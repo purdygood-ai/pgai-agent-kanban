@@ -95,6 +95,7 @@ if not __package__:
 
 from pgai_agent_kanban.lib.atomic_write import atomic_write  # noqa: E402
 from pgai_agent_kanban.lib.error_contract import emit_error_contract  # noqa: E402
+from pgai_agent_kanban.lib.text import one_line  # noqa: E402
 from pgai_agent_kanban.lib.timeutil import format_iso  # noqa: E402
 from pgai_agent_kanban.overwatch.block_record import BlockRecord  # noqa: E402
 from pgai_agent_kanban.overwatch.block_requeue import GitTarget, GitTargetError, resolve_git_target  # noqa: E402
@@ -492,10 +493,6 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _one_line(text: str) -> str:
-    return " ".join(text.split())
-
-
 def main(argv: Optional[list] = None) -> int:
     """CLI entry point; returns the exit code (0 done, 3 refused, 2 bad usage)."""
     parser = _parser()
@@ -507,9 +504,9 @@ def main(argv: Optional[list] = None) -> int:
     if args.command == "assess-finished":
         entry, refusal = finished_worktree_refusal(repo, path)
         if refusal:
-            sys.stdout.write(f"keep\t{_one_line(refusal)}\n")
+            sys.stdout.write(f"keep\t{one_line(refusal)}\n")
         else:
-            sys.stdout.write(f"removable\t{_one_line(entry.describe() if entry else str(path))}\n")
+            sys.stdout.write(f"removable\t{one_line(entry.describe() if entry else str(path))}\n")
         return 0
     try:
         removed = remove_finished_worktree(repo, path)
@@ -524,12 +521,12 @@ def main(argv: Optional[list] = None) -> int:
         # CENSUS-ANCHOR: worktree-residue-finished-refusal-01
         emit_error_contract(
             "overwatch.stale_worktree_kept",
-            f"the finished task's worktree at {path} was not removed: {_one_line(str(exc))}",
+            f"the finished task's worktree at {path} was not removed: {one_line(str(exc))}",
             look,
             project=args.project,
         )
         return 3
-    sys.stdout.write(f"removed\t{_one_line(removed)}\n")
+    sys.stdout.write(f"removed\t{one_line(removed)}\n")
     return 0
 
 

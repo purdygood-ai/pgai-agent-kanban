@@ -286,12 +286,15 @@ fi
 # even when shell-env does not re-export it (belt-and-suspenders).
 export PGAI_AGENT_KANBAN_ROOT_PATH
 
+# Operator user config, then [chain] pm_mode (config_loader.sh).
+# shellcheck source=../lib/config_loader.sh
+source "${SCRIPT_DIR}/../lib/config_loader.sh"
+config_startup_prelude "$KANBAN_ROOT"
 # ---------------------------------------------------------------------------
 # Source config — INI format (kanban.cfg) replaces legacy config.cfg
 # read_ini available via project_paths.sh (sourced above).
 # ---------------------------------------------------------------------------
 if [[ -f "${KANBAN_ROOT}/kanban.cfg" ]]; then
-    export PGAI_KANBAN_PM_MODE="${PGAI_KANBAN_PM_MODE:-$(read_ini "${KANBAN_ROOT}/kanban.cfg" chain pm_mode automatic)}"
     export PGAI_DASHBOARD_SESSION_NAME="${PGAI_DASHBOARD_SESSION_NAME:-$(read_ini "${KANBAN_ROOT}/kanban.cfg" dashboard session_name pgai-kanban-dashboard)}"
     export PGAI_DASHBOARD_REFRESH_SECONDS="${PGAI_DASHBOARD_REFRESH_SECONDS:-$(read_ini "${KANBAN_ROOT}/kanban.cfg" dashboard refresh_seconds 5)}"
 fi
@@ -1320,7 +1323,7 @@ dashboard_send_armed_keys "schedule.1" "${SCHED_EVENT_CMD}"
 #     - Current branch + sync-with-origin status
 #     - Uncommitted changes summary
 #     - In-flight rc/* branches
-#     - Recent commits on main (top 5)
+#     - Recent commits on <branch_prefix>main (top 5)
 #
 # Right pane: git-recent-tags.sh, same cadence-loop.sh 10s cadence
 #   Shows Recent Tags listing (>=10 newest tags, newest first).
@@ -1716,10 +1719,14 @@ if [[ "$_ARM_STATUS" -ne 0 ]]; then
   # remedy below names both the diagnostic path and the retry path.
   _arm_pending_oneline="$(printf '%s, ' $_ARM_PENDING)"
   _arm_pending_oneline="${_arm_pending_oneline%, }"
+  # The first still-unarmed pane names a real capture-pane target, and a
+  # doubled bound a real retry value, so the remedy runs as printed.
+  _arm_first_pending="${_arm_pending_oneline%%, *}"
+  _create_cmd="$(printf '%q' "${KANBAN_ROOT}/scripts/dashboard/create.sh")"
   pgai_emit_error_contract \
     "dashboard_create.pane_arm_timeout" \
     "create.sh gave up after ${ARM_TIMEOUT_SECONDS}s with no further pane reporting its signal trap armed; still-unarmed pane(s): ${_arm_pending_oneline}." \
-    "Inspect the stalled pane(s) directly: tmux attach -t ${SESSION_NAME} (or 'tmux capture-pane -t \"${SESSION_NAME}:<pane>\" -p') to see why that pane's script has not reached its first line yet. Once fixed, tear down with team/scripts/dashboard/kill.sh --session ${SESSION_NAME} and re-run create.sh. To raise the bound instead, re-run with PGAI_DASHBOARD_ARM_TIMEOUT_SECONDS=<n> set higher than ${ARM_TIMEOUT_SECONDS}."
+    "Inspect the stalled pane(s) directly: tmux attach -t $(printf '%q' "${SESSION_NAME}") (or tmux capture-pane -t $(printf '%q' "${SESSION_NAME}:${_arm_first_pending}") -p) to see why that pane's script has not reached its first line yet. Once fixed, tear down with $(printf '%q' "${KANBAN_ROOT}/scripts/dashboard/kill.sh") --session $(printf '%q' "${SESSION_NAME}") and re-run ${_create_cmd}. To raise the bound instead, re-run with it set higher than ${ARM_TIMEOUT_SECONDS}, e.g. PGAI_DASHBOARD_ARM_TIMEOUT_SECONDS=$(( ARM_TIMEOUT_SECONDS * 2 )) ${_create_cmd}."
   # CENSUS-ANCHOR: dashboard-create-pane-arm-timeout-01
   exit 1
 fi

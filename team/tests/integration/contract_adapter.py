@@ -153,7 +153,7 @@ class CliAdapter:
         adapter = CliAdapter()
         result = adapter.invoke(
             "reset",
-            ["--project", "project_a", "--key", "CODER-XXXX-T001-some-task"],
+            ["--project", "project-a", "--key", "CODER-XXXX-T001-some-task"],
             kanban_root=two_project_root,
         )
         assert result.returncode == 0
@@ -179,7 +179,7 @@ class CliAdapter:
                          "wontdo", "delete").  Must be a key in
                          ``_CLI_SCRIPT_MAP``; raises ``ValueError`` if not.
             args:        CLI arguments forwarded to the bash script (e.g.
-                         ``["--project", "project_a", "--key", task_id]``).
+                         ``["--project", "project-a", "--key", task_id]``).
             kanban_root: Temp kanban root the subprocess operates against.
                          PGAI_AGENT_KANBAN_ROOT_PATH is set to this path.
             extra_env:   Optional additional environment variables.  Values

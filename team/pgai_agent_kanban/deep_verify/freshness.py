@@ -48,15 +48,15 @@ words):
 Usage (import):
     from pgai_agent_kanban.deep_verify.freshness import evaluate_freshness
     decision = evaluate_freshness(
-        target_version="v2.9.12",
+        target_version="v1.2.3",
         record={
-            "timestamp": "2026-09-01T03:15:00+00:00",
-            "version": "v2.9.12",
-            "commit": "e240ee1",
+            "timestamp": "2026-01-01T03:15:00+00:00",
+            "version": "v1.2.3",
+            "commit": "0123abc",
             "verdict": "built",
             "detail": "docker/claude-code: built; podman/claude-code: built",
         },
-        now=datetime.datetime(2026, 9, 3, 12, 0, tzinfo=datetime.timezone.utc),
+        now=datetime.datetime(2026, 1, 3, 12, 0, tzinfo=datetime.timezone.utc),
     )
     decision.result   # "fresh"
     decision.age_str  # "2d8h"
@@ -65,7 +65,7 @@ Usage (import):
     # None -- distinguish this from a malformed ledger, which raises
     # LedgerError before this module is ever reached; the caller refuses
     # that case on its own, without calling here).
-    evaluate_freshness(target_version="v2.9.12", record=None, now=...).result
+    evaluate_freshness(target_version="v1.2.3", record=None, now=...).result
     # -> "never_run"
 
 Usage (CLI, consumed by deep-verify-freshness-check.sh via
@@ -97,7 +97,7 @@ if not __package__:
     if _OWN_PACKAGE_ROOT not in sys.path:
         sys.path.insert(0, _OWN_PACKAGE_ROOT)
 
-from pgai_agent_kanban.lib.timeutil import parse_iso  # noqa: E402
+from pgai_agent_kanban.lib.timeutil import format_days_hours, parse_iso  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Result vocabulary. Imported (never redefined) by anything that needs to
@@ -147,14 +147,6 @@ class FreshnessDecision:
     result: str
     reasons: tuple[str, ...] = ()
     age_str: str = ""
-
-
-def _format_elapsed(delta: datetime.timedelta) -> str:
-    total_hours = int(delta.total_seconds() // 3600)
-    days, hours = divmod(total_hours, 24)
-    if days:
-        return f"{days}d{hours}h"
-    return f"{hours}h"
 
 
 def evaluate_freshness(
@@ -212,7 +204,7 @@ def evaluate_freshness(
         )
     else:
         elapsed = now - record_time
-        age_str = _format_elapsed(elapsed)
+        age_str = format_days_hours(elapsed)
         window = datetime.timedelta(days=window_days)
         if elapsed > window:
             reasons.append(

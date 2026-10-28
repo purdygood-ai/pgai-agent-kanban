@@ -30,12 +30,17 @@ Design notes:
     every subprocess environment so the gate's own temp usage cannot depend
     on ambient environment state.
   - No PGAI_LINT_CHANGELOG_MODE is set — the gate runs in strict byte-compare
-    mode, so a forced-stale artifact fails deterministically regardless of
-    which branch the worktree happens to be on.
+    mode, so a forced-stale artifact is reported deterministically regardless
+    of which branch the worktree happens to be on.
+  - The gate is quality class: it exits 0 whatever it finds, so "stale" and
+    "fresh" are read from the per-instance findings it writes with
+    --findings-file (non-empty versus an empty array), never from its exit
+    status.
 """
 
 from __future__ import annotations
 
+import json
 import os
 import pathlib
 import re
@@ -143,18 +148,23 @@ def _gate_subprocess_env(tmp_path: pathlib.Path, kanban_root: pathlib.Path) -> d
 
 
 def _run_gate_cli(
-    scratch_changelog: pathlib.Path, bugs_dir: pathlib.Path, env: dict
+    scratch_changelog: pathlib.Path,
+    bugs_dir: pathlib.Path,
+    env: dict,
+    findings_file: pathlib.Path,
 ) -> subprocess.CompletedProcess:
     """Invoke the gate's real CLI entry point as a subprocess.
 
     This is the literal command a human operator (or a downstream script)
     runs — not an internal function call — so the captured stdout/stderr is
-    exactly what a stranger would see.
+    exactly what a stranger would see.  ``--findings-file`` is added so the
+    caller can read the verdict from the findings the gate records.
 
     Args:
         scratch_changelog: Path to the CHANGELOG.md artifact to check.
         bugs_dir:           The scratch bug ledger the gate renders from.
         env:                Subprocess environment (see _gate_subprocess_env()).
+        findings_file:      Where the gate writes its findings array.
 
     Returns:
         The completed subprocess result.
@@ -167,6 +177,8 @@ def _run_gate_cli(
             str(scratch_changelog),
             "--bugs-dir",
             str(bugs_dir),
+            "--findings-file",
+            str(findings_file),
         ],
         env=env,
         capture_output=True,
@@ -199,11 +211,19 @@ class TestChangelogFreshnessGateCliRecovery:
         bugs_dir = _scratch_bugs_dir(kanban_root)
         env = _gate_subprocess_env(tmp_path, kanban_root)
 
-        result = _run_gate_cli(scratch, bugs_dir, env)
-        assert result.returncode != 0, (
-            "Gate CLI subprocess exited 0 for a forced-stale scratch CHANGELOG.md.\n"
+        findings_file = tmp_path / "findings.json"
+        result = _run_gate_cli(scratch, bugs_dir, env, findings_file)
+        assert result.returncode == 0, (
+            "Gate CLI subprocess exited non-zero for a forced-stale scratch "
+            "CHANGELOG.md; a stale artifact is a quality finding (exit 0).\n"
             f"stdout: {result.stdout!r}\nstderr: {result.stderr!r}"
         )
+        findings = json.loads(findings_file.read_text(encoding="utf-8"))
+        assert findings, (
+            "Gate CLI recorded no finding for a forced-stale scratch CHANGELOG.md.\n"
+            f"stdout: {result.stdout!r}\nstderr: {result.stderr!r}"
+        )
+        assert all(f["lint"] == "changelog_freshness" for f in findings), findings
 
         err = result.stderr
         assert "Cause(s):" in err, (
@@ -262,10 +282,11 @@ class TestChangelogFreshnessGateCliRecovery:
         bugs_dir = _scratch_bugs_dir(kanban_root)
         env = _gate_subprocess_env(tmp_path, kanban_root)
 
-        failing_result = _run_gate_cli(scratch, bugs_dir, env)
-        assert failing_result.returncode != 0, (
-            "Gate CLI subprocess exited 0 for a forced-stale scratch CHANGELOG.md; "
-            "cannot exercise recovery without a genuine failure.\n"
+        findings_file = tmp_path / "findings.json"
+        failing_result = _run_gate_cli(scratch, bugs_dir, env, findings_file)
+        assert json.loads(findings_file.read_text(encoding="utf-8")), (
+            "Gate CLI recorded no finding for a forced-stale scratch CHANGELOG.md; "
+            "cannot exercise recovery without a genuine finding.\n"
             f"stdout: {failing_result.stdout!r}\nstderr: {failing_result.stderr!r}"
         )
 
@@ -291,12 +312,15 @@ class TestChangelogFreshnessGateCliRecovery:
             )
 
         # Independently re-invoke the gate's CLI (the same invocation shape as
-        # the initial failing call) to prove the artifact is genuinely fresh,
-        # not merely that the last printed command happened to exit 0.
-        recovered_result = _run_gate_cli(scratch, bugs_dir, env)
+        # the initial call) to prove the artifact is genuinely fresh: the
+        # re-run records no finding at all.
+        recovered_result = _run_gate_cli(scratch, bugs_dir, env, findings_file)
         assert recovered_result.returncode == 0, (
-            "Gate CLI subprocess still exits non-zero against the scratch "
-            "changelog path after running every printed remedy command verbatim.\n"
+            f"stdout: {recovered_result.stdout!r}\nstderr: {recovered_result.stderr!r}"
+        )
+        assert json.loads(findings_file.read_text(encoding="utf-8")) == [], (
+            "Gate CLI still records a finding against the scratch changelog path "
+            "after running every printed remedy command verbatim.\n"
             f"Commands run: {[c[1] for c in commands]!r}\n"
             f"stdout: {recovered_result.stdout!r}\nstderr: {recovered_result.stderr!r}"
         )

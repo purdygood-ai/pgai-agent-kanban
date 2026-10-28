@@ -59,6 +59,15 @@ stray fixture is most likely -- so a HALT the suite removed from (or
 left on) the live root goes unreported. PGAI_AGENT_KANBAN_ROOT_PATH is
 pointed at a throwaway directory for every case here, so the "live root"
 the fixture copy of the runner guards is never the operator's install.
+
+PER-INSTANCE POST-SUITE FINDINGS
+--------------------------------
+Each post-suite check records one finding per thing it found. The
+bare-/tmp case never touches /tmp: the fixture copy of temp.sh ends with a
+redefinition of pgai_tmp_snapshot (the one function that lists /tmp) that
+prints a listing file instead, and a synthetic test appends residue names
+to that file during the pytest session -- the same shape as an entry
+appearing in /tmp while the suite runs.
 """
 
 from __future__ import annotations
@@ -107,6 +116,7 @@ _STUB_PY_SCRIPTS = [
     "lint_gate_census_compliance.py",
     "lint_block_record_sites.py",
     "lint_inline_python.py",
+    "lint_section_parsers.py",
     "lint_docker_helper_path.py",
     "lint_python_duplicates.py",
     "lint_api_route_impl.py",
@@ -117,6 +127,7 @@ _STUB_PY_SCRIPTS = [
     "dashboard/generate_window_docs.py",
     "dashboard/lint_tmux_format_jobs.py",
     "generate_operator_verb_docs.py",
+    "generate_measured_pace_docs.py",
     "check_docs_citations.py",
 ]
 _STUB_SH_SCRIPTS = ["lint_skip_bug_gate.sh", "lint_governance_byte_budgets.sh"]
@@ -134,6 +145,10 @@ _RUNNER_CONFIG = {
     },
 }
 _RUNNER_NAMES = list(_RUNNER_CONFIG)
+
+# Kanban-shaped residue names the hygiene fixture reports as appearing in
+# /tmp during the suite (never created anywhere; see the module docstring).
+_SEEDED_RESIDUE = ("pgai_tmp.SEEDA1", "tmp.SEEDB2")
 
 
 # ---------------------------------------------------------------------------
@@ -177,6 +192,7 @@ def _build_fixture_repo(
     deliberately_fail: bool,
     breakage_class_fails: bool = False,
     removes_root_sentinel: bool = False,
+    seeds_hygiene_findings: bool = False,
 ) -> pathlib.Path:
     """Build a throwaway REPO_ROOT-shaped tree under *tmp_path* and return it.
 
@@ -196,6 +212,11 @@ def _build_fixture_repo(
     _run_runner_script points the runner at -- from inside the pytest
     session, simulating a fixture that resolved the live root instead of
     its own synthetic board. Arm the HALT with _arm_fleet_halt first.
+
+    *seeds_hygiene_findings* makes the fixture copy of temp.sh list /tmp
+    from the file named by $FIXTURE_TMP_LISTING (see the module docstring)
+    and adds a synthetic test that appends _SEEDED_RESIDUE to that file and
+    adds a HALT-AFTER under $PGAI_AGENT_KANBAN_ROOT_PATH/projects/demo/.
     """
     fixture_root = tmp_path / "fixture_repo"
     scripts_dir = fixture_root / "team" / "scripts"
@@ -224,6 +245,28 @@ def _build_fixture_repo(
     )
     (failing_dir / "test_fixture_marker.py").write_text(test_body, encoding="utf-8")
 
+    if seeds_hygiene_findings:
+        with (scripts_dir / "lib" / "temp.sh").open("a", encoding="utf-8") as handle:
+            handle.write(
+                "\n# Fixture override: list the file named by FIXTURE_TMP_LISTING.\n"
+                "pgai_tmp_snapshot() { sort -- \"${FIXTURE_TMP_LISTING}\"; }\n"
+            )
+        residue = ", ".join(repr(name) for name in _SEEDED_RESIDUE)
+        (failing_dir / "test_fixture_hygiene_residue.py").write_text(
+            "import os\n"
+            "import pathlib\n"
+            "\n"
+            "\n"
+            "def test_fixture_hygiene_residue():\n"
+            "    listing = pathlib.Path(os.environ['FIXTURE_TMP_LISTING'])\n"
+            "    with listing.open('a', encoding='utf-8') as handle:\n"
+            f"        for name in ({residue},):\n"
+            "            handle.write(name + '\\n')\n"
+            "    root = pathlib.Path(os.environ['PGAI_AGENT_KANBAN_ROOT_PATH'])\n"
+            "    (root / 'projects' / 'demo' / 'HALT-AFTER').write_text('rc\\n', encoding='utf-8')\n",
+            encoding="utf-8",
+        )
+
     if removes_root_sentinel:
         (failing_dir / "test_fixture_sentinel_mutation.py").write_text(
             "import os\n"
@@ -245,6 +288,7 @@ def _run_runner_script(
     runner_name: str,
     kanban_root: pathlib.Path,
     temp_dir: pathlib.Path,
+    extra_env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess:
     """Invoke the fixture copy of *runner_name* as a real bash subprocess.
 
@@ -273,6 +317,7 @@ def _run_runner_script(
     env.pop("PYTEST_ADDOPTS", None)
     env["PGAI_AGENT_KANBAN_ROOT_PATH"] = str(kanban_root)
     env["PGAI_AGENT_KANBAN_TEMP_DIR"] = str(temp_dir)
+    env.update(extra_env or {})
     script = fixture_root / "team" / "scripts" / runner_name
     return subprocess.run(
         ["bash", str(script)],
@@ -523,8 +568,13 @@ def test_sentinel_removal_reported_on_pytest_failure(
         f"a failing suite that mutated the sentinel set; got {doc['findings']!r}"
     )
     assert sentinel_findings[0]["severity"] == "quality"
-    assert str(halt) in sentinel_findings[0].get("detail", ""), (
-        "the finding's detail must carry the removed sentinel's path"
+    assert sentinel_findings[0]["path"] == str(halt), (
+        "the per-instance finding must name the removed sentinel's path"
+    )
+    assert sentinel_findings[0]["kind"] == "sentinel-removed", sentinel_findings[0]
+    assert str(halt) in sentinel_findings[0]["cause"], sentinel_findings[0]
+    assert "exit_code" not in sentinel_findings[0], (
+        "a sentinel difference is recorded per instance, not as a coarse exit-code entry"
     )
 
 
@@ -646,3 +696,62 @@ def test_findings_file_replaced_on_forced_pytest_missing_abort(
         "runner_incomplete finding recording why"
     )
     assert "pytest is not installed" in doc["findings"][0]["summary"]
+
+
+# ---------------------------------------------------------------------------
+# Post-suite hygiene checks record one finding per instance
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("runner_name", _RUNNER_NAMES)
+def test_post_suite_residue_and_sentinel_changes_are_each_their_own_finding(
+    runner_name: str, tmp_path: pathlib.Path
+) -> None:
+    """Two seeded bare-/tmp residue entries and two sentinel changes (the
+    fleet HALT removed, a project HALT-AFTER added) reach the findings file
+    as four per-instance findings, none of them a coarse exit-code entry,
+    and the green suite still exits 0."""
+    fixture_root = _build_fixture_repo(
+        tmp_path,
+        runner_name,
+        deliberately_fail=False,
+        removes_root_sentinel=True,
+        seeds_hygiene_findings=True,
+    )
+    kanban_root = tmp_path / "safe_kanban_root"
+    (kanban_root / "projects" / "demo").mkdir(parents=True)
+    temp_dir = tmp_path / "temp"
+    temp_dir.mkdir()
+    halt = _arm_fleet_halt(kanban_root)
+    added = kanban_root / "projects" / "demo" / "HALT-AFTER"
+    listing = tmp_path / "tmp_listing"
+    listing.write_text("baseline-entry\n", encoding="utf-8")
+    findings_path = temp_dir / "lint" / _RUNNER_CONFIG[runner_name]["findings_name"]
+
+    result = _run_runner_script(
+        fixture_root, runner_name, kanban_root, temp_dir,
+        extra_env={"FIXTURE_TMP_LISTING": str(listing)},
+    )
+
+    assert result.returncode == 0, (
+        "post-suite hygiene findings must never change a green run's exit code; "
+        f"got {result.returncode}\nstdout: {result.stdout!r}\nstderr: {result.stderr!r}"
+    )
+    assert not halt.exists() and added.is_file(), "the check reports and never repairs"
+    doc = json.loads(findings_path.read_text(encoding="utf-8"))
+    residue = [f for f in doc["findings"] if f.get("lint") == "bare_tmp_cleanliness"]
+    sentinels = [f for f in doc["findings"] if f.get("lint") == "sentinel_leak"]
+    assert sorted(pathlib.Path(f["path"]).name for f in residue) == sorted(_SEEDED_RESIDUE), (
+        doc["findings"]
+    )
+    assert {(f["kind"], f["path"]) for f in sentinels} == {
+        ("sentinel-removed", str(halt)),
+        ("sentinel-added", str(added)),
+    }, doc["findings"]
+    for finding in residue + sentinels:
+        assert finding["severity"] == "quality"
+        assert finding["path"] in finding["cause"], finding
+        assert finding["remedy"], finding
+        assert "exit_code" not in finding, f"a coarse exit-code entry was recorded: {finding}"
+    assert "bare_tmp_cleanliness: quality-class finding(s) (2 per-instance)" in result.stderr
+    assert "sentinel_leak: quality-class finding(s) (2 per-instance)" in result.stderr

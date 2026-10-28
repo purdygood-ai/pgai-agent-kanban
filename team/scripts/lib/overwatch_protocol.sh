@@ -51,7 +51,7 @@
 #   overwatch_backup_file   <src_path>                              — backup a file
 #   overwatch_log_action    <name> <target> <action> <backup_path> <reason>  — log
 #   overwatch_halt_first_fix [--ship-policy-resolution] <fn>       — HALT-first wrapper
-#   overwatch_load_module_runner                                   — load pp_run_ops/pgai_atomic_write/block_record.sh on first use
+#   overwatch_load_module_runner                                   — load pp_run_ops/pgai_atomic_write/block_record.sh/provider_signatures.sh on first use
 #   transient_retry_limit                                          — resolve the ONE retry ceiling
 #   transient_retry_field  <status_file> <field> [default]         — read the durable retry record
 #   transient_retry_write   <status_file> <reason_code> <retry_count>
@@ -580,6 +580,11 @@ overwatch_halt_first_fix() {
 # marker lets the next sweep tell that HALT from an operator's and remove
 # it. A HALT without a well-formed marker -- any operator or CM HALT -- is
 # never removed by OVERWATCH.
+#
+# Below the marker the HALT carries the provenance block
+# (pgai_agent_kanban.overwatch.halt_provenance) that marks it as the chain's:
+#   # halt-writer: overwatch-repair
+#   # halt-reason: OVERWATCH repair in progress (<fn>)
 # ---------------------------------------------------------------------------
 OVERWATCH_REPAIR_HALT_MARKER="# overwatch-repair-halt:"
 
@@ -598,13 +603,16 @@ _overwatch_proc_start_time() {
 
 # overwatch_write_repair_halt <halt_file> <fn>
 # Create <halt_file> as an OVERWATCH repair HALT carrying the creator marker
-# for this shell ($$). Returns non-zero when the file cannot be written.
+# for this shell ($$) and the provenance block. Returns non-zero when the
+# file cannot be written.
 overwatch_write_repair_halt() {
     local halt_file="$1" fn="$2" start
     start="$(_overwatch_proc_start_time "$$")" || start=0
-    printf '%s\n%s\n' \
+    printf '%s\n%s\n%s\n%s\n' \
         "# HALT created by OVERWATCH while it repairs this project (${fn}); removed when the repair ends." \
         "${OVERWATCH_REPAIR_HALT_MARKER} pid=$$ start=${start} fn=${fn} at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+        "# halt-writer: overwatch-repair" \
+        "# halt-reason: OVERWATCH repair in progress (${fn})" \
         > "$halt_file"
 }
 
@@ -747,17 +755,18 @@ transient_retry_limit() {
 
 # ---------------------------------------------------------------------------
 # overwatch_load_module_runner
-# Make pp_run_ops (pp_run_ops.sh), pgai_atomic_write (atomic_write.sh) and
-# the ## Block Record writers (block_record.sh: block_record_write and its
-# evidence helpers) available, sourcing each from this file's own directory
-# only when the
+# Make pp_run_ops (pp_run_ops.sh), pgai_atomic_write (atomic_write.sh), the
+# ## Block Record writers (block_record.sh: block_record_write and its
+# evidence helpers) and the provider-error signature reader
+# (provider_signatures.sh: provider_signature_is and its siblings) available,
+# sourcing each from this file's own directory only when the
 # caller has not already defined it — a caller's own copy, or a test stub,
 # wins. Loaded on first use rather than at source time so sourcing this file
-# stays side-effect-free. The durable-record readers and writers below, and
-# check-transient-api-error.sh's status writers, call it before their first
-# module call.
+# stays side-effect-free. The durable-record readers and writers below,
+# check-transient-api-error.sh's status writers, and the wake's post-exit
+# transient detection call it before their first module call.
 #
-# Returns 0 when all three are defined afterwards; 1, with a message on
+# Returns 0 when all four are defined afterwards; 1, with a message on
 # stderr naming the missing file, otherwise.
 # ---------------------------------------------------------------------------
 overwatch_load_module_runner() {
@@ -784,6 +793,13 @@ overwatch_load_module_runner() {
         # shellcheck source=block_record.sh
         source "${_owp_lib_dir}/block_record.sh" 2>/dev/null || {
             echo "overwatch_protocol.sh: cannot load ${_owp_lib_dir}/block_record.sh" >&2
+            return 1
+        }
+    fi
+    if ! declare -F provider_signature_is >/dev/null 2>&1; then
+        # shellcheck source=provider_signatures.sh
+        source "${_owp_lib_dir}/provider_signatures.sh" 2>/dev/null || {
+            echo "overwatch_protocol.sh: cannot load ${_owp_lib_dir}/provider_signatures.sh" >&2
             return 1
         }
     fi
@@ -954,6 +970,8 @@ _dispatch_record_path() {
 # "returned"; <offset_start>/<offset_end> are byte offsets into <batch_log>
 # (an empty or non-numeric offset_end/exit_code is recorded as null). The
 # agent and provider names come from AGENT and ACTIVE_PROVIDER when set.
+# The record is built and appended by pgai_agent_kanban.lib.dispatch_ledger
+# (dispatch_record, append_dispatch_record) through pp_run_ops.
 # Returns 0 on success; non-zero (with a message on stderr) when the ledger
 # cannot be written. Callers on the wake path treat a failure as a warning:
 # a missing ledger only costs OVERWATCH a skip, never the dispatch itself.
@@ -978,32 +996,10 @@ dispatch_record_append() {
         return 1
     }
 
-    python3 - "${ledger}" "${event}" "${AGENT:-unknown}" "${ACTIVE_PROVIDER:-unknown}" \
-        "${batch_log}" "${offset_start}" "${offset_end}" "${exit_code}" <<'PY'
-import datetime, json, sys
-
-ledger, event, agent, provider, batch_log, offset_start, offset_end, exit_code = sys.argv[1:9]
-
-def as_int(raw):
-    raw = (raw or "").strip()
-    return int(raw) if raw.isdigit() else None
-
-record = {
-    "recorded_at": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-    "event": event,
-    "agent": agent,
-    "provider": provider,
-    "batch_log": batch_log,
-    "offset_start": as_int(offset_start) or 0,
-    "offset_end": as_int(offset_end),
-    "exit_code": as_int(exit_code),
-}
-try:
-    with open(ledger, "a", encoding="utf-8") as fh:
-        fh.write(json.dumps(record, sort_keys=True) + "\n")
-except OSError as e:
-    raise SystemExit(f"dispatch_record_append: cannot write {ledger}: {e}")
-PY
+    overwatch_load_module_runner || return 1
+    pp_run_ops pgai_agent_kanban.lib.dispatch_ledger append -- "${ledger}" "${event}" \
+        "${AGENT:-unknown}" "${ACTIVE_PROVIDER:-unknown}" "${batch_log}" \
+        "${offset_start}" "${offset_end}" "${exit_code}"
 }
 
 # ---------------------------------------------------------------------------
@@ -1015,6 +1011,8 @@ PY
 # well-formed JSON objects are ignored (a torn write must never mask an
 # earlier good record). Returns 1, echoing nothing, when the task has no
 # ledger or no usable record — "never dispatched by a wake", not a fault.
+# The ledger is read by pgai_agent_kanban.lib.dispatch_ledger
+# (latest_dispatch_span) through pp_run_ops.
 # ---------------------------------------------------------------------------
 dispatch_record_latest() {
     local task_dir="$1"
@@ -1022,33 +1020,8 @@ dispatch_record_latest() {
     ledger="$(_dispatch_record_path "${task_dir}")"
     [[ -f "${ledger}" ]] || return 1
 
-    python3 - "${ledger}" <<'PY'
-import json, sys
-
-latest = None
-with open(sys.argv[1], encoding="utf-8", errors="replace") as fh:
-    for line in fh:
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            obj = json.loads(line)
-        except ValueError:
-            continue
-        if isinstance(obj, dict) and obj.get("batch_log"):
-            latest = obj
-
-if latest is None:
-    raise SystemExit(1)
-
-start = latest.get("offset_start")
-end = latest.get("offset_end")
-print("\t".join([
-    str(latest["batch_log"]),
-    str(start if isinstance(start, int) and start >= 0 else 0),
-    str(end) if isinstance(end, int) and end >= 0 else "",
-]))
-PY
+    overwatch_load_module_runner || return 1
+    pp_run_ops pgai_agent_kanban.lib.dispatch_ledger latest -- "${ledger}"
 }
 
 # ---------------------------------------------------------------------------

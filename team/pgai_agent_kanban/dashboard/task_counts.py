@@ -11,6 +11,10 @@ The one scan behind two readers of the same numbers:
   - ``pgai_agent_kanban.ops.read.get_queues`` calls :func:`scan_task_counts`
     for the queue pane (``show-queues.sh`` and ``GET /show-queues``).
 
+It also holds :func:`agent_queue_counts`, the per-agent backlog counts
+``GET /projects/{name}`` reports as ``queue_counts`` -- see BACKLOG COUNTS
+below; that count reads backlog lines, not task folders.
+
 WHAT IS COUNTED
 ---------------
 Every directory under *tasks_root* that holds a ``status.md`` file, except
@@ -31,6 +35,16 @@ Every directory under *tasks_root* that holds a ``status.md`` file, except
 The first-line reader keeps a value exactly as written apart from case: a
 bold ``**DONE**`` is not unwrapped, so it counts toward the total only, as it
 always has on the dashboard.
+
+BACKLOG COUNTS
+--------------
+:func:`agent_queue_counts` counts the lines of one agent's
+``tasks/queues/<agent>_backlog.md`` as the queue pane lists them
+(``column_render.single.queue_items``: each task's state from its
+status.md, else the queue marker). WORKING counts as ``working``; DONE and
+WONT-DO (``lib.terminal_states.is_terminal``) as ``done``; every other
+state -- BACKLOG, WAITING, BLOCKED, unknown -- as ``open``. A missing
+backlog counts all zeros.
 
 Usage (CLI)::
 
@@ -58,13 +72,16 @@ if not __package__:
     if _OWN_PACKAGE_ROOT not in sys.path:
         sys.path.insert(0, _OWN_PACKAGE_ROOT)
 
+from pgai_agent_kanban.lib.terminal_states import is_terminal  # noqa: E402
 from pgai_agent_kanban.task_status import read_section  # noqa: E402
 
 __all__ = [
+    "AGENT_QUEUE_STATS",
     "QUEUE_ROLES",
     "QUEUE_STATS",
     "TaskCounts",
     "WorkingTask",
+    "agent_queue_counts",
     "format_task_counts",
     "scan_task_counts",
 ]
@@ -74,6 +91,9 @@ QUEUE_ROLES: tuple[str, ...] = ("PM", "CODER", "WRITER", "TESTER", "CM")
 
 #: The counters kept per role, in output order.
 QUEUE_STATS: tuple[str, ...] = ("TOTAL", "DONE", "WORKING", "BLOCKED", "WAITING")
+
+#: The counters :func:`agent_queue_counts` keeps for one agent's backlog.
+AGENT_QUEUE_STATS: tuple[str, ...] = ("open", "working", "done")
 
 # The role a task without a recognised README role is counted under.
 _DEFAULT_ROLE = "CODER"
@@ -207,6 +227,38 @@ def scan_task_counts(tasks_root: "pathlib.Path | str") -> TaskCounts:
     done_entries.sort(reverse=True)
     last_done = tuple((task_id, role) for _mtime_s, task_id, role in done_entries[:_LAST_DONE_SLOTS])
     return TaskCounts(totals=totals, queues=queues, working=working, last_done=last_done)
+
+
+def agent_queue_counts(tasks_root: "pathlib.Path | str", agent: str) -> dict[str, int]:
+    """Count one agent's backlog lines as ``{open, working, done}``.
+
+    Args:
+        tasks_root: A project's ``tasks/`` directory.
+        agent:      The agent role (``pm``, ``coder``, ...); its backlog is
+                    ``<tasks_root>/queues/<agent lowercased>_backlog.md``.
+
+    Returns:
+        ``{"open": n, "working": n, "done": n}`` -- see BACKLOG COUNTS in
+        the module docstring. All zeros when the backlog does not exist.
+    """
+    # Imported here, not at module top: the CLI data.sh runs on every
+    # dashboard refresh never needs the column renderer.
+    from pgai_agent_kanban.dashboard.column_render.single import queue_items
+
+    root = pathlib.Path(tasks_root)
+    counts = {stat: 0 for stat in AGENT_QUEUE_STATS}
+    backlog = root / "queues" / f"{agent.lower()}_backlog.md"
+    if not backlog.is_file():
+        return counts
+    for item in queue_items(backlog, root):
+        state = item["state"]
+        if state.upper() == "WORKING":
+            counts["working"] += 1
+        elif is_terminal(state):
+            counts["done"] += 1
+        else:
+            counts["open"] += 1
+    return counts
 
 
 def format_task_counts(counts: TaskCounts) -> str:

@@ -69,6 +69,7 @@ if str(_TEAM_DIR) not in sys.path:
 from tests.fixtures.binary_guard import require_binary  # noqa: E402
 from tests.fixtures.git_network_stub import install_git_network_stub  # noqa: E402
 from tests.fixtures.scrubbed_subprocess_env import build_scrubbed_env  # noqa: E402
+from tests.fixtures.section_reader_modules import copy_section_reader_modules
 
 _SCRIPT = _TEAM_DIR / "scripts" / "cm" / "cancel-rc.sh"
 _CM_PY_SRC = _TEAM_DIR / "pgai_agent_kanban" / "cm"
@@ -272,6 +273,7 @@ def _seed_root(base: pathlib.Path, repo: pathlib.Path, spec: dict) -> pathlib.Pa
     cm_dir.mkdir(parents=True)
     for src in sorted(_CM_PY_SRC.glob("*.py")):
         (cm_dir / src.name).write_text(src.read_text(encoding="utf-8"), encoding="utf-8")
+    copy_section_reader_modules(cm_dir.parent)
     return root
 
 

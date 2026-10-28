@@ -12,19 +12,22 @@ under tmp_path, exactly as the release script resolves it; no live kanban
 root, repository or release is involved.
 
 Coverage:
-  - Every ship-policy matrix row, with the ship_posture key absent and set
-    to matrix (and set to always on an unconfirmed push_to_remote lane,
+  - Every ship-policy matrix row, with the ship_posture key set to matrix
+    (and, on an unconfirmed push_to_remote lane, absent or set to always,
     which the remote-lane guard resolves to matrix), produces the decision,
     release-notes status and HALT error key the matrix produces without a
     posture, prints nothing, and records no Auto-Ship Event.
-  - Under always, the rows that halt on trigger 2 or trigger 3 ship as
+  - Under always, set explicitly or by the default when the key is absent
+    from both config files of a push_to_remote = false lane, the rows that
+    halt on trigger 2 or trigger 3 ship as
     SHIP-NON-FUNCTIONAL (notes status NON-FUNCTIONAL) and record exactly one
     event naming the trigger and its error key; every other row -- trigger
     1, the unrecognized-TESTER-state row and every ship row -- is unchanged.
   - The no-row-matched catch-all still halts under always.
   - The covered-trigger set is exactly 2, 3 and 8, and only under always.
   - The Step 4c pattern stop: under matrix the caller halts and no bug is
-    filed; under always exactly one bug naming the pattern is filed, the
+    filed; under always (explicit or the default) exactly one bug naming
+    the pattern is filed, the
     event records it, and a second detection cites the open bug instead of
     filing another.
   - The Known Issues block for an auto-ship names the causing bugs by
@@ -86,8 +89,12 @@ class MatrixRow:
 # Every row the existing ship-policy fixtures exercise, with the matrix's
 # decision, release-notes status and HALT error key.
 _ROWS = [
-    MatrixRow("blocked_high_pass", ("blocked", "high", "pass", "no", "yes", "no", "none"), "HALT", "", _KEY_T1),
-    MatrixRow("blocked_low_concerns", ("blocked", "low", "ship-with-concerns", "no", "yes", "no", "none"), "HALT", "", _KEY_T1),
+    # A BLOCKED TESTER task is requeued once under either posture, never HALT.
+    MatrixRow("blocked_high_pass", ("blocked", "high", "pass", "no", "yes", "no", "none"), "REQUEUE-VERIFICATION", ""),
+    MatrixRow(
+        "blocked_low_concerns", ("blocked", "low", "ship-with-concerns", "no", "yes", "no", "none"),
+        "REQUEUE-VERIFICATION", "",
+    ),
     MatrixRow("done_low_pass", ("done", "low", "pass", "no", "yes", "no", "none"), "SHIP-FUNCTIONAL", "FUNCTIONAL"),
     MatrixRow("done_medium_pass", ("done", "medium", "pass", "no", "yes", "no", "none"), "SHIP-FUNCTIONAL", "FUNCTIONAL"),
     MatrixRow("done_low_concerns", ("done", "low", "ship-with-concerns", "no", "yes", "no", "none"), "SHIP-KNOWN-BUGS", "KNOWN-BUGS"),
@@ -100,9 +107,10 @@ _ROWS = [
         "HALT", "", _KEY_T3,
     ),
     MatrixRow("no_tester_task", ("none", "none", "none", "no", "no", "no", "none"), "SHIP-FUNCTIONAL", "FUNCTIONAL"),
-    MatrixRow("found_working", ("working", "none", "none", "no", "yes", "no", "none"), "HALT", "", _KEY_UNRECOGNIZED),
-    MatrixRow("found_wont_do", ("wont-do", "none", "none", "no", "yes", "no", "none"), "HALT", "", _KEY_UNRECOGNIZED),
-    MatrixRow("found_empty_state", ("", "none", "none", "no", "yes", "no", "none"), "HALT", "", _KEY_UNRECOGNIZED),
+    # An unrecognised TESTER state takes the SHIP-WITH-CONCERNS row, never HALT.
+    MatrixRow("found_working", ("working", "none", "none", "no", "yes", "no", "none"), "SHIP-KNOWN-BUGS", "KNOWN-BUGS"),
+    MatrixRow("found_wont_do", ("wont-do", "none", "none", "no", "yes", "no", "none"), "SHIP-KNOWN-BUGS", "KNOWN-BUGS"),
+    MatrixRow("found_empty_state", ("", "none", "none", "no", "yes", "no", "none"), "SHIP-KNOWN-BUGS", "KNOWN-BUGS"),
     MatrixRow(
         "high_regression", ("done", "high", "ship-with-serious-concerns", "no", "yes", "yes", "none"),
         "HALT", "", _KEY_T2,
@@ -130,12 +138,18 @@ _REMOTE = "[project]\npush_to_remote = true\n"
 
 # Configurations that resolve to the matrix posture.
 _MATRIX_CONFIGS = {
-    "key_absent": (_LOCAL, "[paths]\n"),
     "matrix_in_project_cfg": (_LOCAL + "[release]\nship_posture = matrix\n", "[paths]\n"),
     "matrix_in_kanban_cfg": (_LOCAL, "[release]\nship_posture = matrix\n"),
     "always_on_unconfirmed_remote_lane": (_REMOTE + "[release]\nship_posture = always\n", "[paths]\n"),
+    "key_absent_on_unconfirmed_remote_lane": (_REMOTE, "[paths]\n"),
 }
-_ALWAYS_CONFIG = (_LOCAL + "[release]\nship_posture = always\n", "[paths]\n")
+# Configurations that resolve to the always posture: set explicitly, and the
+# default when the key is absent from both files of a local-only lane.
+_ALWAYS_CONFIGS = {
+    "always_in_project_cfg": (_LOCAL + "[release]\nship_posture = always\n", "[paths]\n"),
+    "key_absent": (_LOCAL, "[paths]\n"),
+}
+_ALWAYS_CONFIG = _ALWAYS_CONFIGS["always_in_project_cfg"]
 
 
 def _build_root(tmp_path: pathlib.Path, project_cfg: str, kanban_cfg: str) -> pathlib.Path:
@@ -211,9 +225,10 @@ def test_matrix_posture_keeps_every_row_decision_notes_status_and_halt_key(tmp_p
     assert narration == [], f"the matrix posture must print nothing, got {narration!r}"
 
 
+@pytest.mark.parametrize("config_id", sorted(_ALWAYS_CONFIGS))
 @pytest.mark.parametrize("row", _ROWS, ids=[r.id for r in _ROWS])
-def test_always_posture_ships_triggers_two_and_three_and_leaves_every_other_row(tmp_path, row):
-    root = _build_root(tmp_path, *_ALWAYS_CONFIG)
+def test_always_posture_ships_triggers_two_and_three_and_leaves_every_other_row(tmp_path, row, config_id):
+    root = _build_root(tmp_path, *_ALWAYS_CONFIGS[config_id])
     values, narration, result = _decide(tmp_path, root, row)
 
     assert result.returncode == 0, _diag(result)
@@ -237,8 +252,10 @@ def test_always_posture_ships_triggers_two_and_three_and_leaves_every_other_row(
 
 
 def test_unmatched_halt_row_still_halts_under_always(tmp_path):
-    # A HALT whose inputs fit no named row reaches the catch-all; it is a
-    # data-integrity stop, not a covered trigger, so it halts under always.
+    # A HALT whose inputs fit no named row reaches the catch-all; it is not
+    # a covered trigger, so the posture leaves it a HALT under always (the
+    # step after it, cm_verification_floor_unreadable_halt, floors it to
+    # SHIP-KNOWN-BUGS -- test_cm_ship_policy_bash.py).
     root = _build_root(tmp_path, *_ALWAYS_CONFIG)
     script = (
         f"{_SOURCES} && PROJECT_NAME={_PROJECT} && cm_ship_posture_read >/dev/null && "
@@ -286,6 +303,7 @@ def test_only_always_ships_through_triggers_two_three_and_eight(tmp_path, postur
         (_KEY_T3, "3"),
         (_KEY_T8, "8"),
         ("cm-release.trigger-10.pollution-guard-strict", "10"),
+        ("cm-release.trigger-5b.tag-points-at-wrong-commit", "5b"),
         (_KEY_UNRECOGNIZED, "none"),
         (_KEY_UNMATCHED, "none"),
         ("", "none"),
@@ -326,7 +344,7 @@ def _pattern_stop(tmp_path: pathlib.Path, root: pathlib.Path, calls: int = 1):
 
 
 def test_pattern_stop_under_matrix_halts_and_files_nothing(tmp_path):
-    root = _build_root(tmp_path, *_MATRIX_CONFIGS["key_absent"])
+    root = _build_root(tmp_path, *_MATRIX_CONFIGS["matrix_in_project_cfg"])
     result, _notes_dir = _pattern_stop(tmp_path, root)
 
     assert result.returncode == 0, _diag(result)
@@ -334,8 +352,9 @@ def test_pattern_stop_under_matrix_halts_and_files_nothing(tmp_path):
     assert list((root / "projects" / _PROJECT / "bugs").iterdir()) == []
 
 
-def test_pattern_stop_under_always_files_one_bug_and_records_it_in_the_event(tmp_path):
-    root = _build_root(tmp_path, *_ALWAYS_CONFIG)
+@pytest.mark.parametrize("config_id", sorted(_ALWAYS_CONFIGS))
+def test_pattern_stop_under_always_files_one_bug_and_records_it_in_the_event(tmp_path, config_id):
+    root = _build_root(tmp_path, *_ALWAYS_CONFIGS[config_id])
     result, notes_dir = _pattern_stop(tmp_path, root)
 
     assert result.returncode == 0, _diag(result)

@@ -42,7 +42,9 @@ Precedence (highest wins)
 Lock correlation
 ----------------
 A project's locks are the files under ``<root>/locks`` whose name ends in
-``-<project>.lock`` (:func:`pgai_agent_kanban.ops.locks.project_lock_files`).
+``-<project>.lock`` and that no other project claims -- a wake-batch record
+naming another project, or a longer project name the lock name also ends
+with (:func:`pgai_agent_kanban.ops.locks.project_lock_files`).
 The first one that carries no provenance (``no-provenance``) or whose file
 has not been refreshed for the project's stale-lock threshold
 (``aged-out``; :func:`~pgai_agent_kanban.ops.locks.project_stale_age_threshold`)
@@ -56,9 +58,10 @@ holder's lock descriptor, say) still holding the flock. Acquisitions defer
 to it, narrating ``lock.provenance.orphan_holder``, so the lock stays held
 until the orphan exits and is reported stuck once it ages out; a release
 without ``--force`` refuses ``release_locks.orphan_holder`` (exit 4) naming
-the pids. The remedy is a ``release-locks.sh --release`` command, with
-``--force`` when the recorded holder is alive or, for a dead recorded
-holder, when its flock is still held
+the pids. The remedy is a ``release-locks.sh --release`` command naming the
+script installed under the kanban root (``<root>/scripts/release-locks.sh``,
+shell-quoted), with ``--force`` when the recorded holder is alive or, for a
+dead recorded holder, when its flock is still held
 (:func:`pgai_agent_kanban.ops.locks.flock_held`), so the printed command is
 one the release accepts.
 
@@ -152,6 +155,8 @@ from pgai_agent_kanban.lib.error_contract import emit_error_contract  # noqa: E4
 from pgai_agent_kanban.ops import locks as ops_locks  # noqa: E402
 from pgai_agent_kanban.ops.context import OpsContext  # noqa: E402
 from pgai_agent_kanban.ops.errors import OpsError  # noqa: E402
+from pgai_agent_kanban.overwatch.halt_provenance import installed_script_command, unhalt_command  # noqa: E402
+from pgai_agent_kanban.task_status import read_section  # noqa: E402
 
 __all__ = [
     "CLI_VERBS",
@@ -365,6 +370,9 @@ class ProjectDetails:
         posture_error:   The refusal, when it refused.
         pending_bundles: Pending requirements bundles.
         now:             The epoch second the lock ages were read at.
+        kanban_root:     The kanban root the details were read from; the
+                         commands and files the text renders name what is
+                         installed under it.
     """
 
     locks: tuple[ReleaseLockDetail, ...]
@@ -374,6 +382,7 @@ class ProjectDetails:
     posture_error: Optional[defer_posture.DeferPostureError]
     pending_bundles: tuple[PendingBundle, ...]
     now: int
+    kanban_root: str
 
 
 @dataclasses.dataclass(frozen=True)
@@ -506,24 +515,20 @@ def _xargs_echo(line: str) -> str:
 def task_state(status_file: PathLike) -> str:
     """The first non-blank line under ``## State`` in *status_file*, blank-normalised.
 
-    The heading is any line starting ``## State``; the next ``## `` heading
-    ends the section. The value is read the way the shell reader did --
-    words joined by single spaces, quotes removed, an unmatched quote reading
-    as no value. ``""`` when the file is unreadable or carries no value.
+    The section is read by :func:`task_status.read_section` with
+    ``heading_prefix``: the heading is any line starting ``## State``, and
+    the next level-2 heading ends the section. The value is read the way
+    the shell reader did -- words joined by single spaces, quotes removed,
+    an unmatched quote reading as no value. ``""`` when the file is
+    unreadable or carries no value.
     """
     text = _read_text(status_file)
     if text is None:
         return ""
-    found = False
-    for line in ini.split_lines(text):
-        if line.startswith("## State"):
-            found = True
-            continue
-        if found and line.startswith("## "):
-            break
-        if found and line.strip(" \t"):
-            return _xargs_echo(line)
-    return ""
+    body = read_section(text, "State", heading_prefix=True)
+    if not body:
+        return ""
+    return _xargs_echo(body.split("\n", 1)[0])
 
 
 def _mtime(path: str, fallback: int) -> int:
@@ -678,34 +683,25 @@ def _resolving_marker(project_root: str) -> Optional[tuple[str, str, str]]:
 def _last_decision(release_state_path: str) -> Optional[DecisionEvent]:
     """The last ``## OVERWATCH Decision`` block of release-state.md (it is append-only).
 
-    A block ends at the next ``## `` heading; a new decision heading starts a
-    fresh block. Within a block the last ``Lane:``, ``Version:`` and
-    ``Outcome:`` lines win.
+    The block is read by :func:`task_status.read_section` with ``last=True``:
+    it is the body of the last ``## OVERWATCH Decision`` heading and ends at
+    the next level-2 heading. Within the block the last ``Lane:``,
+    ``Version:`` and ``Outcome:`` lines win. ``None`` when the file is
+    absent or unreadable or carries no decision block.
     """
     if not os.path.isfile(release_state_path):
         return None
     text = _read_text(release_state_path)
     if text is None:
         return None
-    in_block = have = False
-    cur = {"Lane": "", "Version": "", "Outcome": ""}
-    last = dict(cur)
-    for line in ini.split_lines(text):
-        if line.startswith("## OVERWATCH Decision"):
-            in_block, cur = True, {"Lane": "", "Version": "", "Outcome": ""}
-            continue
-        if line.startswith("## "):
-            if in_block:
-                last, have = dict(cur), True
-            in_block = False
-        if in_block:
-            for key in cur:
-                if line.startswith(f"{key}:"):
-                    cur[key] = line[len(key) + 1:].lstrip(" \t")
-    if in_block:
-        last, have = dict(cur), True
-    if not have:
+    block = read_section(text, "OVERWATCH Decision", last=True)
+    if block is None:
         return None
+    last = {"Lane": "", "Version": "", "Outcome": ""}
+    for line in block.split("\n"):
+        for key in last:
+            if line.startswith(f"{key}:"):
+                last[key] = line[len(key) + 1:].lstrip(" \t")
     lane, version, outcome = _read_tab_fields(f"{last['Lane']}\t{last['Version']}\t{last['Outcome']}", 3)
     return DecisionEvent(lane, version, outcome)
 
@@ -779,7 +775,22 @@ def _find_stuck_lock(kanban_root: str, project: str, now: int) -> Optional[_Stuc
 # ---------------------------------------------------------------------------
 
 
-def _halted(project: str, project_root: str) -> ProjectVerdict:
+def _sop_core(kanban_root: str) -> str:
+    """The installed SOP-core.md a remedy cites: ``<kanban root>/SOP-core.md``.
+
+    ``install.sh`` flattens the repository's ``team/`` directory onto the
+    kanban root, so no ``team/`` prefix exists on an installed root.
+    """
+    return f"{kanban_root}/SOP-core.md"
+
+
+def _lock_provenance_sh(kanban_root: str) -> str:
+    """The installed lock library a lock violation cites: ``<kanban root>/scripts/lib/lock_provenance.sh``."""
+    return f"{kanban_root}/scripts/lib/lock_provenance.sh"
+
+
+def _halted(kanban_root: str, project: str, project_root: str) -> ProjectVerdict:
+    """The HALTED verdict for *project*; its remedy names the installed unhalt.sh and SOP-core.md under *kanban_root*."""
     resolving = _resolving_marker(project_root)
     if resolving is not None:
         lane, attempt, version = resolving
@@ -801,16 +812,16 @@ def _halted(project: str, project_root: str) -> ProjectVerdict:
             cause = f"OVERWATCH Decision recorded (lane {decision.lane}, {decision.version}): {outcome}"
             remedy = (
                 "review the full ## OVERWATCH Decision event in release-state.md; if it does not "
-                "resolve the block, a human resolves it as usual (team/SOP-core.md, 'HALT Flags') — "
-                f"once the underlying issue is resolved, run: team/scripts/unhalt.sh --project {project}"
+                f"resolve the block, a human resolves it as usual ({_sop_core(kanban_root)}, 'HALT Flags') — "
+                f"once the underlying issue is resolved, run: {unhalt_command(kanban_root, project)}"
             )
             return ProjectVerdict(project, VERDICT_HALTED, EXIT_HALTED, cause, remedy, f"{project}: HALTED — {cause}; remedy: {remedy}")
 
     halt_file = f"{project_root}/HALT"
     cause = f"{halt_file} is present ({_halt_reason(halt_file)})"
     remedy = (
-        "only the operator may remove a HALT file (team/SOP-core.md, 'HALT Flags') — once the "
-        f"underlying issue is resolved, run: team/scripts/unhalt.sh --project {project}"
+        f"only the operator may remove a HALT file ({_sop_core(kanban_root)}, 'HALT Flags') — once the "
+        f"underlying issue is resolved, run: {unhalt_command(kanban_root, project)}"
     )
     return ProjectVerdict(project, VERDICT_HALTED, EXIT_HALTED, cause, remedy, f"{project}: HALTED — {cause}; remedy: {remedy}")
 
@@ -838,7 +849,7 @@ def resolve_project_verdict(kanban_root: PathLike, project: str, *, now: Optiona
         return ProjectVerdict(project, VERDICT_IDLE, EXIT_IDLE, cause, remedy, f"{project}: IDLE — cause: {cause}; remedy: {remedy}")
 
     if os.path.isfile(f"{project_root}/HALT"):
-        return _halted(project, project_root)
+        return _halted(root, project, project_root)
 
     current = _now(now)
     scan = _scan_tasks(project_root)
@@ -850,7 +861,7 @@ def resolve_project_verdict(kanban_root: PathLike, project: str, *, now: Optiona
             cause = "no state transition in that window suggests churn or a hang"
             remedy = (
                 f"inspect {task_id}/status.md and its agent log, and if it is genuinely stuck, set it to "
-                "BLOCKED with the obstacle named (team/SOP-core.md, 'Standard Task States') so a human "
+                f"BLOCKED with the obstacle named ({_sop_core(root)}, 'Standard Task States') so a human "
                 "can reset it, or file a bug for the hang."
             )
             line = (
@@ -870,7 +881,7 @@ def resolve_project_verdict(kanban_root: PathLike, project: str, *, now: Optiona
         cause = f"see {task_id}/status.md's ## Blockers field for the named obstacle"
         remedy = (
             "a human resolves that obstacle, then flips its State from BLOCKED back to BACKLOG "
-            "(team/SOP-core.md, 'Standard Task States' — BLOCKED is returned to BACKLOG only by HUMAN)."
+            f"({_sop_core(root)}, 'Standard Task States' — BLOCKED is returned to BACKLOG only by HUMAN)."
         )
         line = f"{project}: BLOCKED — task {task_id} is in BLOCKED state and no task is WORKING; cause: {cause}; remedy: {remedy}"
         return ProjectVerdict(project, VERDICT_BLOCKED, EXIT_BLOCKED, cause, remedy, line, task_id, "BLOCKED")
@@ -879,14 +890,16 @@ def resolve_project_verdict(kanban_root: PathLike, project: str, *, now: Optiona
     if queued > 0:
         stuck = _find_stuck_lock(root, project, current)
         if stuck is not None:
-            release = f"team/scripts/release-locks.sh --release {stuck.name}"
+            release_args = ["--release", stuck.name]
             if stuck.liveness == "held" or stuck.orphan_held:
-                release += " --force"
+                release_args.append("--force")
+            release = installed_script_command(root, "release-locks.sh", *release_args)
+            why_details = installed_script_command(root, "why.sh", "--project", project, "--details")
             if stuck.reason == "no-provenance":
                 cause = (
                     f"{queued} task(s) are queued but ⚠️ VIOLATION: lock {stuck.path} (last refreshed "
                     f"{stuck.age} ago) carries no provenance record at all -- a lock this framework holds "
-                    "must never exist without one (team/scripts/lib/lock_provenance.sh, 'Atomic release'), "
+                    f"must never exist without one ({_lock_provenance_sh(root)}, 'Truncate-free release'), "
                     "so wake cannot be trusted to have deferred against it safely"
                 )
             else:
@@ -901,7 +914,7 @@ def resolve_project_verdict(kanban_root: PathLike, project: str, *, now: Optiona
                         "still holds its flock"
                     )
             remedy = (
-                f"release it: {release} (team/scripts/why.sh --project {project} --details lists every "
+                f"release it: {release} ({why_details} lists every "
                 "lock's full provenance); if it recurs, inspect the holder's exit behavior."
             )
             line = f"{project}: STUCK-LOCK — cause: {cause}; remedy: {remedy}"
@@ -1089,6 +1102,7 @@ def _project_details(kanban_root: str, project: str, now: int) -> ProjectDetails
         posture_error=error,
         pending_bundles=_pending_bundles(project_root),
         now=now,
+        kanban_root=kanban_root,
     )
 
 
@@ -1175,9 +1189,9 @@ def _render_locks_text(details: ProjectDetails) -> str:
         )
         if lock.violation:
             lines.append(
-                '  ⚠️ VIOLATION: a lock this framework holds must never exist without a provenance record '
-                '(lock_provenance.sh, "Truncate-free release") -- run team/scripts/release-locks.sh to '
-                "inspect or clear it."
+                "  ⚠️ VIOLATION: a lock this framework holds must never exist without a provenance record "
+                f'({_lock_provenance_sh(details.kanban_root)}, "Truncate-free release") -- run '
+                f"{installed_script_command(details.kanban_root, 'release-locks.sh')} to inspect or clear it."
             )
     return "\n".join(lines)
 

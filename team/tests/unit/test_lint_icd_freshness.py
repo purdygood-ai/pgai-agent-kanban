@@ -16,6 +16,11 @@ Tests cover:
   3. **Missing artifact**: pass a nonexistent path as icd_path; assert
      check_freshness() returns False and the error names the missing artifact.
 
+  4. **CLI findings** (``TestIcdFreshnessCliFindings``): main() against a
+     stale scratch artifact prints the staleness, writes one quality finding
+     to --findings-file, and exits 0 (quality class); against the committed
+     artifact it writes an empty findings array.
+
 All temp paths use pytest's tmp_path (redirected to the framework temp root
 by conftest.py when PGAI_AGENT_KANBAN_TEMP_DIR is set).  No bare /tmp paths.
 """
@@ -23,6 +28,7 @@ by conftest.py when PGAI_AGENT_KANBAN_TEMP_DIR is set).  No bare /tmp paths.
 from __future__ import annotations
 
 import importlib.util
+import json
 import pathlib
 import sys
 
@@ -225,10 +231,95 @@ class TestIcdFreshnessBehavioralNegative:
         )
         assert result is False, (
             "check_freshness() returned True for a nonexistent artifact path.\n"
-            "A missing artifact must be treated as stale (exit 1)."
+            "A missing artifact must be treated as stale."
         )
         captured = capsys.readouterr()
         assert captured.err, (
             "check_freshness() emitted no error output for a missing artifact.\n"
             "The error message must name the missing file so operators know what to fix."
         )
+
+
+# ---------------------------------------------------------------------------
+# CLI findings: quality class -- report, record, exit 0
+# ---------------------------------------------------------------------------
+
+
+class TestIcdFreshnessCliFindings:
+    """main() records each problem as a finding and exits 0 whatever it finds."""
+
+    def test_stale_artifact_records_one_finding_and_exits_0(
+        self, tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """A byte-modified artifact is printed stale, written as one finding, exit 0."""
+        original_bytes = _ICD_ARTIFACT.read_bytes()
+        scratch = tmp_path / "stale_icd_cli.json"
+        scratch.write_bytes(original_bytes[:-1] + bytes([original_bytes[-1] ^ 0x01]))
+        findings_file = tmp_path / "findings" / "icd_freshness.json"
+
+        exit_code = _lint.main(
+            [
+                "--icd", str(scratch),
+                "--version-file", str(_ICD_VERSION_FILE),
+                "--findings-file", str(findings_file),
+            ]
+        )
+
+        assert exit_code == 0, "a stale ICD is a quality finding: main() must return 0"
+        err = capsys.readouterr().err
+        assert "stale" in err.lower(), err
+        assert "error:   lint.icd-freshness" in err, err
+        findings = json.loads(findings_file.read_text(encoding="utf-8"))
+        assert len(findings) == 1, findings
+        assert findings[0]["lint"] == "icd_freshness"
+        assert findings[0]["severity"] == "quality"
+        assert findings[0]["file"] == str(scratch.resolve())
+        assert "generate-icd.sh" in findings[0]["remedy"], findings[0]
+
+    def test_fresh_artifact_writes_empty_findings_file(
+        self, tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """The committed artifact writes an empty findings array and exits 0."""
+        findings_file = tmp_path / "findings.json"
+
+        exit_code = _lint.main(
+            [
+                "--icd", str(_ICD_ARTIFACT),
+                "--version-file", str(_ICD_VERSION_FILE),
+                "--findings-file", str(findings_file),
+            ]
+        )
+
+        assert exit_code == 0
+        assert json.loads(findings_file.read_text(encoding="utf-8")) == []
+        capsys.readouterr()
+
+
+def test_regeneration_crash_is_a_could_not_check_finding(
+    tmp_path: pathlib.Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A generator that raises leaves freshness unchecked: one finding, exit 0."""
+    import pgai_agent_kanban.api.generate_icd as generator
+
+    def _raise(**_kwargs: object) -> None:
+        raise RuntimeError("fixture: API dependency unavailable")
+
+    monkeypatch.setattr(generator, "generate_icd", _raise)
+    findings_file = tmp_path / "findings.json"
+
+    exit_code = _lint.main(
+        [
+            "--icd", str(_ICD_ARTIFACT),
+            "--version-file", str(_ICD_VERSION_FILE),
+            "--findings-file", str(findings_file),
+        ]
+    )
+
+    assert exit_code == 0
+    err = capsys.readouterr().err
+    assert "fixture: API dependency unavailable" in err, err
+    findings = json.loads(findings_file.read_text(encoding="utf-8"))
+    assert len(findings) == 1, findings
+    assert "could not be checked" in findings[0]["cause"], findings[0]

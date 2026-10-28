@@ -51,6 +51,8 @@ import pytest
 # Paths (relative to team/, which is the CWD when run via run-unit-tests.sh)
 # ---------------------------------------------------------------------------
 _WAKE_README_META_LIB = pathlib.Path("scripts/lib/wake_readme_meta.sh")
+# The section reader the README-metadata readers call (read_md_field).
+_MD_FIELD_LIB = pathlib.Path("scripts/lib/md_field.sh")
 _WAKE_TASK_STATE_LIB = pathlib.Path("scripts/lib/wake_task_state.sh")
 # This pre-dispatch block now lives once in the shared wake driver's prep
 # stage, sourced by both wake/claude.sh and wake/codex.sh (v2.9.20-engine-
@@ -146,6 +148,7 @@ def _run_readme_helpers(tmp_path: pathlib.Path, readme: pathlib.Path) -> subproc
     script = textwrap.dedent(f"""\
         #!/usr/bin/env bash
         set -euo pipefail
+        source {_MD_FIELD_LIB}
         {_awk_extract_function("get_role_from_readme", _WAKE_README_META_LIB)}
         {_awk_extract_function("get_assigned_agent_from_readme", _WAKE_README_META_LIB)}
         {_awk_extract_function("role_is_valid_agent", _WAKE_README_META_LIB)}
@@ -237,6 +240,7 @@ def _run_dispatch_assertion(
     script = textwrap.dedent(f"""\
         #!/usr/bin/env bash
         set -euo pipefail
+        source {_MD_FIELD_LIB}
         {_awk_extract_function("get_role_from_readme", _WAKE_README_META_LIB)}
         {_awk_extract_function("get_assigned_agent_from_readme", _WAKE_README_META_LIB)}
         {_awk_extract_function("role_is_valid_agent", _WAKE_README_META_LIB)}

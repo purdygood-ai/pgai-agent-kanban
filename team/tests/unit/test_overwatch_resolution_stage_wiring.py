@@ -14,7 +14,12 @@ invokes `pgai_agent_kanban.overwatch.resolution_stage`. The on-BLOCK nudge
 rather than a wake; block triage hands a ship-policy block to the same
 resolution stage. This file proves the wake hop: the call is present in
 BOTH provider siblings' `run_project_chain`, with a byte-identical call-site
-block.
+block. The question a lane parks in the operator inbox resumes with the
+unhalt.sh an installed kanban carries, built through
+halt_provenance.unhalt_command; the inbox close and halt-after commands the
+stage prints name the installed inbox.sh and halt-after.sh, built through
+halt_provenance.installed_script_command, so each runs as printed on a
+kanban root whose path contains a space.
 """
 
 from __future__ import annotations
@@ -212,3 +217,87 @@ def test_wake_skips_the_resolution_stage_while_another_firing_holds_the_lock(tmp
     assert "overwatch.firing_lock_held" in log
     assert "\tfiring-skipped:lock-held\t" in (root / "projects" / "demo" / "overwatch" / "actions.log").read_text(
         encoding="utf-8")
+
+
+def test_a_parked_lane_question_resumes_with_the_installed_unhalt_script(tmp_path) -> None:
+    """The inbox question a lane parks names <root>/scripts/unhalt.sh, quoted for a root with a space."""
+    import shlex
+
+    from pgai_agent_kanban.ops.context import OpsContext
+    from pgai_agent_kanban.overwatch import inbox
+    from pgai_agent_kanban.overwatch.resolution_stage import _park_lane_question
+
+    root = tmp_path / "kanban root"
+    (root / "projects" / "demo").mkdir(parents=True)
+    halt = root / "projects" / "demo" / "HALT"
+
+    line, entry_id = _park_lane_question(str(root), "demo", "v1.0.0", "Which option?", str(halt), "C")
+
+    assert line == f"inbox entry {entry_id} written"
+    (entry,) = inbox.list_open(OpsContext(kanban_root=root), "demo")
+    answer = entry.how_to_answer
+    assert "team/scripts" not in answer
+    prefix = "resume with "
+    resume = answer.split(prefix, 1)[1].split(";", 1)[0]
+    assert resume.startswith(f"'{root}/scripts/unhalt.sh'")
+    assert shlex.split(resume) == [f"{root}/scripts/unhalt.sh", "--project", "demo"]
+
+
+def test_the_inbox_close_and_halt_after_commands_name_the_installed_scripts_quoted(tmp_path) -> None:
+    """Both commands name <root>/scripts/..., shell-quoted, for a root containing a space."""
+    import shlex
+
+    from pgai_agent_kanban.ops.context import OpsContext
+    from pgai_agent_kanban.overwatch.resolution_stage import _halt_after_command, _inbox_close_command
+
+    root = tmp_path / "kanban root"
+
+    close = _inbox_close_command(OpsContext(kanban_root=root), "demo")
+    command, prose = close.split(" followed by ", 1)
+    assert prose == "this entry's INBOX ID"
+    assert command.startswith(f"'{root}/scripts/inbox.sh'")
+    assert shlex.split(command) == [f"{root}/scripts/inbox.sh", "--project", "demo", "close", "--id"]
+
+    halt_after = _halt_after_command(str(root), "demo")
+    assert halt_after.startswith(f"'{root}/scripts/halt-after.sh'")
+    assert shlex.split(halt_after) == [f"{root}/scripts/halt-after.sh", "--project", "demo"]
+
+
+def test_a_resumed_halt_after_entry_prints_runnable_commands(tmp_path, monkeypatch) -> None:
+    """The inbox entry an auto-resumed HALT-AFTER leaves names both installed scripts, quoted."""
+    import shlex
+
+    from pgai_agent_kanban.lib.sentinel_provenance import record_sentinel_write
+    from pgai_agent_kanban.ops.context import OpsContext
+    from pgai_agent_kanban.overwatch import inbox
+    from pgai_agent_kanban.overwatch.resolution_stage import EXECUTED, run_resolution_stage
+
+    root = tmp_path / "kanban root"
+    project = root / "projects" / "demo"
+    (project / "tasks").mkdir(parents=True)
+    (root / "tmp").mkdir()
+    for name in ("PGAI_AGENT_KANBAN_ROOT_PATH", "KANBAN_ROOT"):
+        monkeypatch.setenv(name, str(root))
+    monkeypatch.setenv("PGAI_AGENT_KANBAN_TEMP_DIR", str(root / "tmp"))
+    for name in ("PGAI_TASKS_DIR", "PGAI_PROJECT_ROOT", "PGAI_PROJECT_NAME"):
+        monkeypatch.delenv(name, raising=False)
+    (root / "kanban.cfg").write_text("[overwatch]\nhalt_after_auto_resume = true\n", encoding="utf-8")
+    (project / "project.cfg").write_text("[project]\nproject_name = demo\nbranch_prefix = ai_\n", encoding="utf-8")
+    (project / "release-state.md").write_text(
+        "# Release State\n\n## Active RC\nnone\n\n## RC Opened At\nnone\n\n"
+        "## RC Opened By Task\nnone\n\n## Last Released\nv1.4.2\n",
+        encoding="utf-8",
+    )
+    (project / "HALT").write_text("", encoding="utf-8")
+    record_sentinel_write(root, project / "HALT", "promote")
+
+    outcome = run_resolution_stage("demo", str(root))
+
+    assert outcome.status == EXECUTED, outcome.reason
+    (entry,) = inbox.list_open(OpsContext(kanban_root=root), "demo")
+    answer = entry.how_to_answer
+    assert "team/scripts" not in answer
+    halt_after = answer.split("arm ", 1)[1].split(" again;", 1)[0]
+    assert shlex.split(halt_after) == [f"{root}/scripts/halt-after.sh", "--project", "demo"]
+    close = answer.split("close this entry with ", 1)[1].split(" followed by ", 1)[0]
+    assert shlex.split(close) == [f"{root}/scripts/inbox.sh", "--project", "demo", "close", "--id"]

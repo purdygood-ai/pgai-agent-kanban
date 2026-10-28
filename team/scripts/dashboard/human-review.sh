@@ -96,11 +96,10 @@ source "${SCRIPT_DIR}/lib/helper_resolver.sh"
 # shellcheck source=lib/dev_tree.sh
 source "${SCRIPT_DIR}/../lib/dev_tree.sh"
 
-# Source config — INI format (kanban.cfg) replaces legacy config.cfg.
-# read_ini available via project_paths.sh (sourced above).
-if [[ -f "$KANBAN_ROOT/kanban.cfg" ]]; then
-    export PGAI_KANBAN_PM_MODE="${PGAI_KANBAN_PM_MODE:-$(read_ini "$KANBAN_ROOT/kanban.cfg" chain pm_mode automatic)}"
-fi
+# Operator user config, then [chain] pm_mode (config_loader.sh).
+# shellcheck source=../lib/config_loader.sh
+source "${SCRIPT_DIR}/../lib/config_loader.sh"
+config_startup_prelude "$KANBAN_ROOT"
 export PGAI_DEV_TREE_PATH="${PGAI_DEV_TREE_PATH:-$(resolve_global_dev_tree)}"
 
 # ---------------------------------------------------------------------------

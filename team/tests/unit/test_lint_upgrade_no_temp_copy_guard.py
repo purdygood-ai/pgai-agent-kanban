@@ -6,8 +6,9 @@ Tests for team/scripts/lint_upgrade_no_temp_copy_guard.py.
 Tests cover:
 
   1. **Guard fires on fixture** (negative proof): inject a temp file that
-     contains the retired guard block and assert the lint exits 1 with a
-     message naming all three retired identifiers.  This is the proof that
+     contains the retired guard block and assert the lint reports a message
+     naming all three retired identifiers, writes one finding per restored
+     line to --findings-file, and exits 0 (quality class).  This is the proof that
      the guard guards — without it, a silent pass-through bug in the scanner
      would make the gate always green.
 
@@ -32,6 +33,7 @@ paths, no live kanban state mutations.
 from __future__ import annotations
 
 import importlib.util
+import json
 import sys
 import textwrap
 from pathlib import Path
@@ -127,21 +129,39 @@ def test_guard_fires_on_fixture_with_retired_block(tmp_path: Path) -> None:
         )
 
 
-def test_guard_fires_returns_nonzero_exit_for_fixture(tmp_path: Path) -> None:
-    """The lint main() returns exit code 1 when the fixture contains the guard block.
+def test_guard_fires_records_findings_and_exits_0_for_fixture(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The lint reports each restored guard line as a finding and returns 0.
 
     This verifies the end-to-end integration of find_executable_hits() into
-    the CLI: hitting violations causes main() to return 1 (not 0 or 2).
+    the CLI: every hit is printed and written to --findings-file as its own
+    quality finding (file and line), and main() returns 0 -- a finding is
+    not a failure -- rather than 2 (the usage-error status).
     """
     fixture = tmp_path / "upgrade_fixture_retired.sh"
     fixture.write_text(_GUARD_BLOCK_FIXTURE, encoding="utf-8")
+    findings_file = tmp_path / "findings" / "upgrade_guard.json"
+    expected_lines = [n for n, _line in _lint.find_executable_hits(fixture)]
 
-    exit_code = _lint.main(["--upgrade-sh", str(fixture)])
+    exit_code = _lint.main(["--upgrade-sh", str(fixture), "--findings-file", str(findings_file)])
 
-    assert exit_code == 1, (
-        f"Expected lint main() to return exit code 1 for a fixture with the "
-        f"retired guard block, but got exit code {exit_code}."
+    assert exit_code == 0, (
+        f"Expected lint main() to return exit code 0 (findings are quality "
+        f"class) for a fixture with the retired guard block, but got {exit_code}."
     )
+    captured = capsys.readouterr()
+    assert "error:   lint.upgrade-no-temp-copy-guard" in captured.err, captured.err
+    for lineno in expected_lines:
+        assert f"line {lineno}:" in captured.out, captured.out
+    findings = json.loads(findings_file.read_text(encoding="utf-8"))
+    assert [f["line"] for f in findings] == expected_lines, findings
+    assert expected_lines, "the fixture must seed at least one hit"
+    for finding in findings:
+        assert finding["lint"] == "upgrade_no_temp_copy_guard"
+        assert finding["severity"] == "quality"
+        assert finding["file"] == str(fixture.resolve())
+        assert f"sed -i '{finding['line']}d'" in finding["remedy"], finding
 
 
 def test_clean_upgrade_sh_passes() -> None:

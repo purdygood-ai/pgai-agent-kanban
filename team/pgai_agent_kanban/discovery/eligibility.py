@@ -69,6 +69,7 @@ from pgai_agent_kanban.lib.version_ceiling import (  # noqa: E402
     CeilingValueError,
     parse_ceiling,
 )
+from pgai_agent_kanban.task_status import section_value  # noqa: E402
 from pgai_agent_kanban.lib.filename_contract import (  # noqa: E402
     INTAKE_REQUIREMENTS_RE as _INTAKE_RE,
     SEMVER_REQUIREMENTS_RE as _SEMVER_RE,
@@ -83,8 +84,6 @@ AUTO_SENTINELS = {"auto", "next-patch", ""}
 
 # Non-requirements intake items (BUG- and PRIORITY- prefixes).
 _NON_REQ_BUNDLE_RE = re.compile(r'^(PRIORITY-[0-9]{4,}-.+|BUG-[0-9]{4,}-.+)\.md$', re.IGNORECASE)
-_STATUS_FIELD_RE = re.compile(r'^##\s+Status\s*\n\s*(\S+)', re.M | re.IGNORECASE)
-_TARGET_FIELD_RE = re.compile(r'^##\s+Target Version\s*\n+\s*(\S+)', re.M | re.IGNORECASE)
 _EXPLICIT_VER_RE = re.compile(r'^v?\d+\.\d+\.\d+$')
 
 
@@ -103,9 +102,9 @@ def _is_terminal(text: str, name: str, err: TextIO) -> bool:
     """True for an item in a closed state (lib.terminal_states: done, or
     wont-do -- the retired "superseded" reads as wont-do); a closed item that
     is not done is narrated on *err*."""
-    status_match = _STATUS_FIELD_RE.search(text)
-    if status_match:
-        item_status = status_match.group(1).strip().lower()
+    tokens = section_value(text, "Status").split()
+    if tokens:
+        item_status = tokens[0].lower()
         canonical = canonical_state(item_status)
         if canonical in TERMINAL_STATES:
             if canonical != "done":
@@ -130,8 +129,9 @@ def _candidates(req_dir: pathlib.Path) -> Iterator[tuple]:
 
 
 def _target_value(text: str) -> str:
-    m = _TARGET_FIELD_RE.search(text)
-    return m.group(1).strip().lower() if m else ""
+    """The first token of the ``## Target Version`` value, lowercased, or ``""``."""
+    tokens = section_value(text, "Target Version").split()
+    return tokens[0].lower() if tokens else ""
 
 
 def list_eligible_requirements(

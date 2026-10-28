@@ -108,7 +108,7 @@ def _build_task_folder(
 
     Args:
         kanban_root:  Kanban root path (from ``two_project_root`` fixture).
-        project_name: Project the task belongs to (e.g. ``"project_a"``).
+        project_name: Project the task belongs to (e.g. ``"project-a"``).
         task_id:      Full task identifier.  The agent prefix determines which
                       backlog file receives the queue marker.
         state:        Initial task state written to ``## State`` in status.md.
@@ -328,7 +328,7 @@ class TestTerminalStateOperationContracts:
         # Use the operation name in the task ID so failures self-identify the
         # operation without needing to read the parametrize label.
         task_id = f"CODER-20260628-CT001-{operation}-contract"
-        task_dir = _build_task_folder(root, "project_a", task_id, state=initial_state)
+        task_dir = _build_task_folder(root, "project-a", task_id, state=initial_state)
 
         # Pre-condition: for reset, mark the backlog as [x] (simulating a prior
         # close) so the marker-flip-to-open can be verified.
@@ -337,7 +337,7 @@ class TestTerminalStateOperationContracts:
             backlog_file = (
                 root
                 / "projects"
-                / "project_a"
+                / "project-a"
                 / "tasks"
                 / "queues"
                 / f"{agent_prefix}_backlog.md"
@@ -349,7 +349,7 @@ class TestTerminalStateOperationContracts:
 
         result = cli_invoker.invoke(
             operation,
-            ["--project", "project_a", "--key", task_id],
+            ["--project", "project-a", "--key", task_id],
             kanban_root=root,
         )
 
@@ -386,7 +386,7 @@ class TestTerminalStateOperationContracts:
         #   "x"       — line present and flipped to [x] (closed / wont-do).
         #   "open"    — line present and flipped to [ ] or [ ] (reset to BACKLOG).
         #   "removed" — line absent from the backlog (delete removed it with the task).
-        marker = _read_backlog_marker(root, "project_a", task_id)
+        marker = _read_backlog_marker(root, "project-a", task_id)
         if expected_marker == "x":
             assert marker == "x", (
                 f"'{operation}' must flip the backlog marker to [x]; "
@@ -440,13 +440,13 @@ class TestTerminalStateOperationContracts:
         nonexistent_key = "CODER-99999999-NOEXIST-terminal"
 
         # Record the project directory state before any operation.
-        project_dir = root / "projects" / "project_a"
+        project_dir = root / "projects" / "project-a"
         before_files = set(project_dir.rglob("*"))
 
         for operation in ("reset", "close", "wontdo", "delete"):
             result = cli_invoker.invoke(
                 operation,
-                ["--project", "project_a", "--key", nonexistent_key],
+                ["--project", "project-a", "--key", nonexistent_key],
                 kanban_root=root,
             )
             assert result.returncode != 0, (
@@ -502,12 +502,12 @@ class TestReadOperationContracts:
         """
         root = two_project_root
         task_id = "CODER-20260628-CT010-show-read-only-contract"
-        task_dir = _build_task_folder(root, "project_a", task_id, state="BACKLOG")
+        task_dir = _build_task_folder(root, "project-a", task_id, state="BACKLOG")
         status_before = (task_dir / "status.md").read_bytes()
 
         result = cli_invoker.invoke(
             "show",
-            ["--project", "project_a", "--key", task_id, "--file", "status"],
+            ["--project", "project-a", "--key", task_id, "--file", "status"],
             kanban_root=root,
         )
 
@@ -539,7 +539,7 @@ class TestReadOperationContracts:
 
         result = cli_invoker.invoke(
             "show",
-            ["--project", "project_a", "--key", "CODER-99999999-NOEXIST-show"],
+            ["--project", "project-a", "--key", "CODER-99999999-NOEXIST-show"],
             kanban_root=root,
         )
 
@@ -563,14 +563,14 @@ class TestReadOperationContracts:
         """
         root = two_project_root
         full_task_id = "CODER-20260628-CT011-prefix-match-target"
-        _build_task_folder(root, "project_a", full_task_id, state="WORKING")
+        _build_task_folder(root, "project-a", full_task_id, state="WORKING")
 
         # Supply only the prefix, not the full task ID.
         prefix_key = "CODER-20260628-CT011"
 
         result = cli_invoker.invoke(
             "show",
-            ["--project", "project_a", "--key", prefix_key, "--file", "status"],
+            ["--project", "project-a", "--key", prefix_key, "--file", "status"],
             kanban_root=root,
         )
 
@@ -606,19 +606,19 @@ class TestReadOperationContracts:
 
         # Create the intended target: prefix is CT012, full ID has CT012 followed by -slug.
         target_id = "CODER-20260628-CT012-boundary-safe"
-        _build_task_folder(root, "project_a", target_id, state="DONE")
+        _build_task_folder(root, "project-a", target_id, state="DONE")
 
         # Create the numeric continuation that must NOT be matched by the prefix CT012.
         # CT0120 starts with CT012 but is a distinct sequence number.
         sibling_id = "CODER-20260628-CT0120-boundary-sibling"
-        _build_task_folder(root, "project_a", sibling_id, state="BACKLOG")
+        _build_task_folder(root, "project-a", sibling_id, state="BACKLOG")
 
         # Prefix key: resolves only to target_id, not sibling_id.
         prefix_key = "CODER-20260628-CT012"
 
         result = cli_invoker.invoke(
             "show",
-            ["--project", "project_a", "--key", prefix_key, "--file", "status"],
+            ["--project", "project-a", "--key", prefix_key, "--file", "status"],
             kanban_root=root,
         )
 
@@ -665,14 +665,14 @@ class TestReadOperationContracts:
         # Alphabetically, CT013-alpha comes before CT013-beta.
         first_task_id = "CODER-20260628-CT013-alpha"
         second_task_id = "CODER-20260628-CT013-beta"
-        _build_task_folder(root, "project_a", first_task_id, state="DONE")
-        _build_task_folder(root, "project_a", second_task_id, state="BACKLOG")
+        _build_task_folder(root, "project-a", first_task_id, state="DONE")
+        _build_task_folder(root, "project-a", second_task_id, state="BACKLOG")
 
         ambiguous_prefix = "CODER-20260628-CT013"
 
         result = cli_invoker.invoke(
             "show",
-            ["--project", "project_a", "--key", ambiguous_prefix, "--file", "status"],
+            ["--project", "project-a", "--key", ambiguous_prefix, "--file", "status"],
             kanban_root=root,
         )
 
@@ -717,7 +717,7 @@ class TestReadOperationContracts:
         root = two_project_root
 
         # Create a bug intake item (no matching task directory with this key).
-        bugs_dir = root / "projects" / "project_a" / "bugs"
+        bugs_dir = root / "projects" / "project-a" / "bugs"
         bugs_dir.mkdir(parents=True, exist_ok=True)
         bug_id = "BUG-7001-resolver-self-id-test"
         bug_file = bugs_dir / f"{bug_id}.md"
@@ -730,7 +730,7 @@ class TestReadOperationContracts:
 
         result = cli_invoker.invoke(
             "show",
-            ["--project", "project_a", "--key", bug_id],
+            ["--project", "project-a", "--key", bug_id],
             kanban_root=root,
         )
 
@@ -774,8 +774,8 @@ class TestReadOperationContracts:
         # Two tasks sharing an ambiguous prefix — write operations must not proceed.
         first_task_id = "CODER-20260628-CT014-write-ambig-alpha"
         second_task_id = "CODER-20260628-CT014-write-ambig-beta"
-        first_dir = _build_task_folder(root, "project_a", first_task_id, state="BACKLOG")
-        second_dir = _build_task_folder(root, "project_a", second_task_id, state="BACKLOG")
+        first_dir = _build_task_folder(root, "project-a", first_task_id, state="BACKLOG")
+        second_dir = _build_task_folder(root, "project-a", second_task_id, state="BACKLOG")
 
         ambiguous_prefix = "CODER-20260628-CT014"
 
@@ -783,7 +783,7 @@ class TestReadOperationContracts:
         for operation in ("reset", "close", "wontdo"):
             result = cli_invoker.invoke(
                 operation,
-                ["--project", "project_a", "--key", ambiguous_prefix],
+                ["--project", "project-a", "--key", ambiguous_prefix],
                 kanban_root=root,
             )
             assert result.returncode != 0, (
@@ -884,7 +884,7 @@ class TestHaltFamilyContracts:
            - global operations must not create HALT inside any project directory.
 
         The per-project operations (halt / unhalt) are invoked with
-        ``--project project_a``.  The global operations (halt-global /
+        ``--project project-a``.  The global operations (halt-global /
         unhalt-global) take no project argument.
 
         Pre-condition for unhalt and unhalt-global: the corresponding HALT
@@ -895,9 +895,9 @@ class TestHaltFamilyContracts:
         root = two_project_root
 
         # Per-project flag path and invocation args.
-        per_project_halt = root / "projects" / "project_a" / "HALT"
+        per_project_halt = root / "projects" / "project-a" / "HALT"
         # Sibling project flag path — must never be touched.
-        sibling_project_halt = root / "projects" / "project_b" / "HALT"
+        sibling_project_halt = root / "projects" / "project-b" / "HALT"
         # Global flag path.
         global_halt = root / "HALT"
 
@@ -906,7 +906,7 @@ class TestHaltFamilyContracts:
         if project_scoped:
             target_flag = per_project_halt
             out_of_scope_flags = [sibling_project_halt, global_halt]
-            invoke_args = ["--project", "project_a"]
+            invoke_args = ["--project", "project-a"]
         else:
             target_flag = global_halt
             out_of_scope_flags = [per_project_halt, sibling_project_halt]
@@ -980,7 +980,7 @@ class TestHaltFamilyContracts:
         root = two_project_root
 
         if project_scoped:
-            invoke_args = ["--project", "project_a"]
+            invoke_args = ["--project", "project-a"]
         else:
             invoke_args = []
 
@@ -1002,8 +1002,8 @@ class TestHaltFamilyContracts:
     ) -> None:
         """unhalt removes only the targeted project's HALT flag.
 
-        After halt+unhalt on project_a, the per-project HALT flag for
-        project_a must be absent.  The kanban root HALT and project_b's HALT
+        After halt+unhalt on project-a, the per-project HALT flag for
+        project-a must be absent.  The kanban root HALT and project-b's HALT
         must not be created or affected.
 
         This is the round-trip scope contract for the per-project pair: halt
@@ -1011,26 +1011,26 @@ class TestHaltFamilyContracts:
         """
         root = two_project_root
 
-        # Set up: halt project_a.
-        cli_invoker.invoke("halt", ["--project", "project_a"], kanban_root=root)
-        assert (root / "projects" / "project_a" / "HALT").exists(), (
+        # Set up: halt project-a.
+        cli_invoker.invoke("halt", ["--project", "project-a"], kanban_root=root)
+        assert (root / "projects" / "project-a" / "HALT").exists(), (
             "Pre-condition: HALT must exist after halt invocation."
         )
 
-        # Act: unhalt project_a.
+        # Act: unhalt project-a.
         result = cli_invoker.invoke(
-            "unhalt", ["--project", "project_a"], kanban_root=root
+            "unhalt", ["--project", "project-a"], kanban_root=root
         )
 
         assert result.returncode == 0, (
             f"unhalt must exit 0; rc={result.returncode}.\n"
             f"stdout: {result.stdout}\nstderr: {result.stderr}"
         )
-        assert not (root / "projects" / "project_a" / "HALT").exists(), (
+        assert not (root / "projects" / "project-a" / "HALT").exists(), (
             "unhalt must remove the per-project HALT flag for the targeted project."
         )
-        assert not (root / "projects" / "project_b" / "HALT").exists(), (
-            "unhalt must not touch project_b's HALT flag."
+        assert not (root / "projects" / "project-b" / "HALT").exists(), (
+            "unhalt must not touch project-b's HALT flag."
         )
         assert not (root / "HALT").exists(), (
             "unhalt must not create or remove the global HALT at the kanban root."
@@ -1055,7 +1055,7 @@ class TestHaltFamilyContracts:
 
         # Pre-condition: create a per-project HALT independently so we can
         # verify that unhalt-global does not remove it.
-        (root / "projects" / "project_a" / "HALT").touch()
+        (root / "projects" / "project-a" / "HALT").touch()
 
         # Set up: halt-global.
         cli_invoker.invoke("halt-global", [], kanban_root=root)
@@ -1075,7 +1075,7 @@ class TestHaltFamilyContracts:
         )
         # Per-project flag must survive — it was not created by halt-global
         # and must not be removed by unhalt-global.
-        assert (root / "projects" / "project_a" / "HALT").exists(), (
+        assert (root / "projects" / "project-a" / "HALT").exists(), (
             "unhalt-global must not remove a pre-existing per-project HALT flag; "
             "global and per-project halt are independent mechanisms."
         )
@@ -1090,8 +1090,11 @@ class TestIntakeContracts:
     """intake routes files by prefix and rejects unknown prefixes.
 
     The intake contract: deposit routes by filename prefix, validates, and
-    rejects malformed files.  These contracts must hold regardless of how
-    the deposit is triggered (CLI today; REST/automation later).
+    rejects malformed files.  A PRIORITY-* or requirements deposit never
+    overwrites an existing file of the same name (no clobber); a BUG-*
+    draft whose number is taken is deposited under the next free number,
+    leaving the existing bug intact.  These contracts must hold regardless
+    of how the deposit is triggered (CLI today; REST/automation later).
     """
 
     @pytest.mark.parametrize(
@@ -1146,11 +1149,11 @@ class TestIntakeContracts:
         root = two_project_root
         staged = tmp_path / filename
         staged.write_text(header, encoding="utf-8")
-        (root / "projects" / "project_a" / subdir).mkdir(parents=True, exist_ok=True)
+        (root / "projects" / "project-a" / subdir).mkdir(parents=True, exist_ok=True)
 
         result = cli_invoker.invoke(
             "intake",
-            ["--project", "project_a", str(staged)],
+            ["--project", "project-a", str(staged)],
             kanban_root=root,
         )
 
@@ -1158,7 +1161,7 @@ class TestIntakeContracts:
             f"intake must exit 0 for a {prefix_label} file; "
             f"rc={result.returncode}.\nstdout: {result.stdout}\nstderr: {result.stderr}"
         )
-        deposited = root / "projects" / "project_a" / subdir / filename
+        deposited = root / "projects" / "project-a" / subdir / filename
         assert deposited.exists(), (
             f"{prefix_label} file must be deposited to {subdir}/; "
             f"not found at {deposited}.\nstdout: {result.stdout}"
@@ -1170,29 +1173,30 @@ class TestIntakeContracts:
         cli_invoker: CliAdapter,
         tmp_path: pathlib.Path,
     ) -> None:
-        """intake refuses a deposit when the target file already exists in the intake directory.
+        """intake refuses a PRIORITY-* deposit when the target file already exists.
 
-        The no-clobber contract: if the destination already contains a file with
-        the same basename as the staged file, intake must exit non-zero without
+        The no-clobber contract, which holds for PRIORITY-* and requirements
+        deposits: if the destination already contains a file with the same
+        basename as the staged file, intake must exit non-zero without
         overwriting the existing file.  The original destination content must
-        remain unchanged after the refused deposit.
+        remain byte-for-byte unchanged after the refused deposit.
         """
         root = two_project_root
-        bugs_dir = root / "projects" / "project_a" / "bugs"
-        bugs_dir.mkdir(parents=True, exist_ok=True)
+        priority_dir = root / "projects" / "project-a" / "priority"
+        priority_dir.mkdir(parents=True, exist_ok=True)
 
-        filename = "BUG-9002-no-clobber-contract-test.md"
+        filename = "PRIORITY-9002-no-clobber-contract-test.md"
         # Pre-create the destination file to simulate a file already deposited.
         original_content = (
-            "# BUG-9002: original content\n\n"
-            "## Status\nopen\n\n"
-            "## Summary\nOriginal intake file.\n"
+            b"# PRIORITY-9002: original content\n\n"
+            b"## Status\nopen\n\n"
+            b"## Summary\nOriginal intake file.\n"
         )
-        (bugs_dir / filename).write_text(original_content, encoding="utf-8")
+        (priority_dir / filename).write_bytes(original_content)
 
         staged = tmp_path / filename
         staged.write_text(
-            "# BUG-9002: clobber attempt\n\n"
+            "# PRIORITY-9002: clobber attempt\n\n"
             "## Status\nopen\n\n"
             "## Summary\nThis must not overwrite the original.\n",
             encoding="utf-8",
@@ -1200,7 +1204,7 @@ class TestIntakeContracts:
 
         result = cli_invoker.invoke(
             "intake",
-            ["--project", "project_a", str(staged)],
+            ["--project", "project-a", str(staged)],
             kanban_root=root,
         )
 
@@ -1209,10 +1213,69 @@ class TestIntakeContracts:
             f"got rc={result.returncode}.\nstdout: {result.stdout}"
         )
         # The original destination must be unmodified.
-        surviving_content = (bugs_dir / filename).read_text(encoding="utf-8")
+        surviving_content = (priority_dir / filename).read_bytes()
         assert surviving_content == original_content, (
             "intake must not overwrite the existing file when the no-clobber guard fires; "
             "destination content was modified."
+        )
+
+    def test_taken_bug_number_is_deposited_under_the_next_free_number(
+        self,
+        two_project_root: pathlib.Path,
+        cli_invoker: CliAdapter,
+        tmp_path: pathlib.Path,
+    ) -> None:
+        """intake renumbers a BUG-* draft whose number is taken and leaves the existing bug intact.
+
+        The bug-number contract: a staged BUG-NNNN-<slug>.md whose number is
+        already held in bugs/ is deposited as a new BUG-MMMM-<slug>.md with a
+        different number, exit 0, and the existing file keeps every byte.
+        """
+        root = two_project_root
+        bugs_dir = root / "projects" / "project-a" / "bugs"
+        bugs_dir.mkdir(parents=True, exist_ok=True)
+
+        filename = "BUG-9004-renumber-contract-test.md"
+        original_content = (
+            b"# BUG-9004: original content\n\n"
+            b"## Status\nopen\n\n"
+            b"## Summary\nOriginal intake file.\n"
+        )
+        (bugs_dir / filename).write_bytes(original_content)
+
+        staged = tmp_path / filename
+        staged.write_text(
+            "# BUG-9004: second draft\n\n"
+            "## Status\nopen\n\n"
+            "## Summary\nThis draft takes the next free number.\n",
+            encoding="utf-8",
+        )
+
+        result = cli_invoker.invoke(
+            "intake",
+            ["--project", "project-a", str(staged)],
+            kanban_root=root,
+        )
+
+        assert result.returncode == 0, (
+            "intake must deposit a BUG-* draft whose number is taken under the next free number; "
+            f"got rc={result.returncode}.\nstdout: {result.stdout}\nstderr: {result.stderr}"
+        )
+        assert (bugs_dir / filename).read_bytes() == original_content, (
+            "intake must leave the existing bug file byte-for-byte unchanged when it renumbers a draft."
+        )
+        renumbered = sorted(
+            p for p in bugs_dir.glob("BUG-*-renumber-contract-test.md") if p.name != filename
+        )
+        assert len(renumbered) == 1, (
+            f"expected exactly one renumbered deposit beside {filename}; found {renumbered}.\n"
+            f"stdout: {result.stdout}"
+        )
+        assert renumbered[0].name in result.stdout, (
+            f"intake's stdout must name the renumbered deposit {renumbered[0].name}; got: {result.stdout}"
+        )
+        assert "This draft takes the next free number." in renumbered[0].read_text(encoding="utf-8"), (
+            "the renumbered deposit must carry the staged draft's body."
         )
 
     def test_unrecognized_prefix_is_rejected_without_deposit(
@@ -1233,7 +1296,7 @@ class TestIntakeContracts:
 
         result = cli_invoker.invoke(
             "intake",
-            ["--project", "project_a", str(staged)],
+            ["--project", "project-a", str(staged)],
             kanban_root=root,
         )
 

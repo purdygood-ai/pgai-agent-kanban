@@ -13,15 +13,17 @@ and the REST route refuse alike and leave the same bytes on disk.
 
 Input confinement
 -----------------
-Every verb checks its project name before it touches the filesystem:
-``create_project`` against ``[a-zA-Z][a-zA-Z0-9_-]*`` (its long-standing
-rule), ``add_project`` and ``remove_project`` against
-:func:`check_project_name` -- one plain name
-(``api.validation.require_component``: no ``/``, ``..``, control character,
-glob character or leading ``-``) made only of the letters, digits, ``_``
-and ``-`` a ``[project:<name>]`` registry section can hold. So ``..`` or
-``../x`` never reaches ``projects/<name>``, ``shutil.rmtree`` or
-projects.cfg.
+Every verb checks its project name before it touches the filesystem
+against the project-name rule (``ini.project_name_rule``, defined once as
+``PROJECTS_CFG_NAME_RE`` in ``scripts/lib/projects_cfg.sh``): a lowercase
+letter or digit, then lowercase letters, digits and ``-``.
+``create_project`` checks it in :func:`check_create_values`;
+``add_project`` and ``remove_project`` in :func:`check_project_name`, which
+first requires one plain name (``api.validation.require_component``: no
+``/``, ``..``, control character, glob character or leading ``-``). So
+``..`` or ``../x`` never reaches ``projects/<name>``, ``shutil.rmtree`` or
+projects.cfg, and no verb writes a section the registry readers would not
+list.
 
 ``create_project`` also runs :func:`check_create_values` before anything
 is read or written: ``workflow_type`` must be one plain name -- it is then
@@ -40,12 +42,14 @@ What each verb does
     prints the plan, and (unless ``dry_run``) lays down
     ``projects/<name>/``: the directory layout, ``project.cfg`` (rendered
     from the project.cfg template, :data:`PROJECT_CFG_TEMPLATE`), the queue
-    files, ``overwatch_backlog.md``, the seeded templates and READMEs,
+    files, the seeded templates and READMEs,
     ``INTENT.md``, ``release-state.md`` and the project ``README.md``
     (from ``templates/project/README-TEMPLATE.md``; the closing "Next
-    steps" tell the operator to fill it in); then registers the project in
-    projects.cfg, migrating a colon-legacy registry to INI first unless
-    ``no_migrate``.
+    steps" tell the operator to fill it in) with its snapshot
+    ``.readme-template.md`` beside it, a byte copy of the template the
+    README was seeded from (:data:`PROJECT_README_SNAPSHOT`); then
+    registers the project in projects.cfg, migrating a colon-legacy
+    registry to INI first unless ``no_migrate``.
 
 ``add_project``
     Registers an existing ``projects/<name>/`` directory, or updates a
@@ -127,16 +131,20 @@ from pgai_agent_kanban.cm.write_rc_state import (
 from pgai_agent_kanban.lib import ini
 from pgai_agent_kanban.lib.atomic_write import atomic_write
 from pgai_agent_kanban.lib.error_contract import format_error_contract, parse_error_contract
+from pgai_agent_kanban.lib.git_remote import DEFAULT_REMOTE_NAME
 from pgai_agent_kanban.lib.palette import load_default_palette
 from pgai_agent_kanban.lib.version_ceiling import CEILING_DEFAULTS
 from pgai_agent_kanban.ops.context import OpsContext
+from pgai_agent_kanban.env import resolve_kanban_root
 from pgai_agent_kanban.ops.errors import IoError, OpsError, Refused
+from pgai_agent_kanban.overwatch.halt_provenance import installed_script_command
 
 __all__ = [
     "CLI_VERBS",
     "PROJECT_CFG_KEYS",
     "PROJECT_CFG_TEMPLATE",
     "PROJECT_NAME_PLACEHOLDER",
+    "PROJECT_README_SNAPSHOT",
     "ProjectOutcome",
     "ProjectRefusal",
     "ProjectValueRefused",
@@ -145,11 +153,13 @@ __all__ = [
     "check_project_name",
     "create_project",
     "dashboard_registry_rows",
+    "project_color",
     "projects_exit_code",
     "queue_file_text",
     "registered_project_names",
     "remove_project",
     "render_project_cfg",
+    "unaccepted_project_names",
     "workflow_template_dir",
 ]
 
@@ -183,8 +193,9 @@ PROJECT_NAME_PLACEHOLDER = "<project_name>"
 #: accessors and pp_load_config; its Key Registry comment lists the
 #: [project], [versioning], [hooks], [debug] and [training] keys),
 #: defer_posture.sh / defer_posture.py (the deferral keys), ops/locks.py,
-#: overwatch/resolution_matrix.py, overwatch/block_requeue.py and
-#: archive/config.py. A key added to a reader is added here and to the
+#: overwatch/resolution_matrix.py, overwatch/block_requeue.py,
+#: overwatch/runaway.py, archive/config.py and pm-agent/pm_materialize.py (the
+#: [testing] runner commands). A key added to a reader is added here and to the
 #: template in the same change.
 PROJECT_CFG_KEYS: tuple[tuple[str, str], ...] = (
     ("project", "project_name"),
@@ -203,6 +214,10 @@ PROJECT_CFG_KEYS: tuple[tuple[str, str], ...] = (
     ("release", "deferred_bugs"),
     ("release", "deferred_bug_level"),
     ("release", "defer_piggyback"),
+    ("release", "deferred_max_age_days"),
+    ("release", "deferred_max_count"),
+    ("release", "bundle_mixing"),
+    ("release", "ride_along_max"),
     ("release", "deep_verify"),
     ("release", "deep_verify_offhours_window"),
     ("release", "ship_posture"),
@@ -211,6 +226,11 @@ PROJECT_CFG_KEYS: tuple[tuple[str, str], ...] = (
     ("locks", "stale_lock_reap_after_wake_periods"),
     ("overwatch", "block_triage"),
     ("overwatch", "requeue_budget"),
+    ("overwatch", "runaway_releases_per_hour"),
+    ("overwatch", "runaway_rc_cycles_per_day"),
+    ("overwatch", "runaway_reason_repeats"),
+    ("overwatch", "runaway_inbox_entries_per_day"),
+    ("overwatch", "halt_after_auto_resume"),
     ("archive", "archive_count"),
     ("hooks", "cm_release_pre_squash_hook"),
     ("hooks", "cm_release_pre_squash_hook_required"),
@@ -222,6 +242,8 @@ PROJECT_CFG_KEYS: tuple[tuple[str, str], ...] = (
     ("debug", "verbose_agents"),
     ("training", "reasoning_trace"),
     ("training", "training_agents"),
+    ("testing", "targeted_test_command"),
+    ("testing", "pre_merge_command"),
 )
 
 # A section header and an active (uncommented) key line, read liberally.
@@ -233,7 +255,8 @@ Value = Union[int, str, None]
 
 # Defaults create-project.sh documents for project.cfg.
 DEFAULT_WORKFLOW = "release"
-DEFAULT_GIT_REMOTE = "origin"
+# The git_remote_name default comes from its one home, lib.git_remote.
+DEFAULT_GIT_REMOTE = DEFAULT_REMOTE_NAME
 # The version-ceiling defaults come from their one home, lib.version_ceiling.
 DEFAULT_MAX_PATCH = str(CEILING_DEFAULTS["max_patch"])
 DEFAULT_MAX_MINOR = str(CEILING_DEFAULTS["max_minor"])
@@ -246,11 +269,6 @@ _CREATE_USAGE = (
 _ADD_USAGE = "Usage: add-project.sh --project <name> [--priority <int>]"
 _REMOVE_USAGE = "Usage: remove-project.sh --project <name> [--force] [--dry-run]"
 
-_PROJECT_NAME_RE = re.compile(r"[a-zA-Z][a-zA-Z0-9_-]*")
-# The names a [project:<name>] registry section holds (_PROJECT_HEADER_RE's
-# class): what add_project and remove_project accept, so every name the
-# registry can carry stays nameable while nothing else reaches a path.
-_REGISTRY_NAME_RE = re.compile(r"[a-zA-Z0-9_-]+")
 _COLOR_RE = re.compile(r"#[0-9A-Fa-f]{6}")
 _COLOR_0X_RE = re.compile(r"0[xX][0-9A-Fa-f]{6}")
 _COLOR_SHORT_RE = re.compile(r"#[0-9A-Fa-f]{3}")
@@ -370,7 +388,31 @@ def _text(value: Value) -> Optional[str]:
 _SPACE = " \t\r\f\v"
 _COMMENT_RE = re.compile(r"^[ \t\r\f\v]*#")
 _BLANK_RE = re.compile(r"^[ \t\r\f\v]*$")
-_PROJECT_HEADER_RE = re.compile(r"^\[project:([a-zA-Z0-9_-]+)\]$")
+# A [project:...] section header of any name, the name being everything
+# between "[project:" and the last "]" (empty included): project_section and
+# project_section_name in PROJECTS_CFG_AWK_HEADER (lib/projects_cfg.sh).
+# Leading and trailing whitespace (a CRLF's CR included) is ignored, as that
+# rule ignores it.
+_PROJECT_SECTION_RE = re.compile(r"^[ \t\r\f\v]*\[project:(.*)\][ \t\r\f\v]*$")
+
+
+def _project_header(line: str) -> Optional[str]:
+    """NAME when *line* is a ``[project:NAME]`` header the registry accepts, else None.
+
+    ``project_header`` in PROJECTS_CFG_AWK_HEADER: a :data:`_PROJECT_SECTION_RE`
+    section whose name satisfies the project-name rule
+    (``ini.is_project_name``). Every reader below lists and reads projects
+    through this one; a section only :data:`_PROJECT_SECTION_RE` matches is
+    no project (:func:`unaccepted_project_names` names it).
+    """
+    section = _PROJECT_SECTION_RE.match(line)
+    if section is None or not ini.is_project_name(section.group(1)):
+        return None
+    return section.group(1)
+
+# A line projects_cfg_format skips while looking for the first data line: a
+# '#' or ';' comment, or a blank line.
+_FORMAT_SKIP_RE = re.compile(r"^[ \t\r\f\v]*([#;]|$)")
 _ANY_SECTION_RE = re.compile(r"^[ \t\r\f\v]*\[")
 _FIELD_RE = re.compile(r"^[a-z_]+[ \t\r\f\v]*=")
 _LEADING_INT_RE = re.compile(r"^[ \t\r\f\v]*([+-]?[0-9]+)")
@@ -486,17 +528,17 @@ class _Registry:
     def format(self) -> str:
         """``ini`` or ``colon-legacy`` (``projects_cfg_format``).
 
-        The first line that is neither blank nor a comment decides: ``[``
-        in its first column is INI. With no such line, the INI header's
-        ``# Format: INI-style`` comment marks INI. A missing file is
-        colon-legacy.
+        The first line that is neither blank nor a ``#`` / ``;`` comment
+        decides: ``[`` after optional whitespace is INI. With no such line,
+        the INI header's ``# Format: INI-style`` comment marks INI. A
+        missing file is colon-legacy.
         """
         if not self.exists():
             return "colon-legacy"
         lines = self.lines()
         for line in lines:
-            if not _skippable(line):
-                return "ini" if line.startswith("[") else "colon-legacy"
+            if not _FORMAT_SKIP_RE.match(line):
+                return "ini" if line.lstrip(_SPACE).startswith("[") else "colon-legacy"
         return "ini" if any(_INI_SENTINEL in line for line in lines) else "colon-legacy"
 
     def has(self, name: str) -> bool:
@@ -504,7 +546,8 @@ class _Registry:
         if not name or not self.exists():
             return False
         if self.format() == "ini":
-            return f"[project:{name}]" in self.lines()
+            header = f"[project:{name}]"
+            return any(line.strip(_SPACE) == header for line in self.lines())
         pattern = re.compile(rf"^[ \t\r\f\v]*{re.escape(name)}[ \t\r\f\v]*:")
         return any(pattern.match(line) for line in self.lines())
 
@@ -513,16 +556,22 @@ class _Registry:
 
         A section of another kind ends the project's section. Only
         ``key=value`` lines whose key is lowercase letters and underscores
-        are read, as the bash readers read them.
+        are read, as the bash readers read them. A project with more than
+        one section reads *key* from the last section that sets it; a key
+        only an earlier section sets keeps that value -- as
+        ``_projects_cfg_ini_value`` (``scripts/lib/projects_cfg.sh``) and
+        :func:`pgai_agent_kanban.lib.ini.projects_registry` read the file.
+        *value* is None when no section of *name* sets *key*.
         """
         current = ""
         found = False
+        result: Optional[str] = None
         for line in self.lines():
             if _skippable(line):
                 continue
-            header = _PROJECT_HEADER_RE.match(line)
-            if header:
-                current = header.group(1)
+            header = _project_header(line)
+            if header is not None:
+                current = header
                 found = found or current == name
                 continue
             if _ANY_SECTION_RE.match(line):
@@ -531,8 +580,8 @@ class _Registry:
             if current == name and _FIELD_RE.match(line):
                 field_key, value = _field(line)
                 if field_key == key:
-                    return True, value
-        return found, None
+                    result = value
+        return found, result
 
     def _colon_entry(self, name: str) -> Optional[list[str]]:
         for line in self.lines():
@@ -575,7 +624,8 @@ class _Registry:
         size = len(palette)
         lines = self.lines()
         if self.format() == "ini":
-            # A section of another kind does not end a project's section here.
+            # A [project:...] section with a rejected name ends a project's
+            # section; a section of another kind does not end it here.
             line_of: dict[str, int] = {}
             order: list[str] = []
             prio: dict[str, str] = {}
@@ -583,11 +633,14 @@ class _Registry:
             for number, line in enumerate(lines, start=1):
                 if _skippable(line):
                     continue
-                header = _PROJECT_HEADER_RE.match(line)
-                if header:
-                    current = header.group(1)
+                header = _project_header(line)
+                if header is not None:
+                    current = header
                     line_of[current] = number
                     order.append(current)
+                    continue
+                if _PROJECT_SECTION_RE.match(line):
+                    current = ""
                     continue
                 if _ANY_SECTION_RE.match(line):
                     continue
@@ -646,9 +699,9 @@ class _Registry:
             for number, line in enumerate(lines, start=1):
                 if _skippable(line):
                     continue
-                header = _PROJECT_HEADER_RE.match(line)
-                if header:
-                    current = header.group(1)
+                header = _project_header(line)
+                if header is not None:
+                    current = header
                     line_of[current] = number
                     order.append(current)
                     continue
@@ -789,9 +842,9 @@ class _Registry:
             if fmt == "ini":
                 in_target = False
                 for index, line in enumerate(lines):
-                    header = _PROJECT_HEADER_RE.match(line)
-                    if header:
-                        in_target = header.group(1) == name
+                    header = _project_header(line)
+                    if header is not None:
+                        in_target = header == name
                     elif _ANY_SECTION_RE.match(line):
                         in_target = False
                     elif in_target and line.startswith("priority=") and priority:
@@ -833,9 +886,9 @@ class _Registry:
         if self.format() == "ini":
             skip = False
             for line in self.lines():
-                header = _PROJECT_HEADER_RE.match(line)
-                if header:
-                    skip = header.group(1) == name
+                header = _project_header(line)
+                if header is not None:
+                    skip = header == name
                     if skip:
                         continue
                 elif _ANY_SECTION_RE.match(line):
@@ -862,8 +915,11 @@ def _ini_registration_order(registry: _Registry) -> list[str]:
     Every ``[project:<name>]`` header, sorted by its priority (999 when
     absent or not a plain integer, as ``projects_cfg_list`` and
     ``ini.projects_registry`` both read it), then by the header's line
-    number. A section of another kind does not end a project's section
-    here, as in the bash helper.
+    number. A ``[project:...]`` section whose name the registry rejects
+    (``[project:bad.name]``) ends a project's section, so a priority under
+    it is no project's; a section of another kind does not end it here, as
+    in the bash helper. A name with more than one section is listed once,
+    at its first header's line, with the last priority set.
     """
     line_of: dict[str, int] = {}
     order: list[str] = []
@@ -872,11 +928,15 @@ def _ini_registration_order(registry: _Registry) -> list[str]:
     for number, line in enumerate(registry.lines(), start=1):
         if _skippable(line):
             continue
-        header = _PROJECT_HEADER_RE.match(line)
-        if header:
-            current = header.group(1)
-            line_of[current] = number
-            order.append(current)
+        header = _project_header(line)
+        if header is not None:
+            current = header
+            if current not in line_of:
+                line_of[current] = number
+                order.append(current)
+            continue
+        if _PROJECT_SECTION_RE.match(line):
+            current = ""
             continue
         if _ANY_SECTION_RE.match(line):
             continue
@@ -891,6 +951,32 @@ def _ini_registration_order(registry: _Registry) -> list[str]:
 def _list_priority(value: str) -> int:
     """A registry priority as ``projects_cfg_list`` sorts by it: a plain integer, else 999."""
     return int(value) if _PLAIN_INT_RE.fullmatch(value) else 999
+
+
+#: The dashboard row cap when neither the environment nor kanban.cfg sets one.
+DEFAULT_DASHBOARD_MAX_ROWS = "20"
+
+
+def dashboard_default_max_rows(
+    kanban_root: PathLike, environ: Optional[dict] = None,
+) -> str:
+    """The dashboard row cap for a project that sets no ``dashboard_max_rows``.
+
+    ``column_render_config_max_rows``'s chain: ``DASHBOARD_MAX_ROWS`` from
+    *environ* (default: this process's environment) when non-empty, else
+    ``kanban.cfg [dashboard] max_rows`` when set, else 20 -- as the string
+    the bash helpers print. The per-project tier and its 5..100 clamp are
+    :func:`dashboard_registry_rows`'s. Every Python surface that draws the
+    board (the tmux pane, the REST board) resolves the cap through here.
+    """
+    env = os.environ if environ is None else environ
+    value = env.get("DASHBOARD_MAX_ROWS") or ""
+    if value:
+        return value
+    cfg = pathlib.Path(kanban_root) / "kanban.cfg"
+    if cfg.is_file():
+        value = ini.read_line_value(cfg, "dashboard", "max_rows") or ""
+    return value or DEFAULT_DASHBOARD_MAX_ROWS
 
 
 def _dashboard_max_rows(registry: _Registry, name: str, default_rows: str) -> str:
@@ -909,7 +995,8 @@ def _dashboard_max_rows(registry: _Registry, name: str, default_rows: str) -> st
 
 
 def dashboard_registry_rows(
-    kanban_root: PathLike, default_max_rows: str,
+    kanban_root: PathLike, default_max_rows: Optional[str] = None,
+    environ: Optional[dict] = None,
 ) -> Optional[list[tuple[str, Optional[str], str]]]:
     """The registered projects as the dashboard's mixed-project board reads them.
 
@@ -918,8 +1005,9 @@ def dashboard_registry_rows(
     ``dashboard_color``, else the palette slot), and *max_rows* is
     ``projects_cfg_max_rows``'s (the per-project ``dashboard_max_rows``,
     clamped to 5..100, else *default_max_rows* -- the caller's
-    ``${DASHBOARD_MAX_ROWS:-20}``), both as the strings the bash helpers
-    print.
+    ``${DASHBOARD_MAX_ROWS:-20}``, or :func:`dashboard_default_max_rows`
+    over *environ* when the caller passes none), both as the strings the
+    bash helpers print.
 
     Returns ``None`` for an absent or colon-legacy projects.cfg, which this
     reader does not cover; a caller then uses the bash helpers instead.
@@ -927,10 +1015,53 @@ def dashboard_registry_rows(
     registry = _Registry(kanban_root)
     if not registry.exists() or registry.format() != "ini":
         return None
+    if default_max_rows is None:
+        default_max_rows = dashboard_default_max_rows(kanban_root, environ)
     return [
         (name, registry.color(name), _dashboard_max_rows(registry, name, default_max_rows))
         for name in _ini_registration_order(registry)
     ]
+
+
+def project_color(kanban_root: PathLike, name: str) -> Optional[str]:
+    """The display colour of project *name*, as the dashboard draws it.
+
+    ``projects_cfg_color``'s answer, which the dashboard's mixed-project
+    board shows (:func:`dashboard_registry_rows`): the project's explicit
+    ``dashboard_color``, else the default-palette entry at its ordinal in
+    priority order (ascending ``priority``, file order breaking ties, an
+    absent priority counting as 999), wrapping at the palette's length.
+    Every registered project holds an ordinal, whether or not it sets a
+    colour.
+
+    Returns ``None`` when *name* is not registered in
+    ``<kanban_root>/projects.cfg``.
+    """
+    return _Registry(kanban_root).color(name)
+
+
+def unaccepted_project_names(kanban_root: PathLike) -> list[str]:
+    """Names of the ``[project:...]`` sections the registry does not accept.
+
+    ``projects_cfg_unaccepted_names`` (``scripts/lib/projects.sh``): every
+    section header :data:`_PROJECT_SECTION_RE` recognises whose name
+    :func:`_project_header` refuses -- ``[project:bad.name]`` gives
+    ``bad.name``, ``[project:My_App]`` ``My_App``, ``[project:]`` an empty
+    name -- in file order, each once,
+    as written. :func:`registered_project_names` never lists them. An absent
+    or colon-legacy projects.cfg names none.
+    """
+    registry = _Registry(kanban_root)
+    if not registry.exists() or registry.format() != "ini":
+        return []
+    names: list[str] = []
+    for line in registry.lines():
+        if _COMMENT_RE.match(line) or _project_header(line) is not None:
+            continue
+        section = _PROJECT_SECTION_RE.match(line)
+        if section and section.group(1) not in names:
+            names.append(section.group(1))
+    return names
 
 
 def registered_project_names(kanban_root: PathLike) -> list[str]:
@@ -1124,12 +1255,24 @@ _CFG_VALUE_RULE = (
 _DEV_TREE_RULE = "dev_tree must also be an absolute path with no '..' segment."
 
 
+def _installed_cli(kanban_root: Optional[PathLike], script: str, *args: str) -> str:
+    """``<kanban root>/scripts/<script>`` then *args*, every word shell-quoted.
+
+    The runnable-as-printed form of an operator command
+    (``halt_provenance.installed_script_command``). A *kanban_root* of None
+    is the root this process resolves (``PGAI_AGENT_KANBAN_ROOT_PATH``),
+    read only when a remedy is built.
+    """
+    root = resolve_kanban_root() if kanban_root is None else kanban_root
+    return installed_script_command(os.path.abspath(root), script, *args)
+
+
 def check_project_name(verb: str, project: str, kanban_root: PathLike) -> None:
     """Refuse a project name ``add_project`` / ``remove_project`` must not join into a path.
 
-    Accepted: one plain name (``api.validation.require_component``) made
-    only of letters, digits, ``_`` and ``-`` -- every name a
-    ``[project:<name>]`` section can hold. Reads nothing.
+    Accepted: one plain name (``api.validation.require_component``) that
+    satisfies the project-name rule (``ini.project_name_rule``) -- every
+    name a ``[project:<name>]`` section can register. Reads nothing.
 
     Args:
         verb:        ``add_project`` or ``remove_project`` (the error key's verb).
@@ -1141,9 +1284,11 @@ def check_project_name(verb: str, project: str, kanban_root: PathLike) -> None:
     """
     try:
         require_component(project, "project")
-        if not _REGISTRY_NAME_RE.fullmatch(project):
+        if not ini.is_project_name(project):
             raise ComponentRefused(
-                "project", "holds a character other than a letter, digit, '_' or '-'"
+                "project",
+                "is not a lowercase letter or digit followed only by lowercase letters, "
+                "digits and '-'",
             )
     except ComponentRefused as exc:
         if verb == "remove_project":
@@ -1172,7 +1317,9 @@ def _value_refusal(field: str, reason: str, rule: str, remedy: str) -> ProjectVa
     )
 
 
-def check_priority(verb: str, priority: str, project: Optional[str] = None) -> None:
+def check_priority(
+    verb: str, priority: str, project: Optional[str] = None, *, kanban_root: Optional[PathLike] = None
+) -> None:
     """Refuse a registry priority that is not a whole number.
 
     The value is written verbatim into ``projects.cfg`` as ``priority=<value>``
@@ -1186,13 +1333,15 @@ def check_priority(verb: str, priority: str, project: Optional[str] = None) -> N
         verb:     ``create_project`` or ``add_project`` (the error key's verb).
         priority: The value as given.
         project:  Interpolated into the remedy when it is a plain name.
+        kanban_root: Names the installed script in the remedy (default:
+                 the root this process resolves).
 
     Raises:
         ProjectValueRefused: ``<verb>.priority_invalid``, exit 1.
     """
     if not priority or re.fullmatch(r"-?[0-9]+", priority):
         return
-    name = project if project and _PROJECT_NAME_RE.fullmatch(project) else "my-app"
+    name = project if project and ini.is_project_name(project) else "my-app"
     script = "create-project.sh" if verb == "create_project" else "add-project.sh"
     fault = control_character_fault(priority)
     reason = fault if fault is not None else "is not a whole number"
@@ -1207,7 +1356,7 @@ def check_priority(verb: str, priority: str, project: Optional[str] = None) -> N
             f"{verb} refused the 'priority' field: the value {reason}. A registry priority is a "
             "whole number (lower runs first) and is written verbatim into projects.cfg. "
             "Nothing was written.",
-            f"team/scripts/{script} --project {name} --priority 2 --dry-run",
+            _installed_cli(kanban_root, script, "--project", name, "--priority", "2", "--dry-run"),
         ),
     )
 
@@ -1219,6 +1368,7 @@ def check_create_values(
     git_remote: Optional[str] = None,
     dev_tree: Optional[str] = None,
     git_repo: Optional[str] = None,
+    kanban_root: Optional[PathLike] = None,
 ) -> None:
     """Refuse a ``create_project`` value that could escape a path or inject project.cfg keys.
 
@@ -1228,8 +1378,9 @@ def check_create_values(
     run and a real call refuse the same values. A value left None (or
     empty) is not checked here.
 
-      - ``project``: the name create_project registers -- a letter, then
-        letters, digits, ``-`` and ``_``.
+      - ``project``: the name create_project registers -- the project-name
+        rule (``ini.project_name_rule``): a lowercase letter or digit, then
+        lowercase letters, digits and ``-``.
       - ``workflow_type``: one plain name (``require_component``); it is
         then looked up by name among the ready plugins.
       - ``git_remote``, ``dev_tree``, ``git_repo``: no newline or other
@@ -1239,13 +1390,18 @@ def check_create_values(
     Args:
         project: The project name, interpolated into the remedies when it
                  is a valid one (else the example ``my-app``).
+        kanban_root: Names the installed ``create-project.sh`` in the
+                 remedies (default: the root this process resolves).
 
     Raises:
         ProjectValueRefused: ``create_project.<field>_invalid``, exit 1.
     """
-    name = project if project and _PROJECT_NAME_RE.fullmatch(project) else "my-app"
-    retry = f"team/scripts/create-project.sh --project {name}"
-    if project and not _PROJECT_NAME_RE.fullmatch(project):
+    name = project if project and ini.is_project_name(project) else "my-app"
+
+    def retry(*args: str) -> str:
+        return _installed_cli(kanban_root, "create-project.sh", "--project", name, *args)
+
+    if project and not ini.is_project_name(project):
         # BLOCK-WORTHY (docs/blocking-site-census.md): an invariant by
         # design -- the name becomes projects/<name>, the [project:<name>]
         # registry section and the branch-free id every surface resolves;
@@ -1253,9 +1409,11 @@ def check_create_values(
         # CENSUS-ANCHOR: projects-create-name-invalid-01
         raise _value_refusal(
             "project",
-            f"'{project}' does not start with a letter followed only by letters, digits, '-' and '_'",
-            "A project name starts with a letter and holds only letters, digits, '-' and '_'.",
-            f"{retry} --dry-run",
+            f"'{project}' is not a lowercase letter or digit followed only by lowercase letters, "
+            "digits and '-'",
+            "A project name starts with a lowercase letter or digit and holds only lowercase "
+            "letters, digits and '-'.",
+            retry("--dry-run"),
         )
     if workflow_type:
         try:
@@ -1267,12 +1425,12 @@ def check_create_values(
             # outside the kanban. Refused before any plugin lookup.
             # CENSUS-ANCHOR: projects-workflow-type-not-component-01
             raise ProjectValueRefused(
-                "workflow_type", exc.block("create_project", f"{retry} --workflow-type release --dry-run")
+                "workflow_type", exc.block("create_project", retry("--workflow-type", "release", "--dry-run"))
             ) from exc
     examples = {
-        "git_remote": "--git-remote origin",
-        "dev_tree": f"--dev-tree /srv/develop/{name}",
-        "git_repo": f"--git-repo git@example.com:org/{name}.git",
+        "git_remote": ("--git-remote", DEFAULT_GIT_REMOTE),
+        "dev_tree": ("--dev-tree", f"/srv/develop/{name}"),
+        "git_repo": ("--git-repo", f"git@example.com:org/{name}.git"),
     }
     for field, value in (("git_remote", git_remote), ("dev_tree", dev_tree), ("git_repo", git_repo)):
         if not value:
@@ -1291,7 +1449,7 @@ def check_create_values(
         # newline starts a new key or section (a whole [release] block),
         # and dev_tree names the repository every release acts on.
         # CENSUS-ANCHOR: projects-cfg-value-invalid-01
-        raise _value_refusal(field, reason, rule, f"{retry} {examples[field]} --dry-run")
+        raise _value_refusal(field, reason, rule, retry(*examples[field], "--dry-run"))
 
 
 # ---------------------------------------------------------------------------
@@ -1307,19 +1465,19 @@ _AGENT_QUEUES = {
     "tester": ("tester_backlog.md", "Tester Backlog", "tester agent"),
     "cm": ("cm_backlog.md", "CM Backlog", "cm agent"),
 }
-# Seeded for every workflow: the intake queues, and OVERWATCH's queue, which
-# no workflow's agent roster names.
+# Seeded for every workflow without a queue-files.list: the intake queues.
 _INTAKE_QUEUES = (
     ("bug_backlog.md", "Bug Backlog", "bug triage"),
     ("priority_backlog.md", "Priority Backlog", "priority intake"),
 )
-_OVERWATCH_QUEUE = ("overwatch_backlog.md", "Overwatch Backlog", "overwatch agent")
 
 # Template file -> path under the project directory it is copied to.
 # create_project seeds these; ops.seeded_templates keeps an existing
 # project's copies current with the installed templates on install and
 # upgrade. The README copies below are seeded once and never refreshed,
-# and so is the project README (_PROJECT_README_TEMPLATE).
+# and so is the project README (_PROJECT_README_TEMPLATE); create_project
+# stores the template it seeded that README from as the project's
+# PROJECT_README_SNAPSHOT.
 _TEMPLATE_COPIES = (
     ("BUG-TEMPLATE.md", "bugs/templates/BUG-TEMPLATE.md"),
     ("PRIORITY-TEMPLATE.md", "priority/templates/PRIORITY-TEMPLATE.md"),
@@ -1335,8 +1493,15 @@ _README_COPIES = (
 # itself, beside the per-workflow directories. create_project and
 # add_project seed it when the README is absent; nothing ever overwrites
 # an existing one, because it holds the operator's own project rules.
+# When create_project seeds the README it also writes the same template,
+# byte for byte, as PROJECT_README_SNAPSHOT beside it.
 _PROJECT_README_TEMPLATE = "README-TEMPLATE.md"
 _PROJECT_README = "README.md"
+#: projects/<name>/<this>: a byte copy of the project README template a
+#: project's README.md was seeded from -- the baseline a later installed
+#: template is compared against. A dotfile at the project root, outside
+#: every intake directory, so no intake scan reads it.
+PROJECT_README_SNAPSHOT = ".readme-template.md"
 _LAYOUT_DIRS = (
     "",
     "tasks/queues",
@@ -1632,8 +1797,8 @@ def create_project(
        *git_remote*, *dev_tree* and *git_repo* hold no newline or other
        control character; *dev_tree* is absolute with no ``..`` segment
        (``create_project.<field>_invalid``, dual-channel).
-    5. *project* is given and matches ``[a-zA-Z][a-zA-Z0-9_-]*`` -- before
-       any filesystem access. A *dev_tree* that does not exist only warns.
+    5. *project* is given and satisfies the project-name rule
+       (``ini.project_name_rule``) -- before any filesystem access. A *dev_tree* that does not exist only warns.
     6. ``projects/<project>/`` does not exist yet (exit 2).
     7. The workflow type names a ready plugin, matched by name (see
        ``_check_workflow``), and a template directory exists for it (or
@@ -1652,8 +1817,12 @@ def create_project(
 
     The tree includes ``README.md``, the project layer every agent reads,
     copied from :func:`project_readme_template` (a missing template only
-    warns, and the README is not seeded). The closing "Next steps" tell
-    the operator to fill it in.
+    warns, and the README is not seeded). Whenever the README is seeded,
+    the same template is also copied byte for byte to
+    :data:`PROJECT_README_SNAPSHOT` beside it; when it is not, no snapshot
+    is written. The closing "Next steps" tell the operator to fill it in,
+    and name the remote ``init-project-git-repo.sh`` pushes the base
+    branches to: *git_remote*, or ``origin`` when it is None or blank.
 
     Args:
         ctx:           Kanban root.
@@ -1700,7 +1869,7 @@ def create_project(
     for flag, value in ceilings:
         if value and not re.fullmatch(r"[0-9]+", value):
             raise ProjectRefusal(f"ERROR: {flag} requires a non-negative integer; got: '{value}'")
-    check_priority("create_project", prio, name)
+    check_priority("create_project", prio, name, kanban_root=ctx.kanban_root)
     if colour:
         _check_color("--color", colour)
     if dev_tree is not None and not dev_tree:
@@ -1708,7 +1877,12 @@ def create_project(
     if git_repo is not None and not git_repo:
         raise ProjectRefusal("ERROR: --git-repo/--git-repo-url requires a non-empty value.")
     check_create_values(
-        project=name, workflow_type=workflow, git_remote=remote, dev_tree=dev_tree, git_repo=git_repo
+        project=name,
+        workflow_type=workflow,
+        git_remote=remote,
+        dev_tree=dev_tree,
+        git_repo=git_repo,
+        kanban_root=ctx.kanban_root,
     )
     dev_tree = dev_tree or ""
     git_repo = git_repo or ""
@@ -1779,6 +1953,7 @@ def create_project(
         _say(f"  cp {template_dir}/INTENT-TEMPLATE.md -> {project_dir}/INTENT.md")
         if readme_source:
             _say(f"  cp {readme_source} -> {project_dir}/{_PROJECT_README}")
+            _say(f"  cp {readme_source} -> {project_dir}/{PROJECT_README_SNAPSHOT}")
         return ProjectOutcome("create_project", name, pathlib.Path(project_dir), dry_run=True)
 
     try:
@@ -1818,10 +1993,6 @@ def create_project(
             count += 1
     _say(f"  + seeded {count} queue files")
 
-    queue_file, title, desc = _OVERWATCH_QUEUE
-    _write(f"{queues}/{queue_file}", queue_file_text(title, desc))
-    _say("  + seeded overwatch_backlog.md")
-
     for source, target in _TEMPLATE_COPIES:
         _copy(f"{template_dir}/{source}", f"{project_dir}/{target}")
     _say("  + seeded 3 templates")
@@ -1835,6 +2006,7 @@ def create_project(
     _say("  + seeded INTENT.md")
     if readme_source:
         _copy(readme_source, f"{project_dir}/{_PROJECT_README}")
+        _copy(readme_source, f"{project_dir}/{PROJECT_README_SNAPSHOT}")
         _say("  + seeded README.md from the project README template")
 
     _seed_release_state(f"{project_dir}/release-state.md")
@@ -1861,7 +2033,8 @@ def create_project(
         "  2. Fill in the project README -- this project's test runners, lints, coding",
         "     standard and contracts, which every agent reads after its role file:",
         f"     $EDITOR {project_dir}/{_PROJECT_README}",
-        "  3. Push the chain's base branches to origin (run once, before first release):",
+        f"  3. Push the chain's base branches to {remote.strip() or DEFAULT_GIT_REMOTE} "
+        "(run once, before first release):",
         f"     init-project-git-repo.sh --project {name}",
         f"  4. Drop requirements docs in: {project_dir}/requirements/",
         "  5. The chain runs immediately (ceilings are operator checkpoints).",
@@ -1907,7 +2080,10 @@ def add_project(
     A project directory with no ``README.md`` gets one seeded from
     :func:`project_readme_template`, registered already or not, with a line
     telling the operator to fill it in; an existing ``README.md`` is never
-    touched.
+    touched. Whenever the README is seeded, the same template is also copied
+    byte for byte to :data:`PROJECT_README_SNAPSHOT` beside it, as
+    :func:`create_project` does, so the template refresh can report a later
+    template change; when it is not, no snapshot is written.
 
     A project directory with neither ``project.cfg`` nor a legacy
     ``PROJECT.cfg`` gets ``project.cfg`` rendered from the project.cfg
@@ -1950,7 +2126,7 @@ def add_project(
 
     root = str(ctx.kanban_root)
     check_project_name("add_project", name, root)
-    check_priority("add_project", prio, name)
+    check_priority("add_project", prio, name, kanban_root=root)
     project_dir = f"{root}/projects/{name}"
     if not os.path.isdir(project_dir):
         raise ProjectRefusal(
@@ -2007,6 +2183,7 @@ def add_project(
 
     if readme_source:
         _copy(readme_source, readme_target)
+        _copy(readme_source, f"{project_dir}/{PROJECT_README_SNAPSHOT}")
         _say(
             "  + seeded README.md from the project README template; fill in this project's rules:",
             f"     $EDITOR {readme_target}",
@@ -2047,14 +2224,15 @@ def _contract_message(exc: Exception) -> str:
     return contract["message"] if contract else str(exc)
 
 
-def _refuse_active_rc(name: str, release_state: pathlib.Path) -> None:
+def _refuse_active_rc(kanban_root: PathLike, name: str, release_state: pathlib.Path) -> None:
     """Refuse removing a project that has a release in flight, whatever *force* says.
 
     The Active RC is read through ``cm.read_state_field`` (validated): an
     RC recorded there, or a field that does not validate, refuses with exit
-    code 2 before anything is changed.
+    code 2 before anything is changed. The remedies name the installed
+    scripts under *kanban_root*.
     """
-    retry = f"team/scripts/remove-project.sh --project {name}"
+    retry = _installed_cli(kanban_root, "remove-project.sh", "--project", name)
     try:
         active_rc = read_release_state_field(str(release_state), "Active RC")
     except ReleaseStateValidationError as exc:
@@ -2083,8 +2261,9 @@ def _refuse_active_rc(name: str, release_state: pathlib.Path) -> None:
             "remove_project.active_rc",
             f"remove-project.sh: project '{name}' has Active RC = {active_rc}; a project with a "
             "release in flight is not removed, with or without --force. Nothing was changed.",
-            f"Ship or cancel {active_rc} first, e.g. team/scripts/cm/cancel-rc.sh --project {name} "
-            f"--key {active_rc} --yes, then re-run {retry}",
+            f"Ship or cancel {active_rc} first, e.g. "
+            f"{_installed_cli(kanban_root, 'cm/cancel-rc.sh', '--project', name, '--key', active_rc, '--yes')}"
+            f", then re-run {retry}",
         ),
         exit_code=2,
     )
@@ -2136,7 +2315,7 @@ def remove_project(
     root = str(ctx.kanban_root)
     check_project_name("remove_project", name, root)
     project_dir = f"{root}/projects/{name}"
-    _refuse_active_rc(name, ctx.project_root(name) / "release-state.md")
+    _refuse_active_rc(ctx.kanban_root, name, ctx.project_root(name) / "release-state.md")
 
     registry = _Registry(root)
     fmt = registry.format()

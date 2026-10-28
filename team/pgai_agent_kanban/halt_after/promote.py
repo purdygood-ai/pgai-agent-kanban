@@ -13,6 +13,22 @@ does not evaluate drain or RC state; it performs the mechanical steps:
   2. Create a ``HALT`` file at the same scope.
   3. Append a ``## HALT Event`` audit entry to ``release-state.md``.
 
+HALT body:
+
+    # HALT created by HALT-AFTER promotion at 2026-05-29T01:23:45+00:00: rc (Active RC cleared)
+    # halt-writer: halt-after-promotion
+    # halt-reason: HALT-AFTER rc auto-promotion: rc (Active RC cleared)
+    # Resume: /home/op/pgai_agent_kanban/scripts/unhalt.sh --project demo
+
+The first line is what the HALT readers display; the ``halt-writer`` /
+``halt-reason`` lines are the provenance block
+(pgai_agent_kanban.overwatch.halt_provenance), which marks the HALT as the
+chain's rather than an operator's. The resume line names the installed
+script under the kanban root, so it runs as printed:
+``<kanban root>/scripts/unhalt.sh --project <name>`` for a project, and
+``<kanban root>/scripts/unhalt-global.sh`` for a promotion at the kanban
+root.
+
 Audit-entry format:
 
     ## HALT Event
@@ -47,6 +63,12 @@ import pathlib
 from pgai_agent_kanban.lib.sentinel_provenance import (
     kanban_root_for_scope,
     record_sentinel_write,
+)
+from pgai_agent_kanban.overwatch.halt_provenance import (
+    WRITER_HALT_AFTER_PROMOTION,
+    provenance_lines,
+    unhalt_command,
+    unhalt_global_command,
 )
 
 from .token import describe_token
@@ -107,11 +129,36 @@ def _build_audit_entry(event: str, timestamp: str) -> str:
     )
 
 
+def _build_halt_body(project_root: pathlib.Path, kanban_root: pathlib.Path, event: str, timestamp: str) -> str:
+    """Build the HALT file body: a display header, the provenance block, and how to resume.
+
+    Args:
+        project_root: The scope the HALT is created in.
+        kanban_root:  That scope's kanban root (equal to *project_root* for a
+                      root-scope promotion).
+        event:        The canonical event token that drained.
+        timestamp:    ISO-8601 UTC timestamp string.
+    """
+    note = _event_drained_note(event)
+    if project_root == kanban_root:
+        resume = unhalt_global_command(kanban_root)
+    else:
+        resume = unhalt_command(kanban_root, project_root.name)
+    lines = [
+        f"# HALT created by HALT-AFTER promotion at {timestamp}: {note}",
+        *provenance_lines(WRITER_HALT_AFTER_PROMOTION, f"HALT-AFTER {event} auto-promotion: {note}"),
+        f"# Resume: {resume}",
+    ]
+    return "\n".join(lines) + "\n"
+
+
 def promote(project_root: "str | pathlib.Path", event: str) -> None:
     """Promote a HALT-AFTER sentinel to HALT and write an audit entry.
 
     Steps:
-      1. Create the ``HALT`` file at *project_root* (empty file).
+      1. Create the ``HALT`` file at *project_root*, carrying the body the
+         module docstring shows.  A HALT already present is left exactly
+         as it is.
       2. Remove the ``HALT-AFTER`` file from *project_root*.
       3. Append a ``## HALT Event`` block to *project_root*/release-state.md.
 
@@ -142,11 +189,17 @@ def promote(project_root: "str | pathlib.Path", event: str) -> None:
 
     timestamp = _utc_now_iso()
 
-    # Step 1 — create HALT (empty sentinel)
-    halt_existed = halt_path.exists()
-    halt_path.touch()
-    logger.info("promote: created %s", halt_path)
-    if not halt_existed:
+    # Step 1 — create HALT with its provenance body. Exclusive create: a
+    # HALT that is already there (an operator's, or CM's) is never
+    # overwritten, even one that appears between a check and the write.
+    body = _build_halt_body(project_root, pathlib.Path(kanban_root), event, timestamp)
+    try:
+        with halt_path.open("x", encoding="utf-8") as fh:
+            fh.write(body)
+    except FileExistsError:
+        logger.info("promote: %s already present; left as it was", halt_path)
+    else:
+        logger.info("promote: created %s", halt_path)
         record_sentinel_write(kanban_root, halt_path, "promote")
 
     # Step 2 — remove HALT-AFTER

@@ -78,10 +78,10 @@
 # Pre-merge runs (--pre-merge [--base REF]): the cheap whole-tree checks a
 # change should pass before it merges, run by the pre-merge engine
 # (module pgai_agent_kanban.testing.pre_merge, via pp_run_ops): the by-path
-# module test (tests/unit/test_package_modules_run_by_path.py), the five
+# module test (tests/unit/test_package_modules_run_by_path.py), the six
 # ratchet lints in fail-on-regression mode (inline Python, duplicated
 # Python, engine size/dupe, API route impl, echo/printf piped into
-# grep -q) and the tracked-files lint (tracked files an ignore rule matches,
+# grep -q, section parsers) and the tracked-files lint (tracked files an ignore rule matches,
 # tracked generated files), four whole-tree guards run whatever the diff (env-bootstrap: scripts/lint_env_bootstrap.py;
 # operator-verb-docs: scripts/generate_operator_verb_docs.py --check;
 # dashboard-window-docs: scripts/dashboard/generate_window_docs.py --check;
@@ -120,6 +120,16 @@
 # ${PGAI_AGENT_KANBAN_TEMP_DIR}/lint/durations-unit.json, beside the
 # findings file (team/scripts/lib/gated_runner_durations.py). Informational
 # only: it never gates, never files a bug, never changes the exit code.
+#
+# Run evidence: a certification run (any run but --files, --pre-merge and
+# --help) first removes every file an earlier unit run left at
+# ${PGAI_AGENT_KANBAN_TEMP_DIR}/lint/findings-unit.json and its .runid,
+# lint/*_unit.json (per-lint findings), lint/durations-unit.json,
+# coverage/unit.json and coverage/unit-data/.coverage*, before any
+# gate runs (gated_runner_clear_run_evidence in
+# team/scripts/lib/gated_runner_lint.sh). Every file at those paths after
+# the run was written by this run; an earlier run's file is never read or
+# merged. The other suite's files are left alone.
 #
 # Green ledger: every certification run (any run without --files) appends
 # {commit, suite, selection, exit, findings_sha, tree_clean} to the per-RC
@@ -235,15 +245,15 @@ _RUT_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # the script.
 [[ -f "$TEAM_ROOT/bashrc" ]] && source "$TEAM_ROOT/bashrc"
 [[ -f "$TEAM_ROOT/env" ]] && source "$TEAM_ROOT/env"
-[[ -f "$HOME/.config/pgai-kanban.cfg" ]] && source "$HOME/.config/pgai-kanban.cfg"
+# Operator user config, then [chain] pm_mode (config_loader.sh).
+# shellcheck source=lib/config_loader.sh
+source "${_RUT_SCRIPT_DIR}/lib/config_loader.sh"
+config_startup_prelude "$TEAM_ROOT"
 # Source ini_parser.sh for read_ini; dev_tree.sh for resolve/require helpers.
 # shellcheck source=lib/ini_parser.sh
 [[ -f "${_RUT_SCRIPT_DIR}/lib/ini_parser.sh" ]] && source "${_RUT_SCRIPT_DIR}/lib/ini_parser.sh"
 # shellcheck source=lib/dev_tree.sh
 source "${_RUT_SCRIPT_DIR}/lib/dev_tree.sh"
-if [[ -f "$TEAM_ROOT/kanban.cfg" ]]; then
-    export PGAI_KANBAN_PM_MODE="${PGAI_KANBAN_PM_MODE:-$(read_ini "$TEAM_ROOT/kanban.cfg" chain pm_mode automatic)}"
-fi
 # Source temp.sh for resolver helpers (include guard in temp.sh prevents double-load).
 # Must happen before strict mode so resolver can read config without triggering pipefail.
 # shellcheck source=lib/temp.sh
@@ -373,6 +383,11 @@ fi
 _RU_TARGETED_EXIT_FILE="${PGAI_AGENT_KANBAN_TEMP_DIR}/targeted-unit.exit"
 _RU_PRE_MERGE_EXIT_FILE="${PGAI_AGENT_KANBAN_TEMP_DIR}/pre-merge.exit"
 if [[ "$_RU_TARGETED" != "true" && "$_RU_HELP_ONLY" != "true" && "$_RU_PRE_MERGE" != "true" ]]; then
+# Remove every evidence file an earlier unit run left (findings, per-lint,
+# durations, coverage) first, so each file at those fixed paths after
+# this run is this run's own and none is merged or read from an earlier
+# run ("Run evidence" in --help).
+gated_runner_clear_run_evidence "${PGAI_AGENT_KANBAN_TEMP_DIR}" unit
 _RU_FINDINGS_FILE="${PGAI_AGENT_KANBAN_TEMP_DIR}/lint/findings-unit.json"
 _RU_RUN_TOKEN="$(gated_runner_claim_findings_file "$_RU_FINDINGS_FILE" "run-unit-tests.sh")"
 fi
@@ -533,6 +548,14 @@ the total run time and the test count to
 Informational only: never a gate, never a filed bug, never a change to
 the exit code.
 
+Run evidence: a certification run starts by removing every file an
+earlier unit run left at <temp-root>/lint/findings-unit.json (and
+its .runid), <temp-root>/lint/*_unit.json, <temp-root>/lint/durations-unit.json,
+<temp-root>/coverage/unit.json and <temp-root>/coverage/unit-data/,
+and prints one line naming them. Every file there after the run is this
+run's own; files from earlier runs are never read. --files, --pre-merge
+and --help remove nothing.
+
 Options:
   --verbose, -v   Pass --verbose flag through to pytest
   --workers N     Lower this run's worker budget to N (a whole number). The
@@ -582,10 +605,11 @@ Options:
                   cheap whole-tree checks a change should pass before it
                   merges, through the pre-merge engine
                   (module pgai_agent_kanban.testing.pre_merge): the
-                  by-path module test, the five ratchet lints in
+                  by-path module test, the six ratchet lints in
                   fail-on-regression mode (inline Python, duplicated
                   Python, engine size/dupe, API route impl, echo/printf
-                  piped into grep -q) and the tracked-files lint
+                  piped into grep -q, section parsers) and the
+                  tracked-files lint
                   (tracked files an ignore rule matches, tracked
                   generated files), four whole-tree guards run
                   whatever the diff (env-bootstrap,
@@ -1141,25 +1165,51 @@ cd "$REPO_ROOT/team"
 # Test anti-pattern lint: scans team/tests/ for anti-pattern 1 (pattern-scan
 # assertion loops) and anti-pattern 2 (hardcoded /tmp or $HOME paths), per
 # roles/TESTER.md "Test Authoring Guidelines".
+# Exits 0 on findings and writes them per instance with --findings-file;
+# they are merged into the aggregate below. The wrapper still records a
+# non-zero exit (a usage error or a crash) as one coarse finding.
 echo "Running test anti-pattern lint..."
+_RU_TEST_ANTI_PATTERNS_FINDINGS="${PGAI_AGENT_KANBAN_TEMP_DIR}/lint/test_anti_patterns_unit.json"
+mkdir -p "$(dirname "$_RU_TEST_ANTI_PATTERNS_FINDINGS")"
+rm -f "$_RU_TEST_ANTI_PATTERNS_FINDINGS"
 gated_runner_run_quality_lint "test_anti_patterns" -- \
-  python3 scripts/lint_test_anti_patterns.py
+  python3 scripts/lint_test_anti_patterns.py --findings-file "$_RU_TEST_ANTI_PATTERNS_FINDINGS"
+gated_runner_merge_findings_file "$_RU_TEST_ANTI_PATTERNS_FINDINGS"
+unset _RU_TEST_ANTI_PATTERNS_FINDINGS
 
 # Skip-cites-real-bug grep gate: enforces the skip-citation policy — every
 # skip()/SKIP: annotation that cites a bug must reference a real BUG-NNNN
 # whose file exists in bugs/.  Placeholder IDs (BUG-SKIP-* or non-BUG-NNNN
 # forms) are flagged.
+# Exits 0 on findings and writes them per instance with --findings-file
+# (one per placeholder citation and per skip citing an unfiled bug); they
+# are merged into the aggregate below. The wrapper still records a non-zero
+# exit (a usage error or a crash) as one coarse finding.
 echo "Running skip-cites-real-bug gate..."
+_RU_SKIP_CITES_REAL_BUG_FINDINGS="${PGAI_AGENT_KANBAN_TEMP_DIR}/lint/skip_cites_real_bug_unit.json"
+mkdir -p "$(dirname "$_RU_SKIP_CITES_REAL_BUG_FINDINGS")"
+rm -f "$_RU_SKIP_CITES_REAL_BUG_FINDINGS"
 gated_runner_run_quality_lint "skip_cites_real_bug" -- \
-  bash "${SCRIPT_DIR}/lint_skip_bug_gate.sh" --tests-dir "${REPO_ROOT}/team/tests"
+  bash "${SCRIPT_DIR}/lint_skip_bug_gate.sh" --tests-dir "${REPO_ROOT}/team/tests" \
+  --findings-file "$_RU_SKIP_CITES_REAL_BUG_FINDINGS"
+gated_runner_merge_findings_file "$_RU_SKIP_CITES_REAL_BUG_FINDINGS"
+unset _RU_SKIP_CITES_REAL_BUG_FINDINGS
 
 # Orphan-test lint: scans team/ for test_*.py files that are unreachable
 # from either gated runner's pytest argv.  An orphan test means a
 # regression it catches will never surface in the authoritative
 # UNIT_EXIT/INTEGRATION_EXIT signal.
+# Exits 0 on findings and writes them per instance with --findings-file;
+# they are merged into the aggregate below. The wrapper still records a
+# non-zero exit (a usage error or a crash) as one coarse finding.
 echo "Running orphan-test lint..."
+_RU_ORPHAN_TESTS_FINDINGS="${PGAI_AGENT_KANBAN_TEMP_DIR}/lint/orphan_tests_unit.json"
+mkdir -p "$(dirname "$_RU_ORPHAN_TESTS_FINDINGS")"
+rm -f "$_RU_ORPHAN_TESTS_FINDINGS"
 gated_runner_run_quality_lint "orphan_tests" -- \
-  python3 scripts/lint_orphan_tests.py
+  python3 scripts/lint_orphan_tests.py --findings-file "$_RU_ORPHAN_TESTS_FINDINGS"
+gated_runner_merge_findings_file "$_RU_ORPHAN_TESTS_FINDINGS"
+unset _RU_ORPHAN_TESTS_FINDINGS
 
 # API-parity lint has moved: it is now the BLOCK-WORTHY census-walk gate run
 # in the fatal pre-flight section above (docs/blocking-site-census.md row 34,
@@ -1180,22 +1230,45 @@ gated_runner_run_quality_lint "operator_verb_manifest" -- \
 # _PGAI_UPGRADE_ORIG_DIR) are absent from executable lines in
 # team/scripts/upgrade.sh.  A squash-merge conflict can silently resurrect
 # the retired block.
+# Exits 0 on findings and writes them per instance with --findings-file;
+# they are merged into the aggregate below. The wrapper still records a
+# non-zero exit (a usage error or a crash) as one coarse finding.
 echo "Running upgrade no-temp-copy-guard lint..."
+_RU_UPGRADE_GUARD_FINDINGS="${PGAI_AGENT_KANBAN_TEMP_DIR}/lint/upgrade_no_temp_copy_guard_unit.json"
+mkdir -p "$(dirname "$_RU_UPGRADE_GUARD_FINDINGS")"
+rm -f "$_RU_UPGRADE_GUARD_FINDINGS"
 gated_runner_run_quality_lint "upgrade_no_temp_copy_guard" -- \
-  python3 scripts/lint_upgrade_no_temp_copy_guard.py
+  python3 scripts/lint_upgrade_no_temp_copy_guard.py --findings-file "$_RU_UPGRADE_GUARD_FINDINGS"
+gated_runner_merge_findings_file "$_RU_UPGRADE_GUARD_FINDINGS"
+unset _RU_UPGRADE_GUARD_FINDINGS
 
 # ICD freshness gate: asserts that docs/api/icd.json is byte-identical to a
 # fresh regeneration from the current codebase.  Fix: run
 # 'bash team/scripts/generate-icd.sh' and commit the result.
+# Exits 0 on findings and writes them per instance with --findings-file;
+# they are merged into the aggregate below. The wrapper still records a
+# non-zero exit (a usage error or a crash) as one coarse finding.
 echo "Running ICD freshness gate..."
+_RU_ICD_FRESHNESS_FINDINGS="${PGAI_AGENT_KANBAN_TEMP_DIR}/lint/icd_freshness_unit.json"
+mkdir -p "$(dirname "$_RU_ICD_FRESHNESS_FINDINGS")"
+rm -f "$_RU_ICD_FRESHNESS_FINDINGS"
 gated_runner_run_quality_lint "icd_freshness" -- \
-  python3 scripts/lint_icd_freshness.py
+  python3 scripts/lint_icd_freshness.py --findings-file "$_RU_ICD_FRESHNESS_FINDINGS"
+gated_runner_merge_findings_file "$_RU_ICD_FRESHNESS_FINDINGS"
+unset _RU_ICD_FRESHNESS_FINDINGS
 
 # ICD compatibility gate: asserts that docs/api/icd.json is a compatible
 # superset of every ICD version listed in docs/api/baselines/SUPPORTED.
+# Each violation and support-table drift item is its own finding, written
+# with --findings-file and merged per instance like the freshness gate above.
 echo "Running ICD compatibility gate..."
+_RU_ICD_COMPAT_FINDINGS="${PGAI_AGENT_KANBAN_TEMP_DIR}/lint/icd_compat_unit.json"
+mkdir -p "$(dirname "$_RU_ICD_COMPAT_FINDINGS")"
+rm -f "$_RU_ICD_COMPAT_FINDINGS"
 gated_runner_run_quality_lint "icd_compat" -- \
-  python3 scripts/lint_icd_compat.py
+  python3 scripts/lint_icd_compat.py --findings-file "$_RU_ICD_COMPAT_FINDINGS"
+gated_runner_merge_findings_file "$_RU_ICD_COMPAT_FINDINGS"
+unset _RU_ICD_COMPAT_FINDINGS
 
 # Operator verb reference freshness gate: asserts that the census-derived
 # generated sections of docs/operator-commands.md and docs/operator-api.md
@@ -1223,6 +1296,22 @@ gated_runner_run_quality_lint "operator_verb_docs_freshness" -- \
 echo "Running dashboard window-census freshness gate..."
 gated_runner_run_quality_lint "dashboard_window_census" -- \
   python3 scripts/dashboard/generate_window_docs.py --check
+
+# Measured-pace freshness check: narrates README.md / HOW_TO.md when their
+# generated measured-pace block ends before the newest shipped per-RC rollup
+# (a release shipped and the block was not re-rendered).  CONVERT
+# (team/SOP-core.md "Blocking Severity: only real damage blocks"): stale doc
+# figures carry zero runtime-failure risk, so the check always exits 0; the
+# per-doc entries come from its --findings-file, merged into the aggregate.
+# Fix: run 'python3 team/scripts/generate_measured_pace_docs.py' from the
+# repo root and commit the result.
+echo "Running measured-pace freshness check..."
+_RU_MEASURED_PACE_FINDINGS="${PGAI_AGENT_KANBAN_TEMP_DIR}/lint/measured_pace_freshness_unit.json"
+mkdir -p "$(dirname "$_RU_MEASURED_PACE_FINDINGS")"
+gated_runner_run_quality_lint "measured_pace_freshness" -- \
+  python3 scripts/generate_measured_pace_docs.py --freshness --findings-file "$_RU_MEASURED_PACE_FINDINGS"
+gated_runner_merge_findings_file "$_RU_MEASURED_PACE_FINDINGS"
+unset _RU_MEASURED_PACE_FINDINGS
 
 # Dashboard tmux format-job lint: no tmux option a dashboard script sets
 # (status formats, status-left/right, window-status formats, pane borders,
@@ -1263,24 +1352,48 @@ gated_runner_run_quality_lint "doc_command_truth" -- \
 # lint_lib_function_dedupe.py (flat lib/*.sh only) as the gated-runner call
 # site -- see lint_engine_size_dupe.py's module docstring for the
 # relationship between the two.
+# Exits 0 on findings and writes them per instance with --findings-file;
+# they are merged into the aggregate below. The wrapper still records a
+# non-zero exit (a usage error or a crash) as one coarse finding.
 echo "Running engine-size/dupe lint..."
+_RU_ENGINE_SIZE_DUPE_FINDINGS="${PGAI_AGENT_KANBAN_TEMP_DIR}/lint/engine_size_dupe_unit.json"
+mkdir -p "$(dirname "$_RU_ENGINE_SIZE_DUPE_FINDINGS")"
+rm -f "$_RU_ENGINE_SIZE_DUPE_FINDINGS"
 gated_runner_run_quality_lint "engine_size_dupe" -- \
-  python3 scripts/lint_engine_size_dupe.py
+  python3 scripts/lint_engine_size_dupe.py --findings-file "$_RU_ENGINE_SIZE_DUPE_FINDINGS"
+gated_runner_merge_findings_file "$_RU_ENGINE_SIZE_DUPE_FINDINGS"
+unset _RU_ENGINE_SIZE_DUPE_FINDINGS
 
 # Env-bootstrap lint: asserts the env-bootstrap unification contract on
 # both runtimes (bash entry points source env_bootstrap.sh/wake_common.sh;
 # Python entry points import resolve_kanban_root rather than reading
 # PGAI_AGENT_KANBAN_ROOT_PATH directly).
+# Exits 0 on findings and writes them per instance with --findings-file;
+# they are merged into the aggregate below. The wrapper still records a
+# non-zero exit (a usage error or a crash) as one coarse finding.
 echo "Running env-bootstrap lint..."
+_RU_ENV_BOOTSTRAP_FINDINGS="${PGAI_AGENT_KANBAN_TEMP_DIR}/lint/env_bootstrap_unit.json"
+mkdir -p "$(dirname "$_RU_ENV_BOOTSTRAP_FINDINGS")"
+rm -f "$_RU_ENV_BOOTSTRAP_FINDINGS"
 gated_runner_run_quality_lint "env_bootstrap" -- \
-  python3 scripts/lint_env_bootstrap.py
+  python3 scripts/lint_env_bootstrap.py --findings-file "$_RU_ENV_BOOTSTRAP_FINDINGS"
+gated_runner_merge_findings_file "$_RU_ENV_BOOTSTRAP_FINDINGS"
+unset _RU_ENV_BOOTSTRAP_FINDINGS
 
 # Help-presence lint: asserts that every operator-facing shell script under
 # team/scripts/ implements a --help or -h flag (Directive 6,
 # docs/coding-standards.md).  Scripts in help_presence_exempt.txt are exempt.
+# Exits 0 on findings and writes them per instance with --findings-file;
+# they are merged into the aggregate below. The wrapper still records a
+# non-zero exit (a usage error or a crash) as one coarse finding.
 echo "Running help-presence lint..."
+_RU_HELP_PRESENCE_FINDINGS="${PGAI_AGENT_KANBAN_TEMP_DIR}/lint/help_presence_unit.json"
+mkdir -p "$(dirname "$_RU_HELP_PRESENCE_FINDINGS")"
+rm -f "$_RU_HELP_PRESENCE_FINDINGS"
 gated_runner_run_quality_lint "help_presence" -- \
-  python3 scripts/lint_help_presence.py
+  python3 scripts/lint_help_presence.py --findings-file "$_RU_HELP_PRESENCE_FINDINGS"
+gated_runner_merge_findings_file "$_RU_HELP_PRESENCE_FINDINGS"
+unset _RU_HELP_PRESENCE_FINDINGS
 
 # Hygiene lint: consolidated per-instance quality scan covering provenance
 # (code files in team/scripts/ and team/pgai_agent_kanban/, release-summary
@@ -1306,9 +1419,17 @@ unset _RU_HYGIENE_LINT_FINDINGS
 # Import-completeness lint: asserts that every third-party Python import
 # across team/scripts/, team/pgai_agent_kanban/, and team/tests/ is
 # declared in requirements.txt or requirements-test.txt.
+# Exits 0 on findings and writes them per instance with --findings-file;
+# they are merged into the aggregate below. The wrapper still records a
+# non-zero exit (a usage error or a crash) as one coarse finding.
 echo "Running import-completeness lint..."
+_RU_IMPORT_COMPLETENESS_FINDINGS="${PGAI_AGENT_KANBAN_TEMP_DIR}/lint/python_import_completeness_unit.json"
+mkdir -p "$(dirname "$_RU_IMPORT_COMPLETENESS_FINDINGS")"
+rm -f "$_RU_IMPORT_COMPLETENESS_FINDINGS"
 gated_runner_run_quality_lint "python_import_completeness" -- \
-  python3 scripts/lint_python_import_completeness.py
+  python3 scripts/lint_python_import_completeness.py --findings-file "$_RU_IMPORT_COMPLETENESS_FINDINGS"
+gated_runner_merge_findings_file "$_RU_IMPORT_COMPLETENESS_FINDINGS"
+unset _RU_IMPORT_COMPLETENESS_FINDINGS
 
 # Dashboard network-git gate: asserts that no network-capable git verb
 # (ls-remote, fetch, pull, push, clone) appears anywhere under
@@ -1316,9 +1437,17 @@ gated_runner_run_quality_lint "python_import_completeness" -- \
 # CONVERT-class per docs/blocking-site-census.md row 39: previously a
 # standalone script with no call site in either gated runner; wired in here
 # so a regression is filed as a finding instead of never surfacing at all.
+# Exits 0 on findings and writes them per instance with --findings-file;
+# they are merged into the aggregate below. The wrapper still records a
+# non-zero exit (a usage error or a crash) as one coarse finding.
 echo "Running dashboard network-git gate..."
+_RU_DASHBOARD_NETWORK_GIT_FINDINGS="${PGAI_AGENT_KANBAN_TEMP_DIR}/lint/dashboard_network_git_gate_unit.json"
+mkdir -p "$(dirname "$_RU_DASHBOARD_NETWORK_GIT_FINDINGS")"
+rm -f "$_RU_DASHBOARD_NETWORK_GIT_FINDINGS"
 gated_runner_run_quality_lint "dashboard_network_git_gate" -- \
-  python3 scripts/lint_dashboard_network_git_gate.py
+  python3 scripts/lint_dashboard_network_git_gate.py --findings-file "$_RU_DASHBOARD_NETWORK_GIT_FINDINGS"
+gated_runner_merge_findings_file "$_RU_DASHBOARD_NETWORK_GIT_FINDINGS"
+unset _RU_DASHBOARD_NETWORK_GIT_FINDINGS
 
 # Dashboard hardcoded-color gate: asserts that no raw ANSI escape literal
 # or tmux #[fg=...] markup literal appears anywhere under
@@ -1481,6 +1610,22 @@ gated_runner_run_quality_lint "inline_python" -- \
   python3 scripts/lint_inline_python.py --findings-file "$_RU_INLINE_PYTHON_FINDINGS"
 gated_runner_merge_findings_file "$_RU_INLINE_PYTHON_FINDINGS"
 unset _RU_INLINE_PYTHON_FINDINGS
+
+# Section-parser ratchet lint: reports a line in non-test code under
+# team/pgai_agent_kanban, team/pm-agent or team/scripts that finds a "## "
+# section by detecting its heading itself, outside task_status.read_section
+# and read_md_field, unless team/config/section-parser-allowlist.txt names
+# the site as one that reads no value; an entry naming no site is reported
+# too.  CONVERT-class: always exits 0, so the wrapper only prints its
+# narration in full; the per-finding entries come from its --findings-file,
+# merged into the aggregate.
+echo "Running section-parser ratchet lint..."
+_RU_SECTION_PARSERS_FINDINGS="${PGAI_AGENT_KANBAN_TEMP_DIR}/lint/section_parsers_unit.json"
+mkdir -p "$(dirname "$_RU_SECTION_PARSERS_FINDINGS")"
+gated_runner_run_quality_lint "section_parsers" -- \
+  python3 scripts/lint_section_parsers.py --findings-file "$_RU_SECTION_PARSERS_FINDINGS"
+gated_runner_merge_findings_file "$_RU_SECTION_PARSERS_FINDINGS"
+unset _RU_SECTION_PARSERS_FINDINGS
 
 # Docker-path lint: every container-engine call in non-test team/ code must
 # go through pgai_docker (team/scripts/lib/docker_use.sh), the one path to
@@ -1713,7 +1858,7 @@ if [[ "$_RU_PRE_MERGE" == "true" ]]; then
   fi
   _RU_PRE_MERGE_ARGV=(--repo "$REPO_ROOT" --suite unit --cap "$_RU_PRE_MERGE_CAP" --workers "$_RU_PRE_MERGE_WORKERS")
   [[ -n "$PRE_MERGE_BASE" ]] && _RU_PRE_MERGE_ARGV+=(--base "$PRE_MERGE_BASE")
-  echo "Pre-merge checks: the by-path module test, the five ratchet lints and the tracked-files lint, the always-run whole-tree guards (env-bootstrap, operator-verb-docs, dashboard-window-docs, docs-citations), the affected unit tests."
+  echo "Pre-merge checks: the by-path module test, the six ratchet lints and the tracked-files lint, the always-run whole-tree guards (env-bootstrap, operator-verb-docs, dashboard-window-docs, docs-citations), the affected unit tests."
   echo "Pre-merge base: ${PRE_MERGE_BASE:-default (the local RC branch this worktree was cut from)}; cap ${_RU_PRE_MERGE_CAP} (kanban.cfg [testing] pre_merge_affected_cap; 0 = no cap); workers ${_RU_PRE_MERGE_WORKERS} (kanban.cfg [testing] workers${REQUESTED_WORKERS:+, lowered by --workers})."
   # shellcheck source=lib/pp_run_ops.sh
   source "${SCRIPT_DIR}/lib/pp_run_ops.sh"
@@ -1865,15 +2010,17 @@ fi
 # acted on so a red suite is checked exactly like a green one -- a stray
 # fixture that reaches the live root is most likely on a failing run, and
 # skipping the checks there is how a leaked or removed HALT goes
-# unreported. Each is CONVERT-class (warn, file, continue): whatever it
-# finds, the exit code that follows is still pytest's own.
+# unreported. Each is CONVERT-class (warn, file, continue) and runs through
+# gated_runner_run_instance_check, which records one finding per residue
+# path, surviving listener or sentinel difference the check names: whatever
+# it finds, the exit code that follows is still pytest's own.
 
 # --- Post-suite /tmp cleanliness assertion (quality-class: warn, file, continue) ---
-# CONVERT-class per docs/blocking-site-census.md row 52: previously a hard
-# `exit 1` on residue detection.  Wrapped through gated_runner_run_quality_lint
-# so a leak is recorded as a non-blocking finding instead of aborting the
-# runner — pytest's own PYTEST_EXIT verdict below is the only fatal exit
-# left in this script.  Runs whatever pytest's exit code was (see the
+# CONVERT-class per docs/blocking-site-census.md ("Bare-/tmp cleanliness
+# assertion" row): each residue entry pgai_tmp_cleanliness_check names
+# (PGAI_TMP_RESIDUE_FOUND) is recorded as its own non-blocking finding by
+# gated_runner_run_instance_check instead of aborting the runner — pytest's
+# own PYTEST_EXIT verdict below is the only fatal exit left in this script.  Runs whatever pytest's exit code was (see the
 # bracket comment above), so a red suite is checked exactly like a green
 # one.  The check uses the snapshot taken before the suite ran
 # (_TMP_SNAPSHOT_FILE).
@@ -1890,12 +2037,14 @@ _run_unit_bare_tmp_cleanliness_check() {
   fi
 }
 echo "Checking for bare-/tmp residue..."
-gated_runner_run_quality_lint "bare_tmp_cleanliness" -- _run_unit_bare_tmp_cleanliness_check
+gated_runner_run_instance_check "bare_tmp_cleanliness" PGAI_TMP_RESIDUE_FOUND \
+  gated_runner_tmp_residue_finding -- _run_unit_bare_tmp_cleanliness_check
 
 # --- Post-suite listener cleanliness assertion (quality-class: warn, file, continue) ---
-# CONVERT-class per docs/blocking-site-census.md row 53: previously a hard
-# `exit 1` when a framework-rooted TCP listener survived the suite.  Same
-# non-blocking treatment as the cleanliness check above.  Only listeners
+# CONVERT-class per docs/blocking-site-census.md ("TCP-listener cleanliness
+# assertion" row): each surviving framework-rooted TCP listener
+# pgai_listener_cleanliness_check names (PGAI_LISTENER_LEAKS_FOUND) is its own
+# non-blocking finding, as with the cleanliness check above.  Only listeners
 # rooted in this project's own temp subtree are flagged; sibling projects'
 # leaked listeners are not attributed to this runner.  The subtree was
 # resolved once, before pytest launched (_RUT_PROJECT_TEMP_SUBTREE), so the
@@ -1922,13 +2071,14 @@ _run_unit_listener_cleanliness_check() {
   fi
 }
 echo "Checking for framework-rooted TCP listener leaks..."
-gated_runner_run_quality_lint "listener_cleanliness" -- _run_unit_listener_cleanliness_check
+gated_runner_run_instance_check "listener_cleanliness" PGAI_LISTENER_LEAKS_FOUND \
+  gated_runner_listener_finding -- _run_unit_listener_cleanliness_check
 
 # --- Post-suite sentinel leak assertion (quality-class: warn, file, continue) ---
 # CONVERT-class per docs/blocking-site-census.md ("Sentinel leak assertion"
-# row): a HALT / HALT-AFTER / DEFER-LOW-BUGS file the suite added to, changed
-# on, or removed from the LIVE kanban root is recorded as a finding and left
-# in place -- only the operator removes a HALT file, and the evidence is the
+# row): each HALT / HALT-AFTER / DEFER-LOW-BUGS file the suite added to,
+# changed on, or removed from the LIVE kanban root (PGAI_SENTINEL_LEAKS_FOUND)
+# is recorded as its own finding and left in place -- only the operator removes a HALT file, and the evidence is the
 # file itself. Compared against the pre-suite snapshot (_SENTINEL_SNAPSHOT_FILE)
 # so a sentinel the operator armed before the run is never attributed to it.
 # Runs on every pytest outcome: a fixture that reaches the live root is
@@ -1947,7 +2097,8 @@ _run_unit_sentinel_leak_check() {
   fi
 }
 echo "Checking the live kanban root for leaked HALT / HALT-AFTER / DEFER-LOW-BUGS files..."
-gated_runner_run_quality_lint "sentinel_leak" -- _run_unit_sentinel_leak_check
+gated_runner_run_instance_check "sentinel_leak" PGAI_SENTINEL_LEAKS_FOUND \
+  gated_runner_sentinel_finding -- _run_unit_sentinel_leak_check
 
 # --- Pytest verdict ---
 # Acted on only after the post-suite checks above have run and recorded
@@ -1997,10 +2148,11 @@ echo "Unit tests PASSED"
 # script's `set -euo pipefail` on that permission error, turning a purely
 # cosmetic housekeeping failure into this runner's own exit status even
 # though every test passed and no lint was fatal. pgai_temp_cleanup_tests
-# now recovers permissions itself (team/scripts/lib/temp.sh); wrapping the
-# call through gated_runner_run_quality_lint, exactly like the two checks
-# above, means that even a sweep problem it still can't recover from is
-# recorded as a non-blocking finding instead of aborting the runner. Calls
+# now recovers permissions itself (team/scripts/lib/temp.sh); running the
+# call through gated_runner_run_instance_check, exactly like the checks
+# above, means that each leftover it still can't remove
+# (PGAI_TEMP_CLEANUP_LEFTOVERS) is recorded as its own non-blocking finding
+# instead of aborting the runner. Calls
 # pgai_temp_cleanup_tests, which removes ONLY the tests/ subtree under
 # ${PGAI_AGENT_KANBAN_TEMP_DIR} -- the scoped helper avoids wiping live agent
 # session files (e.g. claude-<session>/ directories) that reside elsewhere in
@@ -2012,7 +2164,8 @@ if [[ "$NO_SCRATCH_SWEEP" != "true" && -f "${SCRIPT_DIR}/lib/temp.sh" ]]; then
     # shellcheck source=lib/temp.sh
     source "${SCRIPT_DIR}/lib/temp.sh"
     echo "Sweeping post-suite scratch under \${PGAI_AGENT_KANBAN_TEMP_DIR}/tests..."
-    gated_runner_run_quality_lint "scratch_sweep" -- pgai_temp_cleanup_tests
+    gated_runner_run_instance_check "scratch_sweep" PGAI_TEMP_CLEANUP_LEFTOVERS \
+      gated_runner_scratch_sweep_finding -- pgai_temp_cleanup_tests
 fi
 if [[ "$NO_SCRATCH_SWEEP" == "true" ]]; then
     echo "Post-suite scratch sweep of \${PGAI_AGENT_KANBAN_TEMP_DIR}/tests left to the caller (--no-scratch-sweep)."

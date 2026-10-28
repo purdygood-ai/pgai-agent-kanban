@@ -308,9 +308,9 @@ def test_why_no_argument_walk_does_not_mask_a_stalled_project_behind_a_healthy_o
 ) -> None:
     """One command: `why.sh` (no arguments -- walks every registered project).
 
-    Registers two projects in one fixture kanban root: lane_alpha, whose
+    Registers two projects in one fixture kanban root: lane-alpha, whose
     active task has been WORKING for 61 minutes (past
-    STALL_THRESHOLD_MINUTES=60), and lane_beta, whose active task is
+    STALL_THRESHOLD_MINUTES=60), and lane-beta, whose active task is
     healthy WORKING for 5 minutes. The unit suite already proves stall
     detection under `--project NAME` alone, and separately proves worst-
     verdict aggregation across an IDLE+BLOCKED pair -- neither proves that a
@@ -320,9 +320,9 @@ def test_why_no_argument_walk_does_not_mask_a_stalled_project_behind_a_healthy_o
     churning lane behind a fleet-wide "nothing to see" exit code.
     """
     now_epoch = 1_800_000_000
-    _write_projects_cfg(tmp_path, [("lane_alpha", 1, True), ("lane_beta", 2, True)])
+    _write_projects_cfg(tmp_path, [("lane-alpha", 1, True), ("lane-beta", 2, True)])
 
-    alpha_dir = _make_project_dir(tmp_path, "lane_alpha")
+    alpha_dir = _make_project_dir(tmp_path, "lane-alpha")
     _write_task(
         alpha_dir,
         "CODER-20260910-201-churning",
@@ -330,7 +330,7 @@ def test_why_no_argument_walk_does_not_mask_a_stalled_project_behind_a_healthy_o
         mtime_epoch=now_epoch - (61 * 60),
     )
 
-    beta_dir = _make_project_dir(tmp_path, "lane_beta")
+    beta_dir = _make_project_dir(tmp_path, "lane-beta")
     _write_task(
         beta_dir,
         "CODER-20260910-202-progressing",
@@ -347,10 +347,10 @@ def test_why_no_argument_walk_does_not_mask_a_stalled_project_behind_a_healthy_o
 
     lines = result.stdout.strip("\n").splitlines()
     assert len(lines) == 2
-    alpha_line = next(line for line in lines if line.startswith("lane_alpha:"))
-    beta_line = next(line for line in lines if line.startswith("lane_beta:"))
+    alpha_line = next(line for line in lines if line.startswith("lane-alpha:"))
+    beta_line = next(line for line in lines if line.startswith("lane-beta:"))
 
-    assert alpha_line.startswith("lane_alpha: RUNNING"), alpha_line
+    assert alpha_line.startswith("lane-alpha: RUNNING"), alpha_line
     assert "CODER-20260910-201-churning" in alpha_line, alpha_line
     assert "WORKING" in alpha_line, alpha_line
     assert "61m" in alpha_line, alpha_line
@@ -362,7 +362,7 @@ def test_why_no_argument_walk_does_not_mask_a_stalled_project_behind_a_healthy_o
         f"a stalled project's line must not read as a bare healthy RUNNING: {alpha_line!r}"
     )
 
-    assert beta_line.startswith("lane_beta: RUNNING"), beta_line
+    assert beta_line.startswith("lane-beta: RUNNING"), beta_line
     assert "churn or a hang" not in beta_line, (
         f"a healthy project sharing the walk must not be flagged as stalled: {beta_line!r}"
     )
@@ -404,11 +404,11 @@ def test_verify_rc_state_marker_check_diagnoses_identically_on_prefixed_and_bare
 
     kanban_root = _build_dual_project_kanban_root(
         tmp_path,
-        "matrixtest_prefixed", prefixed_repo,
-        "matrixtest_bare", bare_repo,
+        "matrixtest-prefixed", prefixed_repo,
+        "matrixtest-bare", bare_repo,
     )
-    _write_release_state(kanban_root / "projects" / "matrixtest_prefixed", "v1.0.0")
-    _write_release_state(kanban_root / "projects" / "matrixtest_bare", "v1.0.0")
+    _write_release_state(kanban_root / "projects" / "matrixtest-prefixed", "v1.0.0")
+    _write_release_state(kanban_root / "projects" / "matrixtest-bare", "v1.0.0")
 
     # Identical task id and identical (wrong) marker on both projects: the
     # task is WORKING (expected marker [A]) but the queue still carries the
@@ -418,7 +418,7 @@ def test_verify_rc_state_marker_check_diagnoses_identically_on_prefixed_and_bare
     # see team/SOP-core.md, "Task ID and queue path format"); a bare
     # CODER-YYYYMMDD-NNN id would be silently skipped by checks (b)/(c)/(d).
     task_id = "CLAUDE-CODER-20260910-301-consistency-check"
-    for project_name in ("matrixtest_prefixed", "matrixtest_bare"):
+    for project_name in ("matrixtest-prefixed", "matrixtest-bare"):
         project_root = kanban_root / "projects" / project_name
         task_dir = project_root / "tasks" / task_id
         task_dir.mkdir(parents=True, exist_ok=True)
@@ -431,8 +431,8 @@ def test_verify_rc_state_marker_check_diagnoses_identically_on_prefixed_and_bare
             f"- [x] {task_id} — stale done marker\n", encoding="utf-8"
         )
 
-    prefixed_result = _run_verify_rc_state(kanban_root, "matrixtest_prefixed")
-    bare_result = _run_verify_rc_state(kanban_root, "matrixtest_bare")
+    prefixed_result = _run_verify_rc_state(kanban_root, "matrixtest-prefixed")
+    bare_result = _run_verify_rc_state(kanban_root, "matrixtest-bare")
 
     for result in (prefixed_result, bare_result):
         assert result.returncode == 1, result.stdout + result.stderr

@@ -1,0 +1,22 @@
+{
+  "clean": {
+    "class": "any",
+    "hours": 411.0,
+    "last_block": null,
+    "rcs": 2,
+    "since": "2026-10-01T09:00:00+00:00",
+    "status": "no block on record"
+  },
+  "computed_at": "2026-10-18T12:00:00+00:00",
+  "first_record_at": "2026-10-01T09:00:00+00:00",
+  "hands_off": {
+    "class": "human",
+    "hours": 411.0,
+    "last_block": null,
+    "rcs": 2,
+    "since": "2026-10-01T09:00:00+00:00",
+    "status": "no block on record"
+  },
+  "project": "beta",
+  "schema_version": 1
+}

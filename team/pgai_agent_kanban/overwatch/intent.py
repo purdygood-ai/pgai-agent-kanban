@@ -48,11 +48,25 @@ prints this text and exits 0.
 from __future__ import annotations
 
 import os
+import pathlib
 import re
 import sys
 from dataclasses import dataclass
 from datetime import datetime
 from typing import List
+
+# Run by file path or loaded from a file outside its package, this module has
+# no parent package and the interpreter puts only its own directory on
+# sys.path, so the package import below would not resolve. Put this file's own
+# package root -- the directory holding the pgai_agent_kanban/ this file sits
+# in -- at the front of sys.path so the import resolves from the same tree,
+# never another. Imported as a package member, sys.path is left untouched.
+if not __package__:
+    _OWN_PACKAGE_ROOT = str(pathlib.Path(__file__).resolve().parents[2])
+    if _OWN_PACKAGE_ROOT not in sys.path:
+        sys.path.insert(0, _OWN_PACKAGE_ROOT)
+
+from pgai_agent_kanban.task_status import read_section  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Entry model
@@ -78,8 +92,6 @@ class IntentEntry:
 # Grammar
 # ---------------------------------------------------------------------------
 
-_ENTRIES_HEADING_RE = re.compile(r"^##\s+Entries\s*$")
-_ANY_HEADING_RE = re.compile(r"^##\s+\S")
 _FENCE_RE = re.compile(r"^\s*```")
 _BLANK_RE = re.compile(r"^\s*$")
 _BULLET_START_RE = re.compile(r"^\s*-")
@@ -100,26 +112,15 @@ def _is_real_date(value: str) -> bool:
     return True
 
 
-def _entries_section_lines(lines: List[str]) -> List[str]:
-    """Return the lines strictly between a "## Entries" heading and the
-    next "##" heading (or end of file). Returns [] when no "## Entries"
-    heading is present — a file that never declares an Entries section
-    has no entries to find, by construction rather than by accident.
+def _entries_section_lines(text: str) -> List[str]:
+    """Return the lines of the "## Entries" section body, as
+    task_status.read_section reads it (up to the next level-2 heading or
+    end of file). Returns [] when no "## Entries" heading is present — a
+    file that never declares an Entries section has no entries to find, by
+    construction rather than by accident.
     """
-    start = None
-    for index, line in enumerate(lines):
-        if _ENTRIES_HEADING_RE.match(line):
-            start = index + 1
-            break
-    if start is None:
-        return []
-
-    end = len(lines)
-    for index in range(start, len(lines)):
-        if _ANY_HEADING_RE.match(lines[index]):
-            end = index
-            break
-    return lines[start:end]
+    body = read_section(text, "Entries")
+    return body.splitlines() if body else []
 
 
 def _parse_section(section: List[str]) -> List[IntentEntry]:
@@ -195,7 +196,7 @@ def parse_entries(intent_path: str) -> List[IntentEntry]:
     except (OSError, UnicodeDecodeError):
         return []
 
-    section = _entries_section_lines(text.splitlines())
+    section = _entries_section_lines(text)
     return _parse_section(section)
 
 

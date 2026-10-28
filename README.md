@@ -36,7 +36,7 @@ One sentence, one link per row. Depth lives in the linked document.
 | **Dual-channel errors** | Every refusal and HALT emits a machine key plus a plain-language message and runnable remedy — error/message/remedy. | [team/SOP-core.md](team/SOP-core.md) |
 | **Operator REST API** (experimental — see [status](#operator-rest-api-and-browser-ui-status)) | A loopback-only FastAPI service (`scripts/api-server.sh`) that thin-adapts the operator command surface — every mutating endpoint shells out to the one canonical script and returns a `{exit_code, stdout, stderr}` envelope. | [docs/operator-api.md](docs/operator-api.md) |
 | **Structured reads** (experimental — see [status](#operator-rest-api-and-browser-ui-status)) | JSON-native reads (`/board`, `/projects/{name}`, `?format=json` on `/metrics` and `/costs`, `/logs/{kind}`, `/traces`) designed for the browser UI, coexisting with the ANSI-pane reads without disturbing them. | [docs/operator-api.md](docs/operator-api.md) |
-| **OVERWATCH self-monitor** | A horizontal watchdog: a deterministic sweep (Tier 1) and an LLM deep-clean (Tier 2) on the cadences the installed crontab sets, plus an on-BLOCK trigger that wakes it on a fresh failure instead of at the next sweep. | [team/roles/OVERWATCH.md](team/roles/OVERWATCH.md) |
+| **OVERWATCH self-monitor** | A horizontal watchdog with no model wake: one hourly deterministic sweep, plus an on-BLOCK nudge that runs its block triage on a fresh failure instead of at the next sweep. Both run the decision wake, which decides each stop once. | [team/roles/OVERWATCH.md](team/roles/OVERWATCH.md) |
 | **Two-phase upgrade** | `upgrade.sh` runs as a small stable Phase-1 bootstrap in the installed tree, then execs into the dev-tree's own `upgrade.sh --phase2` for the real deposit — so upgrades honor the version being installed, not the version already installed. | [team/scripts/upgrade.sh](team/scripts/upgrade.sh) |
 | **Provider abstraction** | Two provider wake lanes ship, `wake/claude.sh` and `wake/codex.sh`. Claude is the supported production provider; the Codex lane is exercised and ships experimental. Switching between them is a `switch-provider.sh` call, not a refactor. | [docs/codex-known-issues.md](docs/codex-known-issues.md) |
 | **Browser UI (sibling repo)** (experimental — see [status](#operator-rest-api-and-browser-ui-status)) | The kanban ships the API; a separate `pgai-agent-kanban-ui` repository ships the browser dashboard that consumes it — deliberate separation, not delayed. | [docs/operator-api.md](docs/operator-api.md) |
@@ -144,9 +144,9 @@ measures.
      generate_measured_pace_docs.py' (from the repo root) and
      commit the result instead. -->
 
-**Per-task wall time (measured):** 5.4–142.7 min, median 17.3 min. Sample: 112 RC(s), 864 task(s), window = every rollup available at render time (v1.27.1 .. v2.21.2). This is an RC's own wall-clock duration spread evenly across its tasks (clock-to-clock, including wake-cadence idle time), not an isolated per-task stopwatch reading -- see this generator's module docstring for why.
+**Per-task wall time (measured):** 5.4–272.3 min, median 16.7 min. Sample: 296 RC(s), 2498 task(s), window = every rollup available at render time (v1.27.1 .. v2.53.10). This is an RC's own wall-clock duration spread evenly across its tasks (clock-to-clock, including wake-cadence idle time), not an isolated per-task stopwatch reading -- see this generator's module docstring for why.
 
-**Composed RC cost (measured):** ~162 min = 1.1×pm bookend + 3.7×coder + 1.4×writer + 1.1×tester + 1.1×cm bookend, each term the average tasks per RC for that role times the median per-task minutes above.
+**Composed RC cost (measured):** ~166 min = 1.0×pm bookend + 4.1×coder + 1.3×writer + 1.0×tester + 1.5×cm bookend, each term the average tasks per RC for that role times the median per-task minutes above.
 
 <!-- MEASURED-PACE-GENERATED:END -->
 

@@ -54,8 +54,10 @@
 # Failure-path bug filing (pgai_agent_kanban.deep_verify.bug_filer, via
 # lib/deep_verify_bug_filer.sh): a failed-to-build verdict files a bug into
 # the project's bugs/ directory exactly like any other TESTER finding, or
-# cites an existing open/running bug already covering the same failing
-# (engine, flavor) pair set instead of filing a duplicate. A built verdict
+# cites an existing open, running or needs-operator bug already covering
+# the same failing (engine, flavor) pair set -- or one the shared
+# same-defect rule matches (lib.bug_filing.find_same_defect_for_draft) --
+# instead of filing a duplicate. A built verdict
 # from a lane that exited non-zero (every image built, a non-build cold
 # test failed) files -- or cites -- a bug naming the failing test's file
 # and test id, keyed on the failing-test set. A could-not-attempt verdict
@@ -250,8 +252,11 @@ if argparse_has help; then
         "test's file and test id is filed. When no image could be built" \
         "(every pair narrate-skipped) and a non-build cold test failed, the" \
         "verdict is could-not-attempt and the same test bug is filed. An" \
-        "open or running bug already covering the same failure is cited" \
-        "instead of filing a duplicate. Any other could-not-attempt run" \
+        "open, running or needs-operator bug already covering the same" \
+        "failure, or reporting the same defect (a slug differing only by" \
+        "a re-file word, ordinal or trailing counter, or a body citing it" \
+        "as its defect), is" \
+        "cited instead of filing a duplicate. Any other could-not-attempt run" \
         "(the lane exited 0, or exited 2 because pytest is not installed)" \
         "files no bug." \
         "" \

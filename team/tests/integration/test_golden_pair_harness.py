@@ -13,7 +13,9 @@ of what this file proves works. What this file demonstrates, in order:
      and shuts down cleanly -- and two concurrent instances never collide on
      a port.
   2. build_synthetic_board seeds a board with a task in every state, one
-     deferred bug, and one active campaign file.
+     deferred bug, one needs-operator, one duplicate and one carried bug
+     (with the closed bundle that carried it), and one active campaign
+     file.
   3. assert_json_parity reports equality for a matching CLI/REST pair and
      names the differing key path for a deliberately mismatched pair.
   4. One golden pair -- the "why" verb / GET /verdicts -- passes end to end:
@@ -44,7 +46,12 @@ import urllib.request
 import pytest
 
 from tests.fixtures.api_server import api_server_fixture
-from tests.fixtures.golden_board import PROJECT_NAME, build_synthetic_board, task_ids_by_state
+from tests.fixtures.golden_board import (
+    PROJECT_NAME,
+    bug_ids_by_board_status,
+    build_synthetic_board,
+    task_ids_by_state,
+)
 from tests.fixtures.golden_comparator import assert_json_parity, diff_json, strip_envelope
 
 _PRODUCTION_DEFAULT_PORT = 8300
@@ -142,7 +149,8 @@ def test_synthetic_board_seeds_every_task_state_a_deferred_bug_and_a_campaign_fi
     tmp_path: pathlib.Path,
 ) -> None:
     """build_synthetic_board's board contains a task in every state, one
-    open low-severity (deferred) bug, and one active DEFER-LOW-BUGS
+    open low-severity (deferred) bug beside one needs-operator, one
+    duplicate and one carried (running) bug, and one active DEFER-LOW-BUGS
     campaign file -- and writes nothing outside the board directory it was
     given (besides the outward-pointing scripts/ symlink)."""
     board_root = tmp_path / "board"
@@ -154,10 +162,15 @@ def test_synthetic_board_seeds_every_task_state_a_deferred_bug_and_a_campaign_fi
         assert f"## State\n{state}" in status_file.read_text(encoding="utf-8")
 
     bug_files = sorted((project_dir / "bugs").glob("*.md"))
-    assert len(bug_files) == 1, f"expected exactly one bug file, found {bug_files}"
-    bug_text = bug_files[0].read_text(encoding="utf-8")
-    assert "**Severity:** low" in bug_text
-    assert "## Status\nopen" in bug_text
+    state_bugs = bug_ids_by_board_status()
+    assert len(bug_files) == 1 + len(state_bugs), f"unexpected bug files: {bug_files}"
+    open_bugs = [f for f in bug_files if "## Status\nopen" in f.read_text(encoding="utf-8")]
+    assert len(open_bugs) == 1, f"expected exactly one open bug file, found {open_bugs}"
+    assert "**Severity:** low" in open_bugs[0].read_text(encoding="utf-8")
+    file_status = {"needs-operator": "needs-operator", "duplicate": "duplicate", "carried": "running"}
+    for board_status, bug_id in state_bugs.items():
+        text = (project_dir / "bugs" / f"{bug_id}.md").read_text(encoding="utf-8")
+        assert f"## Status\n{file_status[board_status]}" in text, bug_id
 
     campaign_file = project_dir / "DEFER-LOW-BUGS"
     assert campaign_file.is_file()

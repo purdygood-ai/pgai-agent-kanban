@@ -174,9 +174,12 @@ if [[ -n "$COLUMN_RENDER_ARG_ERROR" ]]; then
     exit 1
 fi
 
+# Operator user config, then [chain] pm_mode (config_loader.sh).
+# shellcheck source=../lib/config_loader.sh
+source "${SCRIPT_DIR}/../lib/config_loader.sh"
+config_startup_prelude "$KANBAN_ROOT"
 # Source config (kanban.cfg; read_ini comes from project_paths.sh above).
 if [[ -f "${KANBAN_ROOT}/kanban.cfg" ]]; then
-    export PGAI_KANBAN_PM_MODE="${PGAI_KANBAN_PM_MODE:-$(read_ini "${KANBAN_ROOT}/kanban.cfg" chain pm_mode automatic)}"
     DASHBOARD_ROWS_PER_COLUMN="${DASHBOARD_ROWS_PER_COLUMN:-$(read_ini "${KANBAN_ROOT}/kanban.cfg" dashboard rows_per_column 21)}"
     export DASHBOARD_ROWS_PER_COLUMN
     # [dashboard] max_rows → DASHBOARD_MAX_ROWS (column_render_config.sh).

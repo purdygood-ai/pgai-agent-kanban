@@ -635,5 +635,12 @@
     "file": "team/templates/project/document/document-brief-template.md",
     "justification": "worked example: a versioned artifact slug illustrating the Source Documents field, not a release citation",
     "line_hint": 119
+  },
+  {
+    "class": "provenance",
+    "content_hash": "bd76b8e74f28",
+    "file": "team/pgai_agent_kanban/lib/bug_filing.py",
+    "justification": "placeholder ID an unclaimed draft is named with for the same-defect match; a value, not a citation of any bug",
+    "line_hint": 324
   }
 ]

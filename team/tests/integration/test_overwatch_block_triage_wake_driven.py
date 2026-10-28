@@ -65,7 +65,7 @@ def _build(tmp_path: pathlib.Path, project_name: str) -> tuple[pathlib.Path, pat
 
 
 def test_overwatch_wake_escalates_an_always_human_block(tmp_path: pathlib.Path) -> None:
-    kanban_root, proj, status = _build(tmp_path, "wd_block_triage")
+    kanban_root, proj, status = _build(tmp_path, "wd-block-triage")
     result = _run_wake(kanban_root, "overwatch")
     assert result.returncode == 0, f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
 
@@ -80,7 +80,7 @@ def test_overwatch_wake_escalates_an_always_human_block(tmp_path: pathlib.Path) 
 
 
 def test_coder_wake_leaves_the_blocked_task_alone(tmp_path: pathlib.Path) -> None:
-    kanban_root, proj, status = _build(tmp_path, "wd_block_triage_coder")
+    kanban_root, proj, status = _build(tmp_path, "wd-block-triage-coder")
     before = status.read_bytes()
     result = _run_wake(kanban_root, "coder")
     assert result.returncode == 0, f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"

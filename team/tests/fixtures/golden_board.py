@@ -9,9 +9,10 @@ WHY THIS EXISTS
 A golden-pair fixture (see ``golden_comparator.py`` and
 ``api_server.py`` in this same directory) proves that a CLI script and its
 REST twin agree over the SAME data. That data must exercise the full shape
-a read verb can render -- every task state, a deferred bug, and an active
-deferral campaign -- or the comparison is trivial and would not catch a
-verb that only handles the happy-path subset of its own vocabulary.
+a read verb can render -- every task state, every bug state the board
+draws apart, a deferred bug, and an active deferral campaign -- or the
+comparison is trivial and would not catch a verb that only handles the
+happy-path subset of its own vocabulary.
 
 This module builds exactly that board, once, so every golden-pair test
 seeds the identical shape instead of each test file hand-rolling its own
@@ -33,7 +34,12 @@ HOW TO USE
     #                          WORKING, BLOCKED, DONE, WONT-DO
     #   projects/<name>/bugs/<id>.md
     #                       -- one open, low-severity bug (deferred under
-    #                          the campaign file below)
+    #                          the campaign file below), plus one bug per
+    #                          intake state the board draws on its own:
+    #                          needs-operator, duplicate, and a running bug
+    #                          that is carried (bug_ids_by_board_status())
+    #   projects/<name>/requirements/<bundle>.md
+    #                       -- a done bugfix bundle listing the carried bug
     #   projects/<name>/DEFER-LOW-BUGS
     #                       -- an active deferral campaign (until=vX.Y.Z)
 
@@ -62,6 +68,7 @@ WHAT THIS HELPER DOES NOT DO
 from __future__ import annotations
 
 import configparser
+import os
 import pathlib
 
 # ---------------------------------------------------------------------------
@@ -95,6 +102,19 @@ _TASK_IDS_BY_STATE: dict[str, str] = {
 _CAMPAIGN_UNTIL_VERSION = "v99.0.0"
 
 _BUG_ID = "BUG-0001-fixture-deferred-example"
+
+# One bug per intake state the board draws apart from open/running/closed,
+# keyed by the board status it classifies as, each with the ## Status its
+# file carries. "carried" is a running bug the closed bundle below lists.
+_STATE_BUGS: dict[str, tuple[str, str]] = {
+    "needs-operator": ("BUG-9001-fixture-needs-operator-example", "needs-operator"),
+    "duplicate": ("BUG-9002-fixture-duplicate-example", "duplicate"),
+    "carried": ("BUG-9003-fixture-carried-example", "running"),
+}
+
+# The closed bugfix bundle that lists the carried bug: it shipped with the
+# bug still running, so every bundle listing it is closed.
+_CLOSED_BUNDLE = "v0.1.0-bugfix-bundle-20260101"
 
 # The queue marker each task state derives (SOP-core's marker table): a
 # state's marker is written by the same transition that writes the state.
@@ -209,6 +229,50 @@ Steps to reproduce:
     )
 
 
+def _write_state_bugs(project_dir: pathlib.Path) -> None:
+    """Write one bug per ``_STATE_BUGS`` entry and the closed bundle listing the carried one.
+
+    The needs-operator bug carries only its ``## Status`` (the inbox entry
+    ``ops.write.set_needs_operator`` pairs with it is not seeded, so the
+    operator inbox stays empty); the duplicate bug's ``## Close Note``
+    names the deferred bug as the one it duplicates. The carried bug is
+    ``running`` and listed only by ``_CLOSED_BUNDLE``, whose ``## Status``
+    is ``done``.
+
+    Each bug's modification time is set one second further before the
+    deferred bug's, in ``_STATE_BUGS`` order, so a newest-first listing
+    (the board's intake columns) sees one fixed order run to run with the
+    deferred bug still first.
+    """
+    bugs_dir = project_dir / "bugs"
+    newest = (bugs_dir / f"{_BUG_ID}.md").stat().st_mtime
+    for offset, (bug_id, status) in enumerate(_STATE_BUGS.values(), start=1):
+        close_note = (
+            f"\n## Close Note\nduplicate of BUG-0001 ({_BUG_ID}): fixture pointer\n"
+            if status == "duplicate" else ""
+        )
+        path = bugs_dir / f"{bug_id}.md"
+        path.write_text(
+            f"# {bug_id}\n\n**Bug ID:** {bug_id}\n**Filed By:** golden-pair fixture\n"
+            f"**Date:** 2026-01-01\n**Severity:** low\n\n## Status\n{status}\n{close_note}\n"
+            "## Symptom\nFixture-only placeholder bug for the board's intake states"
+            " -- not a real defect.\n",
+            encoding="utf-8",
+        )
+        when = newest - offset
+        os.utime(path, (when, when))
+
+    carried_id = _STATE_BUGS["carried"][0]
+    requirements_dir = project_dir / "requirements"
+    requirements_dir.mkdir(parents=True, exist_ok=True)
+    (requirements_dir / f"{_CLOSED_BUNDLE}.md").write_text(
+        "# Requirements: v0.1.0 — BUG bundle\n\n## Status\ndone\n\n"
+        "## Target Version\nv0.1.0\n\n## Bundled Items\n\n"
+        f"- {carried_id}.md (`{bugs_dir / f'{carried_id}.md'}`)\n",
+        encoding="utf-8",
+    )
+
+
 def _write_campaign_file(kanban_root: pathlib.Path, project: str) -> None:
     """Write a project-scoped DEFER-LOW-BUGS campaign file.
 
@@ -289,9 +353,14 @@ def build_synthetic_board(
                                 (``with_queues=True`` only) every task
                                 above, under its state's marker.
       - ``projects/<project>/bugs/<id>.md``
-                                one open, low-severity bug.
+                                one open, low-severity bug, plus one
+                                needs-operator, one duplicate and one
+                                carried (running) bug.
+      - ``projects/<project>/requirements/<bundle>.md``
+                                a done bundle listing the carried bug.
       - ``projects/<project>/DEFER-LOW-BUGS``
-                                an active deferral campaign covering that bug.
+                                an active deferral campaign covering the
+                                open bug.
     """
     kanban_root.mkdir(parents=True, exist_ok=True)
     _link_real_scripts(kanban_root)
@@ -304,6 +373,7 @@ def build_synthetic_board(
     if with_queues:
         _write_coder_queue(project_dir)
     _write_deferred_bug(project_dir)
+    _write_state_bugs(project_dir)
     _write_campaign_file(kanban_root, project)
 
     return project_dir
@@ -316,3 +386,12 @@ def task_ids_by_state() -> dict[str, str]:
     duplicating the naming scheme.
     """
     return dict(_TASK_IDS_BY_STATE)
+
+
+def bug_ids_by_board_status() -> dict[str, str]:
+    """Return the board status -> bug file stem mapping of the intake-state bugs.
+
+    One entry each for ``needs-operator``, ``duplicate`` and ``carried``:
+    the board status ``build_synthetic_board``'s bug classifies as.
+    """
+    return {status: bug_id for status, (bug_id, _file_status) in _STATE_BUGS.items()}

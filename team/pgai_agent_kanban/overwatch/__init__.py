@@ -39,6 +39,30 @@ transient-error requeue paths wait out. block_storm.py decides, read-only,
 whether a project's human-gated blocks are systemic -- a storm of one
 reason_code inside [wake] block_storm_window back from now, or a
 reason_code on [wake] systemic_block_reasons -- and so hold the wake's
-task dispatch, never longer than [wake] block_hold_cap.
+task dispatch, never longer than [wake] block_hold_cap. inbox.py is the
+one reader and writer of a project's operator inbox
+(projects/<name>/operator-inbox.md): the questions parked for a human
+answer while the chain carries on, with their write, list, answer, close
+and summary operations. halt_provenance.py says, read-only, whether the
+chain or an operator wrote a project HALT -- from the provenance block the
+chain writers put in the HALT body, or for an empty HALT from the
+sentinel-writes log -- reading anything unproven as the operator's.
+halt_clearing.py says, read-only, whether a chain HALT's cause is resolved
+(RC cancelled and rebundled, task reset, trigger 9 re-checked green), the
+checks resolution_stage.py runs before it clears that HALT.
+decide.py is the decision wake's one pure function: for a new BLOCK, Needs
+Human, chain HALT or RC-level failure it returns exactly one outcome -- an
+existing operator verb, an operator-inbox question, a runaway stop, or none
+-- from the inputs its caller gathered and each classifier row's decision.
+decision_executor.py carries that outcome out through the existing operator
+writes, backing up what it changes, appending a Decision event and writing
+the blocked-ledger pair, under halt_first.py: the HALT-first protocol and
+repo lock (the Python counterpart of overwatch_halt_first_fix) and the
+backup layout overwatch-revert.sh restores. decision_wake.py is the entry
+point the sweep's block-triage check runs per project: it finds every stop
+(the project's HALT, every BLOCKED task, every BACKLOG or WAITING task with
+Needs Human yes, the project itself when a runaway counter trips), gathers
+decide.py's inputs for each, decides it once and has decision_executor.py
+carry the outcome out.
 Further sibling modules may be added here.
 """

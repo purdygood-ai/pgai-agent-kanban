@@ -54,17 +54,16 @@ fi
 # for our own code.
 [[ -f "$TEAM_ROOT/bashrc" ]] && source "$TEAM_ROOT/bashrc"
 [[ -f "$TEAM_ROOT/env" ]] && source "$TEAM_ROOT/env"
-# $HOME/.config/pgai-kanban.cfg is operator-local bash config; sourced as-is.
-[[ -f "$HOME/.config/pgai-kanban.cfg" ]] && source "$HOME/.config/pgai-kanban.cfg"
-# Source: kanban.cfg [chain/paths] — INI format replaces legacy config.cfg
+# Operator user config, then [chain] pm_mode (config_loader.sh).
+# shellcheck source=lib/config_loader.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/config_loader.sh"
+config_startup_prelude "$TEAM_ROOT"
+# Source: kanban.cfg [paths] — INI format replaces legacy config.cfg
 # Source ini_parser.sh directly since project_paths.sh has not been sourced yet.
 _PM_SCRIPT_DIR_TMP="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 [[ -f "${_PM_SCRIPT_DIR_TMP}/lib/ini_parser.sh" ]] && source "${_PM_SCRIPT_DIR_TMP}/lib/ini_parser.sh"
 # shellcheck source=lib/dev_tree.sh
 source "${_PM_SCRIPT_DIR_TMP}/lib/dev_tree.sh"
-if [[ -f "$TEAM_ROOT/kanban.cfg" ]]; then
-    export PGAI_KANBAN_PM_MODE="${PGAI_KANBAN_PM_MODE:-$(read_ini "$TEAM_ROOT/kanban.cfg" chain pm_mode automatic)}"
-fi
 unset _PM_SCRIPT_DIR_TMP
 export PGAI_DEV_TREE_PATH="${PGAI_DEV_TREE_PATH:-$(resolve_global_dev_tree)}"
 # Classification (a): pm-agent only reads/writes $KANBAN_ROOT task queue files;
@@ -137,9 +136,10 @@ Three operating modes:
                    While any task in a role queue is unfinished (or an RC
                    is open) each iteration exits idle before scanning.
                    Scans run without the project's repo lock; a write
-                   (bundle, PM ticket) takes it first and waits for no
-                   one: if a wake holds it, that write is left for the
-                   next run.
+                   (bundle, PM ticket) takes it first, waiting up to
+                   [wake] lock_wait_seconds (default 120) for a holder
+                   to let go; if it is still held after that, the write
+                   is left for the next run.
   3. Continuous:   (set up cron with wake-batch.sh --agent=pm)
                    The same pipeline as --auto, but driven by cron and
                    running one iteration per cron firing over time.
@@ -247,9 +247,11 @@ if [[ "$AUTO" == "true" ]]; then
   #
   # Repo lock: discovery_run_pipeline is called here with no
   # DISCOVERY_WRITE_LOCK_HOOK, so discovery takes the project's repo lock
-  # itself at its first write and releases it before returning (see
-  # lib/discovery.sh, "Repo-lock scope") -- it is free again by the time the
-  # post-discovery wake-batch.sh call below takes it for the PM dispatch.
+  # itself at its first write -- waiting up to [wake] lock_wait_seconds
+  # (LOCK_WAIT_SECONDS, default 120) for a holder to let go -- and releases
+  # it before returning (see lib/discovery.sh, "Repo-lock scope"). It is
+  # free again by the time the post-discovery wake-batch.sh call below
+  # takes it for the PM dispatch.
 
   if [[ -f "$_SCRIPT_DIR/lib/discovery.sh" ]]; then
     # shellcheck source=lib/discovery.sh
@@ -403,17 +405,24 @@ fi
 REQUIREMENTS_FILE="$(cd "$(dirname "$REQUIREMENTS_FILE")" && pwd)/$(basename "$REQUIREMENTS_FILE")"
 
 # --- Extract Target Version from requirements file ---
-# Read through md_fields, which tolerates the shapes an editor leaves (blank
-# lines before the value, an inline "## Target Version: v1.2.3", a bold
-# value). A value starting v<digit> (or V<digit>, written back as v) is the
-# explicit version carried into the ticket's ## Release Version; anything
-# else reads as "none". _RAW_TARGET_VERSION keeps the value as written for
-# the auto-sentinel check below; an absent field reads as empty.
-if ! declare -F pp_run_ops >/dev/null 2>&1; then
-    # shellcheck source=lib/pp_run_ops.sh
-    source "${_SCRIPT_DIR}/lib/pp_run_ops.sh"
+# Read through read_md_field (lib/md_field.sh), which tolerates the shapes an
+# editor leaves (blank lines before the value, an inline
+# "## Target Version: v1.2.3"); the value is the section's first line, with a
+# whole-line **bold** or __bold__ wrapper removed. A value starting v<digit>
+# (or V<digit>, written back as v) is the explicit version carried into the
+# ticket's ## Release Version; anything else reads as "none".
+# _RAW_TARGET_VERSION keeps the value as written for the auto-sentinel check
+# below; an absent field reads as empty.
+if ! declare -F read_md_field >/dev/null 2>&1; then
+    # shellcheck source=lib/md_field.sh
+    source "${_SCRIPT_DIR}/lib/md_field.sh"
 fi
-_RAW_TARGET_VERSION="$(pp_run_ops pgai_agent_kanban.lib.md_fields read "$REQUIREMENTS_FILE" "Target Version" 2>/dev/null)" || _RAW_TARGET_VERSION=""
+_RAW_TARGET_VERSION="$(read_md_field --end-at-subheading "$REQUIREMENTS_FILE" "Target Version" 2>/dev/null)" || _RAW_TARGET_VERSION=""
+_RAW_TARGET_VERSION="${_RAW_TARGET_VERSION%%$'\n'*}"
+_RAW_TARGET_VERSION="${_RAW_TARGET_VERSION%"${_RAW_TARGET_VERSION##*[![:space:]]}"}"
+if [[ "$_RAW_TARGET_VERSION" =~ ^\*\*(.+)\*\*$ || "$_RAW_TARGET_VERSION" =~ ^__(.+)__$ ]]; then
+    _RAW_TARGET_VERSION="${BASH_REMATCH[1]}"
+fi
 _RAW_TARGET_VERSION="$(printf '%s' "$_RAW_TARGET_VERSION" | tr -d '[:space:]')"
 if [[ "$_RAW_TARGET_VERSION" =~ ^[vV][0-9] ]]; then
     TARGET_VERSION="v${_RAW_TARGET_VERSION:1}"

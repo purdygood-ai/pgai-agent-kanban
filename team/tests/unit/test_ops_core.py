@@ -857,16 +857,19 @@ def test_close_item_refuses_retired_superseded_state_with_wont_do_remedy(tmp_pat
 
 @pytest.mark.parametrize("state", CLOSED_STATES)
 def test_close_item_closes_an_intake_item_to_each_closed_state(tmp_path: Path, state: str) -> None:
-    """done and wont-do -- the closed states -- still close an intake item."""
+    """done, wont-do and duplicate -- the closed states -- close an intake item
+    (duplicate with a note naming the surviving item)."""
     project_root, ctx = _make_project_tree(tmp_path)
     bug = _write_intake_file(project_root / "bugs", "BUG-0001", status="open")
-    close_item(ctx, "my-project", "BUG-0001", state=state)
+    _write_intake_file(project_root / "bugs", "BUG-0002", status="open")
+    note = "duplicate of BUG-0002" if state == "duplicate" else ""
+    close_item(ctx, "my-project", "BUG-0001", state=state, note=note)
     assert f"## Status\n{state}\n" in bug.read_text(encoding="utf-8")
 
 
 def test_closed_states_and_the_retired_alias() -> None:
-    """The closed states are done and wont-do; superseded reads as wont-do."""
-    assert CLOSED_STATES == ("done", "wont-do")
+    """The closed states are done, wont-do and duplicate; superseded reads as wont-do."""
+    assert CLOSED_STATES == ("done", "wont-do", "duplicate")
     assert canonical_state("superseded") == "wont-do"
     assert canonical_state(" Superseded ") == "wont-do"
     assert canonical_state("WONT-DO") == "wont-do"
@@ -1072,6 +1075,8 @@ def test_normalize_lowercases_and_strips() -> None:
         ("WORKING", False),  # non-terminal task state
         ("blocked", False),  # non-terminal state
         ("superseded", True),  # retired value in an existing file: reads as wont-do
+        ("duplicate", True),  # closed in favour of the item it duplicates
+        ("needs-operator", False),  # active intake state: waiting on an answer
     ],
 )
 def test_is_terminal(state: str, expected: bool) -> None:

@@ -23,7 +23,9 @@ Covered:
      fresh count and is requeued as usual.
   4. A single-reason requeue still follows its row's max_attempts: a
      provider refusal gets its three attempts under the default budget and
-     escalates naming its own fleet-level cause, not the budget.
+     escalates naming its own fleet-level cause, not the budget; an agent
+     self-block's ladder (agent_unclassified) never requeues past a budget
+     lower than its three attempts.
   5. recompute_gate closes a task rather than requeueing it: it is never
      refused by a spent budget and never counted.
   6. The Block Record keeps requeues / requeue_reasons across re-blocks and
@@ -327,6 +329,30 @@ def test_single_reason_provider_refusal_keeps_its_three_attempts_and_its_own_cau
     assert sandbox.apply(moment, **real).outcome == bt.OUTCOME_ESCALATE
     diagnosis = _section(sandbox.text(), "OVERWATCH Diagnosis")
     assert "fleet-level" in diagnosis and "requeue budget" not in diagnosis
+
+
+def test_agent_unclassified_ladder_stops_at_a_budget_below_its_three_attempts(sandbox):
+    (sandbox.root / "kanban.cfg").write_text("[overwatch]\nrequeue_budget = 2\n", encoding="utf-8")
+    sandbox.block("agent_unclassified", _T0)
+    real = {"handlers": None}  # the real requeue handler: it needs no repository
+
+    assert sandbox.apply(_T0, **real).outcome == bt.OUTCOME_RECORD
+    moment = load_block_record(sandbox.status).cooldown_until
+    for attempt in (1, 2):
+        at = datetime.datetime.fromisoformat(moment)
+        result = sandbox.apply(at, **real)
+        assert (result.outcome, result.mutation) == (bt.OUTCOME_ACT, bt.MUTATION_PROMOTE), result
+        sandbox.requeued()
+        sandbox.block("agent_unclassified", at + datetime.timedelta(minutes=5))
+        moment = load_block_record(sandbox.status).cooldown_until
+
+    result = sandbox.apply(datetime.datetime.fromisoformat(moment), **real)
+
+    assert result.outcome == bt.OUTCOME_ESCALATE, result
+    record = load_block_record(sandbox.status)
+    assert (record.attempts, record.requeues) == (2, 2), "the row's third attempt is not taken past the budget"
+    assert len(sandbox.triage_notes()) == 2
+    assert "requeue budget is spent" in _section(sandbox.text(), "OVERWATCH Diagnosis")
 
 
 # ---------------------------------------------------------------------------

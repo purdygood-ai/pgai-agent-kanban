@@ -46,7 +46,8 @@
 #   fire_block_triage_nudge         — the on-BLOCK nudge: backgrounds
 #                                      overwatch-sweep.sh --only block-triage
 #                                      once a chain that blocked a task has
-#                                      released the repo lock; a no-op for
+#                                      released the repo lock, so the decision
+#                                      wake decides the new block; a no-op for
 #                                      the overwatch agent.
 # Defined at source time, available as soon as this file is sourced.
 #
@@ -340,7 +341,9 @@ _overwatch_wake_load_firing_lock() {
 # check-block-triage.sh, overwatch_check_block_triage) for the named project
 # when AGENT is overwatch: every BLOCKED task carrying a ## Block Record is
 # classified and its decision carried out through the block-triage executor.
-# No-op for every other agent.
+# No-op for every other agent. The check runs as block triage here, with
+# OVERWATCH_DECISION_WAKE unset: the decision wake is the sweep's
+# (overwatch-sweep.sh, the on-BLOCK nudge included).
 #
 # Called from run_project_chain BEFORE the chain takes the project's repo
 # lock. The check takes that same lock itself, per task, through
@@ -383,6 +386,7 @@ run_overwatch_block_triage() {
   (
     set +e
     export OVERWATCH_PROJECT="$project_name"
+    unset OVERWATCH_DECISION_WAKE
     _overwatch_wake_load_firing_lock || exit 0
     # shellcheck source=overwatch-checks/check-block-triage.sh
     source "$check" \
@@ -404,9 +408,10 @@ BLOCK_TRIAGE_NUDGE_LOCK_WAIT_SECONDS=60
 
 # ---------------------------------------------------------------------------
 # fire_block_triage_nudge <project_name>
-# The on-BLOCK nudge: starts OVERWATCH's block triage for every registered
-# project (overwatch-sweep.sh --only block-triage) so a fresh block is
-# triaged within seconds rather than at the next scheduled sweep.
+# The on-BLOCK nudge: starts OVERWATCH's block-triage check for every
+# registered project (overwatch-sweep.sh --only block-triage), where the
+# decision wake decides the fresh block -- and every other stop of the
+# project -- within seconds rather than at the next scheduled sweep.
 #
 # Called by run_project_chain AFTER it has released the project's repo lock,
 # and only when that chain blocked a task (wd_finalize_task marked one [B]);

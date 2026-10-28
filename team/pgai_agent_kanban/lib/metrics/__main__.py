@@ -29,8 +29,17 @@ the name of the function it runs, and prints what that function returns.
     sum_amounts AMOUNT...
         scripts/dashboard/costs.sh.
 
+    metrics_pane USE_COLOR TODAY PROJECTS_JSON RESET BOLD DIM CYAN GREEN YELLOW [NOW]
+        scripts/dashboard/metrics.sh: the Metrics pane, printed line by line
+        (see metrics_pane.metrics_pane_lines). USE_COLOR is "true" or
+        "false"; each escape is "" when colour is off. NOW, an ISO-8601
+        time, is the render time (empty or absent: the current time).
+
     compute_agent_averages AGENT_METRICS_ARGS...
         scripts/dashboard/agent-metrics.sh (see agents.main()).
+
+``--help`` / ``-h`` on its own prints this text; after a verb it prints
+that verb's usage. Either exits 0.
 
 Exit codes: the function's own; 2 for an unknown verb or malformed
 options.
@@ -41,13 +50,17 @@ from __future__ import annotations
 import argparse
 import subprocess
 import sys
+from datetime import timezone
 from typing import Callable, Optional
+
+from ..timeutil import try_parse_iso
 
 from . import agents
 from .common import TextResult, color_enabled
 from .costs import cost_report
 from .costs_pane import cost_block, rc_label, sum_amounts
 from .history import history_csv, rc_rollups_jsonl, show_metrics
+from .metrics_pane import metrics_pane_lines
 
 EXIT_USAGE = 2
 
@@ -143,8 +156,8 @@ def _cost_report(args: list[str]) -> int:
         "--aggregator",
         default="",
         help=(
-            "the token aggregator to run for a missing roll-up (default: the project's dev-tree "
-            "copy)"
+            "the token aggregator to run for a missing roll-up (default: the kanban root's "
+            "pm-agent/aggregate_tokens.py, else the copy in this package's own tree)"
         ),
     )
     parser.add_argument(
@@ -208,6 +221,70 @@ def _sum_amounts(args: list[str]) -> int:
     return 0
 
 
+def _metrics_pane(args: list[str]) -> int:
+    if len(args) not in (9, 10):
+        print(
+            "metrics_pane: expected USE_COLOR TODAY PROJECTS_JSON RESET BOLD DIM CYAN GREEN YELLOW [NOW]",
+            file=sys.stderr,
+        )
+        return EXIT_USAGE
+    use_color, today, projects_json, reset, bold, dim, cyan, green, yellow = args[:9]
+    now = None
+    if len(args) == 10 and args[9].strip():
+        now = try_parse_iso(args[9].strip())
+        if now is None:
+            print(f"metrics_pane: NOW is not an ISO-8601 time: {args[9]!r}", file=sys.stderr)
+            return EXIT_USAGE
+        if now.tzinfo is None:
+            now = now.replace(tzinfo=timezone.utc)
+    # Print each line as it is rendered, so a malformed roll-up that raises
+    # part-way leaves the lines before it on the pane.
+    for line in metrics_pane_lines(
+        _is_true(use_color), today, projects_json, reset, bold, dim, cyan, green, yellow, now=now
+    ):
+        print(line)
+    return 0
+
+
+#: Usage of the verbs that take positional arguments only, printed for
+#: ``VERB --help``; the argparse verbs answer ``--help`` themselves.
+_POSITIONAL_USAGE: dict[str, str] = {
+    "history_csv": (
+        "usage: history_csv CSV_PATH [PROJECT_FILTER]\n"
+        "Print the history.csv at CSV_PATH as CSV, keeping only PROJECT_FILTER's rows\n"
+        "(\"\" or absent keeps every row); with no matching row, the header alone."
+    ),
+    "rc_rollups_jsonl": (
+        "usage: rc_rollups_jsonl PROJECT_FILTER FILE...\n"
+        "Print each per-RC roll-up FILE as one compact, key-sorted JSON line, in the\n"
+        "order given, leaving out roll-ups of other projects (\"\" keeps every one);\n"
+        "an unreadable FILE is skipped with a warning on stderr."
+    ),
+    "cost_block": (
+        "usage: cost_block ROLLUP PRICING INDENT_COUNT\n"
+        "Print what scripts/dashboard/costs.sh shows for one roll-up: its total on the\n"
+        "first line, then the cost block priced by PRICING, indented INDENT_COUNT spaces."
+    ),
+    "rc_label": (
+        "usage: rc_label RC_ROLLUP\n"
+        "Print an RC header's detail for RC_ROLLUP: 'started <shipped_at>, <N> tasks' or\n"
+        "'<N> tasks'; nothing for an unreadable roll-up."
+    ),
+    "sum_amounts": (
+        "usage: sum_amounts AMOUNT...\n"
+        "Print the sum of the dollar AMOUNTs, each running sum rounded to cents; 0 for none."
+    ),
+    "metrics_pane": (
+        "usage: metrics_pane USE_COLOR TODAY PROJECTS_JSON RESET BOLD DIM CYAN GREEN YELLOW [NOW]\n"
+        "Print the dashboard Metrics pane line by line (metrics_pane.metrics_pane_lines),\n"
+        "as scripts/dashboard/metrics.sh shows it. USE_COLOR is \"true\" or \"false\";\n"
+        "each escape (RESET ... YELLOW) is \"\" when colour is off. NOW, an ISO-8601\n"
+        "time, is the render time (empty or absent: the current time)."
+    ),
+}
+
+_HELP_FLAGS = ("--help", "-h")
+
 _VERBS: dict[str, Callable[[list[str]], int]] = {
     "show_metrics": _show_metrics,
     "cost_report": _cost_report,
@@ -216,6 +293,7 @@ _VERBS: dict[str, Callable[[list[str]], int]] = {
     "cost_block": _cost_block,
     "rc_label": _rc_label,
     "sum_amounts": _sum_amounts,
+    "metrics_pane": _metrics_pane,
     "compute_agent_averages": agents.main,
 }
 
@@ -227,6 +305,12 @@ def main(argv: Optional[list[str]] = None) -> int:
     unknown verb, or for options argparse rejects.
     """
     args = list(sys.argv[1:] if argv is None else argv)
+    if args and args[0] in _HELP_FLAGS:
+        print(__doc__.strip())
+        return 0
+    if len(args) == 2 and args[0] in _POSITIONAL_USAGE and args[1] in _HELP_FLAGS:
+        print(_POSITIONAL_USAGE[args[0]])
+        return 0
     if not args or args[0] not in _VERBS:
         print(f"pgai_agent_kanban.lib.metrics: VERB must be one of: {', '.join(_VERBS)}", file=sys.stderr)
         return EXIT_USAGE

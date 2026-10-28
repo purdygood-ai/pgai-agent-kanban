@@ -1,0 +1,52 @@
+{
+  "combined with csv": {
+    "exit_code": 1,
+    "stderr": "ERROR: --reliability cannot be combined with --rc, --day, --csv or --tail\nRun with --help for usage.\n",
+    "stdout": ""
+  },
+  "every registered project": {
+    "exit_code": 0,
+    "stderr": "",
+    "stdout": "  alpha\n    Hands-off: 8 RCs / 248h   since 2026-10-08 03:31 (CM release HALT)\n    Clean:     0 RCs /  16h   since 2026-10-17 19:55 (BLOCKED)\n\n  beta\n    Hands-off: 2 RCs / 411h   since 2026-10-01 (no block on record)\n    Clean:     2 RCs / 411h   since 2026-10-01 (no block on record)\n"
+  },
+  "json": {
+    "exit_code": 0,
+    "stderr": "",
+    "stdout": "{\n  \"clean\": {\n    \"class\": \"any\",\n    \"hours\": 16.08,\n    \"last_block\": {\n      \"cause\": \"chain\",\n      \"class\": \"any\",\n      \"escalated\": false,\n      \"rc\": \"v2.48.0\",\n      \"reason_code\": \"provider_refusal\",\n      \"resolution\": {\n        \"class\": \"any\",\n        \"reason_code\": \"requeue\",\n        \"time\": \"2026-10-17T19:55:00+00:00\"\n      },\n      \"source\": \"task:CODER-20261017-012-wire-route\",\n      \"task\": \"CODER-20261017-012-wire-route\",\n      \"time\": \"2026-10-17T18:40:00+00:00\"\n    },\n    \"rcs\": 0,\n    \"since\": \"2026-10-17T19:55:00+00:00\",\n    \"status\": \"resolved\"\n  },\n  \"computed_at\": \"2026-10-18T12:00:00+00:00\",\n  \"first_record_at\": \"2026-10-08T01:10:00+00:00\",\n  \"hands_off\": {\n    \"class\": \"human\",\n    \"hours\": 248.48,\n    \"last_block\": {\n      \"cause\": \"chain\",\n      \"class\": \"human\",\n      \"escalated\": false,\n      \"rc\": \"v2.40.0\",\n      \"reason_code\": \"cm-release.ship-policy.halt\",\n      \"resolution\": {\n        \"class\": \"human\",\n        \"reason_code\": \"unhalt\",\n        \"time\": \"2026-10-08T03:31:00+00:00\"\n      },\n      \"source\": \"halt:project\",\n      \"task\": null,\n      \"time\": \"2026-10-08T01:10:00+00:00\"\n    },\n    \"rcs\": 8,\n    \"since\": \"2026-10-08T03:31:00+00:00\",\n    \"status\": \"resolved\"\n  },\n  \"project\": \"alpha\",\n  \"schema_version\": 1\n}\n"
+  },
+  "json without a project": {
+    "exit_code": 1,
+    "stderr": "ERROR: --reliability --format json needs a project. Pass --project <name> or set PGAI_PROJECT_NAME.\nRun with --help for usage.\n",
+    "stdout": ""
+  },
+  "json without reliability.json": {
+    "exit_code": 2,
+    "stderr": "ERROR: no reliability.json for project 'gamma'\n  Expected: {ROOT}/projects/gamma/metrics/reliability.json\n  Run: python3 -m pgai_agent_kanban.metrics.reliability refresh --project gamma --kanban-root {ROOT}\n",
+    "stdout": ""
+  },
+  "one project with blocks": {
+    "exit_code": 0,
+    "stderr": "",
+    "stdout": "  alpha\n    Hands-off: 8 RCs / 248h   since 2026-10-08 03:31 (CM release HALT)\n    Clean:     0 RCs /  16h   since 2026-10-17 19:55 (BLOCKED)\n"
+  },
+  "one project without a block": {
+    "exit_code": 0,
+    "stderr": "",
+    "stdout": "  beta\n    Hands-off: 2 RCs / 411h   since 2026-10-01 (no block on record)\n    Clean:     2 RCs / 411h   since 2026-10-01 (no block on record)\n"
+  },
+  "project without reliability.json": {
+    "exit_code": 0,
+    "stderr": "",
+    "stdout": "  gamma\n    (no reliability data yet)\n"
+  },
+  "unknown project": {
+    "exit_code": 1,
+    "stderr": "ERROR: project directory not found: {ROOT}/projects/nope\n",
+    "stdout": ""
+  },
+  "unsupported format": {
+    "exit_code": 1,
+    "stderr": "ERROR: unsupported --format value with --reliability: 'jsonl' (supported: json)\n",
+    "stdout": ""
+  }
+}

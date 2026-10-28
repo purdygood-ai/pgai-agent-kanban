@@ -65,3 +65,10 @@ team/tests/fixtures/action_parity_cases.py
 # docs/operator-api.md:1622 to name where a read verb's golden-pair case is
 # declared, never to run it.
 team/tests/fixtures/read_parity_cases.py
+# ---------------------------------------------------------------------------
+# process-internal: the PM plan's ride-along lint, a library that
+# pm_materialize.py imports and calls before it writes anything. No
+# __main__; it imports the pgai_agent_kanban package, so a standalone --help
+# cannot succeed by design. Cited at docs/OPERATIONS.md:1024 to name what
+# checks a plan's ride_along list, never to suggest running it.
+team/pm-agent/lib/ride_along_lint.py

@@ -3,7 +3,7 @@ test_cm_release_operator_force_override.py
 ============================================
 End-to-end integration tests for cm-release.sh's operator force-override:
 --force --reason "<text>", scoped to exactly the ship-policy matrix's own
-judgement-call HALTs (trigger-1/2/3), refused outright without a reason or
+judgement-call HALTs (trigger-2/3), refused outright without a reason or
 inside an agent wake, and never reaching any mechanical integrity gate
 (squash conflicts, the release-notes stamp guard, and everything else
 outside its enumerated scope).
@@ -19,8 +19,10 @@ Coverage:
     dual-channel before any project/repo state is touched.
   - --force --reason "..." is refused dual-channel when the agent
     wake-context signal (PGAI_AGENT_WAKE_ACTIVE=1) is set.
-  - --force --reason "..." passes a matrix stop (TESTER BLOCKED, trigger-1),
-    ships the release, and leaves both permanent records: an Operator
+  - --force --reason "..." passes a matrix stop (systemic risk high,
+    trigger-2, under ship_posture = matrix; a BLOCKED TESTER task is no
+    longer a stop -- it is requeued once), ships the release, and leaves
+    both permanent records: an Operator
     Override event in release-state.md, and a release-notes ## Status of
     SHIPPED-BY-OPERATOR-OVERRIDE.
   - --force does NOT reach a squash conflict (trigger-5) or a malformed
@@ -39,6 +41,7 @@ import subprocess
 from typing import Optional
 import pytest
 from tests.fixtures.binary_guard import require_binary
+from tests.fixtures.section_reader_modules import copy_section_reader_modules
 
 
 @pytest.fixture(autouse=True)
@@ -145,6 +148,7 @@ def _build_kanban_root(
     src_cm_dir = _TEAM_DIR / "pgai_agent_kanban" / "cm"
     for py_file in src_cm_dir.glob("*.py"):
         (cm_py_dir / py_file.name).write_text(py_file.read_text(encoding="utf-8"), encoding="utf-8")
+    copy_section_reader_modules(cm_py_dir.parent)
 
     return root
 
@@ -313,29 +317,30 @@ def test_force_with_reason_refused_in_wake_context(tmp_path: pathlib.Path) -> No
 
 
 # ---------------------------------------------------------------------------
-# A forced ship over a matrix stop (trigger-1: TESTER BLOCKED) writes both
-# permanent records and single-use is proven by the immediately-following
-# unforced release applying the matrix normally.
+# A forced ship over a matrix stop (trigger-2: systemic risk high, under
+# ship_posture = matrix) writes both permanent records and single-use is
+# proven by the immediately-following unforced release applying the matrix
+# normally.
 # ---------------------------------------------------------------------------
 
 
-def test_forced_ship_over_tester_blocked_writes_both_records_and_next_release_is_unforced(
+def test_forced_ship_over_systemic_risk_high_writes_both_records_and_next_release_is_unforced(
     tmp_path: pathlib.Path,
 ) -> None:
-    """--force passes trigger-1 (TESTER BLOCKED), ships, and writes both records;
-    the very next release (no flag) applies the matrix normally.
+    """--force passes trigger-2 (systemic risk high), ships, and writes both
+    records; the very next release (no flag) applies the matrix normally.
 
     Asserts (first release, forced):
-      - cm-release.sh exits 0 despite a BLOCKED TESTER task.
+      - cm-release.sh exits 0 despite a systemic_risk=high report.
       - release-state.md carries an "## Operator Override" event naming the
-        reason and "cm-release.trigger-1.tester-blocked".
+        reason and "cm-release.trigger-2.systemic-risk-high".
       - release-notes/<version>.md carries "## Status" SHIPPED-BY-OPERATOR-OVERRIDE.
       - The release tag exists (it actually shipped).
 
     Asserts (second release, no flag — single-use proof):
-      - A second RC with its own BLOCKED TESTER task HALTs normally (Trigger 1
-        fires, non-zero exit) — nothing the first --force wrote persisted as
-        a mode.
+      - A second RC with its own systemic_risk=high report HALTs normally
+        (Trigger 2 fires, non-zero exit) — nothing the first --force wrote
+        persisted as a mode.
     """
     version = "v0.30.0"
     project_name = "forced_ship_single_use_test"
@@ -344,6 +349,9 @@ def test_forced_ship_over_tester_blocked_writes_both_records_and_next_release_is
     repo_path = tmp_path / "dev_repo"
     _init_git_repo_with_remote(repo_path, bare_remote)
     kanban_root = _build_kanban_root(tmp_path, project_name, repo_path, push_to_remote="false")
+    # Under the always default trigger 2 ships on its own; matrix keeps it a stop.
+    cfg = kanban_root / "projects" / project_name / "project.cfg"
+    cfg.write_text(cfg.read_text(encoding="utf-8") + "\n[release]\nship_posture = matrix\n", encoding="utf-8")
 
     result_open = _run_cm_script(_OPEN_RC_SCRIPT, [version], kanban_root, project_name, repo_root=repo_path)
     assert result_open.returncode == 0, (
@@ -355,8 +363,8 @@ def test_forced_ship_over_tester_blocked_writes_both_records_and_next_release_is
         "feat: add feature for forced-ship test", return_branch="main",
     )
 
-    tester_task_id = "TESTER-20260908-910-forced-ship-blocked"
-    _build_tester_task(kanban_root, project_name, tester_task_id, version, state="BLOCKED")
+    tester_task_id = "TESTER-20260908-910-forced-ship-high-risk"
+    _build_tester_task(kanban_root, project_name, tester_task_id, version, systemic_risk="high")
 
     reason_text = "Verification infra was down; the diff is a docs-only change reviewed by hand."
     result_release = _run_cm_script(
@@ -364,7 +372,7 @@ def test_forced_ship_over_tester_blocked_writes_both_records_and_next_release_is
         kanban_root, project_name, repo_root=repo_path,
     )
     assert result_release.returncode == 0, (
-        "cm-release.sh --force --reason must pass a BLOCKED-TESTER trigger-1 HALT and ship.\n"
+        "cm-release.sh --force --reason must pass a systemic-risk-high trigger-2 HALT and ship.\n"
         f"stdout: {result_release.stdout}\nstderr: {result_release.stderr}"
     )
 
@@ -372,7 +380,7 @@ def test_forced_ship_over_tester_blocked_writes_both_records_and_next_release_is
     assert "## Operator Override" in release_state_text, (
         f"Expected an '## Operator Override' event in release-state.md.\n{release_state_text}"
     )
-    assert "cm-release.trigger-1.tester-blocked" in release_state_text, (
+    assert "cm-release.trigger-2.systemic-risk-high" in release_state_text, (
         f"Expected the overridden trigger key in the event.\n{release_state_text}"
     )
     assert reason_text in release_state_text, (
@@ -402,8 +410,8 @@ def test_forced_ship_over_tester_blocked_writes_both_records_and_next_release_is
         repo_path, rc_branch2, "feature_second_rc.txt", "second RC feature content\n",
         "feat: add feature for second RC", return_branch="main",
     )
-    tester_task_id2 = "TESTER-20260908-911-second-rc-blocked"
-    _build_tester_task(kanban_root, project_name, tester_task_id2, version2, state="BLOCKED")
+    tester_task_id2 = "TESTER-20260908-911-second-rc-high-risk"
+    _build_tester_task(kanban_root, project_name, tester_task_id2, version2, systemic_risk="high")
 
     result_release2 = _run_cm_script(
         _RELEASE_SCRIPT, [], kanban_root, project_name, repo_root=repo_path,
@@ -415,8 +423,8 @@ def test_forced_ship_over_tester_blocked_writes_both_records_and_next_release_is
         f"stdout: {result_release2.stdout}\nstderr: {result_release2.stderr}"
     )
     combined2 = result_release2.stdout + result_release2.stderr
-    assert "cm-release.trigger-1.tester-blocked" in combined2, (
-        f"Expected the second (unforced) release to HALT on trigger-1 normally.\noutput:\n{combined2}"
+    assert "cm-release.trigger-2.systemic-risk-high" in combined2, (
+        f"Expected the second (unforced) release to HALT on trigger-2 normally.\noutput:\n{combined2}"
     )
     assert not _git_tag_exists(repo_path, version2), (
         f"Release tag '{version2}' must NOT exist — the second release was not forced and must HALT."

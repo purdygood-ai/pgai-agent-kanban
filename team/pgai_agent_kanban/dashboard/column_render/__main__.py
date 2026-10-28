@@ -30,7 +30,9 @@ always pre-rendered at its own width as well.
 
 The colour options take the ANSI escapes the caller resolved (empty when
 colour is off), so the caller's NO_COLOR / TERM=dumb decision is the only
-one.  Bash callers reach this through ``pp_run_ops``.
+one.  The needs-operator colour is read here from the semantic palette's
+``status_needs_operator`` key when ``--use-color=true``.  Bash callers reach
+this through ``pp_run_ops``.
 
 ``input``'s ``--max-major`` / ``--max-minor`` / ``--max-patch`` take the
 ceiling in effect as the ``pp_max_*`` accessors print it: a whole number,
@@ -61,7 +63,12 @@ if not __package__:
         sys.path.insert(0, _OWN_PACKAGE_ROOT)
 
 from pgai_agent_kanban.dashboard.column_render import board_snapshot  # noqa: E402
-from pgai_agent_kanban.dashboard.column_render.cells import CeilingCards, DeferCards, Palette  # noqa: E402
+from pgai_agent_kanban.dashboard.column_render.cells import (  # noqa: E402
+    NEEDS_OPERATOR_PALETTE_KEY,
+    CeilingCards,
+    DeferCards,
+    Palette,
+)
 from pgai_agent_kanban.dashboard.column_render.multi import (  # noqa: E402
     DEFAULT_STATUS_GLYPH,
     Layout,
@@ -73,6 +80,7 @@ from pgai_agent_kanban.dashboard.column_render.single import (  # noqa: E402
     render_input_column,
     render_queue_column,
 )
+from pgai_agent_kanban.lib.palette import resolve_semantic_color  # noqa: E402
 
 _PROG = "python3 -m pgai_agent_kanban.dashboard.column_render"
 
@@ -115,7 +123,10 @@ def _add_palette_args(parser: argparse.ArgumentParser) -> None:
 
 
 def _palette(args: argparse.Namespace) -> Palette:
-    return Palette(args.use_color, args.red, args.yellow, args.green, args.white, args.dim, args.reset)
+    return Palette(
+        args.use_color, args.red, args.yellow, args.green, args.white, args.dim, args.reset,
+        needs_operator=resolve_semantic_color(NEEDS_OPERATOR_PALETTE_KEY, args.use_color),
+    )
 
 
 def build_parser() -> argparse.ArgumentParser:

@@ -85,15 +85,16 @@ KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH}"
 if [[ -n "$_KANBAN_ROOT_OVERRIDE" ]]; then
   KANBAN_ROOT="$_KANBAN_ROOT_OVERRIDE"
 fi
-# Source: kanban.cfg [chain/paths] — INI format replaces legacy config.cfg
+# Source: kanban.cfg [paths] — INI format replaces legacy config.cfg
 # Source ini_parser.sh for read_ini; dev_tree.sh for resolve/require helpers.
 _LF_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 [[ -f "${_LF_SCRIPT_DIR}/lib/ini_parser.sh" ]] && source "${_LF_SCRIPT_DIR}/lib/ini_parser.sh"
 # shellcheck source=lib/dev_tree.sh
 source "${_LF_SCRIPT_DIR}/lib/dev_tree.sh"
-if [[ -f "${KANBAN_ROOT}/kanban.cfg" ]]; then
-    export PGAI_KANBAN_PM_MODE="${PGAI_KANBAN_PM_MODE:-$(read_ini "${KANBAN_ROOT}/kanban.cfg" chain pm_mode automatic)}"
-fi
+# Operator user config, then [chain] pm_mode (config_loader.sh).
+# shellcheck source=lib/config_loader.sh
+source "${_LF_SCRIPT_DIR}/lib/config_loader.sh"
+config_startup_prelude "$KANBAN_ROOT"
 unset _LF_SCRIPT_DIR
 export PGAI_DEV_TREE_PATH="${PGAI_DEV_TREE_PATH:-$(resolve_global_dev_tree)}"
 # Classification (a): log-filter reads log files from stdin or a file argument;

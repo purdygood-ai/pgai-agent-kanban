@@ -148,7 +148,7 @@ def test_registry_missing_file_is_empty(tmp_path: pathlib.Path) -> None:
 
 
 def test_registry_malformed_file_raises(tmp_path: pathlib.Path) -> None:
-    _write(tmp_path / "projects.cfg", "[project:a]\npriority=1\n[project:a]\npriority=2\n")
+    _write(tmp_path / "projects.cfg", "priority=1\n[project:a]\npriority=2\n")
     with pytest.raises(ini.IniError):
         ini.projects_registry(tmp_path)
 

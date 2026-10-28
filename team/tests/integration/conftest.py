@@ -23,7 +23,7 @@ hierarchy.  This file adds only what is specific to the integration scope:
                         this to exercise real code paths against an installed-
                         layout kanban root rather than the dev tree.
 
-  - two_project_root  — kanban root with project_a + project_b registered; from
+  - two_project_root  — kanban root with project-a + project-b registered; from
                         tests/fixtures/two_project.py.  Integration tests use
                         this to exercise multi-project isolation: real discovery,
                         real RC lifecycle, real operator commands across projects.

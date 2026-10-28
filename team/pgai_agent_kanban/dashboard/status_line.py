@@ -15,6 +15,11 @@ per bug file:
 * how many HUMAN-APPROVE gate tasks are pending (WAITING or BACKLOG);
 * how many open bugs the deferral posture holds back, per deferral scope.
 
+The same bug reading serves two more dashboard surfaces:
+:func:`bug_status_split` (the Metrics pane's open / deferred /
+needs-operator bug line) and :func:`needs_operator_keys` (the attention
+pane's NEEDS OPERATOR section), so every pane that counts bugs agrees.
+
 The deferral posture itself (is deferral on, at which level, until which
 version) is resolved before this module is called -- by the dashboard's
 bash resolver, whose answer equals
@@ -64,6 +69,7 @@ Exit codes: 0 always for a well-formed call (unreadable files are skipped);
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import pathlib
 import re
 import sys
@@ -87,14 +93,21 @@ from pgai_agent_kanban.lib.defer_posture import (  # noqa: E402
     SEVERITY_VOCABULARY,
     severity_defer_decision,
 )
-from pgai_agent_kanban.task_status import read_state  # noqa: E402
+from pgai_agent_kanban.lib.terminal_states import (  # noqa: E402
+    NEEDS_OPERATOR_STATE,
+    canonical_state,
+)
+from pgai_agent_kanban.task_status import read_state, section_value  # noqa: E402
 
 __all__ = [
+    "BugStatusSplit",
     "FIELD_SEP",
     "GLOBAL_SCOPE",
     "SEVERITY_VOCABULARY",
+    "bug_status_split",
     "deferred_bug_ids",
     "halt_rows",
+    "needs_operator_keys",
     "pending_approval_count",
     "severity_defer_decision",
     "status_facts",
@@ -109,11 +122,10 @@ GLOBAL_SCOPE = "GLOBAL"
 
 _PENDING_APPROVAL_STATES = frozenset({"WAITING", "BACKLOG"})
 
-# The "## Status" reader the dashboard's bug cards use (the same pattern as
-# pgai_agent_kanban.board.read_intake_status) and the "**Severity:**"
-# reader discovery uses (_disc_bug_severity), so a count here can never
-# disagree with what either of them reads.
-_BUG_STATUS_RE = re.compile(r"^##\s+Status\s*\n+\s*(\S+)", re.M | re.IGNORECASE)
+# A bug's "## Status" is read as pgai_agent_kanban.board.read_intake_status
+# reads it for the dashboard's bug cards (the first token of
+# task_status.section_value), and its "**Severity:**" as discovery reads it
+# (_disc_bug_severity), so a count here can never disagree with either.
 _BUG_SEVERITY_RE = re.compile(r"\*\*Severity:\*\*\s*(.+)", re.IGNORECASE)
 _COMPACT_BUG_ID_RE = re.compile(r"(BUG-[0-9]+)", re.IGNORECASE)
 
@@ -191,6 +203,41 @@ def _read_text(path: pathlib.Path) -> "str | None":
         return None
 
 
+@dataclasses.dataclass(frozen=True)
+class _IntakeRecord:
+    """One intake file as the dashboard counts it."""
+
+    path: pathlib.Path
+    status: str      # first token of ``## Status``, lowercased; "" when absent
+    severity: str    # the ``**Severity:**`` value, trimmed; "" when absent
+
+
+def _intake_records(intake_dir: "pathlib.Path | str") -> list[_IntakeRecord]:
+    """Return every readable ``*.md`` intake file in *intake_dir*, in file-name order.
+
+    README files and unreadable files are skipped; a missing directory
+    yields ``[]``. Subdirectories (an archive) are not descended into.
+    """
+    directory = pathlib.Path(intake_dir)
+    if not directory.is_dir():
+        return []
+    records: list[_IntakeRecord] = []
+    for item_file in sorted(directory.glob("*.md")):
+        if not item_file.is_file() or item_file.name.upper().startswith("README"):
+            continue
+        text = _read_text(item_file)
+        if text is None:
+            continue
+        status = section_value(text, "Status").split()
+        severity = _BUG_SEVERITY_RE.search(text)
+        records.append(_IntakeRecord(
+            path=item_file,
+            status=status[0].lower() if status else "",
+            severity=severity.group(1).strip() if severity else "",
+        ))
+    return records
+
+
 def deferred_bug_ids(bugs_dir: "pathlib.Path | str", level: str) -> list[str]:
     """Return the compact IDs of the open bugs in *bugs_dir* *level* defers.
 
@@ -200,26 +247,74 @@ def deferred_bug_ids(bugs_dir: "pathlib.Path | str", level: str) -> list[str]:
     ``BUG-<digits>`` (the form every bug card displays), else the whole
     stem. A missing directory yields ``[]``.
     """
-    directory = pathlib.Path(bugs_dir)
-    if not directory.is_dir():
-        return []
     ids: list[str] = []
-    for bug_file in sorted(directory.glob("*.md")):
-        if not bug_file.is_file() or bug_file.name.upper().startswith("README"):
+    for record in _intake_records(bugs_dir):
+        if record.status != "open":
             continue
-        text = _read_text(bug_file)
-        if text is None:
+        if severity_defer_decision(record.severity, level) != "deferred":
             continue
-        status = _BUG_STATUS_RE.search(text)
-        if not status or status.group(1).strip().lower() != "open":
-            continue
-        severity = _BUG_SEVERITY_RE.search(text)
-        severity_value = severity.group(1).strip() if severity else ""
-        if severity_defer_decision(severity_value, level) != "deferred":
-            continue
-        compact = _COMPACT_BUG_ID_RE.match(bug_file.stem)
-        ids.append(compact.group(1) if compact else bug_file.stem)
+        compact = _COMPACT_BUG_ID_RE.match(record.path.stem)
+        ids.append(compact.group(1) if compact else record.path.stem)
     return ids
+
+
+@dataclasses.dataclass(frozen=True)
+class BugStatusSplit:
+    """A project's live bug count, split by what each bug is waiting on.
+
+    Attributes:
+        open:           ``open`` bugs the resolved level keeps (they can
+                        trigger or join a bugfix RC).
+        deferred:       ``open`` bugs the resolved level defers -- the same
+                        bugs :func:`deferred_bug_ids` lists.
+        needs_operator: bugs at ``needs-operator``, waiting on an operator
+                        answer in the inbox.
+    """
+
+    open: int = 0
+    deferred: int = 0
+    needs_operator: int = 0
+
+    @property
+    def total(self) -> int:
+        """Every bug the split counts."""
+        return self.open + self.deferred + self.needs_operator
+
+
+def bug_status_split(bugs_dir: "pathlib.Path | str", level: str = "") -> BugStatusSplit:
+    """Return *bugs_dir*'s open / deferred / needs-operator bug counts.
+
+    An ``open`` bug counts as deferred when :func:`severity_defer_decision`
+    says *level* defers it, else as open; pass ``""`` for *level* when the
+    resolved posture is not deferring, so nothing is deferred. A bug whose
+    ``## Status`` reads as ``needs-operator`` (``terminal_states.canonical_state``)
+    counts as needs-operator. Every other status (``running``, closed
+    states) is not counted. A missing directory gives all zeros.
+    """
+    open_count = deferred = needs_operator = 0
+    for record in _intake_records(bugs_dir):
+        if record.status == "open":
+            if level and severity_defer_decision(record.severity, level) == "deferred":
+                deferred += 1
+            else:
+                open_count += 1
+        elif canonical_state(record.status) == NEEDS_OPERATOR_STATE:
+            needs_operator += 1
+    return BugStatusSplit(open=open_count, deferred=deferred, needs_operator=needs_operator)
+
+
+def needs_operator_keys(intake_dir: "pathlib.Path | str") -> list[str]:
+    """Return the key (file name without ``.md``) of every needs-operator item in *intake_dir*.
+
+    *intake_dir* is a project's ``bugs/`` or ``priority/`` directory; the
+    key is what ``ops.write.set_needs_operator`` writes as the item's inbox
+    entry Source. File-name order; a missing directory yields ``[]``.
+    """
+    return [
+        record.path.stem
+        for record in _intake_records(intake_dir)
+        if canonical_state(record.status) == NEEDS_OPERATOR_STATE
+    ]
 
 
 # ---------------------------------------------------------------------------

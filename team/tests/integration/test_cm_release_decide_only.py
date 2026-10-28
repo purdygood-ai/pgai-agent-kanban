@@ -13,15 +13,18 @@ referenced).
 
 Coverage:
   - On each ship-policy fixture -- a clean PASS report (SHIP-FUNCTIONAL),
-    trigger 1 (TESTER BLOCKED), trigger 2 (systemic risk high with a
+    a BLOCKED TESTER task (REQUEUE-VERIFICATION, exit 4, under every
+    posture), trigger 2 (systemic risk high with a
     regression), trigger 3 (serious concerns plus a large fix), trigger 8
     (the last three releases NON-FUNCTIONAL), the unrecognized-TESTER-state
-    row and the no-row-matched row -- under ship_posture=matrix, with the
-    key absent and under always:
+    row and the no-row-matched row (both SHIP-KNOWN-BUGS, the full run
+    filing one bug) -- under ship_posture=matrix, with the
+    key absent (which resolves to always on these local-only lanes) and
+    under always:
       * stdout is exactly one 'ship-policy: decision=… posture=… trigger=…
         notes_status=…' line, followed on HALT by the would-be HALT's
-        error/message/remedy lines, and the exit status is 0 for a ship and
-        3 for HALT;
+        error/message/remedy lines, and the exit status is 0 for a ship,
+        3 for HALT and 4 for REQUEUE-VERIFICATION;
       * the dev tree's HEAD (symbolic ref and tree hash), every branch and
         tag ref, the working-tree status, release-state.md, the bugs/
         directory, both HALT files and every other file under the kanban
@@ -50,6 +53,7 @@ read_ship_policy_report_values. Nothing else in the release is altered.
 from __future__ import annotations
 
 import hashlib
+import json
 import pathlib
 import re
 import shutil
@@ -85,12 +89,9 @@ def _require_git() -> None:
 
 _TEAM_DIR = pathlib.Path(__file__).parent.parent.parent  # team/
 
-_KEY_T1 = "cm-release.trigger-1.tester-blocked"
 _KEY_T2 = "cm-release.trigger-2.systemic-risk-high"
 _KEY_T3 = "cm-release.trigger-3.serious-concerns-large-fix"
 _KEY_T8 = "cm-release.trigger-8.last-3-rcs-non-functional"
-_KEY_UNRECOGNIZED = "cm-release.ship-policy.tester-state-unrecognized"
-_KEY_UNMATCHED = "cm-release.ship-policy.halt"
 
 _LINE_RE = re.compile(
     r"^ship-policy: decision=(?P<decision>\S+)\s+posture=(?P<posture>\S+)\s+"
@@ -101,6 +102,12 @@ _PROCEEDING_RE = re.compile(r"Proceeding with release: (\S+) \(release notes Sta
 # The postures each fixture runs under: the key set to matrix, absent, and
 # set to always.
 _POSTURES = {"matrix": "matrix", "absent": None, "always": "always"}
+
+
+def _resolved_posture(posture: Optional[str]) -> str:
+    """The posture a fixture lane resolves to: every lane here has
+    push_to_remote = false, so an absent key takes the default, always."""
+    return "matrix" if posture == "matrix" else "always"
 
 
 # ---------------------------------------------------------------------------
@@ -169,10 +176,11 @@ class Scenario:
 
 _SCENARIOS = {
     "clean_ship_functional": Scenario(_lane_builder(_clean_pass), _SHIP_FUNCTIONAL, _SHIP_FUNCTIONAL),
+    # Verification that did not run is requeued once, under either posture.
     "trigger_1_tester_blocked": Scenario(
         _lane_builder(_blocked_tester),
-        Expected("HALT", "1", "none", _KEY_T1),
-        Expected("HALT", "1", "none", _KEY_T1),
+        Expected("REQUEUE-VERIFICATION", "none", "none"),
+        Expected("REQUEUE-VERIFICATION", "none", "none"),
     ),
     "trigger_2_systemic_risk_high": Scenario(
         _posture_builder(_trigger_2_lane),
@@ -189,15 +197,17 @@ _SCENARIOS = {
         Expected("HALT", "8", "none", _KEY_T8),
         Expected("SHIP-FUNCTIONAL", "8", "FUNCTIONAL"),
     ),
+    # An unrecognised TESTER state and the no-row-matched catch-all take the
+    # SHIP-WITH-CONCERNS row (the full run files a bug), under either posture.
     "unrecognized_tester_state": Scenario(
         _lane_builder(_working_tester),
-        Expected("HALT", "none", "none", _KEY_UNRECOGNIZED),
-        Expected("HALT", "none", "none", _KEY_UNRECOGNIZED),
+        Expected("SHIP-KNOWN-BUGS", "none", "KNOWN-BUGS"),
+        Expected("SHIP-KNOWN-BUGS", "none", "KNOWN-BUGS"),
     ),
     "unmatched_row": Scenario(
         _lane_builder(_unmatched_row),
-        Expected("HALT", "none", "none", _KEY_UNMATCHED),
-        Expected("HALT", "none", "none", _KEY_UNMATCHED),
+        Expected("SHIP-KNOWN-BUGS", "none", "KNOWN-BUGS"),
+        Expected("SHIP-KNOWN-BUGS", "none", "KNOWN-BUGS"),
     ),
 }
 
@@ -271,6 +281,9 @@ def _assert_decision(result: subprocess.CompletedProcess, expected: Expected, po
         assert len(rest) == 3, _diag(result)
         assert re.match(rf"^error:\s+{re.escape(expected.halt_key)}$", rest[0]), _diag(result)
         assert rest[1].startswith("message: ") and rest[2].startswith("remedy: "), _diag(result)
+    elif expected.decision == "REQUEUE-VERIFICATION":
+        assert result.returncode == 4, _diag(result)
+        assert rest == [], _diag(result)
     else:
         assert result.returncode == 0, _diag(result)
         assert rest == [], _diag(result)
@@ -306,7 +319,12 @@ class _Copy:
 def _assert_full_run_agrees(decided: subprocess.CompletedProcess, full: subprocess.CompletedProcess,
                             copy: _Copy) -> None:
     fields, rest = _parse(decided)
-    if decided.returncode == 0:
+    if decided.returncode == 4:
+        assert full.returncode == 4, f"decider requeued verification, full run did not\n{_diag(full)}"
+        assert copy.halt_key() is None, _diag(full)
+        assert not _git_tag_exists(copy.repo, copy.version), _diag(full)
+        assert "REQUEUE-VERIFICATION" in full.stdout, _diag(full)
+    elif decided.returncode == 0:
         assert full.returncode == 0, f"decider shipped, full run did not\n{_diag(full)}"
         assert copy.halt_key() is None, _diag(full)
         assert _git_tag_exists(copy.repo, copy.version), _diag(full)
@@ -331,18 +349,21 @@ def test_decide_only_writes_nothing_and_agrees_with_the_full_run(tmp_path, scena
     scenario = _SCENARIOS[scenario_id]
     posture = _POSTURES[posture_id]
     lane, extra_env = scenario.make(tmp_path / "decide", posture)
-    expected = scenario.always if posture == "always" else scenario.matrix
+    resolved = _resolved_posture(posture)
+    expected = scenario.always if resolved == "always" else scenario.matrix
 
     before = _snapshot(lane)
     decided = _decide(lane, extra_env)
     _assert_unchanged(before, _snapshot(lane), decided)
-    _assert_decision(decided, expected, "always" if posture == "always" else "matrix")
+    _assert_decision(decided, expected, resolved)
 
     copy = _Copy(lane, tmp_path / "full")
     full = copy.release(extra_env)
     _assert_full_run_agrees(decided, full, copy)
-    if scenario_id == "trigger_8_last_three_non_functional" and posture == "always":
-        # The full run files the pattern bug the decider only narrated.
+    if (scenario_id == "trigger_8_last_three_non_functional" and resolved == "always") or scenario_id in (
+        "unrecognized_tester_state", "unmatched_row",
+    ):
+        # The full run files the bug the decider only narrated.
         assert len(list((copy.proj / "bugs").glob("BUG-*.md"))) == 1, _diag(full)
         assert list((lane.proj / "bugs").glob("BUG-*.md")) == [], _diag(decided)
 
@@ -384,7 +405,7 @@ def test_decide_only_runs_under_an_agent_wake(tmp_path):
     decided = _decide(lane, {"PGAI_AGENT_WAKE_ACTIVE": "1"})
     _assert_unchanged(before, _snapshot(lane), decided)
     assert "agent-wake-refused" not in decided.stderr, _diag(decided)
-    _assert_decision(decided, _SHIP_FUNCTIONAL, "matrix")
+    _assert_decision(decided, _SHIP_FUNCTIONAL, _resolved_posture(None))
 
 
 @pytest.mark.parametrize(
@@ -445,12 +466,18 @@ def test_decide_only_override_refusal_remedy_names_the_requested_project(
         assert other not in remedy.group(1), _diag(decided)
 
 
-def test_help_documents_decide_only_and_the_help_lint_passes():
+def test_help_documents_decide_only_and_the_help_lint_passes(tmp_path):
     help_result = subprocess.run(["bash", str(_RELEASE_SCRIPT), "--help"], capture_output=True, text=True)
     assert help_result.returncode == 0, help_result.stderr
     assert "--decide-only" in help_result.stdout
     assert "ship-policy: decision=" in help_result.stdout
+    # The help lint exits 0 whatever it finds; its verdict is the findings file.
+    findings_path = tmp_path / "help_presence.json"
     lint = subprocess.run(
-        ["python3", str(_TEAM_DIR / "scripts" / "lint_help_presence.py")], capture_output=True, text=True,
+        ["python3", str(_TEAM_DIR / "scripts" / "lint_help_presence.py"),
+         "--findings-file", str(findings_path)],
+        capture_output=True, text=True,
     )
     assert lint.returncode == 0, f"{lint.stdout}\n{lint.stderr}"
+    findings = json.loads(findings_path.read_text(encoding="utf-8"))
+    assert findings == [], f"{findings}\n{lint.stdout}"

@@ -204,30 +204,8 @@ refusal_ledger_read_latest() {
     local ledger_path
     ledger_path="$(refusal_ledger_path "$name")" || return 1
 
-    local pythonpath
-    pythonpath="$(pp_pythonpath)" || return 1
-
-    PYTHONPATH="$pythonpath" python3 - "$ledger_path" <<'PY'
-import sys
-
-from pgai_agent_kanban.lib.refusal_ledger import RefusalLedgerError, read_latest
-
-ledger_path = sys.argv[1]
-try:
-    record = read_latest(ledger_path)
-except RefusalLedgerError as exc:
-    print(f"refusal_ledger: {exc}", file=sys.stderr)
-    sys.exit(1)
-
-if record is None:
-    print("found=false")
-    sys.exit(0)
-
-print("found=true")
-for key in ("timestamp", "project", "surface", "error", "message", "remedy", "context"):
-    value = record.get(key) or ""
-    # Single-line values only, matching the ledger's own field-parse shape.
-    value = str(value).replace("\n", " ")
-    print(f"{key}={value}")
-PY
+    # pgai_agent_kanban.lib.refusal_ledger's latest-fields verb wraps
+    # read_latest and prints the key=value lines documented above; a
+    # malformed ledger is its one stderr line and exit 1.
+    pp_run_ops pgai_agent_kanban.lib.refusal_ledger latest-fields "$ledger_path"
 }

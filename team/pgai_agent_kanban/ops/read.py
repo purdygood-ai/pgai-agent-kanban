@@ -27,6 +27,8 @@ and the script-shaped reads, each a data function plus the render function
 returning the ReadOutput (exit code, stdout, stderr) its script prints:
 
   get_status(ctx, project)              render_status(...)       kanban-status.sh
+  get_release_state(ctx, project)       render_release_state(...)       release-state.sh
+  get_deep_verify_status(ctx, project)  render_deep_verify_status(...)  deep-verify-status.sh
   get_test_report(ctx, project, key)    render_test_report(...)  show-test-report.sh
   get_task_readme(ctx, project, key)    render_task_readme(...)  show-readme.sh
   list_rejected(ctx, project=None)      render_rejected(...)     list-rejected.sh
@@ -62,6 +64,7 @@ from pgai_agent_kanban.ops.errors import (
     Refused,
     cli_exit_code,
 )
+from pgai_agent_kanban.overwatch.halt_provenance import installed_script_command
 
 
 # ---------------------------------------------------------------------------
@@ -176,7 +179,7 @@ def no_project_refusal(ctx: OpsContext) -> str:
         example = registered[0]
         remedy = (
             f"Name a registered project ({', '.join(registered)}): "
-            f"team/scripts/dashboard/show-queues.sh --project {example} "
+            f"{installed_script_command(ctx.kanban_root, 'dashboard/show-queues.sh', '--project', example)} "
             f"(REST: GET /show-queues?project={example}), or export "
             f"PGAI_PROJECT_NAME={example} before running it."
         )
@@ -186,8 +189,9 @@ def no_project_refusal(ctx: OpsContext) -> str:
             "board reads registered project directories (projects/<name>/tasks/queues/) only."
         )
         remedy = (
-            f"Register the project, then name it: team/scripts/create-project.sh --project "
-            f"{_EXAMPLE_PROJECT} && team/scripts/dashboard/show-queues.sh --project {_EXAMPLE_PROJECT}"
+            "Register the project, then name it: "
+            f"{installed_script_command(ctx.kanban_root, 'create-project.sh', '--project', _EXAMPLE_PROJECT)} && "
+            f"{installed_script_command(ctx.kanban_root, 'dashboard/show-queues.sh', '--project', _EXAMPLE_PROJECT)}"
         )
     return format_error_contract("show_queues.no_project", message, remedy)
 
@@ -264,7 +268,7 @@ def get_queues(ctx: OpsContext, project: str) -> dict[str, Any]:
             "show_queues.project_directory_missing",
             f"show-queues.sh: project directory not found: {project_root}.",
             "Check the project name against projects.cfg, or create it first with "
-            f"team/scripts/create-project.sh --project {project}.",
+            f"{installed_script_command(ctx.kanban_root, 'create-project.sh', '--project', project)}.",
         ))
 
     tasks_dir = ctx.tasks_dir(project)
@@ -585,19 +589,14 @@ def _read_deep_verify_mode_raw(
     ``""`` when neither file carries a non-blank value; the caller then
     applies the built-in default. The value stays literal -- the legacy
     ``true``/``false`` aliases are resolved by the caller (see
-    ``_DEEP_VERIFY_MODE_ALIASES``). Pure-Python reads by the bash
-    ``read_ini`` rules, through the one chain helper the ship-posture
-    resolver also uses; no shell-out.
+    ``_DEEP_VERIFY_MODE_ALIASES``). The chain is walked by the shared
+    resolver ``pgai_agent_kanban.lib.project_cfg.resolve_tiered_cfg_value``,
+    by the bash ``read_ini`` rules; no shell-out.
     """
-    from pgai_agent_kanban.lib import project_cfg
-    from pgai_agent_kanban.overwatch.resolution_matrix import _release_key_chain
+    from pgai_agent_kanban.lib.project_cfg import resolve_tiered_cfg_value
 
-    found = project_cfg.project_cfg_file(pathlib.Path(project_root))
-    return _release_key_chain(
-        str(found) if found is not None else None,
-        str(pathlib.Path(kanban_root) / "kanban.cfg"),
-        "deep_verify",
-    )
+    found = resolve_tiered_cfg_value(kanban_root, project_root, "release", "deep_verify")
+    return found.value, found.source
 
 
 def get_deep_verify_status(ctx: OpsContext, project: str) -> dict[str, Any]:
@@ -1155,6 +1154,128 @@ def render_status(
     return read_status(ctx, project, no_color=no_color, environ=environ, now=now).output
 
 
+# --- release state -----------------------------------------------------------
+
+#: release-state.md's schema headings, in order, with the snake_case key
+#: ``release-state.sh`` prints for each -- the names the JSON REST twin uses.
+_RELEASE_STATE_CLI_KEYS: tuple[tuple[str, str], ...] = (
+    ("Active RC", "active_rc"),
+    ("RC Opened At", "rc_opened_at"),
+    ("RC Opened By Task", "rc_opened_by_task"),
+    ("Last Released", "last_released"),
+)
+
+
+def render_release_state(ctx: OpsContext, project: str) -> ReadOutput:
+    """Return what ``release-state.sh --project P`` prints, over :func:`get_release_state`.
+
+    Success (exit 0): one ``key=value`` line per field, in schema order --
+    ``active_rc``, ``rc_opened_at``, ``rc_opened_by_task``,
+    ``last_released`` -- a field legitimately unset printing ``none``.
+
+    Refusals print nothing to stdout:
+
+    - NotFound (exit 2): ``release-state.sh: <message>`` on stderr.
+    - Refused (exit 3): the three-line ``error:``/``message:``/``remedy:``
+      block on stderr, built by ``lib.error_contract.dual_channel_from_text``
+      from ``str(exc)`` with :data:`RELEASE_STATE_REFUSAL_ERROR_KEY` and
+      :data:`RELEASE_STATE_REFUSAL_FALLBACK_REMEDY` -- the same function and
+      fallbacks ``GET /release-state`` builds its 422 body from, so the two
+      surfaces show one remedy string.
+
+    Args:
+        ctx:     OpsContext carrying the kanban root path.
+        project: Project name as registered in ``projects.cfg``.
+
+    Returns:
+        :class:`ReadOutput`.
+    """
+    from pgai_agent_kanban.lib.error_contract import dual_channel_from_text
+
+    def _render() -> "tuple[str, str, int]":
+        try:
+            fields = get_release_state(ctx, project)
+        except NotFound as exc:
+            raise CliRefusal(
+                "release_state.project_not_found", f"release-state.sh: {exc}\n", exit_code=2
+            ) from exc
+        except Refused as exc:
+            body = dual_channel_from_text(
+                str(exc),
+                RELEASE_STATE_REFUSAL_ERROR_KEY,
+                RELEASE_STATE_REFUSAL_FALLBACK_REMEDY,
+            )
+            raise CliRefusal(
+                body["error"],
+                format_error_contract(body["error"], body["message"], body["remedy"]) + "\n",
+                exit_code=3,
+            ) from exc
+        text = "".join(f"{key}={fields[heading]}\n" for heading, key in _RELEASE_STATE_CLI_KEYS)
+        return text, "", 0
+
+    return _script_output(_render)
+
+
+# --- DEEP-VERIFY status ------------------------------------------------------
+
+
+def render_deep_verify_status(ctx: OpsContext, project: str) -> ReadOutput:
+    """Return what ``deep-verify-status.sh --project P`` prints, over :func:`get_deep_verify_status`.
+
+    Success (exit 0), on stdout::
+
+        project: <name>
+        mode: weekly|off
+        latest: never-run                      (no ledger record yet)
+        latest: <verdict> (<timestamp>, <version>, <commit>)
+
+        Ledger (<N> entries):
+        <one deep_verify.ledger.format_record block per entry, oldest
+        first, each followed by a blank line>
+
+    Refusals print nothing to stdout:
+
+    - NotFound (exit 2): ``deep-verify-status.sh: <message>`` on stderr.
+    - Refused (exit 3): ``str(exc)`` on stderr verbatim -- the malformed
+      ledger's or the unrecognized ``[release] deep_verify`` value's own
+      text, never re-worded.
+
+    Args:
+        ctx:     OpsContext carrying the kanban root path.
+        project: Project name as registered in ``projects.cfg``.
+
+    Returns:
+        :class:`ReadOutput`.
+    """
+    from pgai_agent_kanban.deep_verify.ledger import DeepVerifyRecord, format_record
+
+    def _render() -> "tuple[str, str, int]":
+        try:
+            status = get_deep_verify_status(ctx, project)
+        except NotFound as exc:
+            raise CliRefusal(
+                "deep_verify_status.project_not_found", f"deep-verify-status.sh: {exc}\n", exit_code=2
+            ) from exc
+        except Refused as exc:
+            raise CliRefusal("deep_verify_status.refused", f"{exc}\n", exit_code=3) from exc
+
+        lines = [f"project: {project}\n", f"mode: {status['mode']}\n"]
+        latest = status["latest"]
+        if latest is None:
+            lines.append("latest: never-run\n")
+        else:
+            lines.append(
+                f"latest: {latest['verdict']} "
+                f"({latest['timestamp']}, {latest['version']}, {latest['commit']})\n"
+            )
+        entries = status["entries"]
+        lines.append(f"\nLedger ({len(entries)} entries):\n")
+        lines.extend(f"{format_record(DeepVerifyRecord.from_dict(entry))}\n\n" for entry in entries)
+        return "".join(lines), "", 0
+
+    return _script_output(_render)
+
+
 # --- TESTER report ---------------------------------------------------------
 
 _RC_VERSION_KEY_RE = re.compile(r"v([0-9]+)\.([0-9]+)\.([0-9]+)")
@@ -1465,6 +1586,8 @@ CLI_VERBS: tuple[str, ...] = (
     "get_task_status",
     "get_queues",
     "get_status",
+    "get_release_state",
+    "get_deep_verify_status",
     "get_test_report",
     "get_task_readme",
     "list_rejected",
@@ -1474,6 +1597,8 @@ _CLI_USAGE = (
     "  verbs: get_task_status KANBAN_ROOT PROJECT KEY [status|readme]\n"
     "         get_queues KANBAN_ROOT PROJECT DATA_PROJECT DETAILS\n"
     "         get_status KANBAN_ROOT PROJECT NO_COLOR\n"
+    "         get_release_state KANBAN_ROOT PROJECT\n"
+    "         get_deep_verify_status KANBAN_ROOT PROJECT\n"
     "         get_test_report KANBAN_ROOT PROJECT KEY\n"
     "         get_task_readme KANBAN_ROOT PROJECT KEY\n"
     "         list_rejected KANBAN_ROOT [PROJECT]"
@@ -1482,6 +1607,8 @@ _CLI_USAGE = (
 #: Script-shaped verbs: name -> (accepted argument counts, ReadOutput producer).
 _SCRIPT_VERBS: "dict[str, tuple[tuple[int, ...], Any]]" = {
     "get_status": ((3,), lambda ctx, a: render_status(ctx, a[1], no_color=a[2] == "1")),
+    "get_release_state": ((2,), lambda ctx, a: render_release_state(ctx, a[1])),
+    "get_deep_verify_status": ((2,), lambda ctx, a: render_deep_verify_status(ctx, a[1])),
     "get_test_report": ((3,), lambda ctx, a: render_test_report(ctx, a[1], a[2])),
     "get_task_readme": ((3,), lambda ctx, a: render_task_readme(ctx, a[1], a[2])),
     "list_rejected": ((1, 2), lambda ctx, a: render_rejected(ctx, a[1] if len(a) == 2 else "")),
@@ -1523,6 +1650,18 @@ def _cli_main(argv: "list[str] | None" = None) -> int:
         output of ``kanban-status.sh``. NO_COLOR is ``1`` for
         ``--no-color``.
 
+    ``get_release_state KANBAN_ROOT PROJECT``
+        Prints release-state.md's four fields :func:`render_release_state`
+        renders -- the output of ``release-state.sh``: exit 2 for a project
+        with no directory, 3 with the error-contract block for a field the
+        schema refuses.
+
+    ``get_deep_verify_status KANBAN_ROOT PROJECT``
+        Prints the cadence, latest verdict and ledger
+        :func:`render_deep_verify_status` renders -- the output of
+        ``deep-verify-status.sh``: exit 2 for a project with no directory,
+        3 for a malformed ledger or deep_verify value.
+
     ``get_test_report KANBAN_ROOT PROJECT KEY``
         Prints the TESTER report :func:`get_test_report` reads -- the
         output of ``show-test-report.sh``.
@@ -1536,7 +1675,7 @@ def _cli_main(argv: "list[str] | None" = None) -> int:
         the output of ``list-rejected.sh``; an empty or absent PROJECT
         lists every project.
 
-    The four script-shaped verbs print their stderr, then their stdout,
+    The six script-shaped verbs print their stderr, then their stdout,
     and exit with the code their script has always exited with.
 
     Exit codes: 0 success; 1 usage error or a generic OpsError; otherwise

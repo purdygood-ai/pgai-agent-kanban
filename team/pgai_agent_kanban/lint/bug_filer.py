@@ -14,14 +14,20 @@ hygiene-lint instances by their own "class" field (lint_hygiene.py's
 registered classes -- provenance, version-named-test, comment-drift, and
 any future registrant), and files AT MOST ONE bug per class per run,
 listing every instance of that class in the one report -- deduplicated
-against a bug already open or running for the same class, the same "cites
-an OPEN bug" rule team/roles/TESTER.md's Step 6 states and the DEEP-VERIFY
-tier's own pgai_agent_kanban.deep_verify.bug_filer already follows for its
-own dedup key (a failing (engine, flavor) pair set). This module factors
-the parts that behave identically to that filer -- BUG-NNNN claiming,
-scanning bugs/ for a still-live dedup candidate -- into the shared
-pgai_agent_kanban.lib.bug_filing module rather than reimplementing them
-(docs/coding-standards.md directive 1).
+against a live bug (status open, running or needs-operator) for the same
+class, the same "cites an OPEN bug" rule team/roles/TESTER.md's Step 6
+states and the DEEP-VERIFY tier's own pgai_agent_kanban.deep_verify.bug_filer
+already follows for its own dedup key (a failing (engine, flavor) pair
+set). When the class key matches nothing, the shared same-defect rule is
+consulted for the drafted report before a slot is claimed: a live bug
+whose slug differs from the draft's only by re-file markers (a re-file
+word, an ordinal or a trailing counter), or one the draft's body cites as
+its defect, is cited instead. The parts every filer shares -- the bug
+record shape, the existing-bug lookup, BUG-NNNN claiming and the
+same-defect rule -- come from pgai_agent_kanban.lib.bug_filing
+(file_or_cite_record) rather than being reimplemented here
+(docs/coding-standards.md directive 1); this module supplies only the
+hygiene-specific fields.
 
 Only hygiene-lint findings are this filer's concern. A findings file also
 carries findings from every other quality-class lint the gated runners
@@ -216,7 +222,7 @@ if not __package__:
     if _OWN_PACKAGE_ROOT not in sys.path:
         sys.path.insert(0, _OWN_PACKAGE_ROOT)
 
-from pgai_agent_kanban.lib.bug_filing import import_bug_scanner, iter_open_or_running_bugs  # noqa: E402
+from pgai_agent_kanban.lib.bug_filing import BugRecord, file_or_cite_record  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Reproduction-command class check: ask team/scripts/lint_hygiene.py which
@@ -265,14 +271,14 @@ def _resolve_repo_root(repo_root: "str | Path | None") -> Path:
 
 
 # ---------------------------------------------------------------------------
-# Dedup key: this filer's own "## Hygiene Lint Class" section, read the same
-# narrow way pgai_agent_kanban.deep_verify.bug_filer reads its own
-# "## Deep-Verify Pairs" section -- one section, specific to this filer's
-# report shape, never the full BUG-TEMPLATE.md field set.
+# Dedup key: this filer's own "## Hygiene Lint Class" section, holding the
+# one class name the bug covers. The shared lookup
+# (lib.bug_filing.find_existing_bug, through file_or_cite_record) matches a
+# live bug recording the same class.
 #
 # Dedup-against-running -- decision recorded here (settled, not narrowed)
 # ------------------------------------------------------------------------
-# find_existing_bug_for_class treats a bug whose "## Status" is "running"
+# The class lookup treats a bug whose "## Status" is "running"
 # the same as one that is "open": either suppresses a fresh filing for that
 # class. That choice has a real cost: a "running" bug is flipped to "done"
 # by the release step at ship, so a newly-discovered site of the same class
@@ -313,26 +319,7 @@ def _resolve_repo_root(repo_root: "str | Path | None") -> Path:
 # that decision, not the "narrowed" branch.
 # ---------------------------------------------------------------------------
 
-_HYGIENE_CLASS_SECTION = "## Hygiene Lint Class"
-_HYGIENE_CLASS_RE = re.compile(
-    r"^##\s+Hygiene Lint Class\s*\n\s*(\S+)", re.MULTILINE | re.IGNORECASE
-)
-
-
-def _read_hygiene_class(text: str) -> "str | None":
-    match = _HYGIENE_CLASS_RE.search(text)
-    return match.group(1).strip() if match else None
-
-
-def find_existing_bug_for_class(bugs_dir: str, cls: str) -> "str | None":
-    """Return the BUG-NNNN id of an open/running bug in *bugs_dir* whose
-    recorded '## Hygiene Lint Class' equals *cls*, or None when no such bug
-    exists. Scans in filename-sorted order (via iter_open_or_running_bugs)
-    for a deterministic pick."""
-    for bug_id, text in iter_open_or_running_bugs(bugs_dir):
-        if _read_hygiene_class(text) == cls:
-            return bug_id
-    return None
+_HYGIENE_CLASS_HEADING = "Hygiene Lint Class"
 
 
 # ---------------------------------------------------------------------------
@@ -653,16 +640,18 @@ def _reproduction_line(cls: str) -> str:
     )
 
 
-def _render_bug_content(
+def _record_for_class(
     *,
-    bug_id: str,
     slug: str,
     project: str,
     cls: str,
     findings: list,
     filed_at: str,
     commit: str,
-) -> str:
+) -> BugRecord:
+    """The bug record for one hygiene class's surviving *findings*: the
+    hygiene-specific fields lib.bug_filing.render_bug_record writes, keyed
+    on the class name in "## Hygiene Lint Class"."""
     count = len(findings)
     finding_lines = "\n".join(_finding_line(f) for f in findings)
     remedy_lines = "\n".join(_remedy_line(i, f) for i, f in enumerate(findings, start=1))
@@ -670,46 +659,40 @@ def _render_bug_content(
         f"- {path}"
         for path in sorted({f.get("file", "(unknown file)") for f in findings})
     )
-
-    return (
-        f"# {bug_id}-{slug}\n\n"
-        f"**Bug ID:** {bug_id}-{slug}\n"
-        f"**Filed By:** hygiene-lint (autonomous) — {count} '{cls}' hygiene "
-        f"finding(s) in {project}.\n"
-        f"**Date:** {filed_at}\n"
-        "**Severity:** low\n\n"
-        "## Status\nopen\n\n"
-        "## Category\nhygiene-lint\n\n"
-        "---\n\n"
-        "## Symptom\n"
-        f"team/scripts/lint_hygiene.py's '{cls}' class reported {count} "
-        "instance(s) across the scanned tree in one run, every one of them "
-        f"committed at the observed commit below. See Findings below "
-        "for every instance's file and line.\n\n"
-        "## Expected\n"
-        f"No unsuppressed '{cls}' hygiene findings.\n\n"
-        "## Actual\n"
-        f"{finding_lines}\n\n"
-        "## Reproduction\n"
-        f"{_reproduction_line(cls)}\n"
-        "## Files Involved\n"
-        f"{files_involved}\n\n"
-        "## Hypothesis (optional)\n"
-        "Speculative -- see each finding's own remedy line below for the "
-        "runnable fix (reword the line, or suppress it deliberately with a "
-        "justification via --add-suppression).\n\n"
-        "---\n\n"
-        f"{_HYGIENE_CLASS_SECTION}\n"
-        f"{cls}\n\n"
-        "## Observed At Commit\n"
-        f"{commit}\n\n"
-        "## Findings\n"
-        f"{finding_lines}\n\n"
-        "## Remedies\n"
-        "Run each command below from the repository root of a checkout that carries "
-        "the finding it names -- the paths inside each command are repo-relative, not "
-        "tied to the tree this bug was filed from.\n\n"
-        f"{remedy_lines}\n"
+    return BugRecord(
+        slug=slug,
+        filed_by=f"hygiene-lint (autonomous) — {count} '{cls}' hygiene finding(s) in {project}.",
+        filed_at=filed_at,
+        severity="low",
+        category="hygiene-lint",
+        symptom=(
+            f"team/scripts/lint_hygiene.py's '{cls}' class reported {count} "
+            "instance(s) across the scanned tree in one run, every one of them "
+            "committed at the observed commit below. See Findings below "
+            "for every instance's file and line."
+        ),
+        expected=f"No unsuppressed '{cls}' hygiene findings.",
+        actual=finding_lines,
+        reproduction=_reproduction_line(cls).rstrip("\n"),
+        files_involved=files_involved,
+        hypothesis=(
+            "Speculative -- see each finding's own remedy line below for the "
+            "runnable fix (reword the line, or suppress it deliberately with a "
+            "justification via --add-suppression)."
+        ),
+        key_heading=_HYGIENE_CLASS_HEADING,
+        key=cls,
+        extra_sections=(
+            ("Observed At Commit", commit),
+            ("Findings", finding_lines),
+            (
+                "Remedies",
+                "Run each command below from the repository root of a checkout that carries "
+                "the finding it names -- the paths inside each command are repo-relative, not "
+                "tied to the tree this bug was filed from.\n\n"
+                f"{remedy_lines}",
+            ),
+        ),
     )
 
 
@@ -724,10 +707,12 @@ class FilingResult:
     file_or_cite_hygiene_bugs() call.
 
     cls       -- the hygiene class this result covers.
-    outcome   -- "filed" (a new bug file was written) or "duplicate" (an
-                 existing open/running bug already covers this class;
-                 nothing was written).
-    bug_id    -- "BUG-NNNN" for either outcome.
+    outcome   -- "filed" (a new bug file was written) or "duplicate" (a
+                 live bug -- open, running or needs-operator -- already
+                 covers this class, or the shared same-defect rule matches
+                 it; nothing was written).
+    bug_id    -- "BUG-NNNN" for either outcome: the filed bug, or the live
+                 bug cited.
     bug_path  -- absolute path to the filed file ("filed" only); None for
                  "duplicate" (no file was written).
     count     -- number of findings of this class in this run.
@@ -749,8 +734,12 @@ def file_or_cite_hygiene_bugs(
     repo_root: "str | Path | None" = None,
 ) -> list:
     """File at most one aggregated bug per hygiene class present in the
-    findings file at *findings_path*, or cite an existing open/running bug
-    that already covers a class instead of filing a duplicate.
+    findings file at *findings_path*, or cite an existing live bug (open,
+    running or needs-operator) that already covers a class instead of
+    filing a duplicate. A class whose own key matches no live bug is
+    checked against the shared same-defect rule for its drafted report
+    (lib.bug_filing.find_same_defect_for_draft) before a slot is claimed;
+    a match is cited the same way and nothing is filed for that class.
 
     Before grouping into a filing decision, every finding whose "file" sits
     in an uncommitted edit (staged, unstaged, or untracked -- see
@@ -811,7 +800,6 @@ def file_or_cite_hygiene_bugs(
     dirty_files = _dirty_relative_paths(root, all_files)
 
     os.makedirs(bugs_dir, exist_ok=True)
-    claim_next_bug_id, release_bug_id_claim = import_bug_scanner()
     filed_at = filed_at or datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
     proof_cache: "dict[str, str | None]" = {}
@@ -836,33 +824,19 @@ def file_or_cite_hygiene_bugs(
             # with what it lists; file nothing for it this run.
             continue
 
-        existing = find_existing_bug_for_class(bugs_dir, cls)
-        if existing:
-            results.append(
-                FilingResult(cls=cls, outcome="duplicate", bug_id=existing, bug_path=None, count=len(findings))
-            )
-            continue
-
-        slug = _slug_for_class(cls)
-        bug_id, bug_path, lock_path = claim_next_bug_id(
-            bugs_dir, slug, claimed_by="hygiene-lint-aggregate-filer"
-        )
-        content = _render_bug_content(
-            bug_id=bug_id,
-            slug=slug,
+        record = _record_for_class(
+            slug=_slug_for_class(cls),
             project=project,
             cls=cls,
             findings=findings,
             filed_at=filed_at,
             commit=commit,
         )
-        try:
-            Path(bug_path).write_text(content, encoding="utf-8")
-        finally:
-            release_bug_id_claim(lock_path)
-
+        filed = file_or_cite_record(bugs_dir, record, claimed_by="hygiene-lint-aggregate-filer")
         results.append(
-            FilingResult(cls=cls, outcome="filed", bug_id=bug_id, bug_path=str(bug_path), count=len(findings))
+            FilingResult(
+                cls=cls, outcome=filed.outcome, bug_id=filed.bug_id, bug_path=filed.bug_path, count=len(findings)
+            )
         )
 
     return results
@@ -877,7 +851,11 @@ _CLI_HELP = """\
 usage: bug_filer.py <bugs_dir> <project> <findings_file>
 
 File, or cite, one aggregated hygiene bug per lint class a gated run's
-findings file holds.
+findings file holds. A class is cited, not filed, when an open, running or
+needs-operator bug records it, or reports the same defect (a slug
+differing only by a re-file word, ordinal or trailing counter, or a body
+citing it as its defect); the cited ID prints on the bug_id line with
+outcome=duplicate.
 
 Positional arguments (all three required, in this order):
   bugs_dir       the project's bugs/ directory

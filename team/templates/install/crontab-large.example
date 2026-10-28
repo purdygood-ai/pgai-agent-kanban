@@ -11,21 +11,18 @@
 #   file, or by substituting manually as shown below).
 #
 # Cadence: every minute, pipeline-ordered with sub-minute stagger.
-#   Pipeline phase A (release-side: PM, CM, TESTER):
-#     fires on every minute at :00, with CM at :00+24s and TESTER at :00+48s.
-#   Pipeline phase B (work-producers: CODER, WRITER):
-#     fires on every minute at :00+12s, with WRITER at :00+36s.
+#   Agents fire in pipeline order within each minute:
+#     :00+00s  PM      (plans; leads the minute)
+#     :00+12s  CODER   (produces code)
+#     :00+24s  WRITER  (produces docs)
+#     :00+36s  TESTER  (verifies what the producers finished)
+#     :00+48s  CM      (releases; last, so it sees the TESTER's result)
 #
-#   The two phases are interleaved within each minute:
-#     :00+00s  PM
-#     :00+12s  CODER
-#     :00+24s  CM
-#     :00+36s  WRITER
-#     :00+48s  TESTER
-#
-#   This pipeline ordering ensures CM/TESTER always see completed CODER/WRITER
-#   work from the previous minute before they run, while CODER/WRITER get a
-#   12-second head start on each new minute before CM/TESTER check in.
+#   PM leads, the two producers follow, then the two consumers in the order
+#   the pipeline hands work along: TESTER before CM, so a verification that
+#   finishes in a minute is read by the release step in that same minute
+#   instead of waiting for the next one. Any handoff therefore lands in the
+#   same minute or the next.
 #
 # Maximum agent-to-agent handoff latency: ~60 seconds (one full minute cycle).
 # Best-case handoff (adjacent pipeline slot): 12-24 seconds.
@@ -60,34 +57,36 @@ PATH=__CLAUDE_PATH__:/usr/local/bin:/usr/bin:/bin
 # LARGE-TIER PATTERN — every-minute firing with sub-minute pipeline-ordered
 #                      stagger across all five agents
 # =============================================================================
-# Fires every minute. Agents are interleaved by sub-minute sleep offset:
-#   :00+00s  PM      — release-side phase A start
-#   :00+12s  CODER   — work-producer phase B start
-#   :00+24s  CM      — release-side phase A mid
-#   :00+36s  WRITER  — work-producer phase B mid
-#   :00+48s  TESTER  — release-side phase A end
+# Fires every minute. Agents are interleaved by sub-minute sleep offset, in
+# pipeline order:
+#   :00+00s  PM      — planner
+#   :00+12s  CODER   — producer
+#   :00+24s  WRITER  — producer
+#   :00+36s  TESTER  — consumer (verifies)
+#   :00+48s  CM      — consumer (releases; last so it reads the TESTER's result)
 #
 # Operator tuning:
 #   - Adjust sleep offsets (12, 24, 36, 48) for wider/narrower stagger.
 #   - Use 0-59 for N in --sleep=N; values >= 60 trigger a warning.
 #   - Reduce to every-2-minutes (*/2 / 1-59/2) if API rate limits are hit.
 
-# --- Release-side agents: PM, CM, TESTER ---
-# PM fires every minute at :00 (no sleep offset — leads the phase)
+# --- Planner ---
+# PM fires every minute at :00 (no sleep offset — leads the minute)
 * * * * * __KANBAN_ROOT__/scripts/wake-batch.sh --agent=pm     --sleep=0  >> __KANBAN_ROOT__/logs/cron-pm.log 2>&1
 
-# CM fires every minute with 24-second delay: :00+24s
-* * * * * __KANBAN_ROOT__/scripts/wake-batch.sh --agent=cm     --sleep=24 >> __KANBAN_ROOT__/logs/cron-cm.log 2>&1
-
-# TESTER fires every minute with 48-second delay: :00+48s
-* * * * * __KANBAN_ROOT__/scripts/wake-batch.sh --agent=tester --sleep=48 >> __KANBAN_ROOT__/logs/cron-tester.log 2>&1
-
-# --- Work-producer agents: CODER, WRITER ---
-# CODER fires every minute with 12-second delay (leads phase B): :00+12s
+# --- Producers: CODER, WRITER ---
+# CODER fires every minute with 12-second delay: :00+12s
 * * * * * __KANBAN_ROOT__/scripts/wake-batch.sh --agent=coder  --sleep=12 >> __KANBAN_ROOT__/logs/cron-coder.log 2>&1
 
-# WRITER fires every minute with 36-second delay: :00+36s
-* * * * * __KANBAN_ROOT__/scripts/wake-batch.sh --agent=writer --sleep=36 >> __KANBAN_ROOT__/logs/cron-writer.log 2>&1
+# WRITER fires every minute with 24-second delay: :00+24s
+* * * * * __KANBAN_ROOT__/scripts/wake-batch.sh --agent=writer --sleep=24 >> __KANBAN_ROOT__/logs/cron-writer.log 2>&1
+
+# --- Consumers: TESTER, then CM ---
+# TESTER fires every minute with 36-second delay: :00+36s
+* * * * * __KANBAN_ROOT__/scripts/wake-batch.sh --agent=tester --sleep=36 >> __KANBAN_ROOT__/logs/cron-tester.log 2>&1
+
+# CM fires every minute with 48-second delay (last, reads the TESTER's result): :00+48s
+* * * * * __KANBAN_ROOT__/scripts/wake-batch.sh --agent=cm     --sleep=48 >> __KANBAN_ROOT__/logs/cron-cm.log 2>&1
 
 # --- Cleanup Script (weekly, Sundays at 4:00 AM) ---
 # With no --project, cleanup.sh runs once per project registered in
@@ -112,12 +111,6 @@ PATH=__CLAUDE_PATH__:/usr/local/bin:/usr/bin:/bin
 # Operator tuning: adjust the minute (30) to any preferred slot. To widen the
 # sweep interval, change the second field from * to */2 (every-2-hours), etc.
 30 * * * * __KANBAN_ROOT__/scripts/overwatch-sweep.sh >> __KANBAN_ROOT__/logs/cron-overwatch-sweep.log 2>&1
-
-# --- OVERWATCH Tier-2 deep-clean (daily at 03:30) ---
-# LLM-driven review of the action log and any sweep-flagged anomalies.
-# The daily cadence keeps model cost bounded; the 03:30 slot avoids the
-# hourly sweep at :30 by an hour and sits during a low-traffic window.
-30 3 * * * __KANBAN_ROOT__/scripts/wake-batch.sh --agent=overwatch --sleep=0 --max-tasks=1 >> __KANBAN_ROOT__/logs/cron-overwatch.log 2>&1
 
 # --- Log Cleanup (daily at 04:30) ---
 30 4 * * * __KANBAN_ROOT__/scripts/cleanup/cleanup_logs.sh >> __KANBAN_ROOT__/logs/cron-cleanup-logs.log 2>&1

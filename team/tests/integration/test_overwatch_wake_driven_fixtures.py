@@ -47,17 +47,13 @@ Design notes
   set install.sh mirrors into a live install), so the wake scripts invoked
   as subprocesses are byte-identical to production and self-locate exactly
   as they would on a real host.
-- Per roles/OVERWATCH.md, a project only receives
-  autonomous OVERWATCH resolution once its overwatch_backlog.md queue file
-  exists (create-project.sh does not provision one by default — this is the
-  per-project opt-in gate, reusing the existing "queue file must exist"
-  convention rather than a bespoke flag). Every fixture below creates that
-  file explicitly, mirroring the deliberate operator enablement step.
-- The AGENT=overwatch and AGENT=pm queues built here are always empty (no
-  BACKLOG-marked entries), so process_one_task returns immediately without
-  ever invoking the real `claude` CLI — the wake scripts run their
-  substrate logic (dev-tree gate, resolution stage, discovery pipeline)
-  with zero external API calls or cost.
+- OVERWATCH keeps no queue file: no fixture below creates
+  overwatch_backlog.md, and the overwatch wake serves no task, so it never
+  invokes a provider CLI. The AGENT=pm queue built here is always empty (no
+  BACKLOG-marked entries), so process_one_task returns immediately for it
+  too — the wake scripts run their substrate logic (dev-tree gate,
+  resolution stage, discovery pipeline) with zero external API calls or
+  cost.
 - All temp paths use pytest's tmp_path. No bare /tmp.
 """
 
@@ -188,12 +184,8 @@ def _build_kanban_root(
     queues_dir.mkdir(parents=True, exist_ok=True)
     (root / "logs").mkdir(parents=True, exist_ok=True)
 
-    # The deliberate per-project enablement act (roles/OVERWATCH.md):
-    # only a project whose overwatch_backlog.md exists gets the
-    # autonomous resolution stage invoked at all (run_project_chain's
-    # backlog-file gate runs BEFORE run_overwatch_resolution_stage).
+    # Pipeline queues only: OVERWATCH keeps no queue file.
     for agent, title in (
-        ("overwatch", "Overwatch Backlog"),
         ("pm", "PM Backlog"),
         ("coder", "Coder Backlog"),
         ("writer", "Writer Backlog"),
@@ -397,7 +389,7 @@ class TestGoldenFixtureWakeDriven:
     def test_matched_block_resolves_with_zero_interventions_via_real_wake_entrypoint(
         self, tmp_path: pathlib.Path
     ) -> None:
-        fx = _build_golden_fixture(tmp_path, "wd_golden")
+        fx = _build_golden_fixture(tmp_path, "wd-golden")
 
         result = _run_wake(fx.kanban_root, "overwatch")
         assert result.returncode == 0, (
@@ -441,7 +433,7 @@ class TestGoldenFixtureWakeDriven:
     def test_next_discovery_tick_rebundles_the_reopened_bug_via_real_pm_wake(
         self, tmp_path: pathlib.Path
     ) -> None:
-        fx = _build_golden_fixture(tmp_path, "wd_golden_rebundle")
+        fx = _build_golden_fixture(tmp_path, "wd-golden-rebundle")
 
         overwatch_result = _run_wake(fx.kanban_root, "overwatch")
         assert overwatch_result.returncode == 0, overwatch_result.stderr
@@ -513,7 +505,7 @@ class TestFailClosedWakeDriven:
     def test_single_fact_off_halt_hards_with_no_action_via_real_wake_entrypoint(
         self, tmp_path: pathlib.Path, mutator, case_name
     ) -> None:
-        fx = _build_golden_fixture(tmp_path, f"wd_failclosed_{case_name}")
+        fx = _build_golden_fixture(tmp_path, f"wd-failclosed-{case_name.replace('_', '-')}")
         mutator(fx)
 
         result = _run_wake(fx.kanban_root, "overwatch")
@@ -548,7 +540,7 @@ class TestCeilingFixtureWakeDriven:
     def test_third_consecutive_family_failure_halt_hards_with_full_history(
         self, tmp_path: pathlib.Path
     ) -> None:
-        project_name = "wd_ceiling"
+        project_name = "wd-ceiling"
         fx = _build_golden_fixture(
             tmp_path, project_name, bug_id="BUG-0001-foo", version="v2.0.3", attempt=3, ceiling=3
         )
@@ -645,7 +637,7 @@ class TestOperatorHaltInviolabilityWakeDriven:
     def test_operator_halt_alongside_ship_policy_halt_declines_and_touches_neither_file(
         self, tmp_path: pathlib.Path
     ) -> None:
-        fx = _build_golden_fixture(tmp_path, "wd_operator_halt")
+        fx = _build_golden_fixture(tmp_path, "wd-operator-halt")
 
         fleet_operator_halt = fx.kanban_root / "HALT"
         _write_operator_halt(fleet_operator_halt)
@@ -689,7 +681,7 @@ class TestCounterKeyingWakeDriven:
     ) -> None:
         # Run 1: family A, first attempt (1 -> 2).
         fx_a1 = _build_golden_fixture(
-            tmp_path, "wd_counter_a1", bug_id="BUG-0001-foo", version="v2.0.1", attempt=1, ceiling=5
+            tmp_path, "wd-counter-a1", bug_id="BUG-0001-foo", version="v2.0.1", attempt=1, ceiling=5
         )
         result_a1 = _run_wake(fx_a1.kanban_root, "overwatch")
         assert result_a1.returncode == 0, result_a1.stderr
@@ -700,7 +692,7 @@ class TestCounterKeyingWakeDriven:
         # counter has already been bumped by write_rc_state for this family
         # (attempt 2 -> 3).
         fx_a2 = _build_golden_fixture(
-            tmp_path, "wd_counter_a2", bug_id="BUG-0001-foo", version="v2.0.2", attempt=2, ceiling=5
+            tmp_path, "wd-counter-a2", bug_id="BUG-0001-foo", version="v2.0.2", attempt=2, ceiling=5
         )
         result_a2 = _run_wake(fx_a2.kanban_root, "overwatch")
         assert result_a2.returncode == 0, result_a2.stderr
@@ -709,7 +701,7 @@ class TestCounterKeyingWakeDriven:
 
         # Run 3: DIFFERENT cargo (a different bug) — fresh family at 1 -> 2.
         fx_b = _build_golden_fixture(
-            tmp_path, "wd_counter_b", bug_id="BUG-0002-bar", version="v2.0.1", attempt=1, ceiling=5
+            tmp_path, "wd-counter-b", bug_id="BUG-0002-bar", version="v2.0.1", attempt=1, ceiling=5
         )
         result_b = _run_wake(fx_b.kanban_root, "overwatch")
         assert result_b.returncode == 0, result_b.stderr
@@ -756,7 +748,7 @@ class TestLedgerAtomicityWakeDriven:
     def test_kill_mid_execution_leaves_recorded_entry_and_next_sweep_reconciles(
         self, tmp_path: pathlib.Path
     ) -> None:
-        fx = _build_golden_fixture(tmp_path, "wd_atomicity")
+        fx = _build_golden_fixture(tmp_path, "wd-atomicity")
         marker_path = tmp_path / "drill_started.marker"
         _write_hanging_cancel_rc_stub(fx.kanban_root, marker_path)
 

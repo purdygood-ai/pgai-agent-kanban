@@ -86,7 +86,7 @@ if [[ -z "${_project_raw}" ]]; then
     pgai_emit_error_contract \
         "defer.project_required" \
         "defer.sh: no project named -- a deferral campaign is always per-project (an until= target names a different release boundary in every project's version space)." \
-        "Set \$PGAI_PROJECT_NAME to a project registered in projects.cfg, or pass --project directly, e.g. team/scripts/defer.sh --project your-project --until vX.Y.Z."
+        "Set \$PGAI_PROJECT_NAME to a project registered in projects.cfg, or pass --project directly, e.g. $(printf '%q' "${KANBAN_ROOT}/scripts/defer.sh") --project pgai-agent-kanban --until v1.2.3."
     # CENSUS-ANCHOR: defer-arm-project-required-01
     exit 1
 fi

@@ -63,18 +63,19 @@ A test assumes a hardcoded working directory, environment-variable value, or tem
 # BAD — hardcoded /tmp path; ignores the framework temp-dir convention
 TEST_DIR=/tmp/some_specific_path
 
-# BETTER — respect PGAI_AGENT_KANBAN_TEMP_DIR, use mktemp, trap cleanup
-TEST_DIR="$(mktemp -d -p "${PGAI_AGENT_KANBAN_TEMP_DIR:-/tmp}" test.XXXXXX)"
+# BETTER — a private directory under the framework temp root, trap cleanup
+source scripts/lib/temp.sh
+TEST_DIR="$(pgai_mktemp_d test)"
 trap "rm -rf '$TEST_DIR'" EXIT
 ```
 
-In Python the equivalent is `pathlib.Path(os.environ.get("PGAI_AGENT_KANBAN_TEMP_DIR") or "/tmp")`, or pytest's `tmp_path`.
+In Python the equivalent is pytest's `tmp_path`, or, for a path under the framework temp root itself, `pathlib.Path(resolve_temp_root())` from `pgai_agent_kanban.lib.temp_root` — never a hand-read of the variable with a fallback of your own.
 
 **When acceptable:** almost never. A test that genuinely needs a fixed system path must check for it and skip cleanly when absent, with a comment beginning `# Path-dependent test:` explaining what would be lost by making it portable.
 
 ### Temp paths come from the framework helpers, not from a literal
 
-**Rule: scratch space comes from the framework's temp helpers — pytest's `tmp_path` in Python, `pgai_mktemp_d` (or `mktemp -d -p "${PGAI_AGENT_KANBAN_TEMP_DIR:-/tmp/pgai_kanban_tmp}"`) in bash — never from a path the author typed out.**
+**Rule: scratch space comes from the framework's temp helpers — pytest's `tmp_path` in Python, `pgai_mktemp_d` from `scripts/lib/temp.sh` in bash, `resolve_temp_root()` when Python needs the root itself — never from a path the author typed out, and never from a hand-read of `PGAI_AGENT_KANBAN_TEMP_DIR` with a fallback of your own.**
 
 Two failures follow from a typed path, and the second hides the first. A fixed name is shared by every process that runs the test, so two concurrent runs plant the same file and one deletes the other's fixture mid-assertion. And the estate redirects all pytest-managed temp space under `PGAI_AGENT_KANBAN_TEMP_DIR` (`team/tests/conftest.py` sets `PYTEST_DEBUG_TEMPROOT`), so a literal escapes that redirect entirely and leaves residue on the host that the next run's cleanliness check attributes to whoever ran last.
 
@@ -246,8 +247,9 @@ A test creates files, opens descriptors, forks subprocesses, or mutates environm
 # BAD — temp files without cleanup; stale stderr can mask a real failure
 cmd 2>/tmp/pgai_kanban_tmp/stderr.txt
 
-# BETTER — mktemp + trap guarantees cleanup even on test failure
-WORK_DIR="$(mktemp -d -p "${PGAI_AGENT_KANBAN_TEMP_DIR:-/tmp/pgai_kanban_tmp}" test.XXXXXX)"
+# BETTER — pgai_mktemp_d + trap guarantees cleanup even on test failure
+source scripts/lib/temp.sh
+WORK_DIR="$(pgai_mktemp_d test)"
 trap "rm -rf '$WORK_DIR'" EXIT
 cmd 2>"$WORK_DIR/stderr.txt"
 ```
@@ -262,7 +264,7 @@ with open(lock_file, "w") as fd:
     do_thing()
 ```
 
-For Python prefer `tmp_path`, context managers, and `monkeypatch` (which auto-reverts on teardown); for bash, `mktemp -d` plus a `trap ... EXIT`.
+For Python prefer `tmp_path`, context managers, and `monkeypatch` (which auto-reverts on teardown); for bash, `pgai_mktemp_d` plus a `trap ... EXIT`.
 
 **When acceptable:** a test that legitimately needs to leave artifacts for inspection must opt in via a flag or environment variable, default to cleanup, and document the opt-in with a comment beginning `# Cleanup opt-out:`.
 
@@ -543,7 +545,7 @@ env -u PGAI_TASKS_DIR -u PGAI_PROJECT_ROOT \
     bash team/scripts/cleanup/cleanup.sh --project <name> --dry-run
 ```
 
-**Why overriding one root is not a sandbox.** A script that resolves its paths through `scripts/lib/project_paths.sh` reads `KANBAN_ROOT` and never falls back to `PGAI_AGENT_KANBAN_ROOT_PATH` — override the documented name alone and every resolved path still names whatever root the inherited `KANBAN_ROOT` holds. `cleanup.sh` reconciles the two before any destructive step: it derives whichever is unset from the other, and when both are set and disagree it refuses dual-channel (`cleanup.root_mismatch`, quoting both values) rather than guess. Read that refusal as a half-built sandbox and re-run with both roots on the same throwaway path. No other script carries that guard.
+**Why overriding one root is not a sandbox.** A script that resolves its paths through `scripts/lib/project_paths.sh` takes `KANBAN_ROOT` when it is set, else `PGAI_AGENT_KANBAN_ROOT_PATH`, else fails closed. `KANBAN_ROOT` wins even when the two disagree, so an inherited `KANBAN_ROOT` outranks a repointed `PGAI_AGENT_KANBAN_ROOT_PATH` — override the documented name alone and every resolved path still names whatever root the inherited `KANBAN_ROOT` holds. `cleanup.sh` reconciles the two before any destructive step: it derives whichever is unset from the other, and when both are set and disagree it refuses dual-channel (`cleanup.root_mismatch`, quoting both values) rather than guess. Read that refusal as a half-built sandbox and re-run with both roots on the same throwaway path. No other script carries that guard.
 
 **Why two of the five are cleared rather than repointed.** `PGAI_TASKS_DIR` and `PGAI_PROJECT_ROOT` arrive as fully-resolved live-install paths and take precedence over anything either root derives, so no root override reaches them — leave `PGAI_TASKS_DIR` in place and a run whose every other step is sandboxed still prunes task folders from the operator's tasks directory. `PGAI_AGENT_KANBAN_TEMP_DIR` governs temp-space sweeps on its own, so a run that purges temp space needs it pointed inside the sandbox too.
 
@@ -626,7 +628,7 @@ Both gated runners take three flags that change what kind of run you are making.
 | `--quarantined` | exactly the quarantined tests | no — not a run of the suite | `lint/findings-<suite>.json`, one ledger record whose selection is `quarantine` |
 | `--reuse-if-green` | the whole suite, or nothing when the ledger already certifies this commit green | yes | `lint/findings-<suite>.json`; a ledger record only when pytest actually ran |
 
-Every path in this section sits under the framework temp root, `$PGAI_AGENT_KANBAN_TEMP_DIR` (default `/tmp/pgai_kanban_tmp`).
+Every path in this section sits under the framework temp root, `$PGAI_AGENT_KANBAN_TEMP_DIR` (default `/tmp/pgai_kanban_tmp`). Every run in the table except `--files` first removes the files an earlier run of its suite left at the fixed evidence paths — `lint/findings-<suite>.json` and the per-lint `lint/*_<suite>.json` beside it, `lint/durations-<suite>.json`, and `coverage/<suite>.json` — so a file there after the run is that run's own. A `--files` run removes nothing.
 
 ### `--files`: run only the tests you touched
 
@@ -787,13 +789,14 @@ It is not a certification run, and it says so: the run prints `pre-merge run —
 
 ### What it runs
 
-The unit runner's pre-merge run hands over to the pre-merge engine, `python3 -m pgai_agent_kanban.testing.pre_merge`, which runs its checks in this order — the by-path test, the ratchet lints (five of them), the tracked-files lint `tracked-ignored`, the four whole-tree guards and the affected tests, twelve checks in all:
+The unit runner's pre-merge run hands over to the pre-merge engine, `python3 -m pgai_agent_kanban.testing.pre_merge`, which runs its checks in this order — the by-path test, the ratchet lints (six of them), the tracked-files lint `tracked-ignored`, the four whole-tree guards and the affected tests, thirteen checks in all:
 
 | Check | What it does | It fails when |
 |---|---|---|
 | `by-path` | Runs `tests/unit/test_package_modules_run_by_path.py` over the whole `pgai_agent_kanban` package: every package module with a `__main__` block is started by file path, with no `PYTHONPATH`. | A module with a `__main__` block lacks the self-location guard, so it cannot import its own package when started by path. |
 | `lint: inline-python`, `lint: python-duplicates`, `lint: engine-size`, `lint: api-route-impl` | Runs four of the ratchet lints (`lint_inline_python.py`, `lint_python_duplicates.py`, `lint_engine_size_dupe.py`, `lint_api_route_impl.py`) exactly as the gated runners run them, in fail-on-regression mode. | The lint reports anything: a file over its recorded allowance, an unlisted new file, an allowlist entry left above the measured count, a malformed allowlist line, an engine file over its line ceiling, or a cross-file shell function collision. |
 | `lint: echo-pipe-grep-q` | Runs the fifth ratchet lint, `team/scripts/lint_echo_pipe_grep_q.py`, the same way. It reports every `echo` or `printf` whose output is piped into a quiet `grep` (`-q`, `--quiet` or `--silent`) in non-test bash under `team/` and in `install.sh`, against the per-file ceilings in `team/config/echo-pipe-grep-q-allowlist.txt`. Under `set -o pipefail` that pipeline can report "no match" for text that matches: `grep` exits at its first match, and the still-writing `echo` dies of SIGPIPE. | The lint reports anything: a site in a file the allowlist does not list, a file over its allowance, an allowlist entry left above the measured count, or a malformed or missing allowlist. **Fix:** test the text without a pipe — `grep -q PATTERN <<< "$text"` (same pattern and flags) or `[[ $text =~ $re ]]` — at each site the output names; where a listed file's count drops, lower its allowlist entry in the same change; then re-check with `python3 team/scripts/lint_echo_pipe_grep_q.py`. |
+| `lint: section-parsers` | Runs the sixth ratchet lint, `team/scripts/lint_section_parsers.py`, the same way. It reports code that finds a markdown `## ` section by matching its heading itself — `startswith("## ")`, a comparison with a `"## ..."` literal, a pattern anchored on `^##` — in non-test Python under `team/pgai_agent_kanban`, `team/pm-agent` and `team/scripts` and non-test bash under `team/scripts`. A section is read only through `task_status.read_section` (Python) or `read_md_field` (bash); a site that reads no value, such as a section writer or a heading counter, is listed with its class in `team/config/section-parser-allowlist.txt`. | The lint reports anything: a site the allowlist does not name, an entry that names no site, or a malformed allowlist line. **Fix:** read the value through `read_section` or `read_md_field` at each site the output names; for a site that reads no value, add its allowlist line (`--list-sites` prints every site); remove each entry reported as naming no site; then re-check with `python3 team/scripts/lint_section_parsers.py`. |
 | `lint: tracked-ignored` | Runs `team/scripts/lint_tracked_ignored.py` after the ratchet lints and judges it the same way. It is not a ratchet: it keeps no allowlist. It reports every tracked file a `.gitignore` rule matches (`git ls-files -ci --exclude-standard`), and every tracked file whose name marks it as generated output — `*.log`, `*.lock`, `.coverage`, `coverage*.json`, `*.orig`, `nohup.out`, rotated `*.previous-RUN-*` artifacts and the like. | The lint reports anything. **Fix:** untrack each file the output names with the `git rm --cached -- <file>` its remedy prints, commit, then re-check with `python3 team/scripts/lint_tracked_ignored.py`. |
 | `guard: env-bootstrap` | Runs `team/scripts/lint_env_bootstrap.py`: every Python module reads the kanban root through `resolve_kanban_root()`, and every bash entry point that reads it sources the bootstrap prelude. | A module reads the kanban root directly, such as an `os.environ.get("PGAI_AGENT_KANBAN_ROOT_PATH")`, or a bash entry point reads it without the prelude. **Fix:** read the root through `resolve_kanban_root()` from `pgai_agent_kanban.env` (Python) or source `scripts/lib/env_bootstrap.sh` (bash) at each site the output names, then re-check with `python3 team/scripts/lint_env_bootstrap.py`. |
 | `guard: operator-verb-docs` | Runs `team/scripts/generate_operator_verb_docs.py --check`: the generated verb and route references in `docs/operator-commands.md` and `docs/operator-api.md` match a fresh render from the verb census and each verb's own `--help`. | A verb's `--help` text or census row changed and the generated references were not regenerated. **Fix:** run `python3 team/scripts/generate_operator_verb_docs.py`, then commit `docs/operator-commands.md` and `docs/operator-api.md`. |
@@ -827,6 +830,8 @@ lint: python-duplicates       PASS      4.2s
 lint: engine-size             PASS      0.6s
 lint: api-route-impl          PASS      0.3s
 lint: echo-pipe-grep-q        PASS      0.5s
+lint: section-parsers         PASS      0.6s
+lint: tracked-ignored         PASS      0.1s
 guard: env-bootstrap          PASS      0.2s
 guard: operator-verb-docs     FAIL      1.5s  finding(s)
     <the guard's own output, up to 20 lines, naming what drifted>
@@ -836,7 +841,7 @@ guard: docs-citations         PASS      0.2s
 affected tests                PASS     41.7s  12 of 12 affected test file(s) run
 ------------------------------------------------------------------------
 guards:  4 always-run guard(s) added 2.0s of the 5.0s budget
-pre-merge: FAIL -- 1 of 11 check(s) failed (guard: operator-verb-docs) in 69.9s
+pre-merge: FAIL -- 1 of 13 check(s) failed (guard: operator-verb-docs) in 70.6s
 ========================================================================
 ```
 

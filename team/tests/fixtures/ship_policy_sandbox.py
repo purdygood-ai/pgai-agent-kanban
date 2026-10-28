@@ -146,7 +146,9 @@ def build_lane(
 ) -> ShipPolicyLane:
     """Build a lane for *fixture* under the ship posture *posture*.
 
-    *posture* None leaves the ship_posture key out of both config files.
+    *posture* None leaves the ship_posture key out of both config files,
+    which on this push_to_remote = false lane resolves to the default,
+    always.
     With *writer_notes*, WRITER-authored notes carrying the PENDING-RELEASE
     placeholder are committed on the RC branch, so Step 4e stamps them.
     """

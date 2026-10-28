@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # team/scripts/lib/wake_reconcile_sweeps.sh
 #
-# The two once-per-wake, once-per-project reconciliation sweeps —
-# reconcile_stale_active and reconcile_terminal_worktrees — kept in their
-# own stage file so wake_task_state.sh stays under the 800-line-per-file
-# ceiling (team/scripts/lint_engine_size_dupe.py). Both are called from
+# The three once-per-wake, once-per-project reconciliation sweeps —
+# reconcile_stale_active, reconcile_terminal_worktrees and
+# reconcile_terminal_liveness_records — kept in their own stage file so
+# wake_task_state.sh stays under the 800-line-per-file ceiling
+# (team/scripts/lint_engine_size_dupe.py). All three are called from
 # run_project_chain's three sweep points (wake_driver.sh) and share one
 # dependency set (worktree.sh, project_paths.sh, the task-liveness
 # primitives in wake_task_state.sh, and pp_run_ops for the queue scan).
@@ -65,7 +66,14 @@
 #       alone). Called from the same three sweep points in wake_driver.sh,
 #       immediately after reconcile_stale_active.
 #
-# Both sweeps answer "is the agent that owns this task still running?"
+#   reconcile_terminal_liveness_records
+#       Removes the dispatch-liveness record of each task in this project
+#       whose own ## State is DONE or WONT-DO, once its agent is no longer
+#       alive and its worktree is gone. Records of BACKLOG, WAITING, WORKING
+#       and BLOCKED tasks are never removed. See its own header below.
+#       Called immediately after reconcile_terminal_worktrees.
+#
+# All three sweeps answer "is the agent that owns this task still running?"
 # through the shared task_liveness_verdict / task_liveness_is_alive
 # predicates (wake_task_state.sh) rather than each carrying its own
 # `pgrep -f "$task_id"` guard — see those functions' headers for why a
@@ -114,12 +122,12 @@
 # Plain key=value lines: final_state, pid (the wake process that finalized)
 # and finalized_at (UTC ISO-8601). Only its presence is read.
 #
-# Both sweeps below read it for one decision. A task whose ## State reads
-# DONE but that has no record reached DONE without the wake's finalize: the
-# wake was stopped while the agent ran, or lost its repo lock before the
-# queue write. Its done-claim never met the completion gate, so
-# _sweep_gate_unfinalized_done runs that same gate before the marker can
-# become [x] or the worktree is torn down.
+# The first two sweeps below read it for one decision. A task whose
+# ## State reads DONE but that has no record reached DONE without the
+# wake's finalize: the wake was stopped while the agent ran, or lost its
+# repo lock before the queue write. Its done-claim never met the
+# completion gate, so _sweep_gate_unfinalized_done runs that same gate
+# before the marker can become [x] or the worktree is torn down.
 #
 #   task_finalize_record_path <task_dir>     echo the record's path
 #   task_finalize_record_write <task_dir> <final_state>
@@ -548,4 +556,88 @@ reconcile_terminal_worktrees() {
   if [[ $reaped -gt 0 ]]; then
     log "reconcile-terminal-worktrees: reaped ${reaped} terminal-task worktree(s)"
   fi
+}
+
+# ---------------------------------------------------------------------------
+# reconcile_terminal_liveness_records
+#
+# Removes the dispatch-liveness record (task_liveness_record_path,
+# wake_task_state.sh) of every task in this project whose own status.md
+# reads DONE or WONT-DO. A record is written at each dispatch and nothing
+# else removes it once the wake's own finalize has torn the worktree down,
+# so without this pass locks/task-liveness/ grows by one file per task
+# forever. Called from the same three sweep points in wake_driver.sh,
+# immediately after reconcile_terminal_worktrees.
+#
+# The record directory is kanban-wide; this pass judges only the records
+# whose task folder sits under this project's TASKS_ROOT. A record whose
+# task belongs to another project is left for that project's own pass, and
+# one whose task folder exists in no project (archived or deleted) is
+# removed by cleanup.sh's retention sweep, never here.
+#
+# A record is kept when any of these holds:
+#   - the task's ## State is anything but DONE or WONT-DO (BACKLOG,
+#     WAITING, WORKING, BLOCKED), or status.md is missing or unreadable;
+#   - task_liveness_is_alive reports the agent alive (held, or a record this
+#     pass cannot read): a task can read DONE while its agent is still
+#     exiting, and an unreadable record is never judged;
+#   - the task's worktree directory still exists, or its path cannot be
+#     resolved: reconcile_terminal_worktrees retries a failed teardown only
+#     while the dead-pid record is present (an absent record reads as
+#     alive), so the record outlives the worktree, never the other way.
+# Removing a terminal task's record changes no later decision:
+# reconcile_stale_active reads ## State before it consults a record, and a
+# task id is never dispatched twice.
+#
+# Best-effort and idempotent: a failed removal is retried on the next call,
+# and nothing here fails the chain. Logs one line when it removed anything.
+#
+# Dependencies: task_liveness_record_path, task_liveness_is_alive, get_state
+# (wake_task_state.sh); pgai_worktree_path (worktree.sh); TASKS_ROOT, log()
+# (wake_bootstrap.sh); KANBAN_ROOT.
+# ---------------------------------------------------------------------------
+reconcile_terminal_liveness_records() {
+  [[ -n "${TASKS_ROOT:-}" && -d "${TASKS_ROOT}" ]] || return 0
+  # The directory comes from the one path helper, so this pass and the
+  # record writer can never disagree on where records live.
+  local probe_path record_dir
+  probe_path="$(task_liveness_record_path "path-probe" 2>/dev/null)" || return 0
+  record_dir="$(dirname "$probe_path")"
+  [[ -d "$record_dir" ]] || return 0
+
+  local removed=0
+  local record_file task_id task_status task_state wt_path
+  for record_file in "${record_dir}"/*.record; do
+    [[ -f "$record_file" ]] || continue
+    task_id="$(basename "$record_file" .record)"
+    [[ -n "$task_id" && "$task_id" != .* ]] || continue
+    # Only a record at exactly the path the helper gives this id is ours.
+    [[ "$(task_liveness_record_path "$task_id" 2>/dev/null)" == "$record_file" ]] || continue
+
+    task_status="${TASKS_ROOT}/${task_id}/status.md"
+    [[ -f "$task_status" ]] || continue
+    # Cheapest checks first: this pass runs under the project repo lock,
+    # and the ## State read is the costly one.
+    wt_path="$(pgai_worktree_path "$task_id" 2>/dev/null)" || continue
+    [[ -n "$wt_path" && ! -e "$wt_path" ]] || continue
+    if task_liveness_is_alive "$task_id"; then
+      continue
+    fi
+    task_state="$(get_state "$task_status" 2>/dev/null || echo "")"
+    case "$task_state" in
+      DONE|WONT-DO) : ;;
+      *) continue ;;
+    esac
+
+    if rm -f -- "$record_file" 2>/dev/null && [[ ! -e "$record_file" ]]; then
+      removed=$((removed + 1))
+    else
+      log "reconcile-terminal-liveness-records: WARNING: could not remove ${record_file} for ${task_state} task ${task_id} (non-fatal; will retry next cycle)"
+    fi
+  done
+
+  if [[ $removed -gt 0 ]]; then
+    log "reconcile-terminal-liveness-records: removed ${removed} liveness record(s) of DONE/WONT-DO tasks from ${record_dir}"
+  fi
+  return 0
 }

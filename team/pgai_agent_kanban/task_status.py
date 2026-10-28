@@ -31,23 +31,28 @@ Behavior:
     by one blank line on every write, which the golden-path acceptance
     criterion (byte-identical output) exists to catch.
   - Rides the blocked-interval ledger (pgai_agent_kanban.metrics.
-    blocked_ledger) beside a state write, best-effort: a transition into
-    BLOCKED carrying ``--needs-human yes`` in THIS call appends a
-    block-start; a later transition out of BLOCKED appends the matching
-    block-end. Attributed to the project's own Active RC (release-state.md);
-    with Active RC "none", or when the CLI's ``--project``/``--key`` are
-    unavailable to a library caller, nothing is written. CENSUS CLASS
-    CONVERT — a ledger failure (unwritable metrics directory, an
-    already-open start, an end with no open start) never changes this
-    tool's own exit code or the status.md write it rides beside; see
+    blocked_ledger) beside a state write, best-effort. A BLOCKED write
+    (any ``--needs-human``), or ``--needs-human yes`` on a non-terminal
+    state, opens a block-start for ``task:<key>`` with class any, cause
+    chain and the Block Record's reason_code (``needs_human`` when the
+    state is not BLOCKED), unless the task's block is already open. A
+    DONE or WONT-DO write, or a move out of BLOCKED, appends the matching
+    block-end with class any. Attributed to the project's Active RC
+    (release-state.md), or to the ledger's no-RC version when it is
+    "none". A library caller that omits ``project``/``key`` stamps
+    nothing. CENSUS CLASS CONVERT — a ledger failure never changes this
+    tool's exit code or the status.md write it rides beside; see
     ``_stamp_blocked_ledger_boundary`` below.
   - Keeps the task's ``## Block Record``
     (``pgai_agent_kanban.overwatch.block_record``) in step with the state,
     in the same atomic write. A BLOCKED write records the block:
     ``--reason-code`` from the closed agent list (``agent_unclassified``
-    when omitted, so every agent self-block is classifiable), owner_role
-    from the task's ``## Role``, and for ``agent_operator_data_action`` the
-    typed ``--action-args`` as the evidence line. A task already BLOCKED
+    when omitted, so every agent self-block is classifiable;
+    ``agent_transient_provider_error`` for a block caused by a transient
+    provider error; ``agent_operator_data_action`` for an allowlisted
+    operator data action), owner_role from the task's ``## Role``, and
+    for ``agent_operator_data_action`` the typed ``--action-args`` as the
+    evidence line. A task already BLOCKED
     that carries a record keeps it when no ``--reason-code`` is given. A
     DONE or WONT-DO write removes the record. An unknown code, a malformed
     or unknown action argument, ``--action-args`` without
@@ -80,7 +85,7 @@ Usage (via the bash wrapper):
         --key CODER-20260101-001-example-task --state BLOCKED \\
         --needs-human yes --reason-code agent_operator_data_action \\
         --action-args verb=restamp-fixed-in project=pgai-agent-kanban \\
-                      version=v2.28.0 bugs=BUG-0412,BUG-0413   (example values)
+                      version=v1.2.3 bugs=BUG-0042,BUG-0043   (example values)
 
 Read mode (the canonical ``## State`` reader for shell callers):
     python3 -m pgai_agent_kanban.task_status --read-state <path/to/status.md>
@@ -97,7 +102,10 @@ Subcommands (additive to the flag interface above):
         (<path/to/status.md> | --project <name> --key <task-id>) \
         --section HEADING --body TEXT
 
-    python3 -m pgai_agent_kanban.task_status read STATUS_FILE --section HEADING --raw
+    python3 -m pgai_agent_kanban.task_status read STATUS_FILE --section HEADING --raw \\
+        [READING...]
+    python3 -m pgai_agent_kanban.task_status read STATUS_FILE --section HEADING \\
+        [--section HEADING]... --value [READING...]
     python3 -m pgai_agent_kanban.task_status read STATUS_FILE --section HEADING \\
         --field NAME [--default TEXT]
     python3 -m pgai_agent_kanban.task_status render STATUS_FILE \\
@@ -117,7 +125,18 @@ Subcommands (additive to the flag interface above):
     writers and readers (``team/scripts/lib/wake_task_state.sh``,
     ``team/scripts/lib/wake_driver_finalize.sh``) call.
     ``read --raw`` prints a section body exactly as written and exits 3 when
-    the heading is absent. ``read --field`` prints one value of a
+    the heading is absent. ``read --value`` prints the first value line of
+    each ``--section`` (:func:`first_value_line`), one line per heading in
+    the order named, an empty line for a heading with no value, and exits 3
+    after printing every line when any heading is absent; both print one
+    plain stderr line and exit 1 for an unreadable file, and both decode a
+    byte that is not valid UTF-8 as U+FFFD rather than refuse the file
+    (``render`` and the status writers still refuse it). READING is any of
+    ``--exact-heading``, ``--free-spacing``, ``--comments``,
+    ``--end-at-subheading`` and ``--end-at-rule``, the :func:`read_section`
+    keywords of the same names; they apply to ``--raw`` and ``--value``
+    only. Bash callers reach these two modes through ``read_md_field``
+    (``team/scripts/lib/md_field.sh``). ``read --field`` prints one value of a
     ``key: value`` record section (the OVERWATCH retry and zero-progress
     records in ``team/scripts/lib/overwatch_protocol.sh``), or ``--default``.
     ``render --append-missing HEADING`` writes that section's body verbatim
@@ -144,8 +163,12 @@ Subcommands (additive to the flag interface above):
 Library API — the one status.md implementation; Python callers import these
 rather than carrying their own ``## Section`` regex:
     read_section(text, heading) -> str | None   section body, None if absent
-    section_value(text, heading) -> str         first value line of a section
+    section_span(text, heading) -> SectionSpan  where a section sits, None if absent
+    section_regex(heading, ...) -> re.Pattern   read_section's compiled section pattern
+    section_value(text, heading, fences=False)  first value line of a section
     section_lines(text, heading, max_lines)     non-blank body lines, stripped
+    first_value_line(body) -> str               release-state value of a body
+    is_horizontal_rule(line) -> bool            a line of three or more dashes
     read_state(path) -> str                     ``## State``, uppercased
     replace_section(text, heading, body) -> str text-level section rewrite
     replace_sections(text, {heading: body})     several, in order
@@ -186,7 +209,7 @@ import re
 import shlex
 import sys
 from pathlib import Path
-from typing import Callable, Mapping, NoReturn, Optional, Sequence
+from typing import TYPE_CHECKING, Callable, Mapping, NoReturn, Optional, Sequence
 
 # Run by file path (``python3 .../task_status.py``) or loaded from a file
 # outside its package, this module has no parent package and the interpreter
@@ -200,15 +223,16 @@ if not __package__:
     if _OWN_PACKAGE_ROOT not in sys.path:
         sys.path.insert(0, _OWN_PACKAGE_ROOT)
 
-from pgai_agent_kanban.cm.read_state_field import read_state_field  # noqa: E402
 from pgai_agent_kanban.lib.atomic_write import atomic_write as _atomic_write  # noqa: E402
 from pgai_agent_kanban.lib.error_contract import emit_error_contract  # noqa: E402
-from pgai_agent_kanban.metrics.blocked_ledger import (  # noqa: E402
-    append_block_end,
-    append_block_start,
-    ledger_path_for_project,
-)
-from pgai_agent_kanban.ops.context import OpsContext  # noqa: E402
+
+# The release-state reader, the blocked-interval ledger and OpsContext are
+# imported inside the functions that use them. The section readers here are
+# imported by light command-line readers (md_fields, read_state_field) that
+# must not pay for the ops package, and read_state_field imports this module,
+# so importing it back at load time would be circular.
+if TYPE_CHECKING:
+    from pgai_agent_kanban.ops.context import OpsContext
 
 # ---------------------------------------------------------------------------
 # Canonical state vocabulary.
@@ -277,6 +301,8 @@ def resolve_status_file(
         Path to the task's status.md (may or may not exist yet — existence
         is checked by the caller).
     """
+    from pgai_agent_kanban.ops.context import OpsContext
+
     resolved_ctx = ctx if ctx is not None else OpsContext.from_env()
     return resolved_ctx.tasks_dir(project) / key / "status.md"
 
@@ -397,7 +423,15 @@ def validate_needs_human(value: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _section_pattern(heading: str) -> str:
+def _section_pattern(
+    heading: str,
+    *,
+    end_at_subheading: bool = False,
+    exact_heading: bool = False,
+    free_spacing: bool = False,
+    end_at_rule: bool = False,
+    heading_prefix: bool = False,
+) -> str:
     """Return the regex matching one ``## <heading>`` section.
 
     Groups: (1) the heading line without its newline, including an inline
@@ -407,19 +441,106 @@ def _section_pattern(heading: str) -> str:
     and can never run into the following section, while a ``###``
     subheading inside a body stays part of that body; (3) the separator:
     the ``\\n+##`` run up to the next level-2 heading, or the trailing
-    newlines at end of file.  Use with ``re.M | re.I``.
+    newlines at end of file.  Use with ``re.M | re.I`` (``re.M`` alone
+    with *exact_heading*).
 
     The heading is matched liberally — any run of spaces or tabs after
     ``##``, any letter case, an optional inline ``: value`` — but whole:
     ``## State`` never matches ``## State Notes`` or ``## Status``.
+
+    The defaults are the writers' pattern.  The keyword variants serve
+    :func:`read_section` and :func:`section_regex` alone:
+
+    - *end_at_subheading*: any line starting ``##`` ends the body, a
+      ``###`` subheading included.
+    - *exact_heading*: the heading line must read exactly ``## <heading>``
+      apart from surrounding whitespace (one space, no inline value; letter
+      case is enforced by leaving out ``re.I``), and any line whose text
+      starts ``##`` after its leading whitespace ends the body.
+    - *free_spacing*: ``##`` and each word of the heading may be separated
+      by any run of blanks, none included (``##Output  Formats`` and
+      ``## OutputFormats`` both match ``Output Formats``); no inline value.
+      Combine with ``re.M | re.I``.
+    - *end_at_rule*: a horizontal rule (three or more dashes starting the
+      line, trailing blanks allowed) ends the body too.
+    - *heading_prefix*: the heading line need only start with
+      ``## <heading>`` (any run of spaces or tabs after ``##``); the rest
+      of the line is part of the heading, so ``## States`` matches
+      ``State`` and no inline value is read.  Combine with ``re.M | re.I``.
     """
-    return (
-        rf"(^##[ \t]+{re.escape(heading)}(?:[ \t]*:[^\n]*)?[ \t\r]*)"
-        r"((?:\n(?!##(?!#))[^\n]*)*?)(\n+##(?!#)|\n*\Z)"
-    )
+    if sum((exact_heading, free_spacing, heading_prefix)) > 1:
+        raise ValueError(
+            "exact_heading, free_spacing and heading_prefix are different heading readings; pass one"
+        )
+    if exact_heading:
+        head = rf"(^[^\S\n]*## {re.escape(heading)}[^\S\n]*)"
+        ends = r"[^\S\n]*##"
+    else:
+        if free_spacing:
+            words = r"[^\S\n]*".join(re.escape(word) for word in heading.split())
+            head = rf"(^##[^\S\n]*{words}[^\S\n]*)"
+        elif heading_prefix:
+            head = rf"(^##[ \t]+{re.escape(heading)}[^\n]*)"
+        else:
+            head = rf"(^##[ \t]+{re.escape(heading)}(?:[ \t]*:[^\n]*)?[ \t\r]*)"
+        ends = "##" if end_at_subheading else "##(?!#)"
+    if end_at_rule:
+        ends = rf"(?:{ends}|-{{3,}}[^\S\n]*$)"
+    return head + rf"((?:\n(?!{ends})[^\n]*)*?)(\n+{ends}|\n*\Z)"
 
 
 _SECTION_FLAGS = re.M | re.I
+
+# Stands in for ``#`` on a line the reader must not treat as a heading.
+_INERT_MARK = "\x00"
+
+
+def _mask_inert_lines(text: str, *, fences: bool, comments: bool) -> str:
+    """Return *text* with every ``#`` on a fenced or commented line masked.
+
+    A line inside a fenced code block (opener and closer included, paired
+    by ``lib/markdown_fence``; an unclosed block runs to the end of the
+    text) is inert when *fences* is set.  A line inside an HTML comment
+    block is inert when *comments* is set: the block opens on a line whose
+    text starts ``<!--`` once complete one-line ``<!-- ... -->`` comments
+    are removed, and closes on the first later line containing ``-->``,
+    both lines included; an unclosed block runs to the end of the text.
+
+    Masking replaces characters one for one and leaves every newline in
+    place, so a match found in the masked text has the same offsets in
+    *text*.
+    """
+    if not fences and not comments:
+        return text
+    if fences:
+        from pgai_agent_kanban.lib.markdown_fence import is_fence_closer, match_fence_opener
+
+    lines = text.split("\n")
+    fence_token: Optional[str] = None
+    in_comment = False
+    for idx, line in enumerate(lines):
+        stripped = line.strip()
+        inert = False
+        if fence_token is not None:
+            inert = True
+            if is_fence_closer(stripped, fence_token):
+                fence_token = None
+        elif in_comment:
+            inert = True
+            if "-->" in stripped:
+                in_comment = False
+                rest = stripped.split("-->", 1)[1]
+                if _HTML_COMMENT_RE.sub("", rest).strip().startswith("<!--"):
+                    in_comment = True
+        else:
+            opener = match_fence_opener(stripped) if fences else None
+            if opener is not None:
+                fence_token, inert = opener[0], True
+            elif comments and _HTML_COMMENT_RE.sub("", stripped).strip().startswith("<!--"):
+                in_comment, inert = True, True
+        if inert:
+            lines[idx] = line.replace("#", _INERT_MARK)
+    return "\n".join(lines)
 
 
 def _split_heading_line(heading_line: str, heading: str) -> tuple[str, str]:
@@ -445,7 +566,7 @@ def _missing_section_error(heading: str) -> TaskStatusError:
         message=f"status.md has no '## {heading}' section to update",
         remedy=(
             "confirm the task's status.md was created from the standard "
-            "template (team/templates/task/task-status/status.md) before "
+            f"template ({_installed_status_template()}) before "
             f"writing '## {heading}'"
         ),
     )
@@ -528,38 +649,207 @@ def replace_section(
 _set_section_body = replace_section
 
 
-def read_section(text: str, heading: str) -> Optional[str]:
+@dataclasses.dataclass(frozen=True)
+class SectionSpan:
+    """Where one ``## <heading>`` section sits in a text, as offsets into it.
+
+    The bounds :func:`read_section` and :func:`replace_section` share (the
+    writers' reading), for a writer that edits around a section rather
+    than replacing its body.
+
+    Attributes:
+        start:        Offset of the section's heading line.
+        body_end:     Offset just past the section's body: its last line
+                      before the blank lines that separate it from what
+                      follows (equal to the heading line's end for an
+                      empty body).
+        next_heading: Offset of the next level-2 heading's ``##``, or
+                      ``None`` when the section runs to the end of the text.
+    """
+
+    start: int
+    body_end: int
+    next_heading: Optional[int]
+
+
+def section_span(text: str, heading: str) -> Optional[SectionSpan]:
+    """Return where the ``## <heading>`` section sits in *text*, or ``None``.
+
+    The heading and the end of the section are found exactly as
+    :func:`replace_section` finds them (any letter case, any run of spaces
+    or tabs after ``##``, an optional inline ``: value``; the next level-2
+    heading or the end of the text ends the body). The first section
+    with that heading is the one described.
+    """
+    match = re.search(_section_pattern(heading), text, _SECTION_FLAGS)
+    if match is None:
+        return None
+    separator = match.group(3)
+    next_heading = match.end(3) - 2 if separator.endswith("##") else None
+    return SectionSpan(start=match.start(), body_end=match.end(2), next_heading=next_heading)
+
+
+def section_regex(
+    heading: str,
+    *,
+    end_at_subheading: bool = False,
+    exact_heading: bool = False,
+    free_spacing: bool = False,
+    end_at_rule: bool = False,
+    heading_prefix: bool = False,
+) -> "re.Pattern[str]":
+    """Return the compiled pattern :func:`read_section` matches a section with.
+
+    For a caller that needs the section boundary itself -- to compare it
+    with another reader's, or to search text directly -- rather than a
+    body. The keyword readings are :func:`read_section`'s and mean the
+    same; the flags are the ones it uses (``re.M | re.I``, or ``re.M``
+    alone with *exact_heading*).
+
+    Groups: (1) the heading line, (2) the body (unstripped; an inline
+    ``: value`` on the heading line is not part of it), (3) the separator
+    up to the next heading that ends the body, or the trailing newlines
+    at the end of the text. The pattern is applied to text as given:
+    CRLF normalising and fence or comment masking are
+    :func:`read_section`'s.
+
+    Raises:
+        ValueError: when more than one of *exact_heading*, *free_spacing*
+            and *heading_prefix* is set.
+    """
+    return re.compile(
+        _section_pattern(
+            heading,
+            end_at_subheading=end_at_subheading,
+            exact_heading=exact_heading,
+            free_spacing=free_spacing,
+            end_at_rule=end_at_rule,
+            heading_prefix=heading_prefix,
+        ),
+        re.M if exact_heading else _SECTION_FLAGS,
+    )
+
+
+def read_section(
+    text: str,
+    heading: str,
+    *,
+    end_at_subheading: bool = False,
+    exact_heading: bool = False,
+    free_spacing: bool = False,
+    end_at_rule: bool = False,
+    fences: bool = False,
+    comments: bool = False,
+    last: bool = False,
+    heading_prefix: bool = False,
+) -> Optional[str]:
     """Return the body of the ``## <heading>`` section in *text*, or ``None``.
 
-    The one status.md section reader; it shares :func:`replace_section`'s
-    regex, so a reader and the writer never disagree about where a body
-    starts and ends.  Reading is liberal, accepting the variants the writers
-    and hand-edits produce:
+    The one Python reader of a ``## Heading`` section, for status.md,
+    release-state.md, task READMEs and intake files alike.  With its
+    defaults it shares :func:`replace_section`'s regex, so the reader and
+    the writer never disagree about where a body starts and ends.  The
+    keyword parameters select the readings other callers need; every one
+    defaults to the status.md reading.
 
-    - any number of blank lines between the heading and the value;
-    - an inline value on the heading line (``## State: DONE``), returned as
-      the body's first line;
-    - any letter case and run of spaces/tabs in the heading;
-    - CRLF line endings (returned normalised to ``\\n``).
+    Rules:
+
+    - **Heading match.**  Any letter case and any run of spaces or tabs
+      after ``##``; trailing spaces, tabs or a carriage return are allowed.
+      The name is matched whole: ``## State`` never matches
+      ``## State Notes`` (unless *heading_prefix* is set).  The heading
+      must start its line.
+    - **Inline value.**  ``## Heading: value`` reads ``value`` as the
+      body's first line, ahead of any lines below the heading.
+    - **Blank lines.**  Any number of blank lines may sit between the
+      heading and the value; they, and blank lines at the end of the body,
+      are dropped with the surrounding whitespace.
+    - **End of section.**  A body ends at the next level-2 heading (a line
+      starting ``##`` that is not ``###``) or at the end of the text.  A
+      ``###`` subheading stays inside the body.  A ``---`` horizontal rule
+      does not end a section unless *end_at_rule* is set; the release-state
+      readers stop at one over the returned body instead
+      (:func:`first_value_line`).
+    - **Missing versus empty.**  An absent heading returns ``None``; a
+      heading with no body returns ``""``, never the next section's text.
+    - **Last line.**  A heading on the last line of the text, with or
+      without a trailing newline, returns ``""``.
+    - **CRLF.**  ``\\r\\n`` line endings are normalised to ``\\n`` before
+      reading, so the body comes back with ``\\n`` endings.
+    - **Fenced code.**  Off by default, matching :func:`replace_section`.
+      With *fences*, a ``## `` line inside a fenced code block (``` or
+      ``~~~``, paired through ``lib/markdown_fence``) neither starts nor
+      ends a section.
+    - **First occurrence.**  A repeated heading reads its first section
+      unless *last* is set.
 
     The body is returned as written otherwise — bold markers, HTML comments
-    and trailing text are kept; :func:`read_state` is the reader that turns
-    a body into a value.
+    and trailing text are kept; :func:`section_value` is the reader that
+    turns a body into a value.
 
     Args:
-        text:    Full status.md contents.
+        text:    Full file contents.
         heading: Section heading name, without the ``## `` prefix.
+        end_at_subheading: A ``###`` (or deeper) heading ends the section
+                 too, the intake-file reading ``lib/md_fields`` uses.
+        exact_heading: The heading line must read exactly ``## <heading>``
+                 once its surrounding whitespace is stripped: letter case
+                 counts, one space after ``##``, no inline value.  Lines
+                 are matched after their leading whitespace, so an indented
+                 heading is found and any line whose stripped text starts
+                 ``##`` (``###`` included) ends the section.  The
+                 release-state reading ``cm/read_state_field`` uses.
+        free_spacing: ``##`` and each word of *heading* may be separated by
+                 any run of blanks, none included (``##Artifact Name`` and
+                 ``## ArtifactName`` both match ``Artifact Name``), letter
+                 case is ignored, and no inline value is read.  Cannot be
+                 combined with *exact_heading*.  The requirement-file reading
+                 ``cm/finalize.sh`` uses.
+        end_at_rule: A horizontal rule -- three or more dashes starting a
+                 line, trailing blanks allowed -- ends the section too, so a
+                 ``---`` rule is never part of the body.
+        fences:  Fenced code blocks are skipped, as described above.
+        comments: A ``## `` line inside an HTML comment block (opened by a
+                 line starting ``<!--``, closed by the first later line
+                 containing ``-->``) neither starts nor ends a section.
+        last:    Read the last ``## <heading>`` section rather than the
+                 first — for files that append one block per event under
+                 a repeated heading (release-state.md's
+                 ``## OVERWATCH Decision``).
+        heading_prefix: The heading line need only start with
+                 ``## <heading>``: ``## States`` and ``## State Notes`` both
+                 match ``State``, any letter case, and the rest of the line
+                 is part of the heading, so no inline value is read.  Cannot
+                 be combined with *exact_heading* or *free_spacing*.  The
+                 task-state reading ``ops/verdict`` uses.
 
     Returns:
         The section body with surrounding whitespace removed (``""`` for an
         empty section), or ``None`` when the heading is absent.
     """
     normalised = text.replace("\r\n", "\n")
-    m = re.search(_section_pattern(heading), normalised, flags=_SECTION_FLAGS)
+    searched = _mask_inert_lines(normalised, fences=fences, comments=comments)
+    pattern = section_regex(
+        heading,
+        end_at_subheading=end_at_subheading,
+        exact_heading=exact_heading,
+        free_spacing=free_spacing,
+        end_at_rule=end_at_rule,
+        heading_prefix=heading_prefix,
+    )
+    m = pattern.search(searched)
     if m is None:
         return None
-    _heading_line, inline = _split_heading_line(m.group(1), heading)
-    body = m.group(2).strip()
+    if last:
+        later = pattern.search(searched, m.end(2))
+        while later is not None:
+            m = later
+            later = pattern.search(searched, m.end(2))
+    # Masking keeps offsets, so the spans index the unmasked text.
+    body = normalised[m.start(2):m.end(2)].strip()
+    if exact_heading or free_spacing or heading_prefix:
+        return body
+    _heading_line, inline = _split_heading_line(normalised[m.start(1):m.end(1)], heading)
     if inline:
         return f"{inline}\n{body}".strip()
     return body
@@ -569,7 +859,7 @@ _HTML_COMMENT_RE = re.compile(r"<!--.*?-->", re.S)
 _BOLD_VALUE_RE = re.compile(r"^(\*\*|__)(.+?)\1$")
 
 
-def section_value(text: str, heading: str) -> str:
+def section_value(text: str, heading: str, *, fences: bool = False) -> str:
     """Return the value of the ``## <heading>`` section in *text*, or ``""``.
 
     The value is the first non-blank line of the body once HTML comments
@@ -582,11 +872,13 @@ def section_value(text: str, heading: str) -> str:
     Args:
         text:    Full status.md contents.
         heading: Section heading name, without the ``## `` prefix.
+        fences:  A ``## `` line inside a fenced code block neither starts
+                 nor ends the section (:func:`read_section`'s *fences*).
 
     Returns:
         The value, or ``""`` when the heading is absent or carries no value.
     """
-    body = read_section(text, heading)
+    body = read_section(text, heading, fences=fences)
     if not body:
         return ""
     for line in _HTML_COMMENT_RE.sub("", body).splitlines():
@@ -615,6 +907,60 @@ def section_lines(text: str, heading: str, max_lines: Optional[int] = None) -> l
     body = read_section(text, heading) or ""
     lines = [line.strip() for line in body.splitlines() if line.strip()]
     return lines if max_lines is None else lines[:max_lines]
+
+
+_HORIZONTAL_RULE_RE = re.compile(r"-{3,}")
+
+
+def is_horizontal_rule(line: str) -> bool:
+    """Return True when *line* is a markdown horizontal rule: three or more dashes.
+
+    The whole of *line* must be dashes; the caller strips it first.
+    """
+    return bool(_HORIZONTAL_RULE_RE.fullmatch(line))
+
+
+def first_value_line(body: str) -> str:
+    """Return the first value line of a section *body*, or ``""``.
+
+    The value step the release-state readers (``cm/read_state_field``)
+    apply over a body :func:`read_section` returned.  Lines are taken in
+    order, each stripped:
+
+    - blank lines and single-``#`` comment lines are skipped;
+    - an HTML comment block (``<!--`` through the first ``-->``, on one
+      line or several) is skipped whole, and a complete inline
+      ``<!-- ... -->`` is dropped from a line before the rest of the line
+      is considered;
+    - a horizontal rule (a line of three or more dashes) ends the walk
+      with no value, so a ``---`` rule is never returned as the value.
+
+    Unlike :func:`section_value`, a ``**bold**`` wrapper is kept and a
+    ``#`` line is never a value.
+
+    Args:
+        body: A section body, as :func:`read_section` returns it.
+
+    Returns:
+        The first qualifying line, stripped, or ``""`` when there is none.
+    """
+    in_html_comment = False
+    for line in body.split("\n"):
+        value = line.strip()
+        if in_html_comment:
+            if "-->" not in value:
+                continue
+            in_html_comment = False
+            value = value.split("-->", 1)[1].strip()
+        value = _HTML_COMMENT_RE.sub("", value).strip()
+        if value.startswith("<!--"):
+            in_html_comment = True
+            continue
+        if value and is_horizontal_rule(value):
+            break
+        if value and not value.startswith("#"):
+            return value
+    return ""
 
 
 def read_state(status_file: "Path | str", *, upper: bool = True) -> str:
@@ -959,7 +1305,7 @@ def _rewrite_sections(
             remedy=(
                 "verify --project and --key resolve to an existing task "
                 f"folder, or create {status_file} from "
-                "team/templates/task/task-status/status.md first"
+                f"{_installed_status_template()} first"
             ),
         )
 
@@ -1055,8 +1401,187 @@ def set_section(
 
 
 # ---------------------------------------------------------------------------
-# Blocked-interval ledger adapter (best-effort, never raises)
+# Blocked-interval ledger stamps (best-effort, never raise)
+#
+# One block-start / block-end pair of helpers every task-level and HALT
+# ledger writer outside the wake shares: this module's own status writes,
+# pgai_agent_kanban.overwatch.block_record (every ## Block Record write) and
+# pgai_agent_kanban.ops.write (reset, unhalt, close, wontdo). The ledger
+# module is imported inside them, never at load time (see the note on
+# imports above).
 # ---------------------------------------------------------------------------
+
+#: Reason code a block opened by ``Needs Human: yes`` alone (no BLOCKED
+#: state, so no ## Block Record) is recorded with.
+NEEDS_HUMAN_REASON_CODE = "needs_human"
+
+
+def task_ledger_source(key: str) -> str:
+    """The blocked-ledger ``source`` of a task-level block: ``task:<key>``."""
+    return f"task:{key}"
+
+
+def ledger_context_for_status_file(status_file: "Path | str") -> "Optional[tuple[Path, str, str]]":
+    """``(kanban_root, project, key)`` read from a status.md path, or None.
+
+    Pure path arithmetic over the multi-project layout
+    ``<kanban_root>/projects/<project>/tasks/<key>/status.md``; any other
+    path (a single-project install, a file outside a task folder) is None,
+    and the caller stamps nothing. Reading the root from the path rather
+    than the environment keeps a stamp beside the status.md it describes.
+    """
+    path = Path(os.path.abspath(status_file))
+    key_dir = path.parent
+    tasks_dir = key_dir.parent
+    project_dir = tasks_dir.parent
+    projects_dir = project_dir.parent
+    if path.name != "status.md" or tasks_dir.name != "tasks" or projects_dir.name != "projects":
+        return None
+    return projects_dir.parent, project_dir.name, key_dir.name
+
+
+def _ledger_now() -> str:
+    return datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S+00:00")
+
+
+def _warn_ledger_stamp(kind: str, project: str, source: str, exc: BaseException) -> None:
+    """One stderr line for a stamp that genuinely failed (never the no-op)."""
+    detail = " ".join(str(exc).split())
+    try:
+        print(
+            f"[blocked-ledger] WARNING: {kind} for {source} in project {project} was not "
+            f"recorded ({type(exc).__name__}: {detail}); the write it rides beside stands. "
+            f"Check that {project}'s metrics/ directory is writable and its "
+            "blocked-intervals.jsonl parses.",
+            file=sys.stderr,
+        )
+    except Exception:  # noqa: BLE001 - a closed stderr must not fail the caller either
+        pass
+
+
+def _open_ledger_blocks(ledger_path: str, source: str) -> list[dict]:
+    """The still-open blocks of *source*, under whatever version each was opened."""
+    from pgai_agent_kanban.metrics.blocked_ledger import block_intervals
+
+    return [b for b in block_intervals(ledger_path) if b["source"] == source and b["end"] is None]
+
+
+def stamp_ledger_block_start(
+    kanban_root: "Path | str",
+    project: str,
+    source: str,
+    *,
+    reason_code: Optional[str] = None,
+    cause: str = "chain",
+    block_class: str = "any",
+    timestamp: Optional[str] = None,
+) -> bool:
+    """Open a block for *source* on *project*'s blocked ledger, best-effort.
+
+    The block is recorded under the project's ``## Active RC``
+    (``<kanban_root>/projects/<project>/release-state.md``), or under the
+    ledger's no-RC version (``blocked_ledger.NO_RC_VERSION``) when the Active
+    RC is ``none`` or unreadable, with *block_class*, *cause* and
+    *reason_code*. When *source* already has an open block under ANY
+    version, nothing is written: two writers opening the same block (the
+    status writer and a Block Record write) leave one open interval.
+
+    Never raises. The ledger's ``blocked-ledger.no-op`` is silent; any other
+    failure prints one stderr warning. CENSUS CLASS CONVERT
+    (docs/blocking-site-census.md): the write this rides beside has already
+    happened and its outcome never changes.
+
+    Returns:
+        True when a block-start was appended.
+    """
+    from pgai_agent_kanban.cm.read_state_field import read_state_field
+    from pgai_agent_kanban.metrics.blocked_ledger import (
+        ERROR_NO_OP,
+        LedgerError,
+        append_block_start,
+        ledger_path_for_project,
+        version_for_active_rc,
+    )
+
+    try:
+        ledger_path = ledger_path_for_project(str(kanban_root), project)
+        if _open_ledger_blocks(ledger_path, source):
+            return False
+        release_state = Path(kanban_root) / "projects" / project / "release-state.md"
+        try:
+            active_rc = read_state_field(str(release_state), "Active RC")
+        except (OSError, UnicodeDecodeError):
+            active_rc = "none"
+        append_block_start(
+            ledger_path,
+            version_for_active_rc(active_rc),
+            source,
+            timestamp or _ledger_now(),
+            block_class=block_class,
+            cause=cause,
+            reason_code=reason_code,
+        )
+        return True
+    except LedgerError as exc:
+        if exc.error != ERROR_NO_OP:
+            _warn_ledger_stamp("block-start", project, source, exc)
+    except Exception as exc:  # noqa: BLE001 - best-effort stamp, never a gate
+        _warn_ledger_stamp("block-start", project, source, exc)
+    return False
+
+
+def stamp_ledger_block_end(
+    kanban_root: "Path | str",
+    project: str,
+    source: str,
+    *,
+    block_class: str = "any",
+    cause: Optional[str] = None,
+    reason_code: Optional[str] = None,
+    timestamp: Optional[str] = None,
+) -> int:
+    """Close every open block of *source* on *project*'s ledger, best-effort.
+
+    Each block-end names the version its block-start was recorded under
+    (an RC, or the no-RC version), so a block opened before an RC changed
+    still closes. *block_class* is the class of the resolution (``human``
+    when a human cleared it); *cause* and *reason_code* are written when
+    given. No open block is a silent no-op.
+
+    Never raises; same CENSUS CLASS CONVERT contract as
+    :func:`stamp_ledger_block_start`.
+
+    Returns:
+        The number of block-ends appended.
+    """
+    from pgai_agent_kanban.metrics.blocked_ledger import (
+        ERROR_NO_OP,
+        LedgerError,
+        append_block_end,
+        ledger_path_for_project,
+    )
+
+    closed = 0
+    try:
+        ledger_path = ledger_path_for_project(str(kanban_root), project)
+        stamp = timestamp or _ledger_now()
+        for block in _open_ledger_blocks(ledger_path, source):
+            append_block_end(
+                ledger_path,
+                block["version"],
+                source,
+                stamp,
+                block_class=block_class,
+                cause=cause,
+                reason_code=reason_code,
+            )
+            closed += 1
+    except LedgerError as exc:
+        if exc.error != ERROR_NO_OP:
+            _warn_ledger_stamp("block-end", project, source, exc)
+    except Exception as exc:  # noqa: BLE001 - best-effort stamp, never a gate
+        _warn_ledger_stamp("block-end", project, source, exc)
+    return closed
 
 
 def _stamp_blocked_ledger_boundary(
@@ -1066,72 +1591,62 @@ def _stamp_blocked_ledger_boundary(
     old_state: Optional[str],
     new_state: str,
     needs_human_requested: Optional[str],
+    reason_code: Optional[str] = None,
 ) -> None:
-    """Best-effort blocked-interval ledger stamp for a BLOCKED transition.
+    """Best-effort blocked-ledger stamp for one status write of task *key*.
 
-    Opens an interval when THIS call moves the task into BLOCKED carrying
-    ``needs_human_requested == "yes"`` (a BLOCKED transition whose call did
-    not pass ``--needs-human yes`` opens nothing — "carrying Needs Human
-    yes" means this call's flag, not whatever the file already held).
-    Closes the matching interval when the task's PRIOR
-    state was BLOCKED and this call's *new_state* is not — regardless of
-    whether that prior BLOCKED entry itself carried Needs Human yes, since
-    an end with no open start is simply swallowed below as a no-op, exactly
-    like the wake-path HALT adapter's own idempotent shape
-    (wake_blocked_ledger.sh).
+    Opens a block (``task:<key>``, class any, cause chain) when THIS call
+    writes BLOCKED, whatever its ``--needs-human`` value, with *reason_code*
+    (the task's ## Block Record reason_code); or when THIS call passes
+    ``--needs-human yes`` on a non-terminal state, with reason_code
+    ``needs_human``. A task whose block is already open is left as it is.
 
-    Attributed to the project's own Active RC (release-state.md's
-    ``## Active RC``); with Active RC "none" there is no RC to attribute
-    the interval to, so nothing is written — the same rule the wake-path
-    adapter applies.
+    Otherwise closes the task's open block, class any, with the new state
+    (lower case) as reason_code, when THIS call writes DONE or WONT-DO or
+    moves the task out of BLOCKED. A write that opens never closes, so a
+    task leaving BLOCKED with ``--needs-human yes`` stays blocked. A
+    terminal write never opens: a terminal task has no later state to close
+    the block with.
 
-    Never raises. Any failure — no project/key context (a library caller
-    that omitted them), an unresolvable kanban root, an unwritable metrics
-    directory, a duplicate-open or orphaned-close the ledger module itself
-    refuses, or a malformed existing ledger — is swallowed silently.
-    CENSUS CLASS CONVERT (docs/blocking-site-census.md): this call rides
-    beside a status.md write that has, by the time this runs, already
-    succeeded; the ledger stamp must never change that outcome. Mirrors
-    ``pgai_agent_kanban.lib.refusal_ledger.record_refusal``'s own
-    "best-effort, never raises" recording idiom.
+    Attributed through :func:`stamp_ledger_block_start` (the Active RC, or
+    the no-RC version). Skipped when *project* or *key* is missing (a
+    library caller that omits them) or the kanban root cannot be resolved.
+    Never raises: CENSUS CLASS CONVERT (docs/blocking-site-census.md) --
+    status.md has already been written by the time this runs.
 
     Args:
-        project: Project name (``None`` when the caller has no project
-            context — e.g. an existing library caller that predates this
-            parameter).
-        key: Task ID (the ledger's ``source`` becomes ``task:<key>``).
-        old_state: The task's ``## State`` value BEFORE this write, or
-            ``None`` when absent.
-        new_state: The canonical ``## State`` value THIS call is writing.
-        needs_human_requested: The canonical ``--needs-human`` value THIS
-            call passed (``"yes"``/``"no"``), or ``None`` when the flag was
-            omitted from this call.
+        project: Project name, or ``None``.
+        key: Task ID, or ``None``.
+        old_state: The task's ``## State`` value BEFORE this write.
+        new_state: The canonical ``## State`` value THIS call wrote.
+        needs_human_requested: THIS call's canonical ``--needs-human``
+            value, or ``None`` when the flag was omitted.
+        reason_code: The reason_code a BLOCKED write opens with.
     """
     if not project or not key:
         return
 
-    opening = new_state == "BLOCKED" and needs_human_requested == "yes"
-    closing = (old_state or "").strip().upper() == "BLOCKED" and new_state != "BLOCKED"
+    prior = (old_state or "").strip().upper()
+    opening = new_state == "BLOCKED" or (
+        needs_human_requested == "yes" and new_state not in TERMINAL_STATES
+    )
+    closing = not opening and (new_state in TERMINAL_STATES or prior == "BLOCKED")
     if not opening and not closing:
         return
 
-    try:
-        ctx = OpsContext.from_env()
-        active_rc = read_state_field(str(ctx.release_state_path(project)), "Active RC")
-        if active_rc == "none":
-            return
+    from pgai_agent_kanban.ops.context import OpsContext
 
-        ledger_path = ledger_path_for_project(str(ctx.kanban_root), project)
-        timestamp = datetime.datetime.now(datetime.timezone.utc).strftime(
-            "%Y-%m-%dT%H:%M:%S+00:00"
-        )
-        source = f"task:{key}"
-        if opening:
-            append_block_start(ledger_path, active_rc, source, timestamp)
-        else:
-            append_block_end(ledger_path, active_rc, source, timestamp)
-    except Exception:  # noqa: BLE001 - best-effort stamp, never a gate
-        pass
+    try:
+        kanban_root = OpsContext.from_env().kanban_root
+    except Exception:  # noqa: BLE001 - no resolvable root: nothing to stamp
+        return
+    source = task_ledger_source(key)
+    if opening:
+        if new_state != "BLOCKED":
+            reason_code = NEEDS_HUMAN_REASON_CODE
+        stamp_ledger_block_start(kanban_root, project, source, reason_code=reason_code)
+    else:
+        stamp_ledger_block_end(kanban_root, project, source, reason_code=new_state.lower())
 
 
 # ---------------------------------------------------------------------------
@@ -1151,6 +1666,47 @@ DEFAULT_AGENT_REASON_CODE = "agent_unclassified"
 
 _EXAMPLE_PROJECT = "pgai-agent-kanban"
 _EXAMPLE_KEY = "CODER-20260101-001-example-task"
+
+
+#: The status.md template, relative to the kanban root it is installed under.
+_STATUS_TEMPLATE = Path("templates") / "task" / "task-status" / "status.md"
+
+
+def _remedy_kanban_root() -> Path:
+    """The kanban root a refusal's remedy names its paths under.
+
+    The root the environment resolves; with no root in the environment, the
+    tree this module ships in (the kanban root of an install).
+    """
+    from pgai_agent_kanban.ops.context import OpsContext
+
+    try:
+        return OpsContext.from_env().kanban_root
+    except RuntimeError:
+        return Path(__file__).resolve().parents[1]
+
+
+def _installed_status_template() -> Path:
+    """The status.md template installed under the remedy's kanban root.
+
+    ``<kanban root>/templates/task/task-status/status.md`` -- the copy an
+    installed kanban carries, so the path a remedy names exists on an
+    install.
+    """
+    return _remedy_kanban_root() / _STATUS_TEMPLATE
+
+
+def _task_status_command(*args: str) -> str:
+    """The ``task-status.sh`` command a refusal's remedy names, runnable as printed.
+
+    Names the script installed under the remedy's kanban root
+    (``<kanban root>/scripts/task-status.sh``, see
+    :func:`_remedy_kanban_root`). Every part is shell-quoted, so the command
+    runs from any directory, a worktree included.
+    """
+    from pgai_agent_kanban.overwatch.halt_provenance import installed_script_command
+
+    return installed_script_command(_remedy_kanban_root(), "task-status.sh", *args)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -1234,9 +1790,9 @@ def validate_block_inputs(
     raw_args = [value for value in (action_args or []) if value is not None]
     if reason_code is None and not raw_args:
         return None, []
-    base = (
-        f"bash team/scripts/task-status.sh --project {(project or _EXAMPLE_PROJECT).strip()} "
-        f"--key {(key or _EXAMPLE_KEY).strip()} --state BLOCKED"
+    base = _task_status_command(
+        "--project", (project or _EXAMPLE_PROJECT).strip(), "--key", (key or _EXAMPLE_KEY).strip(),
+        "--state", "BLOCKED",
     )
     example_args = example_action_args()
     if state != "BLOCKED":
@@ -1463,8 +2019,24 @@ def write_task_status(
         old_state=old_state,
         new_state=canonical_state,
         needs_human_requested=canonical_needs_human,
+        reason_code=_ledger_reason_code(block_step.result, old_text, code),
     )
     return block_step.result
+
+
+def _ledger_reason_code(result: StatusWriteResult, old_text: str, code: Optional[str]) -> str:
+    """The reason_code a BLOCKED write's ledger block-start carries: the
+    ## Block Record's own (the one written, or the one kept), else the
+    code this call named, else ``agent_unclassified``."""
+    record = result.block_record
+    if record is None and result.block_record_kept:
+        try:
+            from pgai_agent_kanban.overwatch.block_record import read_block_record
+
+            record = read_block_record(old_text)
+        except Exception:  # noqa: BLE001 - a malformed kept record still opens a block
+            record = None
+    return getattr(record, "reason_code", None) or code or DEFAULT_AGENT_REASON_CODE
 
 
 # ---------------------------------------------------------------------------
@@ -1560,7 +2132,7 @@ def _parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
         metavar="CODE",
         help=(
             "With --state BLOCKED only: why the task blocked, from the closed "
-            "agent list (" + "|".join(AGENT_REASON_CODES) + "). Recorded in "
+            "agent list (" + ", ".join(AGENT_REASON_CODES) + "). Recorded in "
             "the ## Block Record with owner_role taken from the task's ## Role. "
             "A BLOCKED write without it records " + DEFAULT_AGENT_REASON_CODE
             + " (a task already BLOCKED keeps its existing record). An unknown "
@@ -1579,7 +2151,7 @@ def _parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
             "without it: typed key=value pairs, never prose. verb= names an "
             "allowlisted verb (" + "|".join(ACTION_VERBS) + ") and the other "
             "keys are exactly that verb's arguments, "
-            "e.g. verb=restamp-fixed-in project=pgai-agent-kanban version=v2.28.0 bugs=BUG-0412,BUG-0413. "
+            "e.g. verb=restamp-fixed-in project=pgai-agent-kanban version=vX.Y.Z bugs=BUG-NNNN[,BUG-NNNN]. "
             "Stored in the record's evidence line. An unknown key or verb, a "
             "missing argument or a malformed value is refused and nothing is "
             "written."
@@ -1655,15 +2227,19 @@ def _subcommand_parser() -> argparse.ArgumentParser:
         ),
     )
     _target_args(read_p)
-    read_p.add_argument("--section", default=None, metavar="HEADING",
-                        help="Heading name without '## ' (default: State).")
+    read_p.add_argument("--section", action="append", default=None, metavar="HEADING",
+                        help=(
+                            "Heading name without '## ' (default: State). Repeat it "
+                            "with --value to read several headings in one call."
+                        ))
     read_p.add_argument(
         "--raw", action="store_true",
         help=(
             "Print the section body exactly as written, for ## State too (no "
             "first-line, bold or case handling), and exit 3 printing nothing "
             "when the heading is absent. An unreadable file prints one plain "
-            "line to stderr and exits 1."
+            "line to stderr and exits 1; a byte that is not valid UTF-8 reads "
+            "as U+FFFD."
         ),
     )
     read_p.add_argument(
@@ -1678,6 +2254,39 @@ def _subcommand_parser() -> argparse.ArgumentParser:
     )
     read_p.add_argument("--default", default="", metavar="TEXT",
                         help="Value --field prints when it finds none (default: empty).")
+    read_p.add_argument(
+        "--value", action="store_true",
+        help=(
+            "Print the first value line of each --section, one line per "
+            "heading in the order named: blank, '#' comment and HTML comment "
+            "lines are skipped and a '---' rule ends the walk (an empty line "
+            "when there is no value). Exit 3 after printing every line when "
+            "any heading is absent. An unreadable file prints one plain line "
+            "to stderr and exits 1; a byte that is not valid UTF-8 reads as "
+            "U+FFFD."
+        ),
+    )
+    reading = read_p.add_argument_group(
+        "section readings",
+        "How --raw and --value find a section; each defaults to the status.md reading.",
+    )
+    reading.add_argument("--exact-heading", action="store_true",
+                         help=(
+                             "The heading line must read exactly '## HEADING' once stripped "
+                             "(letter case counts, no inline value); any line starting '##' "
+                             "after its indentation ends the section."
+                         ))
+    reading.add_argument("--free-spacing", action="store_true",
+                         help=(
+                             "'##' and each word of HEADING may be separated by any run of "
+                             "blanks, none included; letter case is ignored; no inline value."
+                         ))
+    reading.add_argument("--comments", action="store_true",
+                         help="A '##' line inside an HTML comment block neither starts nor ends a section.")
+    reading.add_argument("--end-at-subheading", action="store_true",
+                         help="A '###' (or deeper) heading ends the section too.")
+    reading.add_argument("--end-at-rule", action="store_true",
+                         help="A '---' horizontal rule starting a line ends the section too.")
 
     set_p = sub.add_parser(
         "set-section",
@@ -1776,7 +2385,7 @@ def _resolve_subcommand_target(args: argparse.Namespace, *, require_file: bool =
         _refuse(
             "task-status.conflicting-target",
             "give either STATUS_FILE or --project/--key, not both",
-            f"bash team/scripts/task-status.sh {args.command} {args.status_file}",
+            _task_status_command(args.command, args.status_file),
         )
     if args.status_file is not None:
         status_file = Path(args.status_file)
@@ -1787,7 +2396,7 @@ def _resolve_subcommand_target(args: argparse.Namespace, *, require_file: bool =
         _refuse(
             "task-status.missing-target",
             f"'{args.command}' needs a STATUS_FILE path or both --project and --key",
-            f"bash team/scripts/task-status.sh {args.command} {_EXAMPLE_TARGET}{example_tail}",
+            f"{_task_status_command(args.command, *_EXAMPLE_TARGET.split())}{example_tail}",
         )
     if require_file and not status_file.is_file():
         _refuse(
@@ -1798,7 +2407,7 @@ def _resolve_subcommand_target(args: argparse.Namespace, *, require_file: bool =
     return status_file
 
 
-def _read_text_plain(path: Path) -> Optional[str]:
+def _read_text_plain(path: Path, errors: str = "strict") -> Optional[str]:
     """Return *path*'s text, or print one plain stderr line and return None.
 
     The wake-facing primitives (``read --raw``, ``render``) report an
@@ -1806,23 +2415,73 @@ def _read_text_plain(path: Path) -> Optional[str]:
     they are building blocks whose callers own the refusal (the same stance
     as ``team/scripts/lib/atomic_write.sh``), and the emitter would also
     append to the refusal ledger.
+
+    *errors* is the UTF-8 decoding policy. The default ``"strict"`` refuses
+    a file holding a byte that is not valid UTF-8, so a path that writes
+    the text back (``render``) never silently replaces one. The read-only
+    ``read --raw`` / ``--value`` pass ``"replace"``: such a byte reads as
+    U+FFFD and every section of the file stays readable.
     """
     try:
-        return path.read_text(encoding="utf-8")
+        return path.read_text(encoding="utf-8", errors=errors)
     except (OSError, UnicodeDecodeError) as exc:
         print(f"cannot read {path}: {exc}", file=sys.stderr)
         return None
 
 
+_READING_FLAGS: tuple[str, ...] = (
+    "exact_heading", "free_spacing", "comments", "end_at_subheading", "end_at_rule",
+)
+
+
+def _reading(args: argparse.Namespace) -> dict[str, bool]:
+    """The read_section keywords the section-reading flags select."""
+    return {name: True for name in _READING_FLAGS if getattr(args, name)}
+
+
+def _one_section(args: argparse.Namespace) -> Optional[str]:
+    """The single --section a mode reads, stripped, or None when not given."""
+    return args.section[0].strip() if args.section else None
+
+
+def _read_mode_conflict(args: argparse.Namespace) -> Optional[str]:
+    """Return a one-line usage error for a flag combination ``read`` refuses."""
+    if args.value and (args.raw or args.field is not None):
+        return "read: --value cannot be combined with --raw or --field"
+    if args.section and len(args.section) > 1 and not args.value:
+        return "read: several --section headings need --value"
+    if _reading(args) and not (args.raw or args.value):
+        return "read: the section-reading flags apply to --raw and --value only"
+    if args.exact_heading and args.free_spacing:
+        return "read: --exact-heading and --free-spacing cannot be combined"
+    if args.value and not args.section:
+        return "read: --value needs at least one --section"
+    return None
+
+
 def _run_read_raw(args: argparse.Namespace) -> int:
-    text = _read_text_plain(_resolve_subcommand_target(args, require_file=False))
+    text = _read_text_plain(_resolve_subcommand_target(args, require_file=False), errors="replace")
     if text is None:
         return 1
-    body = read_section(text, (args.section or "State").strip())
+    body = read_section(text, _one_section(args) or "State", **_reading(args))
     if body is None:
         return EXIT_SECTION_ABSENT
     print(body)
     return 0
+
+
+def _run_read_value(args: argparse.Namespace) -> int:
+    """Print each --section's first value line (``read --value``)."""
+    text = _read_text_plain(_resolve_subcommand_target(args, require_file=False), errors="replace")
+    if text is None:
+        return 1
+    reading = _reading(args)
+    absent = False
+    for heading in args.section:
+        body = read_section(text, heading.strip(), **reading)
+        absent = absent or body is None
+        print(first_value_line(body or ""))
+    return EXIT_SECTION_ABSENT if absent else 0
 
 
 def _run_render(args: argparse.Namespace) -> int:
@@ -1920,7 +2579,8 @@ def _run_read_field(args: argparse.Namespace) -> int:
     if args.raw:
         print("read: --field and --raw cannot be combined", file=sys.stderr)
         return 1
-    if args.section is None or not args.section.strip():
+    heading = _one_section(args)
+    if not heading:
         print("read: --field needs --section naming the record heading", file=sys.stderr)
         return 1
     status_file = _resolve_subcommand_target(args, require_file=False)
@@ -1929,17 +2589,23 @@ def _run_read_field(args: argparse.Namespace) -> int:
         text = _read_text_plain(status_file)
         if text is None:
             return 1
-    print(record_field(text, args.section.strip(), args.field, args.default))
+    print(record_field(text, heading, args.field, args.default))
     return 0
 
 
 def _run_read(args: argparse.Namespace) -> int:
+    conflict = _read_mode_conflict(args)
+    if conflict is not None:
+        print(conflict, file=sys.stderr)
+        return 1
     if args.field is not None:
         return _run_read_field(args)
+    if args.value:
+        return _run_read_value(args)
     if args.raw:
         return _run_read_raw(args)
     status_file = _resolve_subcommand_target(args)
-    heading = (args.section or "State").strip()
+    heading = _one_section(args) or "State"
     if heading.lower() == "state":
         print(read_state(status_file))
         return 0
@@ -1960,15 +2626,17 @@ def _run_set_section(args: argparse.Namespace) -> int:
         _refuse(
             "task-status.missing-section-arg",
             "'set-section' needs --section naming the heading to write",
-            f"bash team/scripts/task-status.sh set-section {_EXAMPLE_TARGET} "
-            "--section Artifacts --body none",
+            _task_status_command(
+                "set-section", *_EXAMPLE_TARGET.split(), "--section", "Artifacts", "--body", "none"
+            ),
         )
     if args.body is None:
         _refuse(
             "task-status.missing-body",
             "'set-section' needs --body with the new section text (it may be empty)",
-            f"bash team/scripts/task-status.sh set-section {_EXAMPLE_TARGET} "
-            f"--section '{args.section.strip()}' --body none",
+            _task_status_command(
+                "set-section", *_EXAMPLE_TARGET.split(), "--section", args.section.strip(), "--body", "none"
+            ),
         )
     heading = args.section.strip()
     body = args.body
@@ -1979,7 +2647,7 @@ def _run_set_section(args: argparse.Namespace) -> int:
             "task-status.state-via-set-section",
             "## State is written with --state, which validates the value and "
             "records the blocked-interval ledger; set-section does not",
-            f"bash team/scripts/task-status.sh --project {project} --key {key} --state DONE",
+            _task_status_command("--project", project, "--key", key, "--state", "DONE"),
         )
     if heading.lower() == "needs human":
         body = validate_needs_human(body)
@@ -2078,7 +2746,7 @@ def _print_block_record_result(result: StatusWriteResult, status_file: Path) -> 
     if result.warning:
         print(
             f"warning: {result.warning}; check the role with: "
-            f"bash team/scripts/task-status.sh read {status_file} --section Role",
+            f"{_task_status_command('read', str(status_file), '--section', 'Role')}",
             file=sys.stderr,
         )
 

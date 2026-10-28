@@ -39,6 +39,12 @@ Two layers:
 the matrix, extracts facts, and matches in one call — the shape OVERWATCH's
 resolution stage is expected to use.
 
+The same file's ``triggers`` list holds one row per CM trigger number:
+which cause checks clear that trigger's chain HALT (``clears_on``) and
+whether the stage runs the fact matrix or waits while none passes
+(``while_open``). ``load_trigger_rows()`` loads and validates it; the
+checks themselves are pgai_agent_kanban.overwatch.halt_clearing.
+
 A third, independent reader lives here too: ``resolve_overwatch_resolve()``
 is the Python counterpart of ``pp_overwatch_resolve()``
 (team/scripts/lib/project_paths.sh) — the master switch gating whether
@@ -53,11 +59,11 @@ absence resolves to True, the shipped default.
 
 ``resolve_ship_posture()`` is the Python counterpart of ``pp_ship_posture()``
 — the project's ship posture (``"matrix"`` or ``"always"``) through the
-same project.cfg-then-kanban.cfg chain, with a remote-lane guard that keeps
-a ``push_to_remote`` lane on ``"matrix"`` unless
-``ship_posture_confirm_remote = true``. It never raises: an unrecognized
-value and an unconfirmed remote lane both resolve to ``"matrix"`` with one
-warning line.
+same project.cfg-then-kanban.cfg chain, ``"always"`` when neither sets it,
+with a remote-lane guard that keeps a ``push_to_remote`` lane on
+``"matrix"`` unless ``ship_posture_confirm_remote = true``. It never
+raises: an unrecognized value and a cfg-set ``always`` on an unconfirmed
+remote lane both resolve to ``"matrix"`` with one warning line.
 
 Usage (CLI):
     python3 resolution_matrix.py resolve <evidence.json> [--matrix <path>] [--kanban-root <path>]
@@ -85,7 +91,7 @@ import re
 import subprocess
 import sys
 from dataclasses import asdict, dataclass, fields
-from typing import Optional
+from typing import NoReturn, Optional
 
 import yaml
 
@@ -117,6 +123,16 @@ HALT_HARD = "HALT-hard"
 
 # The shipped default matrix's sole resolution.
 CANCEL_AND_REBUNDLE = "CANCEL-AND-REBUNDLE"
+
+# The trigger class of a chain HALT CM's release wrote (the HALT header
+# names CM as its creator).
+TRIGGER_CLASS_SHIP_POLICY_HALT = "ship-policy-halt"
+
+# The trigger class the release passes for a squash into main that
+# conflicted (trigger 5). No HALT carries it: the release asks the matrix
+# whether the RC may be cancelled and rebundled before it writes any stop
+# (pgai_agent_kanban.overwatch.resolution_stage.resolve_squash_conflict).
+TRIGGER_CLASS_SQUASH_CONFLICT = "squash-conflict"
 
 # Exact key set every matrix row must declare — six facts plus the
 # prescribed resolution. Extra or missing keys fail matrix loading loudly
@@ -555,6 +571,143 @@ def load_matrix(
 
 
 # ---------------------------------------------------------------------------
+# CM trigger rows: what the resolution stage does with a chain HALT that CM
+# wrote for one numbered trigger (team/roles/CM.md, "The triggers", and
+# the trigger-N error keys cm/release.sh emits)
+# ---------------------------------------------------------------------------
+
+#: The HALTed RC was cancelled after the HALT was written, Active RC reads
+#: none, and none of its cargo is still marked running (it was rebundled).
+CLEAR_RC_CANCELLED = "rc-cancelled"
+#: The task the HALT is about was reset: it reads BACKLOG or WAITING again.
+CLEAR_TASK_RESET = "task-reset"
+#: Trigger 9 re-checked green: the RC's release notes now carry a Status
+#: heading the release stamp can apply to.
+CLEAR_NOTES_STATUS_GREEN = "notes-status-green"
+
+#: The cause checks a trigger row's ``clears_on`` may name.
+CLEAR_CHECKS = frozenset({CLEAR_RC_CANCELLED, CLEAR_TASK_RESET, CLEAR_NOTES_STATUS_GREEN})
+
+#: While the cause stands, consult the fact matrix and the three lanes, as
+#: for any ship-policy HALT.
+WHILE_OPEN_MATRIX = "matrix"
+#: While the cause stands, do nothing: the HALT waits for the operator.
+WHILE_OPEN_WAIT = "wait"
+
+WHILE_OPEN_VALUES = frozenset({WHILE_OPEN_MATRIX, WHILE_OPEN_WAIT})
+
+_TRIGGER_ROW_KEYS = frozenset({"trigger", "name", "clears_on", "while_open"})
+_TRIGGER_VALUE_RE = re.compile(r"^\d+[a-z]?$")
+
+
+@dataclass(frozen=True)
+class TriggerRow:
+    """One CM trigger's row: when its chain HALT may be cleared, and what
+    the stage does while it may not.
+
+    Attributes:
+        trigger:    The CM trigger number, lowercase letter suffix kept
+                    (``"5b"``), as ``halt_provenance.trigger_number`` reads it.
+        name:       A short label for narration (``"squash-conflict"``).
+        clears_on:  Cause checks (CLEAR_CHECKS); the HALT is cleared when any
+                    one of them passes. Empty: never cleared by the stage.
+        while_open: WHILE_OPEN_MATRIX or WHILE_OPEN_WAIT.
+    """
+
+    trigger: str
+    name: str
+    clears_on: tuple
+    while_open: str
+
+
+def _refuse_trigger_row(path: str, index: int, problem: str) -> NoReturn:
+    """Raise MatrixError carrying the dual-channel contract for a bad trigger row."""
+    from pgai_agent_kanban.lib.error_contract import format_error_contract
+
+    contract = format_error_contract(
+        "resolution_matrix.bad_trigger_row",
+        f"Trigger row {index} in resolution matrix '{path}' is not usable: {problem}. "
+        f"Each row needs exactly {', '.join(sorted(_TRIGGER_ROW_KEYS))}; trigger is a CM trigger "
+        f"number such as 5 or 5b, clears_on a list drawn from {', '.join(sorted(CLEAR_CHECKS))}, "
+        f"while_open one of {', '.join(sorted(WHILE_OPEN_VALUES))}. No chain HALT is cleared "
+        "until the table loads.",
+        f"diff {_default_matrix_path()} {path}",
+    )
+    # CONVERT: a trigger table that does not load only means the resolution
+    # stage clears no CM chain HALT on this call; it declines and narrates,
+    # every HALT stays as it is, and nothing new stops.
+    # CENSUS-ANCHOR: resolution-matrix-trigger-row-01
+    raise MatrixError(contract)
+
+
+def _validate_trigger_row(raw: object, index: int, path: str) -> TriggerRow:
+    if not isinstance(raw, dict):
+        _refuse_trigger_row(path, index, f"expected a mapping, got {type(raw).__name__}")
+    keys = set(raw.keys())
+    if keys != _TRIGGER_ROW_KEYS:
+        missing = sorted(_TRIGGER_ROW_KEYS - keys)
+        extra = sorted(str(k) for k in keys - _TRIGGER_ROW_KEYS)
+        _refuse_trigger_row(path, index, f"missing key(s) {missing or 'none'}, unrecognized key(s) {extra or 'none'}")
+    trigger = str(raw["trigger"]).strip().lower()
+    if not _TRIGGER_VALUE_RE.match(trigger):
+        _refuse_trigger_row(path, index, f"trigger {raw['trigger']!r} is not a CM trigger number")
+    name = raw["name"]
+    if not isinstance(name, str) or not name.strip():
+        _refuse_trigger_row(path, index, f"name {name!r} is not a non-empty string")
+    clears_on = raw["clears_on"]
+    if clears_on is None:
+        clears_on = []
+    if not isinstance(clears_on, list) or any(c not in CLEAR_CHECKS for c in clears_on):
+        _refuse_trigger_row(path, index, f"clears_on {raw['clears_on']!r} names a check outside the accepted set")
+    while_open = raw["while_open"]
+    if while_open not in WHILE_OPEN_VALUES:
+        _refuse_trigger_row(path, index, f"while_open {while_open!r} is not an accepted value")
+    return TriggerRow(trigger=trigger, name=name.strip(), clears_on=tuple(clears_on), while_open=while_open)
+
+
+def load_trigger_rows(
+    matrix_path: Optional[str] = None,
+    kanban_root: Optional[str] = None,
+) -> dict:
+    """Load the matrix file's ``triggers`` list, keyed by trigger number.
+
+    The file is found exactly as :func:`load_matrix` finds it. A file with
+    no ``triggers`` key yields ``{}``: every CM trigger HALT then takes the
+    fact matrix path it took before trigger rows existed, and none is
+    cleared. A file that cannot be read or parsed raises MatrixError as
+    load_matrix does.
+
+    Raises:
+        MatrixError: a row that is not a mapping, has a missing or extra
+            key, an unknown check or while_open value, or repeats a trigger
+            number. The message carries the dual-channel contract.
+    """
+    path = _resolve_matrix_path(matrix_path, kanban_root)
+    try:
+        text = open(path, "r", encoding="utf-8").read()
+    except OSError as exc:
+        raise MatrixError(f"Cannot read resolution matrix '{path}': {exc}") from exc
+    try:
+        data = yaml.safe_load(text)
+    except yaml.YAMLError as exc:
+        raise MatrixError(f"YAML parse error in resolution matrix '{path}': {exc}") from exc
+    if not isinstance(data, dict):
+        raise MatrixError(f"Resolution matrix '{path}' must be a YAML mapping at top level")
+    raw_rows = data.get("triggers")
+    if raw_rows is None:
+        return {}
+    if not isinstance(raw_rows, list):
+        _refuse_trigger_row(path, 0, f"'triggers' must be a list, got {type(raw_rows).__name__}")
+    rows: dict = {}
+    for index, raw in enumerate(raw_rows):
+        row = _validate_trigger_row(raw, index, path)
+        if row.trigger in rows:
+            _refuse_trigger_row(path, index, f"trigger {row.trigger} already has a row")
+        rows[row.trigger] = row
+    return rows
+
+
+# ---------------------------------------------------------------------------
 # Matching (the pure, side-effect-free core)
 # ---------------------------------------------------------------------------
 
@@ -888,61 +1041,123 @@ def findings_all_filed(findings: list) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# Ceiling resolution (Python counterpart of pp_max_rc_retries)
+# Tier walk: project.cfg > kanban.cfg through the shared resolver
 # ---------------------------------------------------------------------------
 
 
-def _read_ini_int(cfg_path: str, section: str, key: str) -> Optional[int]:
-    """Read an integer value from an INI-format config file's [section] key.
+def _cfg_key_chain(
+    kanban_root: str,
+    project_root: Optional[str],
+    section: str,
+    key: str,
+    *,
+    legacy: bool = True,
+) -> tuple:
+    """Return ``(raw, source)`` for ``[section] key``, the project tier first.
 
-    Returns None when the file, section, or key is absent, or when the
-    value is present but empty. Raises CeilingConfigError when the value is
-    present but not a valid non-negative integer.
+    The walk is the shared resolver,
+    :func:`pgai_agent_kanban.lib.project_cfg.resolve_tiered_cfg_value` (bash
+    twin ``pp_resolve_tiered_cfg_value``): the project's own config under
+    *project_root* (``project.cfg``, or a legacy ``PROJECT.cfg`` unless
+    *legacy* is False), then ``<kanban_root>/kanban.cfg``, the first
+    non-blank value winning, both read by the bash ``read_ini`` rules.
+    *project_root* ``None`` skips the project tier.
+
+    ``source`` is the winning file's path built with :func:`os.path.join`
+    from the roots as given -- the form every message in this module
+    names. ``("", "")`` when neither file carries a non-blank value. No
+    validation here: each resolver validates the winning value itself.
+    """
+    found = project_cfg.resolve_tiered_cfg_value(
+        kanban_root, project_root, section, key, legacy=legacy
+    )
+    if found.tier == project_cfg.TIER_PROJECT_CFG:
+        return found.value, os.path.join(project_root, os.path.basename(found.source))
+    if found.tier == project_cfg.TIER_KANBAN_CFG:
+        return found.value, os.path.join(kanban_root, "kanban.cfg")
+    return "", ""
+
+
+def _ini_parse_error(cfg_path: str) -> Optional[Exception]:
+    """Return the :func:`ini.load` error for *cfg_path*, or None when it parses.
+
+    None as well when the file is absent. The tier walk reads line by line
+    and answers even from a file ``configparser`` refuses (a duplicate key,
+    text before the first section); this check lets each resolver below keep
+    its own verdict on such a file -- ``resolve_max_rc_retries`` refuses it,
+    the two switches read it as absent.
     """
     if not cfg_path or not os.path.isfile(cfg_path):
         return None
     try:
-        parser = ini.load(cfg_path)
+        ini.load(cfg_path)
     except ini.IniError as exc:
-        raise CeilingConfigError(f"Cannot parse config file '{cfg_path}': {exc}") from exc
-    if not parser.has_option(section, key):
-        return None
-    raw = parser.get(section, key).strip()
-    if not raw:
-        return None
-    if not raw.isdigit():
-        raise CeilingConfigError(
-            f"resolution_matrix: invalid value '{raw}' in {cfg_path} "
-            f"[{section}] {key} (expected non-negative integer)"
-        )
-    return int(raw)
+        return exc
+    return None
+
+
+def _switch_key_chain(project_name: str, kanban_root: str, section: str, key: str) -> tuple:
+    """Return ``(raw, source)`` for an autonomy switch's ``[section] key``.
+
+    The tier walk over ``<kanban_root>/projects/<project_name>/project.cfg``
+    (never a legacy ``PROJECT.cfg``) and kanban.cfg, where a file that
+    cannot be parsed reads as absent: a switch falls back to its own
+    documented default rather than erroring on an unreadable file.
+    ``("", "")`` when no readable file carries a non-blank value.
+    """
+    project_root: Optional[str] = os.path.join(kanban_root, "projects", project_name)
+    kanban_cfg = os.path.join(kanban_root, "kanban.cfg")
+    if _ini_parse_error(os.path.join(project_root, "project.cfg")) is not None:
+        project_root = None
+    raw, source = _cfg_key_chain(kanban_root, project_root, section, key, legacy=False)
+    if source == kanban_cfg and _ini_parse_error(kanban_cfg) is not None:
+        return "", ""
+    return raw, source
+
+
+# ---------------------------------------------------------------------------
+# Ceiling resolution (Python counterpart of pp_max_rc_retries)
+# ---------------------------------------------------------------------------
 
 
 def resolve_max_rc_retries(project_name: str, kanban_root: str) -> int:
     """Python counterpart of pp_max_rc_retries() (team/scripts/lib/project_paths.sh).
 
-    Resolution order (first non-empty source wins):
+    Resolution order (first non-empty source wins), walked by the shared
+    resolver (``_cfg_key_chain``):
       1. <kanban_root>/projects/<project_name>/project.cfg [release] max_rc_retries
       2. <kanban_root>/kanban.cfg [release] max_rc_retries (shipped default: 3)
 
     Raises CeilingConfigError, naming both file paths checked, when the key
     is absent from BOTH sources or when either source's value is not a
-    valid non-negative integer. Never silently substitutes a hardcoded
+    valid non-negative integer, and naming the file when a source the walk
+    consulted cannot be parsed. Never silently substitutes a hardcoded
     default — see this module's docstring above.
     """
-    project_cfg = os.path.join(kanban_root, "projects", project_name, "project.cfg")
-    project_val = _read_ini_int(project_cfg, "release", "max_rc_retries")
-    if project_val is not None:
-        return project_val
-
+    project_root = os.path.join(kanban_root, "projects", project_name)
+    project_cfg_path = os.path.join(project_root, "project.cfg")
     kanban_cfg = os.path.join(kanban_root, "kanban.cfg")
-    kanban_val = _read_ini_int(kanban_cfg, "release", "max_rc_retries")
-    if kanban_val is not None:
-        return kanban_val
+
+    raw, source = _cfg_key_chain(
+        kanban_root, project_root, "release", "max_rc_retries", legacy=False
+    )
+    consulted = (project_cfg_path,) if source == project_cfg_path else (project_cfg_path, kanban_cfg)
+    for cfg_path in consulted:
+        exc = _ini_parse_error(cfg_path)
+        if exc is not None:
+            raise CeilingConfigError(f"Cannot parse config file '{cfg_path}': {exc}") from exc
+
+    if raw:
+        if not raw.isdigit():
+            raise CeilingConfigError(
+                f"resolution_matrix: invalid value '{raw}' in {source} "
+                f"[release] max_rc_retries (expected non-negative integer)"
+            )
+        return int(raw)
 
     raise CeilingConfigError(
         f"resolution_matrix: max_rc_retries is required but absent for project "
-        f"'{project_name}'. Checked {project_cfg} [release] max_rc_retries and "
+        f"'{project_name}'. Checked {project_cfg_path} [release] max_rc_retries and "
         f"{kanban_cfg} [release] max_rc_retries — set one of them."
     )
 
@@ -950,29 +1165,6 @@ def resolve_max_rc_retries(project_name: str, kanban_root: str) -> int:
 # ---------------------------------------------------------------------------
 # Autonomy-gate resolution (Python counterpart of pp_overwatch_resolve)
 # ---------------------------------------------------------------------------
-
-
-def _read_ini_str(cfg_path: str, section: str, key: str) -> Optional[str]:
-    """Read a raw string value from an INI-format config file's [section] key.
-
-    Returns None when the file, section, or key is absent, when the file
-    cannot be parsed, or when the value is present but blank — every one
-    of those collapses to "nothing found here", matching read_ini's own
-    blank-on-miss behavior in team/scripts/lib/ini_parser.sh. Unlike
-    _read_ini_int, this never raises: both switches read through it
-    (overwatch_resolve and block_triage) resolve "absent/unreadable" to
-    their own documented default, never to an error.
-    """
-    if not cfg_path or not os.path.isfile(cfg_path):
-        return None
-    try:
-        parser = ini.load(cfg_path)
-    except ini.IniError:
-        return None
-    if not parser.has_option(section, key):
-        return None
-    raw = parser.get(section, key).strip()
-    return raw or None
 
 
 def resolve_overwatch_resolve(project_name: str, kanban_root: str) -> bool:
@@ -993,16 +1185,9 @@ def resolve_overwatch_resolve(project_name: str, kanban_root: str) -> bool:
     project, and the file it came from, when a present value is neither
     'true' nor 'false'. Never silently guessed into either boolean.
     """
-    project_cfg = os.path.join(kanban_root, "projects", project_name, "project.cfg")
-    kanban_cfg = os.path.join(kanban_root, "kanban.cfg")
+    raw, source = _switch_key_chain(project_name, kanban_root, "release", "overwatch_resolve")
 
-    raw = _read_ini_str(project_cfg, "release", "overwatch_resolve")
-    source = project_cfg
-    if raw is None:
-        raw = _read_ini_str(kanban_cfg, "release", "overwatch_resolve")
-        source = kanban_cfg
-
-    if raw is None:
+    if not raw:
         return False
     if raw == "true":
         return True
@@ -1042,16 +1227,9 @@ def resolve_block_triage(project_name: str, kanban_root: str) -> bool:
     project, and the file it came from, when a present value is neither
     'true' nor 'false'. Never silently guessed into either boolean.
     """
-    project_cfg = os.path.join(kanban_root, "projects", project_name, "project.cfg")
-    kanban_cfg = os.path.join(kanban_root, "kanban.cfg")
+    raw, source = _switch_key_chain(project_name, kanban_root, "overwatch", "block_triage")
 
-    raw = _read_ini_str(project_cfg, "overwatch", "block_triage")
-    source = project_cfg
-    if raw is None:
-        raw = _read_ini_str(kanban_cfg, "overwatch", "block_triage")
-        source = kanban_cfg
-
-    if raw is None or raw == "true":
+    if not raw or raw == "true":
         return True
     if raw == "false":
         return False
@@ -1066,29 +1244,6 @@ def resolve_block_triage(project_name: str, kanban_root: str) -> bool:
 # ---------------------------------------------------------------------------
 # Ship posture (Python counterpart of pp_ship_posture)
 # ---------------------------------------------------------------------------
-
-
-def _release_key_chain(
-    project_cfg_path: Optional[str], kanban_cfg: str, key: str
-) -> tuple:
-    """Return ``(raw, source)`` for ``[release] <key>`` by the bash chain.
-
-    The Python twin of ``_pp_release_key_chain`` in
-    team/scripts/lib/project_paths.sh: the project's own config file
-    (project.cfg, or a legacy PROJECT.cfg) first, then kanban.cfg, the
-    first non-blank value winning. Both files are read by the bash
-    ``read_ini`` rules (inline comments stripped, keys matched exactly), so
-    the two resolvers see the same value in the same file. ``("", "")``
-    when neither file carries a non-blank value.
-    """
-    if project_cfg_path:
-        raw = project_cfg.read_cfg_key(pathlib.Path(project_cfg_path), "release", key)
-        if raw:
-            return raw, project_cfg_path
-    raw = ini.read_line_value(kanban_cfg, "release", key) or ""
-    if raw:
-        return raw, kanban_cfg
-    return "", ""
 
 
 def _project_pushes_to_remote(project_cfg_path: Optional[str]) -> bool:
@@ -1123,7 +1278,7 @@ def resolve_ship_posture(project_name: str, kanban_root: str, *, stream=None) ->
       1. <kanban_root>/projects/<project_name>/project.cfg [release] ship_posture
          (or a legacy PROJECT.cfg, as the bash resolver reads)
       2. <kanban_root>/kanban.cfg [release] ship_posture
-      3. ``"matrix"`` when both are absent or blank
+      3. ``"always"``, the built-in default, when both are absent or blank
 
     Any value other than ``matrix`` or ``always`` resolves to ``"matrix"``
     and writes ONE warning line to *stream* (default ``sys.stderr``) naming
@@ -1132,9 +1287,11 @@ def resolve_ship_posture(project_name: str, kanban_root: str, *, stream=None) ->
     Remote-lane guard: when the project's ``[project] push_to_remote`` is
     not ``false``, ``"always"`` takes effect only if ``[release]
     ship_posture_confirm_remote`` is exactly ``true`` through the same
-    chain. Anything short of that resolves to ``"matrix"`` and writes ONE
-    warning line. On a ``push_to_remote = false`` lane the confirm key is
-    not consulted.
+    chain, the built-in default included. Anything short of that resolves
+    to ``"matrix"``: with ONE warning line when a cfg file set ``always``,
+    silently when ``always`` is only the built-in default (nobody chose a
+    posture for the warning to correct). On a ``push_to_remote = false``
+    lane the confirm key is not consulted.
 
     Neither the fallback nor the guard raises: the caller always gets a
     posture back and carries on. The warning text after its
@@ -1148,10 +1305,10 @@ def resolve_ship_posture(project_name: str, kanban_root: str, *, stream=None) ->
     project_cfg_path = os.path.join(project_root, found.name) if found is not None else None
     prefix = "resolution_matrix: resolve_ship_posture: "
 
-    raw, source = _release_key_chain(project_cfg_path, kanban_cfg, "ship_posture")
-    if raw in ("", SHIP_POSTURE_MATRIX):
+    raw, source = _cfg_key_chain(kanban_root, project_root, "release", "ship_posture")
+    if raw == SHIP_POSTURE_MATRIX:
         return SHIP_POSTURE_MATRIX
-    if raw != SHIP_POSTURE_ALWAYS:
+    if raw not in ("", SHIP_POSTURE_ALWAYS):
         print(
             f"{prefix}WARNING: unrecognized value '{raw}' for project "
             f"'{project_name}' in {source} [release] ship_posture "
@@ -1163,11 +1320,16 @@ def resolve_ship_posture(project_name: str, kanban_root: str, *, stream=None) ->
     if not _project_pushes_to_remote(project_cfg_path):
         return SHIP_POSTURE_ALWAYS
 
-    confirm_raw, confirm_source = _release_key_chain(
-        project_cfg_path, kanban_cfg, "ship_posture_confirm_remote"
+    confirm_raw, confirm_source = _cfg_key_chain(
+        kanban_root, project_root, "release", "ship_posture_confirm_remote"
     )
     if confirm_raw == "true":
         return SHIP_POSTURE_ALWAYS
+
+    # "always" came from the built-in default, not a cfg file: the guard
+    # still keeps the remote lane on matrix, with nothing to warn about.
+    if not source:
+        return SHIP_POSTURE_MATRIX
 
     # The remedy names the file whose confirm value wins the chain: the one
     # already carrying a non-true value, else the one that set "always".
@@ -1271,7 +1433,7 @@ def _fact_trigger_class(evidence: BlockEvidence) -> str:
         except OSError:
             return "unknown"
         if _CM_HALT_HEADER_RE.search(content):
-            return "ship-policy-halt"
+            return TRIGGER_CLASS_SHIP_POLICY_HALT
         if content.strip():
             return "operator-halt"
     return "unknown"

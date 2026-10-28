@@ -9,16 +9,22 @@ Coverage:
      public surface, and the classifier has exactly one home (no second copy
      under the API package).
   2. The importers: GET /board's router, GET /projects' router and the
-     GET /dashboard/{pane} handler bind the classifier from
-     pgai_agent_kanban.board, and the dashboard's column-render panes are
-     exactly the board's column kinds.
+     GET /dashboard/{pane} handler bind what they use of the board from
+     pgai_agent_kanban.board (GET /board's item statuses come through the
+     dashboard's column_render, which binds the classifier there; its
+     requirements' last release is the pane's own,
+     board_gather.requirements_last_released), and the dashboard's
+     column-render panes are exactly the board's column kinds.
   3. The WONT-DO decision: a WONT-DO task state and a ``wont-do`` intake file
      both classify as ``WONT_DO_STATUS`` ("wont-do"), never "done"; the rest
-     of the status vocabulary is pinned beside it.
+     of the status vocabulary is pinned beside it.  needs-operator and
+     duplicate intake files are their own statuses; a running file listed
+     only by closed bundles is "carried", and one a live bundle (or no
+     bundle) lists stays "working".
   4. Behaviour against the committed golden
-     (tests/fixtures/golden/board_rest.json, recorded from the route before
-     the classifier moved): GET /board on the golden board is unchanged, the
-     WONT-DO task included. GET /dashboard/{input,queue} with a column
+     (tests/fixtures/golden/board_rest.json): GET /board on the golden
+     board matches it, the WONT-DO task and the needs-operator, duplicate
+     and carried bugs included. GET /dashboard/{input,queue} with a column
      selected returns exactly the rows column-render.sh prints for that
      column on the same board, and refuses 422 dual-channel, running no
      script, when the request names no column or one the pane does not
@@ -52,6 +58,7 @@ from tests.fixtures.dashboard_render_fixture import (  # noqa: E402
 )
 from tests.fixtures.golden_board import (  # noqa: E402
     PROJECT_NAME,
+    bug_ids_by_board_status,
     build_synthetic_board,
     task_ids_by_state,
 )
@@ -76,9 +83,9 @@ _STATUS_BY_STATE = {
 def golden_root(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> pathlib.Path:
     """Build the golden board with its CODER queue and point the process env at it.
 
-    The /dashboard/{pane} handler runs column-render.sh with this process's
-    environment, so every root variable names the throwaway board and the
-    ambient project-identity variables are cleared.
+    The /dashboard/{pane} handler renders its column panes in process,
+    under this process's environment, so every root variable names the
+    throwaway board and the ambient project-identity variables are cleared.
     """
     root = tmp_path / "board"
     build_synthetic_board(root, with_queues=True)
@@ -119,15 +126,13 @@ def test_classifier_has_one_home() -> None:
     [
         (
             "pgai_agent_kanban.api.routers.board",
-            ["COLUMN_ORDER", "COLUMN_KINDS", "classify_input_item", "classify_queue_item",
-             "get_active_rc_for_project", "get_last_released_for_project",
-             "get_target_version_for_item", "marker_to_state", "parse_queue_line",
-             "read_task_state_from_status_md"],
+            ["COLUMN_ORDER", "COLUMN_KINDS",
+             "get_active_rc_for_project", "get_target_version_for_item",
+             "intake_carried_names"],
         ),
         (
             "pgai_agent_kanban.api.routers.projects",
-            ["get_active_rc_for_project", "get_last_released_for_project",
-             "marker_to_state", "parse_queue_line", "read_task_state_from_status_md"],
+            ["get_active_rc_for_project", "get_last_released_for_project"],
         ),
         ("pgai_agent_kanban.api.reads", ["COLUMN_KINDS"]),
     ],
@@ -136,6 +141,15 @@ def test_routes_bind_the_board_package(module_name: str, names: list[str]) -> No
     module = importlib.import_module(module_name)
     for name in names:
         assert getattr(module, name) is getattr(board, name), f"{module_name}.{name}"
+
+
+def test_board_requirements_read_the_panes_last_release() -> None:
+    """GET /board's last release is the requirements pane's (git tags first), not release-state.md alone."""
+    from pgai_agent_kanban.api.routers import board as board_router
+    from pgai_agent_kanban.dashboard.column_render import board_gather
+
+    assert board_router.requirements_last_released is board_gather.requirements_last_released
+    assert not hasattr(board_router, "get_last_released_for_project")
 
 
 def test_dashboard_column_panes_are_the_board_column_kinds() -> None:
@@ -179,6 +193,76 @@ def test_classify_input_item_vocabulary(tmp_path: pathlib.Path, file_status: str
     assert board.classify_input_item(bug, "BUGS", "", "") == expected
 
 
+@pytest.mark.parametrize(
+    "file_status, expected",
+    [
+        ("needs-operator", "needs-operator"),
+        ("NEEDS-OPERATOR", "needs-operator"),
+        ("duplicate", "duplicate"),
+    ],
+)
+def test_classify_input_item_intake_states(tmp_path: pathlib.Path, file_status: str, expected: str) -> None:
+    """needs-operator and duplicate are their own board statuses, never open or wont-do."""
+    bug = tmp_path / "bugs" / "BUG-9101-example.md"
+    bug.parent.mkdir()
+    bug.write_text(f"# BUG-9101\n\n## Status\n{file_status}\n", encoding="utf-8")
+    assert board.classify_input_item(bug, "BUGS", "", "") == expected
+    assert board.classify_intake_status(file_status) == expected
+    assert board.NEEDS_OPERATOR_STATUS == "needs-operator"
+    assert board.DUPLICATE_STATUS == "duplicate" != board.WONT_DO_STATUS
+
+
+def _bundle(requirements_dir: pathlib.Path, name: str, status: str, item: pathlib.Path) -> None:
+    """Write a bundle *name* at *status* listing *item* under ``## Bundled Items``."""
+    requirements_dir.mkdir(parents=True, exist_ok=True)
+    (requirements_dir / f"{name}.md").write_text(
+        f"# {name}\n\n## Status\n{status}\n\n## Bundled Items\n\n- {item.name} (`{item}`)\n",
+        encoding="utf-8",
+    )
+
+
+def _running_bug(project_dir: pathlib.Path) -> pathlib.Path:
+    bug = project_dir / "bugs" / "BUG-9102-example.md"
+    bug.parent.mkdir(parents=True, exist_ok=True)
+    bug.write_text("# BUG-9102\n\n## Status\nrunning\n", encoding="utf-8")
+    return bug
+
+
+@pytest.mark.parametrize("closed_status", ["done", "wont-do", "duplicate"])
+def test_running_bug_listed_only_by_a_closed_bundle_is_carried(
+    tmp_path: pathlib.Path, closed_status: str,
+) -> None:
+    bug = _running_bug(tmp_path)
+    _bundle(tmp_path / "requirements", "v9.1.0-bugfix-bundle-20260101", closed_status, bug)
+
+    carried = board.intake_carried_names(bug.parent)
+    assert carried == frozenset({bug.name})
+    assert board.classify_intake_status("running", bug.name, carried) == board.CARRIED_STATUS == "carried"
+    assert board.classify_input_item(bug, "BUGS", "", "") == "carried"
+    assert board.classify_input_item(bug, "BUGS", "", "", carried=carried) == "carried"
+
+
+@pytest.mark.parametrize("live_status", ["open", "running"])
+def test_running_bug_in_a_live_bundle_stays_working(tmp_path: pathlib.Path, live_status: str) -> None:
+    """A live bundle still lists it -- alone, or beside a closed one -- so it is in flight."""
+    bug = _running_bug(tmp_path)
+    requirements = tmp_path / "requirements"
+    _bundle(requirements, "v9.2.0-bugfix-bundle-20260102", live_status, bug)
+    assert board.classify_input_item(bug, "BUGS", "", "") == "working"
+
+    _bundle(requirements, "v9.1.0-bugfix-bundle-20260101", "done", bug)
+    assert board.intake_carried_names(bug.parent) == frozenset()
+    assert board.classify_input_item(bug, "BUGS", "", "") == "working"
+
+
+def test_running_bug_no_bundle_lists_stays_working(tmp_path: pathlib.Path) -> None:
+    """Orphaned (no bundle lists it) is not carried; a caller passing no carried set gets working."""
+    bug = _running_bug(tmp_path)
+    assert board.classify_input_item(bug, "BUGS", "", "") == "working"
+    assert board.classify_intake_status("running") == "working"
+    assert board.classify_intake_status("running", bug.name) == "working"
+
+
 def test_golden_board_wont_do_task_classifies_as_wont_do(golden_root: pathlib.Path) -> None:
     tasks_dir = golden_root / "projects" / PROJECT_NAME / "tasks"
     wont_do_id = task_ids_by_state()["WONT-DO"]
@@ -220,6 +304,21 @@ def test_board_response_matches_golden(golden_root: pathlib.Path) -> None:
     assert body == golden["board"]
 
 
+def test_board_bugs_column_carries_each_intake_state(golden_root: pathlib.Path) -> None:
+    """GET /board, served in process, gives each seeded bug its own status, as the golden records."""
+    with build_api_client(golden_root) as client:
+        body = client.get("/board").json()
+    bugs = next(c for c in body["columns"] if c["name"] == "BUGS")
+    got = {item["title"]: item["status"] for item in bugs["items"]}
+    for status, bug_id in bug_ids_by_board_status().items():
+        assert got[bug_id] == status, got
+    assert set(got.values()) == {"open", "needs-operator", "duplicate", "carried"}
+
+    golden = json.loads(_GOLDEN.read_text(encoding="utf-8"))
+    golden_bugs = next(c for c in golden["board"]["columns"] if c["name"] == "BUGS")
+    assert {item["title"]: item["status"] for item in golden_bugs["items"]} == got
+
+
 def test_board_coder_column_carries_one_item_per_state(golden_root: pathlib.Path) -> None:
     with build_api_client(golden_root) as client:
         body = client.get("/board").json()
@@ -235,16 +334,15 @@ def colour_render_env(
 ) -> dict[str, str]:
     """Render the golden board in colour, under one explicit environment.
 
-    The /dashboard/{pane} handler runs column-render.sh with this process's
-    environment, so the process environment is replaced by an explicit,
-    minimal one for the test -- the same names the CLI run each test
-    compares against is given, so the comparison depends on the tree alone.
-    column-render.sh's frame stage imports the package from the kanban root,
-    so the board gets the package symlinked in. Colour stays on so each
-    row's SGR code -- the colour of its board status -- is part of what the
-    parity tests compare. The route renders into its own snapshot directory,
-    so the CLI run renders afresh rather than reading the route's cached
-    text.
+    The /dashboard/{pane} handler renders its column panes in process,
+    under this process's environment, so the process environment is
+    replaced by an explicit, minimal one for the test -- the same names the
+    CLI run each test compares against is given, so the comparison depends
+    on the tree alone. column-render.sh's frame stage imports the package
+    from the kanban root, so the board gets the package symlinked in.
+    Colour stays on so each row's SGR code -- the colour of its board
+    status -- is part of what the parity tests compare. The CLI run gets a
+    snapshot directory of its own, so it renders afresh.
 
     Returns the environment the route renders under.
     """

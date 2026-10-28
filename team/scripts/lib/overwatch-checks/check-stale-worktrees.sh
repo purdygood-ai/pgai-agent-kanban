@@ -69,6 +69,11 @@
 #   0 — completed (anomalies found and handled, or none found)
 #   1 — internal error
 
+# overwatch_registered_projects and overwatch_branch_prefix: the shared
+# projects.cfg and branch_prefix readers.
+# shellcheck source=../overwatch_config.sh
+source "$(dirname "${BASH_SOURCE[0]}")/../overwatch_config.sh"
+
 # ---------------------------------------------------------------------------
 # _csw_resolve_env
 # Resolve KANBAN_ROOT, OVERWATCH_PROJECT, dev tree, and task paths.
@@ -86,14 +91,9 @@ _csw_resolve_env() {
 
     if [[ -z "${OVERWATCH_PROJECT:-}" ]]; then
         local _all_projects=""
-        if declare -f projects_cfg_list >/dev/null 2>&1; then
-            _all_projects="$(projects_cfg_list 2>/dev/null)"
-        else
-            local _cfg="${KANBAN_ROOT}/projects.cfg"
-            _all_projects="$(awk '/^\[project:[a-zA-Z0-9_-]+\]/{match($0,/\[project:([a-zA-Z0-9_-]+)\]/,a);print a[1]}' "${_cfg}" 2>/dev/null)"
-        fi
+        _all_projects="$(overwatch_registered_projects)"
         local _project_count
-        _project_count="$(echo "${_all_projects}" | grep -c '[^[:space:]]' 2>/dev/null || echo 0)"
+        _project_count="$(echo "${_all_projects}" | grep -c '[^[:space:]]' 2>/dev/null)" || _project_count=0
         if [[ "${_project_count}" -gt 1 ]]; then
             echo "check-stale-worktrees: ERROR: OVERWATCH_PROJECT not set and multiple projects registered." >&2
             return 1
@@ -124,16 +124,14 @@ _csw_resolve_env() {
         _CSW_DEV_TREE="${PGAI_DEV_TREE_PATH}"
     fi
 
-    # Resolve this project's configured branch_prefix from the same config
-    # file (the same [project] branch_prefix source pp_prefix_branch
-    # resolves), so integration-branch detection recognizes <prefix>rc/*
+    # Resolve this project's configured branch_prefix through the shared
+    # reader (pp_branch_prefix, the source pp_prefix_branch uses), so
+    # integration-branch detection recognizes <prefix>rc/*
     # for a project configured with any prefix, not just the literal "ai_"
     # this repo happens to ship with. Empty when unconfigured (no prefix).
     _CSW_BRANCH_PREFIX=""
     if [[ -n "${_cfg_file}" ]]; then
-        _CSW_BRANCH_PREFIX="$(grep -E '^[[:space:]]*branch_prefix[[:space:]]*=' "${_cfg_file}" \
-            | head -n1 \
-            | sed 's|^[^=]*=[[:space:]]*||; s|[[:space:]]*$||; s|^["'"'"']||; s|["'"'"']$||')"
+        _CSW_BRANCH_PREFIX="$(overwatch_branch_prefix "${OVERWATCH_PROJECT}")" || return 1
     fi
 
     # Tasks root for this project.
@@ -216,16 +214,39 @@ _csw_extract_task_id_from_path() {
 }
 
 # ---------------------------------------------------------------------------
+# _csw_load_md_field
+# Make read_md_field (../md_field.sh, the one bash section reader) available,
+# sourcing it from this file's own lib directory on first use unless the
+# caller already defines it. A pp_run_ops the caller defined before the
+# load (its own copy, or a test wrapper) stays the active one: md_field.sh
+# leaves it in place, and it is also saved and put back here. Returns 0
+# when read_md_field is defined.
+# ---------------------------------------------------------------------------
+_csw_load_md_field() {
+    declare -F read_md_field >/dev/null 2>&1 && return 0
+    local runner=""
+    runner="$(declare -f pp_run_ops 2>/dev/null)" || runner=""
+    # shellcheck source=../md_field.sh
+    source "$(dirname "${BASH_SOURCE[0]}")/../md_field.sh" || return 1
+    [[ -n "${runner}" ]] && eval "${runner}"
+    declare -F read_md_field >/dev/null 2>&1
+}
+
+# ---------------------------------------------------------------------------
 # _csw_task_state <tasks_root> <task_id>
 # Echo the task's ## State value, upper-cased with whitespace removed;
-# empty when there is no status.md or no State section. The heading may carry
-# trailing spaces and blank lines may sit between it and its value.
+# empty when there is no status.md or no State section. The section is read
+# by read_md_field: the heading may carry trailing spaces and blank lines
+# may sit between it and its value, which is the first non-blank line.
 # ---------------------------------------------------------------------------
 _csw_task_state() {
     local status_file="${1}/${2}/status.md"
     [[ -f "${status_file}" ]] || return 0
-    awk '/^##[ \t]+State[ \t]*$/{found=1;next} found && /^##[ \t]/{exit} found && NF{print;exit}' \
-        "${status_file}" | tr -d '[:space:]' | tr '[:lower:]' '[:upper:]'
+    _csw_load_md_field || return 0
+    local state=""
+    state="$(read_md_field "${status_file}" State 2>/dev/null)" || state=""
+    state="${state%%$'\n'*}"
+    printf '%s' "${state}" | tr -d '[:space:]' | tr '[:lower:]' '[:upper:]'
 }
 
 # ---------------------------------------------------------------------------

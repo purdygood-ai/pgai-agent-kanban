@@ -490,6 +490,33 @@ def test_findings_file_contains_machine_readable_json(tmp_path: Path) -> None:
     assert finding["remedy"], "remedy field must be a non-empty prescriptive fix string"
 
 
+def test_findings_file_holds_one_entry_per_call_site(tmp_path: Path) -> None:
+    """Census row 43: the lint is already per-instance -- two malformed call
+    sites in one file are two findings, each naming its own line, and the
+    run still returns 0. The gated runners merge this array as-is."""
+    bash_dir = tmp_path / "scripts"
+    bash_dir.mkdir()
+    _write_bash_file(
+        bash_dir,
+        "fixture_two_sites.sh",
+        '#!/usr/bin/env bash\n'
+        'pgai_emit_error_contract "gate.first" "first message"\n'
+        'pgai_emit_error_contract "gate.second" "" "remedy text"\n',
+    )
+    findings_file = tmp_path / "findings.json"
+
+    result = _lint.main([
+        "--bash-dirs", str(bash_dir),
+        "--python-dir", str(_empty_python_dir(tmp_path)),
+        "--findings-file", str(findings_file),
+    ])
+
+    assert result == 0
+    data = json.loads(findings_file.read_text(encoding="utf-8"))
+    assert [(f["line"], f["missing_fields"]) for f in data] == [(2, ["remedy"]), (3, ["message"])], data
+    assert all(f["severity"] == "quality" and f["cause"] and f["remedy"] for f in data), data
+
+
 def test_findings_file_is_empty_array_on_clean_tree(tmp_path: Path) -> None:
     bash_dir = tmp_path / "scripts"
     bash_dir.mkdir()

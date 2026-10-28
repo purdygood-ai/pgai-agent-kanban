@@ -44,10 +44,13 @@ Additional cases:
      legitimate).
 
  10. **main() returns 0 on clean synthetic trees**: a synthetic scripts/ dir
-     with zero violations causes main() to return 0.
+     with zero violations causes main() to return 0 and record no finding.
 
- 11. **main() returns 1 on a violation**: a synthetic scripts/ dir containing
-     one violation causes main() to return 1.
+ 11. **A violation is a finding, and main() still returns 0**: a synthetic
+     scripts/ dir containing one violation is recorded as one finding in the
+     --findings-file (quality class); a direct command-line run prints it,
+     writes it and exits 0, and a missing-prelude finding's own remedy, run
+     as printed, clears it.
 
  12. **main() returns 2 when team dir not found**.
 
@@ -61,6 +64,7 @@ paths, no live kanban state mutations.
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
 import stat
 import subprocess
@@ -69,6 +73,8 @@ import textwrap
 from pathlib import Path
 
 import pytest
+
+from tests.fixtures.lint_findings import run_main
 
 
 # ---------------------------------------------------------------------------
@@ -764,34 +770,83 @@ def test_main_returns_zero_on_clean_tree(tmp_path: Path) -> None:
         executable=True,
     )
 
-    rc = _lint.main(["--team-dir", str(team)])
+    rc, findings = run_main(_lint.main, ["--team-dir", str(team)], tmp_path / "findings.json")
     assert rc == 0, f"Expected main() to return 0 on a clean tree, got {rc}"
+    assert findings == [], f"Expected no finding on a clean tree, got {findings}"
 
 
 # ---------------------------------------------------------------------------
-# Case 11 — main() returns 1 on a violation
+# Case 11 — a violation is a finding, and main() still returns 0
 # ---------------------------------------------------------------------------
 
 
-def test_main_returns_one_on_bash_violation(tmp_path: Path) -> None:
-    """main() returns 1 when the bash-side check finds at least one violation."""
+def test_main_records_bash_violation_and_returns_zero(tmp_path: Path) -> None:
+    """A bash-side violation is recorded as one finding; main() returns 0."""
     team = _make_minimal_team_dir(tmp_path)
     scripts = team / "scripts"
     violation_sh = scripts / "violator.sh"
     _write_sh(violation_sh, BASH_VIOLATION_CONTENT, executable=True)
 
-    rc = _lint.main(["--team-dir", str(team), "--bash-only"])
-    assert rc == 1, f"Expected main() to return 1 on a bash violation, got {rc}"
+    rc, findings = run_main(
+        _lint.main, ["--team-dir", str(team), "--bash-only"], tmp_path / "findings.json"
+    )
+    assert rc == 0, f"Expected main() to return 0 on a bash violation (quality class), got {rc}"
+    assert len(findings) == 1, findings
+    finding = findings[0]
+    assert finding["lint"] == "env_bootstrap" and finding["severity"] == "quality"
+    assert finding["kind"] == "bash-missing-prelude", finding
+    assert finding["file"].endswith("scripts/violator.sh"), finding
 
 
-def test_main_returns_one_on_python_violation(tmp_path: Path) -> None:
-    """main() returns 1 when the Python-side check finds at least one violation."""
+def test_main_records_python_violation_and_returns_zero(tmp_path: Path) -> None:
+    """A Python-side violation is recorded as one finding with its line."""
     team = _make_minimal_team_dir(tmp_path)
     violation_py = team / "scripts" / "violator.py"
     _write_py(violation_py, PYTHON_VIOLATION_CONTENT)
 
-    rc = _lint.main(["--team-dir", str(team), "--python-only"])
-    assert rc == 1, f"Expected main() to return 1 on a python violation, got {rc}"
+    rc, findings = run_main(
+        _lint.main, ["--team-dir", str(team), "--python-only"], tmp_path / "findings.json"
+    )
+    assert rc == 0, f"Expected main() to return 0 on a python violation (quality class), got {rc}"
+    assert [f["kind"] for f in findings] == ["python-direct-env-read"], findings
+    assert findings[0]["file"].endswith("scripts/violator.py"), findings
+    assert isinstance(findings[0]["line"], int), findings
+    assert "resolve_kanban_root()" in findings[0]["remedy"], findings
+
+
+def test_direct_run_prints_writes_and_exits_zero_and_the_remedy_clears_it(
+    tmp_path: Path,
+) -> None:
+    """A command-line run prints the finding, writes it and exits 0; the
+    missing-prelude remedy, run as printed, inserts the prelude and clears it."""
+    team = _make_minimal_team_dir(tmp_path)
+    (team / "scripts" / "cm").mkdir()
+    violation_sh = team / "scripts" / "cm" / "violator.sh"
+    _write_sh(violation_sh, BASH_VIOLATION_CONTENT, executable=True)
+    findings_path = tmp_path / "out" / "findings.json"
+
+    proc = subprocess.run(
+        [sys.executable, str(_LINT_SCRIPT), "--team-dir", str(team), "--bash-only",
+         "--findings-file", str(findings_path)],
+        capture_output=True,
+        text=True,
+    )
+
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert f"[bash] {violation_sh}: references PGAI_AGENT_KANBAN_ROOT_PATH" in proc.stdout, (
+        proc.stdout
+    )
+    assert "error:   lint.env-bootstrap" in proc.stderr, proc.stderr
+    findings = json.loads(findings_path.read_text(encoding="utf-8"))
+    assert [f["kind"] for f in findings] == ["bash-missing-prelude"], findings
+
+    remedy = subprocess.run(findings[0]["remedy"], shell=True, capture_output=True, text=True)
+    assert remedy.returncode == 0, remedy.stdout + remedy.stderr
+    assert '/../lib/env_bootstrap.sh"' in violation_sh.read_text(encoding="utf-8")
+    rc, after = run_main(
+        _lint.main, ["--team-dir", str(team), "--bash-only"], tmp_path / "after.json"
+    )
+    assert rc == 0 and after == [], after
 
 
 # ---------------------------------------------------------------------------

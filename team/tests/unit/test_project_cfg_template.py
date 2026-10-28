@@ -10,7 +10,10 @@ Coverage:
      every key has a comment block stating its default (or "Inherits ..." /
      "No in-code default"); the file has no version tag, no $HOME, no
      example project name and no active temp_dir; and its section headers
-     and key names follow the template's, in the template's order.
+     and key names follow the template's, in the template's order.  The
+     example-name check reads only what the template put in the file: a
+     value the test supplied (a dev tree under tmp_path, say) is not
+     searched, while an example name in a template-derived line still fails.
   2. The shared list covers every key project_paths.sh's Key Registry names.
   3. add_project writes a missing project.cfg from the same template (and
      narrates one line saying so); an existing project.cfg, a legacy
@@ -134,8 +137,33 @@ def _value_of(text: str, section: str, key: str) -> tuple[str, bool]:
     return match.group(2).strip(), active
 
 
-def _assert_well_formed_project_cfg(text: str) -> None:
-    """The checks every project.cfg written from the template passes."""
+def _template_derived_text(
+    text: str, found: list[tuple[int, str, str, bool]], supplied: dict[tuple[str, str], str]
+) -> str:
+    """*text* with the value of each active ``(section, key)`` line in *supplied*
+    blanked when it is exactly the value the test supplied.
+
+    What remains is what the template itself put in the file, so a scan of it
+    is independent of caller-chosen values such as a dev tree under tmp_path.
+    A line whose value differs from the supplied one is left in place.
+    """
+    lines = text.splitlines()
+    for index, section, key, active in found:
+        if not active or (section, key) not in supplied:
+            continue
+        match = _ACTIVE_RE.match(lines[index])
+        if match is not None and match.group(2).strip() == supplied[(section, key)]:
+            lines[index] = f"{match.group(1)} ="
+    return "\n".join(lines)
+
+
+def _assert_well_formed_project_cfg(text: str, supplied: dict[tuple[str, str], str] | None = None) -> None:
+    """The checks every project.cfg written from the template passes.
+
+    *supplied* maps ``(section, key)`` to the value the test passed to
+    create_project for it; those values are the test's own and are not
+    searched for example project names.
+    """
     lines = text.splitlines()
     found = _key_lines(text)
     by_key: dict[str, list[tuple[int, str, bool]]] = {}
@@ -158,8 +186,9 @@ def _assert_well_formed_project_cfg(text: str) -> None:
     for number, line in enumerate(lines, 1):
         assert not _VERSION_TAG_RE.search(line), f"line {number} carries a version tag: {line!r}"
     assert "$HOME" not in text
+    derived = _template_derived_text(text, found, supplied or {})
     for example in _EXAMPLE_NAMES:
-        assert example not in text, f"example project name {example!r} reached the file"
+        assert example not in derived, f"example project name {example!r} reached the file"
     assert ops_projects.PROJECT_NAME_PLACEHOLDER not in text
     assert not any(active for _, section, key, active in found if key == "temp_dir"), "temp_dir is active"
 
@@ -218,19 +247,9 @@ def test_create_project_writes_every_read_key_documented_under_its_section(tmp_p
     capsys.readouterr()
 
 
-def test_create_project_substitutes_only_the_project_specific_values(tmp_path, capsys):
-    root = _root(tmp_path)
-    dev_tree = tmp_path / "checkout"
-    dev_tree.mkdir()
-
-    ops_projects.create_project(
-        _ctx(root), "flagged-lane", workflow_type="document", max_patch=3, max_minor=4, max_major=1,
-        git_remote="upstream", dev_tree=str(dev_tree), git_repo="git@git.example.com:org/flagged.git",
-    )
-
-    text = (root / "projects" / "flagged-lane" / "project.cfg").read_text(encoding="utf-8")
-    _assert_well_formed_project_cfg(text)
-    expected = {
+def _flagged_lane_values(dev_tree: pathlib.Path) -> dict[tuple[str, str], str]:
+    """``(section, key) -> value`` for every value _create_flagged_lane supplies."""
+    return {
         ("project", "project_name"): "flagged-lane",
         ("project", "workflow_type"): "document",
         ("project", "git_remote_name"): "upstream",
@@ -240,6 +259,25 @@ def test_create_project_substitutes_only_the_project_specific_values(tmp_path, c
         ("versioning", "max_minor"): "4",
         ("versioning", "max_major"): "1",
     }
+
+
+def _create_flagged_lane(root: pathlib.Path, dev_tree: pathlib.Path) -> str:
+    """create_project ``flagged-lane`` with every project-specific flag set; its project.cfg text."""
+    dev_tree.mkdir(parents=True)
+    ops_projects.create_project(
+        _ctx(root), "flagged-lane", workflow_type="document", max_patch=3, max_minor=4, max_major=1,
+        git_remote="upstream", dev_tree=str(dev_tree), git_repo="git@git.example.com:org/flagged.git",
+    )
+    return (root / "projects" / "flagged-lane" / "project.cfg").read_text(encoding="utf-8")
+
+
+def test_create_project_substitutes_only_the_project_specific_values(tmp_path, capsys):
+    root = _root(tmp_path)
+    dev_tree = tmp_path / "checkout"
+
+    text = _create_flagged_lane(root, dev_tree)
+    expected = _flagged_lane_values(dev_tree)
+    _assert_well_formed_project_cfg(text, supplied=expected)
     for (section, key), value in expected.items():
         assert _value_of(text, section, key) == (value, True), key
     template = _TEMPLATE.read_text(encoding="utf-8").replace(ops_projects.PROJECT_NAME_PLACEHOLDER, "flagged-lane")
@@ -247,6 +285,37 @@ def test_create_project_substitutes_only_the_project_specific_values(tmp_path, c
         if (section, key) not in expected:
             assert _value_of(text, section, key) == _value_of(template, section, key), key
     assert "were supplied via --dev-tree/--git-repo" in text
+    capsys.readouterr()
+
+
+def test_an_example_name_in_a_supplied_dev_tree_path_is_not_a_template_leak(tmp_path, capsys):
+    root = _root(tmp_path)
+    dev_tree = tmp_path / "pgai-agent-kanban" / "checkout"
+
+    text = _create_flagged_lane(root, dev_tree)
+
+    assert _value_of(text, "project", "dev_tree_path") == (str(dev_tree), True)
+    _assert_well_formed_project_cfg(text, supplied=_flagged_lane_values(dev_tree))
+    capsys.readouterr()
+
+
+@pytest.mark.parametrize(
+    "old, new",
+    [
+        ("\nbranch_prefix = ai_\n", "\nbranch_prefix = my-project_\n"),
+        ("# Example: /srv/checkouts/flagged-lane\n", "# Example: /srv/checkouts/pgai-agent-kanban\n"),
+        ("\ngit_repo_url = git@git.example.com:org/flagged.git\n", "\ngit_repo_url = git@git.example.com:myorg/x.git\n"),
+    ],
+    ids=["template-key-value", "template-comment", "supplied-key-overwritten"],
+)
+def test_an_example_name_from_the_template_is_still_caught(tmp_path, capsys, old, new):
+    root = _root(tmp_path)
+    dev_tree = tmp_path / "checkout"
+    text = _create_flagged_lane(root, dev_tree)
+    assert old in text, f"fixture line {old!r} is not in the generated project.cfg"
+
+    with pytest.raises(AssertionError, match="example project name"):
+        _assert_well_formed_project_cfg(text.replace(old, new), supplied=_flagged_lane_values(dev_tree))
     capsys.readouterr()
 
 
@@ -437,8 +506,18 @@ def test_example_leaves_temp_dir_commented():
 
 
 def test_example_shows_the_ship_posture_defaults_commented():
-    assert _value_of(_example(), "release", "ship_posture") == ("matrix", False)
+    assert _value_of(_example(), "release", "ship_posture") == ("always", False)
     assert _value_of(_example(), "release", "ship_posture_confirm_remote") == ("false", False)
+
+
+def test_example_ship_posture_comment_states_always_as_default_and_inherited_value():
+    lines = _example().splitlines()
+    index = next(i for i, s, key, _ in _key_lines(_example()) if (s, key) == ("release", "ship_posture"))
+    block = _comment_block(lines, index)
+    assert "# Default: always" in block, block
+    assert "# Inherits: project.cfg > kanban.cfg > always" in block, block
+    text = " ".join(block)
+    assert "ship_posture = matrix" in text and "ship_posture_confirm_remote" in text, text
 
 
 @pytest.mark.parametrize(

@@ -36,7 +36,7 @@ dashboard_max_rows=30
 
 Syntax rules:
 
-- **Section header** — `[project:NAME]`, where `NAME` matches `[a-zA-Z0-9_-]+` and corresponds to a directory under `$KANBAN_ROOT/projects/<NAME>/`. Other section name patterns are rejected with a clear error pointing at the offending line.
+- **Section header** — `[project:NAME]` alone on its line, where `NAME` matches `^[a-z0-9][a-z0-9-]*$` (`PROJECTS_CFG_NAME_RE` in `scripts/lib/projects_cfg.sh`) and corresponds to a directory under `$KANBAN_ROOT/projects/<NAME>/`. A section with any other name, or with text after its `]`, registers no project; other section name patterns are rejected with a clear error pointing at the offending line.
 - **Fields** — one `key=value` pair per line, under the section that owns them. Keys are lowercase with underscores. Whitespace around the `=` is not required but is tolerated.
 - **Comments** — lines beginning with `#` are ignored. Blank lines are ignored.
 - **Empty sections are valid** — a `[project:foo]` header with no fields registers the project at default values. A warning is emitted if `priority` is needed but unset.

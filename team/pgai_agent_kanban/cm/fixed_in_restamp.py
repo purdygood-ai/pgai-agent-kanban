@@ -84,10 +84,11 @@ Exit codes:
 from __future__ import annotations
 
 import argparse
+import os
 import pathlib
 import re
 import sys
-from typing import NamedTuple
+from typing import NamedTuple, Union
 
 # Run by file path (``python3 .../fixed_in_restamp.py``) or loaded from a file
 # outside its package, this module has no parent package and the interpreter
@@ -104,7 +105,9 @@ if not __package__:
 from pgai_agent_kanban.archive.layout import CATEGORY_BUGS, archive_layout_for_category_dir  # noqa: E402
 from pgai_agent_kanban.cm.changelog_writer import parse_bug_file  # noqa: E402
 from pgai_agent_kanban.cm.fixed_in_writeback import replace_fixed_in, write_fixed_in  # noqa: E402
+from pgai_agent_kanban.env import resolve_kanban_root  # noqa: E402
 from pgai_agent_kanban.lib.error_contract import emit_error_contract  # noqa: E402
+from pgai_agent_kanban.overwatch.halt_provenance import installed_script_command  # noqa: E402
 
 EXIT_OK = 0
 EXIT_WRITE_FAILED = 1
@@ -116,20 +119,51 @@ _VERSION_RE = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)$", re.IGNORECASE)
 # A bare bug identifier, e.g. BUG-0123; matched case-insensitively.
 _BUG_ID_RE = re.compile(r"^BUG-\d+$", re.IGNORECASE)
 
-_SCRIPT = "team/scripts/restamp-fixed-in.sh"
+# The operator script, relative to the installed root's scripts/ directory;
+# remedies name it through installed_script_command.
+_SCRIPT = "restamp-fixed-in.sh"
 _DEFAULT_PROJECT = "pgai-agent-kanban"
 
+KanbanRoot = Union[str, "os.PathLike[str]", None]
 
-def _example(project: str | None) -> str:
+
+def kanban_root_for_bugs_dir(bugs_dir: pathlib.Path) -> pathlib.Path:
+    """The kanban root that owns the bug ledger *bugs_dir*, absolute.
+
+    ``<kanban_root>/projects/<project>/bugs`` belongs to ``<kanban_root>``;
+    any other directory is read as a single-project ledger, ``<kanban_root>/bugs``,
+    whose parent is the root. Remedies name the script under this root, so
+    a run against a sandbox ledger names that sandbox's script.
+    """
+    bugs_dir = pathlib.Path(os.path.abspath(bugs_dir))
+    if archive_layout_for_category_dir(bugs_dir, CATEGORY_BUGS) is not None:
+        return bugs_dir.parent.parent.parent
+    return bugs_dir.parent
+
+
+def _restamp_command(kanban_root: KanbanRoot, project: str | None, *args: str) -> str:
+    """``<kanban root>/scripts/restamp-fixed-in.sh --project <project>`` then *args*.
+
+    Shell-quoted by ``installed_script_command``, so it runs as printed from
+    any directory. A *kanban_root* of None is this process's root
+    (``PGAI_AGENT_KANBAN_ROOT_PATH``), read only when a remedy is built.
+    """
+    root = resolve_kanban_root() if kanban_root is None else kanban_root
+    return installed_script_command(
+        os.path.abspath(root), _SCRIPT, "--project", project or _DEFAULT_PROJECT, *args
+    )
+
+
+def _example(project: str | None, kanban_root: KanbanRoot = None) -> str:
     """A runnable invocation for a remedy, naming *project* when one is known."""
-    return f"{_SCRIPT} --project {project or _DEFAULT_PROJECT} --version v1.4.0 BUG-0101 BUG-0102"  # example invocation
+    return _restamp_command(kanban_root, project, "--version", "v1.4.0", "BUG-0101", "BUG-0102")  # example invocation
 
 
-def _correction_example(project: str | None) -> str:
+def _correction_example(project: str | None, kanban_root: KanbanRoot = None) -> str:
     """A runnable correction-mode invocation for a remedy."""
-    return (
-        f"{_SCRIPT} --project {project or _DEFAULT_PROJECT} "
-        "--version v1.4.0 --replace-from v1.5.0 BUG-0101 BUG-0102"  # example invocation
+    return _restamp_command(
+        kanban_root, project,
+        "--version", "v1.4.0", "--replace-from", "v1.5.0", "BUG-0101", "BUG-0102",  # example invocation
     )
 
 
@@ -172,10 +206,11 @@ def archive_bugs_dir(bugs_dir: pathlib.Path) -> pathlib.Path | None:
     return layout.bugs if layout is not None else None
 
 
-def normalize_replace_from(raw: str, project: str | None = None) -> str:
+def normalize_replace_from(raw: str, project: str | None = None, kanban_root: KanbanRoot = None) -> str:
     """Return the ``--replace-from`` value as a canonical ``vX.Y.Z``, or refuse.
 
-    Accepts the same forms as ``normalize_version``.
+    Accepts the same forms as ``normalize_version``. A refusal's remedy names
+    the script under *kanban_root* (default: this process's root).
     """
     value = raw.strip()
     if _VERSION_RE.match(value) is None:
@@ -186,9 +221,9 @@ def normalize_replace_from(raw: str, project: str | None = None) -> str:
         raise RestampRefused(
             "fixed_in_restamp.replace_from_malformed",
             f"--replace-from {value!r} is not a release version (expected vX.Y.Z, e.g. v1.5.0).",
-            _correction_example(project),
+            _correction_example(project, kanban_root),
         )
-    return normalize_version(value, project)
+    return normalize_version(value, project, kanban_root)
 
 
 def check_correctable(
@@ -196,6 +231,7 @@ def check_correctable(
     version: str,
     replace_from: str,
     project: str | None = None,
+    kanban_root: KanbanRoot = None,
 ) -> None:
     """Refuse unless every named bug's ``## Fixed In`` is empty or *replace_from*.
 
@@ -203,7 +239,8 @@ def check_correctable(
     so one refusal names them all with the value each carries. A file that
     cannot be read is left for ``restamp`` to report as failed.
 
-    The remedy re-runs the correction on the bugs that do qualify, or, when
+    The remedy re-runs the correction on the bugs that do qualify -- the
+    script under *kanban_root* (default: this process's root) -- or, when
     none does, prints the named bugs' ``## Fixed In`` sections to inspect.
     """
     mismatched: list[str] = []
@@ -220,9 +257,8 @@ def check_correctable(
             correctable.append(path.stem)
     if mismatched:
         if correctable:
-            remedy = (
-                f"{_SCRIPT} --project {project or _DEFAULT_PROJECT} --version {version} "
-                f"--replace-from {replace_from} {' '.join(correctable)}"
+            remedy = _restamp_command(
+                kanban_root, project, "--version", version, "--replace-from", replace_from, *correctable
             )
         else:
             remedy = f"grep -A2 '^## Fixed In' {' '.join(str(p) for p in bug_files)}"
@@ -238,11 +274,12 @@ def check_correctable(
         )
 
 
-def normalize_version(raw: str | None, project: str | None = None) -> str:
+def normalize_version(raw: str | None, project: str | None = None, kanban_root: KanbanRoot = None) -> str:
     """Return *raw* as a canonical ``vX.Y.Z``, or refuse.
 
     Surrounding whitespace and a missing or upper-case leading 'v' are
-    tolerated; anything else is refused.
+    tolerated; anything else is refused. A refusal's remedy names the script
+    under *kanban_root* (default: this process's root).
     """
     value = (raw or "").strip()
     if not value:
@@ -251,7 +288,7 @@ def normalize_version(raw: str | None, project: str | None = None) -> str:
         raise RestampRefused(
             "fixed_in_restamp.version_missing",
             "No release version was given, so there is nothing to stamp.",
-            _example(project),
+            _example(project, kanban_root),
         )
     match = _VERSION_RE.match(value)
     if match is None:
@@ -260,7 +297,7 @@ def normalize_version(raw: str | None, project: str | None = None) -> str:
         raise RestampRefused(
             "fixed_in_restamp.version_malformed",
             f"Version {value!r} is not a release version (expected vX.Y.Z, e.g. v1.4.0).",
-            _example(project),
+            _example(project, kanban_root),
         )
     return "v" + ".".join(match.groups())
 
@@ -283,7 +320,10 @@ def _name_candidates(bugs_dir: pathlib.Path, raw: str) -> list[pathlib.Path]:
 
 
 def resolve_bug_files(
-    bugs_dir: pathlib.Path, names: list[str], project: str | None = None
+    bugs_dir: pathlib.Path,
+    names: list[str],
+    project: str | None = None,
+    kanban_root: KanbanRoot = None,
 ) -> list[pathlib.Path]:
     """Resolve every operator-supplied bug name to exactly one file, or refuse.
 
@@ -293,8 +333,12 @@ def resolve_bug_files(
     for it is the archived file. A live match always wins.
 
     Every unresolvable name is collected first, so one refusal names them
-    all. Duplicates collapse to one entry; order follows first mention.
+    all. Duplicates collapse to one entry; order follows first mention. A
+    refusal that suggests a re-run names the script under *kanban_root*
+    (default: :func:`kanban_root_for_bugs_dir` of *bugs_dir*).
     """
+    if kanban_root is None:
+        kanban_root = kanban_root_for_bugs_dir(bugs_dir)
     wanted = [n for n in names if n.strip()]
     if not wanted:
         # BLOCK-WORTHY: a restamp with no bugs named would silently do
@@ -302,7 +346,7 @@ def resolve_bug_files(
         raise RestampRefused(
             "fixed_in_restamp.no_bugs_named",
             "No bug files were named; name each bug to stamp by its id or file name.",
-            _example(project),
+            _example(project, kanban_root),
         )
     if not bugs_dir.is_dir():
         # BLOCK-WORTHY: the ledger to stamp does not exist at this path, so
@@ -447,14 +491,15 @@ def _build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     """CLI entry point; see the module docstring for output and exit codes."""
     args = _build_parser().parse_args(argv)
+    kanban_root = kanban_root_for_bugs_dir(args.bugs_dir)
     try:
-        version = normalize_version(args.version, args.project)
+        version = normalize_version(args.version, args.project, kanban_root)
         replace_from = None
         if args.replace_from is not None:
-            replace_from = normalize_replace_from(args.replace_from, args.project)
-        bug_files = resolve_bug_files(args.bugs_dir, args.bugs, args.project)
+            replace_from = normalize_replace_from(args.replace_from, args.project, kanban_root)
+        bug_files = resolve_bug_files(args.bugs_dir, args.bugs, args.project, kanban_root)
         if replace_from is not None:
-            check_correctable(bug_files, version, replace_from, args.project)
+            check_correctable(bug_files, version, replace_from, args.project, kanban_root)
     except RestampRefused as refusal:
         # BLOCK-WORTHY: every refusal above catches an invocation that would
         # write a wrong or partial release record onto the bug ledger; it is

@@ -53,6 +53,7 @@ Two groups of tests:
 from __future__ import annotations
 
 import importlib.util
+import json
 import sys
 from pathlib import Path
 
@@ -267,11 +268,12 @@ def test_gate_script_reports_exactly_the_four_real_citations(tmp_path: Path):
     assert "OK — all skip annotations are compliant." in result.stdout
 
 
-def test_gate_script_fails_when_a_real_citation_is_missing_its_bug_file(tmp_path: Path):
+def test_gate_script_reports_when_a_real_citation_is_missing_its_bug_file(tmp_path: Path):
     """Negative proof: with an empty bugs/ dir, the four real citations are
-    still detected, and the gate fails because none of them resolve --
-    confirming the detection mechanism actually feeds the existing
-    missing-bug-file check rather than silently degrading to a no-op."""
+    still detected, and the gate reports each because none of them resolve
+    (exiting 0, as a quality-class gate does) -- confirming the detection
+    mechanism actually feeds the existing missing-bug-file check rather
+    than silently degrading to a no-op."""
     tests_dir = tmp_path / "tests"
     bugs_dir = tmp_path / "bugs"
     _write_corpus(tests_dir)
@@ -282,7 +284,7 @@ def test_gate_script_fails_when_a_real_citation_is_missing_its_bug_file(tmp_path
         f"bash {_GATE_SCRIPT} --tests-dir {tests_dir} --bugs-dir {bugs_dir} --verbose",
     )
 
-    assert result.returncode == 1
+    assert result.returncode == 0
     for bug_id in ("BUG-1234", "BUG-1235", "BUG-1236", "BUG-1237"):
         assert bug_id in result.stderr
     # The two non-citations must never appear as findings requiring a bug file.
@@ -350,7 +352,7 @@ def test_gate_script_reports_placeholder_in_real_test_but_not_in_report_fixtures
         f"bash {_GATE_SCRIPT} --tests-dir {tests_dir} --bugs-dir {bugs_dir}",
     )
 
-    assert result.returncode == 1, result.stdout + result.stderr
+    assert result.returncode == 0, result.stdout + result.stderr
     assert "1 placeholder skip citation(s) found" in result.stderr, result.stderr
     assert f"{real_test}:5:" in result.stderr, result.stderr
     for path in planted:
@@ -393,6 +395,45 @@ def test_gate_script_still_scans_a_same_named_directory_outside_fixtures(tmp_pat
         f"bash {_GATE_SCRIPT} --tests-dir {tests_dir} --bugs-dir {bugs_dir}",
     )
 
-    assert result.returncode == 1, result.stdout + result.stderr
+    assert result.returncode == 0, result.stdout + result.stderr
     assert "BUG-1299: no matching file found" in result.stderr, result.stderr
     assert f"{elsewhere}:5:" in result.stderr, result.stderr
+
+
+def test_gate_script_missing_tests_dir_is_one_finding_and_exits_zero(tmp_path: Path):
+    """A tests directory that does not exist means nothing was checked: the
+    gate says so as its one finding and exits 0 rather than failing the run."""
+    bugs_dir = tmp_path / "bugs"
+    bugs_dir.mkdir()
+    missing = tmp_path / "no_such_tests"
+    findings_file = tmp_path / "out" / "skip_gate.json"
+
+    result = run_bash(
+        tmp_path,
+        f"bash {_GATE_SCRIPT} --tests-dir {missing} --bugs-dir {bugs_dir} "
+        f"--findings-file {findings_file}",
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "error:   lint_skip_bug_gate.tests_dir_missing" in result.stderr, result.stderr
+    findings = json.loads(findings_file.read_text(encoding="utf-8"))
+    assert [(f["kind"], f["file"]) for f in findings] == [("tests-dir-missing", str(missing))]
+
+
+def test_gate_script_tree_walk_writes_each_unfiled_citation_as_a_finding(tmp_path: Path):
+    tests_dir = tmp_path / "tests"
+    bugs_dir = tmp_path / "bugs"
+    _write_corpus(tests_dir)
+    bugs_dir.mkdir(parents=True, exist_ok=True)
+    findings_file = tmp_path / "out" / "skip_gate.json"
+
+    result = run_bash(
+        tmp_path,
+        f"bash {_GATE_SCRIPT} --tests-dir {tests_dir} --bugs-dir {bugs_dir} "
+        f"--findings-file {findings_file}",
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    findings = json.loads(findings_file.read_text(encoding="utf-8"))
+    assert sorted(f["bug_id"] for f in findings) == ["BUG-1234", "BUG-1235", "BUG-1236", "BUG-1237"]
+    assert {f["kind"] for f in findings} == {"unfiled-citation"}

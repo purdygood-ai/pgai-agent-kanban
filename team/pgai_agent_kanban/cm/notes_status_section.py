@@ -112,6 +112,7 @@ if not __package__:
 
 from pgai_agent_kanban.lib.html_comments import comment_spans  # noqa: E402
 from pgai_agent_kanban.lib import semver  # noqa: E402
+from pgai_agent_kanban.task_status import read_section  # noqa: E402
 
 __all__ = [
     "NON_FUNCTIONAL",
@@ -307,20 +308,19 @@ def status_section_has_placeholder(text: str) -> bool:
 def status_value(text: str) -> Optional[str]:
     """Return the value of the first Status section in *text*, or None.
 
-    The value is the section's first non-blank line once HTML comments are
-    removed (see the module docstring), stripped of surrounding whitespace.
-    None when there is no ``## Status`` heading outside a comment or the
-    section holds no visible text.
+    HTML comments are removed first, as the module docstring describes, one
+    visible line kept per line of *text*; the ``## Status`` section of what
+    remains is then read by ``task_status.read_section`` (its default
+    reading: any letter case, an inline ``## Status: value`` read, the next
+    level-2 heading ending the section). The value is the body's first line,
+    stripped of surrounding whitespace. None when there is no ``## Status``
+    heading outside a comment or the section holds no visible text.
     """
-    lines = text.splitlines(keepends=True)
-    visible = _visible_lines(lines)
-    for start, end in status_sections(lines):
-        for index in range(start, end):
-            value = visible[index].strip()
-            if value:
-                return value
+    visible = _visible_lines(text.splitlines(keepends=True))
+    body = read_section("\n".join(line.rstrip("\r\n") for line in visible), "Status")
+    if not body:
         return None
-    return None
+    return body.split("\n", 1)[0].strip()
 
 
 def status_value_token(text: str) -> Optional[str]:

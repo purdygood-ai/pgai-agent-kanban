@@ -27,8 +27,10 @@ Coverage:
      even when a ready plugin is planted at the path it names, and a
      project.cfg value holding a newline or other control character, a
      relative dev tree or one with a ``..`` segment -- writing no project.
-     ``release`` and every other ready plugin, and registrable names that
-     do not start with a letter, behave as before.
+     ``release`` and every other ready plugin, and registrable names
+     (including one starting with a digit) behave as before; a name the
+     project-name rule refuses (``My_App``, ``my_app``) is refused like a
+     path-shaped one.
   3. cancel-rc (``cm.cancel.cancel_rc``): a traversal or flag-shaped
      project refuses before any project.cfg or projects.cfg is read and
      before any git command runs.
@@ -358,7 +360,7 @@ def test_remove_project_dotdot_force_leaves_the_kanban_root_and_outside_intact(r
     assert _snapshot(outer) == before
 
 
-@pytest.mark.parametrize("name", ["../x", "../../outer", "..", "a.b", "a b", "x\n[project:evil]"])
+@pytest.mark.parametrize("name", ["../x", "../../outer", "..", "a.b", "a b", "My_App", "my_app", "x\n[project:evil]"])
 def test_add_project_with_a_traversal_name_changes_neither_registry_nor_outside(
     root, outer, name
 ) -> None:
@@ -379,7 +381,7 @@ def test_add_project_refuses_before_any_filesystem_access(root, no_filesystem) -
         ops_projects.add_project(ctx, "../x")
 
 
-@pytest.mark.parametrize("name", ["2048-game", "My_App", "a"])
+@pytest.mark.parametrize("name", ["2048-game", "my-app", "a"])
 def test_registrable_names_still_add_and_remove(root, capsys, name) -> None:
     (root / "projects" / name).mkdir()
 

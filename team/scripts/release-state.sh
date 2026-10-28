@@ -38,6 +38,9 @@
 #       its JSON refusal body from, fed the same str(exc) and the same
 #       fallback key/remedy (pgai_agent_kanban.ops.read), so the CLI's
 #       remedy: line and the REST twin's "remedy" value are one string.
+#
+# The rendering is pgai_agent_kanban.ops.read.render_release_state, reached
+# through pp_run_ops as the get_release_state verb of pgai_agent_kanban.ops.
 
 set -euo pipefail
 # shellcheck source=lib/env_bootstrap.sh
@@ -86,46 +89,10 @@ fi
 
 _rs_project="$(pp_resolve_project_name "${_rs_project}")" || exit 1
 
-PYTHONPATH="$(pp_pythonpath)" python3 - "${PGAI_AGENT_KANBAN_ROOT_PATH}" "${_rs_project}" <<'PY'
-import sys
-
-from pgai_agent_kanban.lib.error_contract import (
-    dual_channel_from_text,
-    format_error_contract,
-)
-from pgai_agent_kanban.ops.context import OpsContext
-from pgai_agent_kanban.ops.errors import NotFound, Refused
-from pgai_agent_kanban.ops.read import (
-    RELEASE_STATE_REFUSAL_ERROR_KEY,
-    RELEASE_STATE_REFUSAL_FALLBACK_REMEDY,
-    get_release_state,
-)
-
-kanban_root, project = sys.argv[1], sys.argv[2]
-ctx = OpsContext(kanban_root=kanban_root)
-
-try:
-    fields = get_release_state(ctx, project)
-except NotFound as exc:
-    print(f"release-state.sh: {exc}", file=sys.stderr)
-    sys.exit(2)
-except Refused as exc:
-    # One renderer for both surfaces: the same str(exc), the same shared
-    # key/remedy fallback, through the same function GET /release-state
-    # uses -- so the remedy: line below is byte-equal to the REST twin's
-    # "remedy" value, whether the raiser produced the house shape or not.
-    body = dual_channel_from_text(
-        str(exc),
-        RELEASE_STATE_REFUSAL_ERROR_KEY,
-        RELEASE_STATE_REFUSAL_FALLBACK_REMEDY,
-    )
-    print(format_error_contract(body["error"], body["message"], body["remedy"]), file=sys.stderr)
-    sys.exit(3)
-
-# Snake-case the schema's Title Case headings for a stable, greppable
-# key=value shape -- the JSON REST twin uses the same four names.
-print(f"active_rc={fields['Active RC']}")
-print(f"rc_opened_at={fields['RC Opened At']}")
-print(f"rc_opened_by_task={fields['RC Opened By Task']}")
-print(f"last_released={fields['Last Released']}")
-PY
+# pgai_agent_kanban.ops.read.render_release_state prints the four fields
+# (exit 0), or refuses: exit 2 for a project with no directory, exit 3 with
+# the error-contract block for a field the schema refuses.
+_rs_rc=0
+pp_run_ops pgai_agent_kanban.ops get_release_state \
+    "${PGAI_AGENT_KANBAN_ROOT_PATH}" "${_rs_project}" || _rs_rc=$?
+exit "${_rs_rc}"

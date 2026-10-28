@@ -97,6 +97,8 @@
 # gated_runner_merge_findings_file expects from an already-structured,
 # per-instance findings producer (the same shape lint_dual_channel_pair.py
 # and lint_gate_census_compliance.py write via their own --findings-file).
+# The JSON is rendered by pgai_agent_kanban.lint.governance_byte_budget
+# from one "<role>\t<assembled>\t<budget>" line per over-budget role.
 
 set -euo pipefail
 # shellcheck source=lib/env_bootstrap.sh
@@ -107,6 +109,8 @@ _GBB_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${_GBB_SCRIPT_DIR}/lib/read_order.sh"
 # shellcheck source=lib/ini_parser.sh
 source "${_GBB_SCRIPT_DIR}/lib/ini_parser.sh"
+# shellcheck source=lib/pp_run_ops.sh
+source "${_GBB_SCRIPT_DIR}/lib/pp_run_ops.sh"
 
 # The seven roles in the catalog: the six RC pipeline agents (OVERVIEW.md)
 # plus OVERWATCH, the horizontal observer outside the pipeline.
@@ -276,30 +280,7 @@ if [[ -n "$_gbb_findings_file" ]]; then
                     "${_gbb_over_roles[$_gbb_i]}" \
                     "${_gbb_over_assembled[$_gbb_i]}" \
                     "${_gbb_over_budget[$_gbb_i]}"
-            done | python3 -c '
-import json
-import sys
-
-findings = []
-for line in sys.stdin:
-    line = line.rstrip("\n")
-    if not line:
-        continue
-    role, assembled, budget = line.split("\t")
-    assembled_i, budget_i = int(assembled), int(budget)
-    findings.append({
-        "lint": "governance_byte_budget",
-        "severity": "quality",
-        "role": role,
-        "assembled_bytes": assembled_i,
-        "budget_bytes": budget_i,
-        "summary": (
-            f"{role} over governance byte budget: "
-            f"assembled={assembled_i} bytes budget={budget_i} bytes"
-        ),
-    })
-print(json.dumps(findings, indent=2, sort_keys=True))
-'
+            done | pp_run_ops pgai_agent_kanban.lint.governance_byte_budget
         )"
     fi
     printf '%s\n' "$_gbb_findings_json" > "$_gbb_findings_file"

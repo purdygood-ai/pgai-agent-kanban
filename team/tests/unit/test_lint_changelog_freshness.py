@@ -46,7 +46,7 @@ Tests cover:
          content but absent from the regenerated content → _diff_is_rc_tolerable()
          returns True (RC-mode tolerates the three removals).
 
-     (b) Lint exits non-zero on ai_main even when PGAI_LINT_CHANGELOG_MODE=rc
+     (b) Lint reports drift on ai_main even when PGAI_LINT_CHANGELOG_MODE=rc
          is set — the branch check in _is_rc_mode() overrides the env var.
 
      (c) Fixture with a drift line that is NOT one of the three tolerable
@@ -60,6 +60,11 @@ Tests cover:
      passes that fixture in RC mode and reports it stale, unchanged, in
      strict mode.
 
+ 10. **Refused branch prefix** (``TestResolveBranchPrefixRefusedValue``):
+     against a scratch kanban root, a project.cfg prefix ``pp_branch_prefix``
+     refuses makes _resolve_branch_prefix() return what it returns for no
+     project.cfg at all, and an inline comment is stripped.
+
 The lint renders with the release render, which writes each Public ID it
 assigns back to its bug file, so every test that runs it hands it a scratch
 copy of the committed bug-ledger fixture — never the operator's live ledger.
@@ -71,6 +76,7 @@ by conftest.py when PGAI_AGENT_KANBAN_TEMP_DIR is set).  No bare /tmp paths.
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
 import pathlib
 import re
@@ -232,14 +238,18 @@ class TestChangelogFreshnessPositive:
 
     PGAI_LINT_CHANGELOG_MODE=rc is set for the two passing cases, the mode an RC
     worktree runs the gate in.  A companion negative test
-    (test_gate_exits_1_without_rc_mode_when_bugs_dir_has_post_commit_entries)
+    (test_gate_records_stale_finding_and_exits_0_without_rc_mode_when_bugs_dir_has_post_commit_entries)
     files a new bug into the scratch ledger after the render and asserts that
-    strict mode then fails.
+    strict mode then reports it stale: printed, written to --findings-file,
+    exit 0 (quality class).
     """
 
     @staticmethod
     def _run_gate(
-        kanban_root: pathlib.Path, changelog: pathlib.Path, rc_mode: bool
+        kanban_root: pathlib.Path,
+        changelog: pathlib.Path,
+        rc_mode: bool,
+        findings_file: pathlib.Path | None = None,
     ) -> subprocess.CompletedProcess:
         env = os.environ.copy()
         env["PYTHONHASHSEED"] = "0"
@@ -248,8 +258,11 @@ class TestChangelogFreshnessPositive:
             env["PGAI_LINT_CHANGELOG_MODE"] = "rc"
         else:
             env.pop("PGAI_LINT_CHANGELOG_MODE", None)
+        argv = [sys.executable, str(_LINT_SCRIPT), "--changelog", str(changelog)]
+        if findings_file is not None:
+            argv += ["--findings-file", str(findings_file)]
         return subprocess.run(
-            [sys.executable, str(_LINT_SCRIPT), "--changelog", str(changelog)],
+            argv,
             env=env,
             capture_output=True,
             text=True,
@@ -295,15 +308,16 @@ class TestChangelogFreshnessPositive:
             "Expected output containing 'ok' or 'fresh'."
         )
 
-    def test_gate_exits_1_without_rc_mode_when_bugs_dir_has_post_commit_entries(
+    def test_gate_records_stale_finding_and_exits_0_without_rc_mode_when_bugs_dir_has_post_commit_entries(
         self, tmp_path: pathlib.Path
     ) -> None:
-        """Gate subprocess exits 1 in strict mode when the ledger gained a bug after the render.
+        """Strict mode reports a ledger that gained a bug after the render, and exits 0.
 
         The scratch CHANGELOG.md is rendered first; a disclosable bug is then
         filed into the scratch ledger, so a fresh render adds its Known Issues
         line.  Without PGAI_LINT_CHANGELOG_MODE=rc the gate byte-compares and
-        must exit 1, naming the artifact stale.
+        must name the artifact stale -- printed, and written to --findings-file
+        as per-instance quality findings -- while exiting 0 (quality class).
         """
         _skip_if_published_missing()
         root = _scratch_kanban_root(tmp_path)
@@ -312,20 +326,42 @@ class TestChangelogFreshnessPositive:
         (bugs_dir / "BUG-9999-test-rc-mode-tolerance-fixture.md").write_text(
             TestRCModeTolerance._SYNTHETIC_BUG_CONTENT, encoding="utf-8"
         )
+        findings_file = tmp_path / "findings" / "changelog_freshness.json"
 
-        result = self._run_gate(root, changelog, rc_mode=False)
+        result = self._run_gate(root, changelog, rc_mode=False, findings_file=findings_file)
 
-        assert result.returncode == 1, (
-            "Gate subprocess did not exit 1 in strict mode for a ledger that gained "
-            "a disclosable bug after the artifact was rendered.\n"
+        assert result.returncode == 0, (
+            "A stale CHANGELOG.md is a quality finding: the gate must exit 0.\n"
             f"stdout: {result.stdout!r}\n"
             f"stderr: {result.stderr!r}"
         )
         assert "stale" in result.stderr.lower(), (
-            "Gate subprocess exited 1 in strict mode but stderr does not contain 'stale'.\n"
+            "Gate subprocess did not print the artifact as stale in strict mode.\n"
             f"stdout: {result.stdout!r}\n"
             f"stderr: {result.stderr!r}"
         )
+        assert "error:   lint.changelog-freshness" in result.stderr, result.stderr
+        findings = json.loads(findings_file.read_text(encoding="utf-8"))
+        assert findings, f"stale artifact wrote no finding to {findings_file}"
+        for finding in findings:
+            assert finding["lint"] == "changelog_freshness", finding
+            assert finding["severity"] == "quality", finding
+            assert str(changelog) in finding["cause"], finding
+            assert "--changelog" in finding["remedy"], finding
+
+    def test_fresh_artifact_writes_empty_findings_file(self, tmp_path: pathlib.Path) -> None:
+        """A fresh artifact writes an empty findings array, so "ran clean" is visible."""
+        _skip_if_published_missing()
+        root = _scratch_kanban_root(tmp_path)
+        changelog = _render_scratch_changelog(
+            root / "projects" / _PROJECT_NAME / "bugs", tmp_path / "CHANGELOG.md"
+        )
+        findings_file = tmp_path / "findings.json"
+
+        result = self._run_gate(root, changelog, rc_mode=True, findings_file=findings_file)
+
+        assert result.returncode == 0, result.stderr
+        assert json.loads(findings_file.read_text(encoding="utf-8")) == []
 
 
 # ---------------------------------------------------------------------------
@@ -1484,8 +1520,8 @@ class TestWriterMigrationDriftTolerance:
         The test monkeypatches _current_git_branch to return 'ai_main' and sets
         PGAI_LINT_CHANGELOG_MODE=rc, then asserts _is_rc_mode() returns False.
 
-        The lint must exit non-zero (fail-fast) on ai_main for the same
-        drift that RC-mode would otherwise tolerate.
+        The lint must report (fail-fast) on ai_main the same drift that
+        RC-mode would otherwise tolerate.
         """
         monkeypatch.setenv("PGAI_LINT_CHANGELOG_MODE", "rc")
         # Patch _current_git_branch at the module level to return 'ai_main'.
@@ -1572,6 +1608,49 @@ class TestIsRcBranchPrefixAware:
         match when a different prefix is asserted -- the alternative added
         is the configured prefix, not an open wildcard."""
         assert _lint._is_rc_branch("ai_rc/v1.0.0", branch_prefix="foo_") is False
+
+
+class TestResolveBranchPrefixRefusedValue:
+    """_resolve_branch_prefix() treats a prefix pp_branch_prefix refuses as an
+    unreadable project.cfg: it returns the shipped fallback, never the refused
+    value and never a traceback.  Each kanban root is a throwaway directory
+    under tmp_path."""
+
+    @staticmethod
+    def _kanban_root(tmp_path: pathlib.Path, cfg_body: str | None) -> pathlib.Path:
+        root = tmp_path / "kanban"
+        project = root / "projects" / _lint._DEFAULT_PROJECT_NAME
+        project.mkdir(parents=True)
+        if cfg_body is not None:
+            (project / "project.cfg").write_text(cfg_body, encoding="utf-8")
+        return root
+
+    @pytest.mark.parametrize("value", ["'zz_'", "zz/"], ids=["single-quoted", "invalid"])
+    def test_refused_prefix_reads_as_an_unreadable_project_cfg(
+        self, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch, value: str
+    ) -> None:
+        monkeypatch.setenv(
+            "PGAI_AGENT_KANBAN_ROOT_PATH", str(self._kanban_root(tmp_path / "none", None))
+        )
+        unreadable = _lint._resolve_branch_prefix()
+
+        monkeypatch.setenv(
+            "PGAI_AGENT_KANBAN_ROOT_PATH",
+            str(self._kanban_root(tmp_path / "refused", f"[project]\nbranch_prefix = {value}\n")),
+        )
+        refused = _lint._resolve_branch_prefix()
+
+        assert refused == unreadable == _lint._DEFAULT_BRANCH_PREFIX
+        assert value not in refused
+
+    def test_inline_comment_is_stripped(
+        self, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv(
+            "PGAI_AGENT_KANBAN_ROOT_PATH",
+            str(self._kanban_root(tmp_path, "[project]\nbranch_prefix = zz_  # note\n")),
+        )
+        assert _lint._resolve_branch_prefix() == "zz_"
 
 
 # ---------------------------------------------------------------------------

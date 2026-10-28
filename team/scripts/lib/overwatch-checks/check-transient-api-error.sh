@@ -13,20 +13,29 @@
 # task's logs/dispatch.jsonl ledger (dispatch_record_* in
 # overwatch_protocol.sh). This check resolves the task's most recent
 # dispatch from that ledger, extracts that span of the batch log, and
-# matches the signatures against its last 50 lines. A BLOCKED task with no
+# matches the signatures against its last 50 lines (for an agent's own
+# agent_unclassified block, against the provider's error lines among them;
+# see below). A BLOCKED task with no
 # ledger (never dispatched by a wake, or dispatched before the ledger
 # existed) or whose recorded batch log is gone is narrated as skipped —
 # never an error, never a handled case, and never a reason to stop the
 # sweep. The task's own logs/*.log files are no longer consulted.
 #
-# Transient signatures (any match triggers):
-#   - "API Error: 5xx"  (any 5-series HTTP status in that phrase)
-#   - "Overloaded"
-#   - "overloaded_error"
-#   - "rate limit"
-#   - "429"
-#   - "503"
-#   - "529"
+# Transient signatures: the transient class of the provider-error signature
+# table (config/provider-error-signatures.txt), read through
+# provider_signatures.sh. A tail is transient only when that is its class; a
+# billing or refusal signature in the same tail outranks it, so such a task is
+# never requeued here.
+#
+# A block its agent wrote itself (## Block Record reason_code
+# agent_unclassified) is classed on the provider's own error lines only, by
+# the wake's rule and selector (agent_block_provider_lines,
+# wake_agent_block_scan.sh): the whole tail must class transient AND the
+# provider lines alone must class transient. The tail ends with the agent's
+# own final reply, which can name a file rate_limit.sh or say "500 chars";
+# prose like that requeues nothing, and the agent's ## Blockers, Needs Human
+# and Block Record are left exactly as written. A task with no Block Record,
+# or any other reason code, is classed on the whole tail as above.
 #
 # This module reads and writes the SAME durable ## Transient Retry
 # record that wake_common.sh's handle_working_after_exit owns (see
@@ -107,6 +116,19 @@
 #
 # --dry-run: scans and logs findings but does NOT modify any task files.
 
+# overwatch_registered_projects and overwatch_branch_prefix: the shared
+# projects.cfg and branch_prefix readers.
+# shellcheck source=../overwatch_config.sh
+source "$(dirname "${BASH_SOURCE[0]}")/../overwatch_config.sh"
+# provider_signature_is: the provider-error signature table's bash reader.
+# shellcheck source=../provider_signatures.sh
+source "$(dirname "${BASH_SOURCE[0]}")/../provider_signatures.sh"
+# agent_block_provider_lines: the provider's own error lines in a tail (the
+# wake's selector, shared rather than copied); block_record_field, which it
+# self-sources, reads the Block Record reason_code.
+# shellcheck source=../wake_agent_block_scan.sh
+source "$(dirname "${BASH_SOURCE[0]}")/../wake_agent_block_scan.sh"
+
 # ---------------------------------------------------------------------------
 # _ctae_resolve_env
 # Resolve KANBAN_ROOT, OVERWATCH_PROJECT, and dev tree path from the environment.
@@ -124,14 +146,9 @@ _ctae_resolve_env() {
 
     if [[ -z "${OVERWATCH_PROJECT:-}" ]]; then
         local _all_projects=""
-        if declare -f projects_cfg_list >/dev/null 2>&1; then
-            _all_projects="$(projects_cfg_list 2>/dev/null)"
-        else
-            local _cfg="${KANBAN_ROOT}/projects.cfg"
-            _all_projects="$(awk '/^\[project:[a-zA-Z0-9_-]+\]/{match($0,/\[project:([a-zA-Z0-9_-]+)\]/,a);print a[1]}' "${_cfg}" 2>/dev/null)"
-        fi
+        _all_projects="$(overwatch_registered_projects)"
         local _project_count
-        _project_count="$(echo "${_all_projects}" | grep -c '[^[:space:]]' 2>/dev/null || echo 0)"
+        _project_count="$(echo "${_all_projects}" | grep -c '[^[:space:]]' 2>/dev/null)" || _project_count=0
         if [[ "${_project_count}" -gt 1 ]]; then
             echo "check-transient-api-error: ERROR: OVERWATCH_PROJECT is not set and multiple projects are registered." >&2
             echo "  Set OVERWATCH_PROJECT to the target project name before running this check." >&2
@@ -167,19 +184,35 @@ _ctae_resolve_env() {
     # branch_prefix — optional; default empty
     _CTAE_BRANCH_PREFIX=""
     if [[ -n "${_cfg_file}" ]]; then
-        local _raw_prefix
-        _raw_prefix="$(grep -E '^[[:space:]]*branch_prefix[[:space:]]*=' "${_cfg_file}" \
-            | head -n1 \
-            | sed 's|^[^=]*=[[:space:]]*||; s|[[:space:]]*$||; s|^["'"'"']||; s|["'"'"']$||')"
-        _CTAE_BRANCH_PREFIX="${_raw_prefix:-}"
+        _CTAE_BRANCH_PREFIX="$(overwatch_branch_prefix "${OVERWATCH_PROJECT}")" || return 1
     fi
 
     return 0
 }
 
 # ---------------------------------------------------------------------------
+# _ctae_load_md_field
+# Make read_md_field (../md_field.sh, the one bash section reader) available,
+# sourcing it from this file's own lib directory on first use unless the
+# caller already defines it. A pp_run_ops the caller defined before the
+# load (its own copy, or a test wrapper) stays the active one: md_field.sh
+# leaves it in place, and it is also saved and put back here. Returns 0
+# when read_md_field is defined.
+# ---------------------------------------------------------------------------
+_ctae_load_md_field() {
+    declare -F read_md_field >/dev/null 2>&1 && return 0
+    local runner=""
+    runner="$(declare -f pp_run_ops 2>/dev/null)" || runner=""
+    # shellcheck source=../md_field.sh
+    source "$(dirname "${BASH_SOURCE[0]}")/../md_field.sh" || return 1
+    [[ -n "${runner}" ]] && eval "${runner}"
+    declare -F read_md_field >/dev/null 2>&1
+}
+
+# ---------------------------------------------------------------------------
 # _ctae_extract_field <status_file> <field_name>
-# Extract the body of a ## Field section from a status.md file.
+# Extract the body of a ## Field section from a status.md file through
+# read_md_field (the next "##" heading that is not "###" ends it).
 # Echoes the trimmed content, or empty string if not found.
 # ---------------------------------------------------------------------------
 _ctae_extract_field() {
@@ -191,16 +224,11 @@ _ctae_extract_field() {
         return 0
     fi
 
-    awk -v field="${field_name}" '
-        $0 ~ "^## " field "$" { found=1; next }
-        found && /^## / { exit }
-        found { lines = lines $0 "\n" }
-        END {
-            gsub(/^[[:space:]]+/, "", lines)
-            gsub(/[[:space:]]+$/, "", lines)
-            print lines
-        }
-    ' "${status_file}"
+    local body=""
+    if _ctae_load_md_field; then
+        body="$(read_md_field "${status_file}" "${field_name}" 2>/dev/null)" || body=""
+    fi
+    printf '%s\n' "${body}"
 }
 
 # ---------------------------------------------------------------------------
@@ -247,39 +275,44 @@ _ctae_log_tail() {
 
 # ---------------------------------------------------------------------------
 # _ctae_matches_transient_signature <text>
-# Returns 0 (true) if the text contains any known transient API error signature.
-#
-# Each signature is tested with a here-string, never by piping echo into
-# grep -q: grep -q exits on its first match, a still-writing echo then dies of
-# SIGPIPE, and under the callers' `set -o pipefail` that turns a match into a
-# miss.
+# Returns 0 (true) when the text classes as transient against the
+# provider-error signature table, 1 otherwise, 2 when the table cannot be
+# read (its error contract, naming the table's path, is on stderr). The
+# reader matches with here-strings, never echo piped into grep -q, so a match
+# survives `set -o pipefail`.
 # ---------------------------------------------------------------------------
 _ctae_matches_transient_signature() {
-    local text="$1"
+    provider_signature_is transient "${1:-}"
+}
 
-    # Check each transient signature
-    if grep -qE 'API Error: 5[0-9][0-9]' <<< "${text}"; then
-        return 0
-    fi
-    if grep -q 'Overloaded' <<< "${text}"; then
-        return 0
-    fi
-    if grep -q 'overloaded_error' <<< "${text}"; then
-        return 0
-    fi
-    if grep -qi 'rate limit' <<< "${text}"; then
-        return 0
-    fi
-    if grep -qE '\b429\b' <<< "${text}"; then
-        return 0
-    fi
-    if grep -qE '\b503\b' <<< "${text}"; then
-        return 0
-    fi
-    if grep -qE '\b529\b' <<< "${text}"; then
-        return 0
-    fi
-    return 1
+# ---------------------------------------------------------------------------
+# _ctae_span_classes_transient <status_file> <text>
+# Class a BLOCKED task's span by the module header's rule. Returns:
+#   0 -- transient: requeue (or bug-file at the ceiling)
+#   1 -- no transient class (none, or a billing/refusal signature outranks it)
+#   2 -- the signature table cannot be read (its error contract is on stderr)
+#   3 -- the task's Block Record reason_code is agent_unclassified and the
+#        transient match is only in the agent's own prose: no provider error
+#        line (agent_block_provider_lines) classes transient
+# The Block Record is read only once the whole span classes transient, so a
+# span without a transient signature costs no record read.
+# ---------------------------------------------------------------------------
+_ctae_span_classes_transient() {
+    local status_file="$1" text="${2:-}"
+    local rc=0
+    _ctae_matches_transient_signature "${text}" || rc=$?
+    (( rc == 0 )) || return "${rc}"
+
+    local code=""
+    code="$(block_record_field "${status_file}" reason_code "")" || code=""
+    [[ "${code}" == "agent_unclassified" ]] || return 0
+
+    _ctae_matches_transient_signature "$(agent_block_provider_lines "${text}")" || rc=$?
+    case "${rc}" in
+        0) return 0 ;;
+        2) return 2 ;;
+        *) return 3 ;;
+    esac
 }
 
 # ---------------------------------------------------------------------------
@@ -373,9 +406,9 @@ _ctae_render_requeue() {
 
     overwatch_load_module_runner || return 1
 
+    _ctae_load_md_field || return 1
     local labels="" labels_rc=0
-    labels="$(pp_run_ops pgai_agent_kanban.task_status read "${status_file}" \
-        --section=Labels --raw)" || labels_rc=$?
+    labels="$(read_md_field "${status_file}" Labels)" || labels_rc=$?
 
     local -a label_args=()
     case "${labels_rc}" in
@@ -800,8 +833,14 @@ overwatch_check_transient_api_error() {
             continue
         fi
 
-        # Check for transient signature
-        if ! _ctae_matches_transient_signature "${log_tail}"; then
+        # Check for transient signature (an agent_unclassified block: on the
+        # provider's own error lines only; see the module header).
+        local class_rc=0
+        _ctae_span_classes_transient "${task_status}" "${log_tail}" || class_rc=$?
+        if (( class_rc == 3 )); then
+            echo "check-transient-api-error: ${task_id}: agent_unclassified block; transient words only in the agent's own output, no provider error line classes transient; left as the agent wrote it" >&2
+            continue
+        elif (( class_rc != 0 )); then
             echo "check-transient-api-error: ${task_id}: no transient signature in batch log span; skipping" >&2
             continue
         fi

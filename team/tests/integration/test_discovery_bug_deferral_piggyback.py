@@ -243,20 +243,20 @@ class TestPiggybackCarriesDeferredBugsOntoATrigger:
         """
         root = two_project_root
         _set_defer_posture(
-            root, "project_a", deferred_bugs=True, deferred_bug_level="low", defer_piggyback=True
+            root, "project-a", deferred_bugs=True, deferred_bug_level="low", defer_piggyback=True
         )
-        trigger = _add_bug_file(root, "project_a", bug_id="BUG-0001", slug="trigger", severity="medium")
+        trigger = _add_bug_file(root, "project-a", bug_id="BUG-0001", slug="trigger", severity="medium")
         low_bugs = [
-            _add_bug_file(root, "project_a", bug_id="BUG-0002", slug="low-a", severity="low"),
-            _add_bug_file(root, "project_a", bug_id="BUG-0003", slug="low-b", severity="low"),
-            _add_bug_file(root, "project_a", bug_id="BUG-0004", slug="low-c", severity="low"),
-            _add_bug_file(root, "project_a", bug_id="BUG-0005", slug="low-d", severity="low"),
+            _add_bug_file(root, "project-a", bug_id="BUG-0002", slug="low-a", severity="low"),
+            _add_bug_file(root, "project-a", bug_id="BUG-0003", slug="low-b", severity="low"),
+            _add_bug_file(root, "project-a", bug_id="BUG-0004", slug="low-c", severity="low"),
+            _add_bug_file(root, "project-a", bug_id="BUG-0005", slug="low-d", severity="low"),
         ]
 
-        result = _run_discovery(root, "project_a")
+        result = _run_discovery(root, "project-a")
 
         assert result.returncode == 0, result.stderr
-        bundles = _bundle_files(root, "project_a")
+        bundles = _bundle_files(root, "project-a")
         assert bundles, f"Expected a bundle for the trigger bug.\nstderr:\n{result.stderr}"
         bundle_text = bundles[0].read_text(encoding="utf-8")
 
@@ -286,7 +286,7 @@ class TestPiggybackCarriesDeferredBugsOntoATrigger:
         )
 
         assert _bug_status(trigger) == "running"
-        backlog_text = _bug_backlog_text(root, "project_a")
+        backlog_text = _bug_backlog_text(root, "project-a")
         assert "[x] BUG-0001" in backlog_text, backlog_text
         for low_bug in low_bugs:
             assert _bug_status(low_bug) == "running", low_bug
@@ -302,20 +302,20 @@ class TestPiggybackCarriesDeferredBugsOntoATrigger:
         """
         root = two_project_root
         _set_defer_posture(
-            root, "project_a", deferred_bugs=True, deferred_bug_level="low", defer_piggyback=False
+            root, "project-a", deferred_bugs=True, deferred_bug_level="low", defer_piggyback=False
         )
-        _add_bug_file(root, "project_a", bug_id="BUG-0001", slug="trigger", severity="medium")
+        _add_bug_file(root, "project-a", bug_id="BUG-0001", slug="trigger", severity="medium")
         low_bugs = [
-            _add_bug_file(root, "project_a", bug_id="BUG-0002", slug="low-a", severity="low"),
-            _add_bug_file(root, "project_a", bug_id="BUG-0003", slug="low-b", severity="low"),
-            _add_bug_file(root, "project_a", bug_id="BUG-0004", slug="low-c", severity="low"),
-            _add_bug_file(root, "project_a", bug_id="BUG-0005", slug="low-d", severity="low"),
+            _add_bug_file(root, "project-a", bug_id="BUG-0002", slug="low-a", severity="low"),
+            _add_bug_file(root, "project-a", bug_id="BUG-0003", slug="low-b", severity="low"),
+            _add_bug_file(root, "project-a", bug_id="BUG-0004", slug="low-c", severity="low"),
+            _add_bug_file(root, "project-a", bug_id="BUG-0005", slug="low-d", severity="low"),
         ]
 
-        result = _run_discovery(root, "project_a")
+        result = _run_discovery(root, "project-a")
 
         assert result.returncode == 0, result.stderr
-        bundles = _bundle_files(root, "project_a")
+        bundles = _bundle_files(root, "project-a")
         assert bundles, result.stderr
         item_ids = parse_bundled_item_basenames(str(bundles[0]))
         assert any("BUG-0001" in i for i in item_ids), item_ids
@@ -325,7 +325,7 @@ class TestPiggybackCarriesDeferredBugsOntoATrigger:
 
         assert "piggybacking" not in result.stderr.lower(), result.stderr
 
-        backlog_text = _bug_backlog_text(root, "project_a")
+        backlog_text = _bug_backlog_text(root, "project-a")
         for low_bug in low_bugs:
             assert _bug_status(low_bug) == "open", low_bug
             item_id = low_bug.name.replace(".md", "")
@@ -343,15 +343,15 @@ class TestPiggybackNeverFiresWithoutATrigger:
         """
         root = two_project_root
         _set_defer_posture(
-            root, "project_a", deferred_bugs=True, deferred_bug_level="low", defer_piggyback=True
+            root, "project-a", deferred_bugs=True, deferred_bug_level="low", defer_piggyback=True
         )
-        bug1 = _add_bug_file(root, "project_a", bug_id="BUG-0001", slug="one", severity="low")
-        bug2 = _add_bug_file(root, "project_a", bug_id="BUG-0002", slug="two", severity="low")
+        bug1 = _add_bug_file(root, "project-a", bug_id="BUG-0001", slug="one", severity="low")
+        bug2 = _add_bug_file(root, "project-a", bug_id="BUG-0002", slug="two", severity="low")
         # Keep the requirements queue non-empty so the hygiene sweep is
         # withheld -- this test isolates "no trigger" from "hygiene sweep
         # fired instead," which is exercised by
         # test_discovery_bug_deferral_gate.py.
-        req_dir = _requirements_dir(root, "project_a")
+        req_dir = _requirements_dir(root, "project-a")
         req_dir.mkdir(parents=True, exist_ok=True)
         (req_dir / "v0.0.5-unrelated.md").write_text(
             "# v0.0.5: unrelated\n\n"
@@ -362,12 +362,12 @@ class TestPiggybackNeverFiresWithoutATrigger:
             "## Summary\nTest requirements file.\n",
             encoding="utf-8",
         )
-        _install_pm_agent_stub(root, "project_a", "PM-20260909-005-decompose-v0-0-5-unrelated")
+        _install_pm_agent_stub(root, "project-a", "PM-20260909-005-decompose-v0-0-5-unrelated")
 
-        result = _run_discovery(root, "project_a")
+        result = _run_discovery(root, "project-a")
 
         assert result.returncode == 0, result.stderr
-        assert not _bundle_files(root, "project_a"), (
+        assert not _bundle_files(root, "project-a"), (
             f"Expected no bug bundle -- no trigger is present to piggyback on.\nstderr:\n{result.stderr}"
         )
         assert "piggybacking" not in result.stderr.lower(), result.stderr

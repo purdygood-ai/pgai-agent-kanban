@@ -32,7 +32,6 @@
 #   TESTER:              :21 :34 :55     (every hour)
 #   CM:                  :34 :55         (every hour)
 #   OVERWATCH sweep:     :30             (every hour)
-#   OVERWATCH wake:      Daily at 3:30 AM
 #   Cleanup (full):      Sundays at 4:00 AM (weekly)
 #   Log Cleanup:         Daily at 4:30 AM
 #   Trivial-log purge:   Daily at 4:15 AM (cleanup.sh --trivial-only; commented out, opt-in)
@@ -82,9 +81,6 @@ PATH=__CLAUDE_PATH__:/usr/local/bin:/usr/bin:/bin
 
 # --- OVERWATCH Tier-1 sweep (hourly at :30) ---
 30 * * * * __KANBAN_ROOT__/scripts/overwatch-sweep.sh >> __KANBAN_ROOT__/logs/cron-overwatch-sweep.log 2>&1
-
-# --- OVERWATCH daily wake (03:30) ---
-30 3 * * * __KANBAN_ROOT__/scripts/wake-batch.sh --agent=overwatch --sleep=0 --max-tasks=1 >> __KANBAN_ROOT__/logs/cron-overwatch.log 2>&1
 
 # --- Cleanup Script (weekly, Sundays at 4:00 AM) ---
 0 4 * * 0 __KANBAN_ROOT__/scripts/cleanup/cleanup.sh >> __KANBAN_ROOT__/logs/cron-cleanup.log 2>&1

@@ -79,6 +79,8 @@ _SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${_SCRIPT_DIR}/lib/dev_tree.sh"
 # shellcheck source=lib/temp.sh
 source "${_SCRIPT_DIR}/lib/temp.sh"
+# shellcheck source=lib/pp_run_ops.sh
+source "${_SCRIPT_DIR}/lib/pp_run_ops.sh"
 
 _VOI_SELF_ROOT="$(cd "${_SCRIPT_DIR}/../.." && pwd)"
 export PGAI_DEV_TREE_PATH="${PGAI_DEV_TREE_PATH:-$(resolve_global_dev_tree 2>/dev/null || true)}"
@@ -201,48 +203,9 @@ _voi_run() {
 _voi_diff_junit() {
     # Diffs two junit-xml files' per-testcase outcome and prints any
     # divergence. Returns 0 if identical, 1 if any test's outcome differs.
-    python3 - "$1" "$2" <<'PYEOF'
-import sys
-import xml.etree.ElementTree as ET
-
-def outcomes(path):
-    tree = ET.parse(path)
-    root = tree.getroot()
-    result = {}
-    for tc in root.iter("testcase"):
-        node_id = f'{tc.get("classname")}::{tc.get("name")}'
-        if tc.find("failure") is not None or tc.find("error") is not None:
-            status = "FAILED"
-        elif tc.find("skipped") is not None:
-            status = "SKIPPED"
-        else:
-            status = "PASSED"
-        result[node_id] = status
-    return result
-
-forward = outcomes(sys.argv[1])
-reversed_ = outcomes(sys.argv[2])
-
-all_ids = sorted(set(forward) | set(reversed_))
-diffs = []
-for node_id in all_ids:
-    f = forward.get(node_id, "MISSING")
-    r = reversed_.get(node_id, "MISSING")
-    if f != r:
-        diffs.append((node_id, f, r))
-
-print(f"Forward order:  {len(forward)} tests collected")
-print(f"Reversed order: {len(reversed_)} tests collected")
-
-if diffs:
-    print(f"\nORDER-COUPLING FINDINGS ({len(diffs)}):")
-    for node_id, f, r in diffs:
-        print(f"  {node_id}: forward={f} reversed={r}")
-    sys.exit(1)
-
-print("\nNo verdict differences between forward and reversed collection order.")
-sys.exit(0)
-PYEOF
+    # The comparison is pgai_agent_kanban.testing.order_independence's
+    # diff_junit_outcomes; see that module for the output format.
+    pp_run_ops pgai_agent_kanban.testing.order_independence "$1" "$2"
 }
 
 for entry in "${_VOI_TARGETS[@]}"; do

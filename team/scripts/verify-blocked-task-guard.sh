@@ -32,8 +32,10 @@
 #             Python heredoc;
 #           - exactly one guard comment header, inside run_project_chain,
 #             below which the driver calls the block_storm module's decide;
-#           - the overwatch branch (never held) is tested before the branch
-#             that logs the hold and sets _dispatch_gated=true;
+#           - overwatch is never held: its chain returns (an
+#             `if [[ "$AGENT" == "overwatch" ]]` block) above the guard
+#             header, before the branch that logs the hold and sets
+#             _dispatch_gated=true;
 #           - the dispatch loop sits inside the
 #             `if [[ "$_dispatch_gated" == "false" ]]` block, which closes
 #             with its end-comment fi;
@@ -376,15 +378,15 @@ else
 
     # --- Overwatch exemption ahead of the hold ----------------------------
     HOLD_LOG_PATTERN='BLOCKED task(s) need human attention; systemic reason_code='
-    OVERWATCH_LINE="$(first_line_matching "$WAKE_DRIVER_SH" '_gate_verdict.*==[[:space:]]*"systemic".*AGENT.*==[[:space:]]*"overwatch"' "${DECIDE_LINE:-0}")"
+    OVERWATCH_LINE="$(first_line_matching "$WAKE_DRIVER_SH" '^[[:space:]]*if[[:space:]]+\[\[[[:space:]]+"\$AGENT"[[:space:]]+==[[:space:]]+"overwatch"[[:space:]]+\]\];[[:space:]]+then[[:space:]]*$')"
     HELD_LOG_LINE="$(first_line_matching "$WAKE_DRIVER_SH" 'not dispatching new tasks' "${DECIDE_LINE:-0}")"
     SET_GATED_LINE="$(first_line_matching "$WAKE_DRIVER_SH" '^[[:space:]]*_dispatch_gated=true[[:space:]]*$' "${HELD_LOG_LINE:-0}")"
     HOLD_LOG_COUNT="$(grep -cF "$HOLD_LOG_PATTERN" "$WAKE_DRIVER_SH" || true)"
     echo "--- overwatch branch at line ${OVERWATCH_LINE:-none}; hold log line at line ${HELD_LOG_LINE:-none}; _dispatch_gated=true at line ${SET_GATED_LINE:-none}; systemic log lines=${HOLD_LOG_COUNT}"
-    if [[ -n "$OVERWATCH_LINE" && -n "$HELD_LOG_LINE" && "$OVERWATCH_LINE" -lt "$HELD_LOG_LINE" ]]; then
-        pass "AC-3 (overwatch): the overwatch branch is tested before the hold, so overwatch is never held"
+    if [[ -n "$OVERWATCH_LINE" && -n "$HDR_LINE" && "$OVERWATCH_LINE" -lt "$HDR_LINE" ]]; then
+        pass "AC-3 (overwatch): the overwatch chain returns above the guard, so overwatch is never held"
     else
-        fail "AC-3 (overwatch): expected an '_gate_verdict == \"systemic\" && AGENT == \"overwatch\"' branch before the 'not dispatching new tasks' log line in ${WAKE_DRIVER_SH}"
+        fail "AC-3 (overwatch): expected an 'if [[ \"\$AGENT\" == \"overwatch\" ]]; then' chain return above the '${GUARD_HDR}' header in ${WAKE_DRIVER_SH}"
     fi
     if [[ -n "$SET_GATED_LINE" && "$HOLD_LOG_COUNT" -ge 1 ]]; then
         pass "AC-3 (log line): the hold logs the count and the systemic reason_code, then sets _dispatch_gated=true"

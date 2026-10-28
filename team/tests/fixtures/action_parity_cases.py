@@ -71,11 +71,14 @@ CONSTRAINTS EVERY CASE HONOURS
 from __future__ import annotations
 
 import dataclasses
+import datetime
 import pathlib
 import shutil
 import subprocess
 from typing import Callable, Optional, Union
 
+from pgai_agent_kanban.ops.context import OpsContext
+from pgai_agent_kanban.overwatch import inbox as overwatch_inbox
 from tests.fixtures.golden_board import PROJECT_NAME, task_ids_by_state
 
 # team/ is three levels up from this file (fixtures/ -> tests/ -> team/); the
@@ -113,6 +116,9 @@ INTAKE_CONTENT = (
     "## Status\nopen\n\n"
     "## Symptom\nFixture-only intake payload; not a real defect.\n"
 )
+
+# The open operator-inbox entry seed_inbox_entry writes.
+INBOX_ENTRY_ID = "INBOX-0001"
 
 # The sentinel files a parity case may arm and must never leak: their
 # basenames, looked for at the board root and under every projects/<name>/.
@@ -309,6 +315,21 @@ def seed_intake_source(root: pathlib.Path, project_dir: pathlib.Path) -> None:
 
 def intake_source_path(root: pathlib.Path) -> pathlib.Path:
     return root / "inbox" / INTAKE_FILENAME
+
+
+def seed_inbox_entry(root: pathlib.Path, project_dir: pathlib.Path) -> None:
+    """One open question in the golden project's operator inbox -- what
+    inbox.sh answer answers. Written through the inbox module, the file's
+    only writer, with a fixed date so both boards start byte-identical."""
+    overwatch_inbox.write_entry(
+        OpsContext(kanban_root=root),
+        PROJECT_NAME,
+        source=f"rc:{PARITY_UNTIL_VERSION}",
+        question="Cancel the RC or keep it open for the late fix?",
+        meanwhile="Left the RC open; the rest of the queue kept running.",
+        how_to_answer='Answer "cancel" or "keep".',
+        now=datetime.datetime(2026, 1, 1, 10, 0, tzinfo=datetime.timezone.utc),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -703,6 +724,28 @@ ACTION_PARITY_CASES: tuple = (
             f"{_GOLDEN_PROJECT_REL}/tasks/{_TASKS['DONE']}/status.md",
             f"archive/{_P}/tasks/{_TASKS['DONE']}/status.md",
             f"archive/{_P}/ARCHIVE-LEDGER.tsv",
+        ),
+    ),
+    # --- Operator inbox -----------------------------------------------------
+    EffectParityCase(
+        verb="inbox", script="inbox.sh",
+        cli_args=_args("--project", _P, "answer", "--id", INBOX_ENTRY_ID, "--answer", "keep"),
+        rest_route="/operations/inbox-answer",
+        rest_body={"project": _P, "id": INBOX_ENTRY_ID, "answer": "keep"},
+        expect_changed=(f"{_GOLDEN_PROJECT_REL}/operator-inbox.md",),
+        seed=seed_inbox_entry,
+    ),
+    RefusalParityCase(
+        verb="inbox", script="inbox.sh",
+        cli_args=_args("--project", GHOST_PROJECT, "answer", "--id", INBOX_ENTRY_ID, "--answer", "keep"),
+        rest_route="/operations/inbox-answer",
+        rest_body={"project": GHOST_PROJECT, "id": INBOX_ENTRY_ID, "answer": "keep"},
+        error_key="project_resolve.not_found",
+        seed=seed_inbox_entry,
+        note=(
+            "project resolution is the script's first refusal; the route lifts it to top-level keys "
+            "(the module's own inbox.* refusals record the refusal ledger on the CLI side, so their "
+            "triple parity is proven in tests/unit/test_inbox_rest.py instead)"
         ),
     ),
     RefusalParityCase(

@@ -1,0 +1,7 @@
+? NEEDS OPERATOR
+--------------------------------------------------------------------
+
+  alpha: 2 needs-operator
+    Newest: INBOX-0002  2026-10-18T10:00:00+00:00  (BUG-9002-export-timeout)  Is a ten-minute export limit acceptable?
+    Answer: scripts/inbox.sh --project alpha list
+

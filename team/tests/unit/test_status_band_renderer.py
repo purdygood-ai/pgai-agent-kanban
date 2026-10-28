@@ -114,8 +114,8 @@ def _run_next_cron_firings(
 
 def _install_crontab(text: str) -> None:
     """Install a synthetic crontab through the autouse crontab-sandbox stub
-    (team/tests/conftest.py's `_sandbox_crontab`) -- writes to
-    $HOME/.fake_crontab, never the real operator crontab."""
+    (team/tests/conftest.py's `_sandbox_crontab`) -- writes to the test's
+    own tmp_path/.fake_crontab, never the real operator crontab."""
     result = subprocess.run(
         ["crontab", "-"],
         input=text,

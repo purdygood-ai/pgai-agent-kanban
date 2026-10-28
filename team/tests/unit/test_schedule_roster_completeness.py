@@ -40,8 +40,10 @@ FIXTURE STRATEGY
 -----------------
 - **Crontab**: installed through the crontab-sandbox stub every test in
   this tree already gets from the autouse `_sandbox_crontab` fixture in
-  team/tests/conftest.py (`crontab -` writes to $HOME/.fake_crontab; `-l`
-  reads it back). This is the only crontab command any test here issues,
+  team/tests/conftest.py (`crontab -` writes to the test's own
+  tmp_path/.fake_crontab, since HOME stays the test process's own --
+  $HOME/.fake_crontab is used only by a subprocess given its own HOME;
+  `-l` reads it back). This is the only crontab command any test here issues,
   and it never touches the operator's real crontab. Rows fire every
   minute with `--sleep=N` stagger, mirroring
   templates/install/crontab-large.example; weekly rows (OVERWATCH,
@@ -435,8 +437,8 @@ def _diagnostic(result: subprocess.CompletedProcess) -> str:
 
 def _install_crontab(text: str) -> None:
     """Install a synthetic crontab through the autouse crontab-sandbox stub
-    (team/tests/conftest.py's `_sandbox_crontab`) -- writes to
-    $HOME/.fake_crontab, never the real operator crontab."""
+    (team/tests/conftest.py's `_sandbox_crontab`) -- writes to the test's
+    own tmp_path/.fake_crontab, never the real operator crontab."""
     result = subprocess.run(
         ["crontab", "-"],
         input=text,
@@ -452,11 +454,11 @@ def _install_crontab(text: str) -> None:
 def _remove_crontab() -> None:
     """Remove any installed sandbox crontab via `crontab -r` (the stub's
     `-r` verb, still through team/tests/conftest.py's `_sandbox_crontab`).
-    Leaves $HOME/.fake_crontab absent, which is what makes the stub's `-l`
-    verb exit non-zero -- one way `dashboard_schedule_roster_count()`
-    degrades to zero (`crontab -l` exiting non-zero), distinct from an
-    installed-but-empty crontab (`crontab -l` exits 0 with empty
-    output)."""
+    Leaves the test's tmp_path/.fake_crontab absent, which is what makes
+    the stub's `-l` verb exit non-zero -- one way
+    `dashboard_schedule_roster_count()` degrades to zero (`crontab -l`
+    exiting non-zero), distinct from an installed-but-empty crontab
+    (`crontab -l` exits 0 with empty output)."""
     result = subprocess.run(
         ["crontab", "-r"],
         capture_output=True,

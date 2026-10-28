@@ -44,6 +44,7 @@ import datetime
 import os
 import pathlib
 import re
+import shlex
 import subprocess
 
 # ---------------------------------------------------------------------------
@@ -200,7 +201,9 @@ def test_queued_work_with_lock_past_stale_threshold_yields_stuck_lock_with_relea
     line = result.stdout.strip()
     assert line.startswith("demo: STUCK-LOCK")
     assert "remedy:" in line
-    assert "team/scripts/release-locks.sh --release repo-wake-demo" in line
+    # The remedy names the script installed under the kanban root, shell-quoted.
+    assert "team/scripts/" not in line
+    assert f"{shlex.quote(f'{tmp_path}/scripts/release-locks.sh')} --release repo-wake-demo" in line
 
 
 def test_stuck_lock_remedy_requires_force_only_when_recorded_pid_is_alive(tmp_path: pathlib.Path) -> None:

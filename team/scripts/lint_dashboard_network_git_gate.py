@@ -2,9 +2,9 @@
 """
 lint_dashboard_network_git_gate.py
 ===================================
-A lint/grep gate that fails when any network-capable git invocation
-(``ls-remote``, ``fetch``, ``pull``, ``push``, ``clone``) appears anywhere
-under ``team/scripts/dashboard/`` — no exceptions, including the ``4:git``
+A lint/grep gate that reports every network-capable git invocation
+(``ls-remote``, ``fetch``, ``pull``, ``push``, ``clone``) that appears
+anywhere under ``team/scripts/dashboard/`` — no exceptions, including the ``4:git``
 window scripts (``git-status.sh``, ``git-recent-tags.sh``).
 
 WHY THIS EXISTS
@@ -18,7 +18,7 @@ prompt, or silently sending network traffic from what looks like a passive
 status display. Behavioral verification of a fixed tree does not stay
 fixed on its own — a future edit can silently reintroduce a ``git fetch``
 or ``git ls-remote`` call. This lint is the structural guard that makes
-such a regression fail CI instead of shipping quietly.
+such a regression surface as a finding instead of shipping quietly.
 
 SCOPE
 -----
@@ -54,20 +54,31 @@ these exact verb words ("no fetch, pull, push, clone, or ls-remote is ever
 invoked here"), and flagging that documentation would be a false positive
 this lint must not produce.
 
+FINDINGS
+--------
+CONVERT (quality class, team/SOP-core.md "Gates and Refusals"): a network
+verb on the render path is a design-law breach with zero runtime-failure
+risk to the run that finds it.  Each violation is printed and recorded as
+one finding (file, line, verb); with --findings-file the findings are
+written as a JSON array (the shape pgai_agent_kanban.lint.findings
+defines), which the gated runners merge per instance with
+gated_runner_merge_findings_file.
+
 EXIT CODES
 ----------
-  0   No violations found (lint is green).
-  1   One or more violations found; see stdout for details.
-  2   Usage error or the specified directory was not found.
+  0   Scan ran, whatever it found (violations are findings, not failures).
+  2   Usage error, or the team/ or dashboard/ directory was not found.
 
 USAGE
 -----
   python3 team/scripts/lint_dashboard_network_git_gate.py [OPTIONS]
 
-  --team-dir PATH   Root of the team/ directory (default: parent of this
-                     script's directory, i.e. team/ when the script lives
-                     at team/scripts/).
-  --verbose, -v      Print each file as it is checked.
+  --team-dir PATH       Root of the team/ directory (default: parent of
+                        this script's directory, i.e. team/ when the script
+                        lives at team/scripts/).
+  --findings-file PATH  Write the findings as a JSON array to PATH (parent
+                        directories created; written even when empty).
+  --verbose, -v         Print each file as it is checked.
 
 EXAMPLES
 --------
@@ -76,6 +87,10 @@ EXAMPLES
 
   # With explicit team dir:
   python3 team/scripts/lint_dashboard_network_git_gate.py --team-dir /path/to/team
+
+  # Record findings for a downstream merge:
+  python3 team/scripts/lint_dashboard_network_git_gate.py \\
+      --findings-file "${PGAI_AGENT_KANBAN_TEMP_DIR}/lint/dashboard_network_git_gate.json"
 """
 
 from __future__ import annotations
@@ -85,6 +100,21 @@ import re
 import sys
 from pathlib import Path
 from typing import NamedTuple
+
+# The finding shape and the error-contract emitter live in the team package
+# beside scripts/; this script is run directly as well as imported, so the
+# package root is put on sys.path from this file's own location.
+_TEAM_DIR = Path(__file__).resolve().parent.parent  # team/
+if str(_TEAM_DIR) not in sys.path:
+    sys.path.insert(0, str(_TEAM_DIR))
+from pgai_agent_kanban.lib.error_contract import emit_error_contract  # noqa: E402
+from pgai_agent_kanban.lint.findings import (  # noqa: E402
+    display_path,
+    quality_finding,
+    write_findings_file,
+)
+
+_LINT_NAME = "dashboard_network_git_gate"
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -260,7 +290,7 @@ def _format_remedy_block(
     commands = _build_fix_commands(violations, team_dir=team_dir, lint_script=lint_script)
 
     lines = [
-        f"lint_dashboard_network_git_gate: FAIL — {len(violations)} violation(s)",
+        f"lint_dashboard_network_git_gate: {len(violations)} violation(s)",
         "",
         "Cause(s):",
     ]
@@ -297,15 +327,16 @@ def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="lint_dashboard_network_git_gate",
         description=(
-            "Fails when any network-capable git invocation "
-            "(ls-remote|fetch|pull|push|clone) appears anywhere under "
-            "team/scripts/dashboard/ — no exceptions, including the 4:git window."
+            "Reports every network-capable git invocation "
+            "(ls-remote|fetch|pull|push|clone) anywhere under "
+            "team/scripts/dashboard/ — no exceptions, including the 4:git window. "
+            "Quality class: each violation is a finding, and the lint exits 0 "
+            "whatever it finds."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
             "Exit codes:\n"
-            "  0  No violations found.\n"
-            "  1  One or more violations found.\n"
+            "  0  Scan ran, whatever it found (violations are findings).\n"
             "  2  Usage error or directory not found.\n"
         ),
     )
@@ -319,6 +350,15 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--findings-file",
+        metavar="PATH",
+        default=None,
+        help=(
+            "Write the findings as a JSON array to PATH (parent directories "
+            "created; written even when empty).  Findings are printed either way."
+        ),
+    )
+    parser.add_argument(
         "--verbose",
         "-v",
         action="store_true",
@@ -328,8 +368,32 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _findings(violations: list[Violation], *, team_dir: Path, lint_script: Path) -> list[dict]:
+    """One quality finding per violation, each carrying its own runnable
+    remedy: the stop-gap ``sed`` that comments the line out, then the re-check."""
+    repo_root = team_dir.parent
+    relint = f'python3 "{lint_script}" --team-dir "{team_dir}"'
+    return [
+        quality_finding(
+            _LINT_NAME,
+            f"{display_path(v.path, repo_root)}:{v.line}: network-capable git verb "
+            f"'{v.verb}' on the dashboard render path -- {v.snippet!r}",
+            f"sed -i '{v.line}s/^/# /' \"{v.path}\" && {relint}",
+            file=display_path(v.path, repo_root),
+            line=v.line,
+            verb=v.verb,
+        )
+        for v in violations
+    ]
+
+
 def main(argv: list[str] | None = None) -> int:
-    """Run the dashboard network-git gate and return an exit code."""
+    """Run the dashboard network-git gate.
+
+    Exit codes: 0 whatever was found (each violation is a quality finding,
+    printed and written to --findings-file); 2 usage error, or the team/ or
+    dashboard/ directory not found.
+    """
     parser = _build_parser()
     args = parser.parse_args(argv)
 
@@ -352,15 +416,26 @@ def main(argv: list[str] | None = None) -> int:
         print(f"[dashboard-git-gate] Scanning {dashboard_dir} ...")
 
     violations = scan_dashboard_dir(dashboard_dir, verbose=args.verbose)
+    lint_script = Path(__file__).resolve()
+    findings = _findings(violations, team_dir=team_dir, lint_script=lint_script)
+    write_findings_file(args.findings_file, findings, lint="lint_dashboard_network_git_gate")
 
     if violations:
-        lint_script = Path(__file__).resolve()
         print(
             "\n"
             + _format_remedy_block(violations, team_dir=team_dir, lint_script=lint_script),
             flush=True,
         )
-        return 1
+        # CENSUS-ANCHOR: dashboard-network-git-gate-01
+        # CONVERT: a network verb on the render path is a design-law breach
+        # with zero runtime-failure risk -- recorded as findings; returns 0.
+        emit_error_contract(
+            "lint.dashboard-network-git",
+            f"{len(findings)} network-capable git invocation(s) under {dashboard_dir}; "
+            "the dashboard render path must stay local-only. Each is listed above.",
+            findings[0]["remedy"],
+        )
+        return 0
 
     print(f"lint_dashboard_network_git_gate: OK ({dashboard_dir} is local-only clean)")
     return 0

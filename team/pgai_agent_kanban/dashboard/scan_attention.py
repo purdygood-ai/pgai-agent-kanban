@@ -22,6 +22,18 @@ Additionally:
      prints a ``QUARANTINED FILES`` section listing project, type, filename,
      reason, and retry_count.  The section is suppressed when no files exist.
 
+  4. Operator-inbox scanner: reads each project's operator inbox
+     (``projects/<name>/operator-inbox.md``) and prints an ``OPERATOR INBOX``
+     section with the project's open count and one line per open entry,
+     newest first.  The section is suppressed when no entry is open in any
+     project.
+
+  5. Needs-operator scanner: counts each project's bug and priority items
+     at ``needs-operator`` and prints a ``NEEDS OPERATOR`` section with the
+     project's count and the newest open inbox question that names one of
+     those items, read through the inbox module.  The section is
+     suppressed when no project has a needs-operator item.
+
 Usage (CLI):
     python3 team/pgai_agent_kanban/dashboard/scan_attention.py \\
         blocked-tasks <tasks_root> [--color | --no-color]
@@ -45,6 +57,12 @@ Usage (CLI):
     python3 team/pgai_agent_kanban/dashboard/scan_attention.py \\
         pending-approvals <kanban_root> [--color | --no-color]
 
+    python3 team/pgai_agent_kanban/dashboard/scan_attention.py \\
+        inbox <kanban_root> [--color | --no-color]
+
+    python3 team/pgai_agent_kanban/dashboard/scan_attention.py \\
+        needs-operator <kanban_root> [--color | --no-color]
+
 Usage (import):
     from pgai_agent_kanban.dashboard.scan_attention import (
         scan_blocked_tasks,
@@ -54,6 +72,8 @@ Usage (import):
         scan_transient_tasks,
         scan_overwatch_section,
         scan_pending_approvals_attention,
+        scan_inbox_section,
+        scan_needs_operator_section,
     )
     scan_blocked_tasks(tasks_root="/path/to/tasks", use_color=True)
     scan_quarantine(kanban_root="/path/to/kanban", use_color=True, threshold=3)
@@ -63,6 +83,8 @@ Usage (import):
     scan_transient_tasks(tasks_root="/path/to/tasks", use_color=True)
     scan_overwatch_section(kanban_root="/path/to/kanban", use_color=True)
     scan_pending_approvals_attention(kanban_root="/path/to/kanban", use_color=True)
+    scan_inbox_section(kanban_root="/path/to/kanban", use_color=True)
+    scan_needs_operator_section(kanban_root="/path/to/kanban", use_color=True)
 
 Exit codes:
     0 — always (errors in individual task reads are silently skipped)
@@ -97,7 +119,9 @@ from pgai_agent_kanban.dashboard._rejected import (  # noqa: E402
     quarantined_files,
 )
 from pgai_agent_kanban.dashboard.rejected_listing import RECOVER_HINT  # noqa: E402
-from pgai_agent_kanban.task_status import section_lines, section_value  # noqa: E402
+from pgai_agent_kanban.lib import ini  # noqa: E402
+from pgai_agent_kanban.task_status import read_section, section_lines  # noqa: E402
+from pgai_agent_kanban.task_status import section_value as _read_field  # noqa: E402
 
 # Rejected-task sidecar parser (read_reason_sidecar), imported lazily below.
 # Import is deferred inside scan_rejected so the module remains importable even
@@ -124,11 +148,6 @@ def _get_read_reason_sidecar():
 # ---------------------------------------------------------------------------
 # Blocked-tasks scanner
 # ---------------------------------------------------------------------------
-
-def _read_field(text: str, heading: str) -> str:
-    """Return the value of the '## heading' section (task_status.section_value)."""
-    return section_value(text, heading)
-
 
 # The earlier name of task_status.section_lines, kept for existing importers.
 _read_section = section_lines
@@ -799,6 +818,204 @@ def scan_pending_approvals_attention(kanban_root: str, use_color: bool) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Operator inbox section scanner
+# ---------------------------------------------------------------------------
+
+_INBOX_QUESTION_TRUNCATE = 100  # max chars of the newest question shown
+_INBOX_DIVIDER_WIDTH = 68       # attention.sh's section divider width
+
+
+def _inbox_entry_text(entry, c_cyan: str, c_dim: str, reset: str) -> str:
+    """Return one inbox entry as the attention pane shows it, without indent.
+
+    ``INBOX-NNNN  <date>  (<source>)  <question>`` -- the source and the
+    question cut to their first line, the question further cut at
+    :data:`_INBOX_QUESTION_TRUNCATE` characters with a trailing ``…``.
+    """
+    question = (entry.question.splitlines() or [""])[0]
+    if len(question) > _INBOX_QUESTION_TRUNCATE:
+        question = question[:_INBOX_QUESTION_TRUNCATE] + "…"
+    source = (entry.source.splitlines() or [""])[0]
+    return f"{c_cyan}{entry.entry_id}{reset}  {c_dim}{entry.date}  ({source}){reset}  {question}"
+
+
+def scan_inbox_section(kanban_root: str, use_color: bool) -> None:
+    """Print the OPERATOR INBOX section: each project's open count and every open entry.
+
+    Called by team/scripts/dashboard/attention.sh. Every project directory
+    under ``kanban_root/projects/`` is read through
+    ``metrics.inbox_view.read_open_entries`` (the inbox module's
+    ``list_open_newest_first``). A project with open entries renders::
+
+        ? OPERATOR INBOX
+        --------------------------------------------------------------------
+
+          <project>: <N> open
+            INBOX-NNNN  <date>  (<source>)  <first line of the question, cut at 100 characters>
+            ... one line per open entry, newest first ...
+            Answer: scripts/inbox.sh --project <project> list
+
+    Every open entry gets its line, whatever wrote it -- an agent's
+    question, a decision-wake action that did not run, a runaway detector a
+    setting turned off -- so no open question is hidden behind a newer one.
+
+    A project whose inbox cannot be read renders ``  <project>: inbox
+    unreadable`` instead, so a question is never hidden by a bad file. A
+    project with no open entries renders nothing, and when no project has
+    anything to show the section is suppressed entirely -- no header, no
+    divider -- as the QUARANTINED FILES section is.
+
+    Args:
+        kanban_root: Path to the kanban root directory.
+        use_color:   When True, emit ANSI color codes and Unicode symbols.
+    """
+    # Imported here, not at module top, so the other scanners in this file
+    # keep working on a tree whose inbox modules fail to import.
+    from pgai_agent_kanban.metrics.inbox_view import PROBLEM_NO_PROJECT, read_open_entries
+
+    kanban_root_path = pathlib.Path(kanban_root)
+
+    RESET  = "\033[0m"    if use_color else ""
+    C_BOLD = "\033[1m"    if use_color else ""
+    C_DIM  = "\033[2m"    if use_color else ""
+    C_CYAN = "\033[0;36m" if use_color else ""
+    C_YEL  = "\033[0;33m" if use_color else ""
+    TRAY   = "\U0001f4e5" if use_color else "?"  # inbox tray symbol
+    RULE   = "─" if use_color else "-"
+
+    blocks: list[list[str]] = []
+    for proj_name, _proj_root in _iter_projects(kanban_root_path):
+        if not ini.is_project_name(proj_name):
+            continue
+        entries, problem = read_open_entries(kanban_root_path, proj_name)
+        if entries is None:
+            if problem != PROBLEM_NO_PROJECT:
+                blocks.append([f"  {C_YEL}{C_BOLD}{proj_name}{RESET}: {problem}"])
+            continue
+        if not entries:
+            continue
+        block = [f"  {C_YEL}{C_BOLD}{proj_name}{RESET}: {len(entries)} open"]
+        for entry in entries:
+            block.append(f"    {_inbox_entry_text(entry, C_CYAN, C_DIM, RESET)}")
+        block.append(f"    {C_DIM}Answer: scripts/inbox.sh --project {proj_name} list{RESET}")
+        blocks.append(block)
+
+    if not blocks:
+        # No open entry anywhere -- emit nothing (suppress section entirely).
+        return
+
+    print(f"\n{C_YEL}{C_BOLD}{TRAY} OPERATOR INBOX{RESET}")
+    print(RULE * _INBOX_DIVIDER_WIDTH)
+    for block in blocks:
+        print("")
+        for line in block:
+            print(line)
+    print("")
+
+
+# ---------------------------------------------------------------------------
+# Needs-operator section scanner
+# ---------------------------------------------------------------------------
+
+#: The intake directories whose items can be set to needs-operator.
+_NEEDS_OPERATOR_INTAKE_DIRS = ("bugs", "priority")
+
+
+def _source_names_key(source: str, keys: "set[str]") -> bool:
+    """Return True when an inbox entry's *source* names one of *keys*.
+
+    The source's first line, stripped, names a key when it equals it or is
+    its leading ID (``BUG-NNNN`` for ``BUG-NNNN-some-slug``).
+    ``ops.write.set_needs_operator`` writes the whole key.
+    """
+    first = (source.strip().splitlines() or [""])[0].strip()
+    if not first:
+        return False
+    return any(key == first or key.startswith(first + "-") for key in keys)
+
+
+def scan_needs_operator_section(kanban_root: str, use_color: bool) -> None:
+    """Print the NEEDS OPERATOR section: each project's needs-operator count and newest question.
+
+    Called by team/scripts/dashboard/attention.sh. For every project
+    directory under ``kanban_root/projects/``, the items at
+    ``needs-operator`` in its ``bugs/`` and ``priority/`` directories are
+    counted (``status_line.needs_operator_keys``); the newest question is
+    the newest open inbox entry whose Source names one of them, read
+    through ``metrics.inbox_view.read_open_entries``. A project with any
+    such item renders::
+
+        ? NEEDS OPERATOR
+        --------------------------------------------------------------------
+
+          <project>: <N> needs-operator
+            Newest: INBOX-NNNN  <date>  (<item key>)  <first line of the question, cut at 100 characters>
+            Answer: scripts/inbox.sh --project <project> list
+
+    When no open entry names any of the project's items the Newest line
+    reads ``Newest: (no open inbox question)``; when the inbox cannot be
+    read it reads ``Newest: (inbox unreadable)``. A project with no
+    needs-operator item renders nothing, and when no project has one the
+    section is suppressed entirely -- no header, no divider.
+
+    Args:
+        kanban_root: Path to the kanban root directory.
+        use_color:   When True, emit ANSI color codes and Unicode symbols.
+    """
+    # Imported here, not at module top, so the other scanners in this file
+    # keep working on a tree whose inbox modules fail to import.
+    from pgai_agent_kanban.dashboard.status_line import needs_operator_keys
+    from pgai_agent_kanban.metrics.inbox_view import read_open_entries
+
+    kanban_root_path = pathlib.Path(kanban_root)
+
+    RESET  = "\033[0m"    if use_color else ""
+    C_BOLD = "\033[1m"    if use_color else ""
+    C_DIM  = "\033[2m"    if use_color else ""
+    C_CYAN = "\033[0;36m" if use_color else ""
+    C_YEL  = "\033[0;33m" if use_color else ""
+    MARK   = "\u2753" if use_color else "?"  # question mark ornament
+    RULE   = "─" if use_color else "-"
+
+    blocks: list[list[str]] = []
+    for proj_name, proj_root in _iter_projects(kanban_root_path):
+        if not ini.is_project_name(proj_name):
+            continue
+        keys: list[str] = []
+        for intake_dir in _NEEDS_OPERATOR_INTAKE_DIRS:
+            keys.extend(needs_operator_keys(proj_root / intake_dir))
+        if not keys:
+            continue
+        entries, problem = read_open_entries(kanban_root_path, proj_name)
+        if entries is None:
+            newest_text = f"{C_DIM}({problem}){RESET}"
+        else:
+            key_set = set(keys)
+            newest = next((e for e in entries if _source_names_key(e.source, key_set)), None)
+            if newest is None:
+                newest_text = f"{C_DIM}(no open inbox question){RESET}"
+            else:
+                newest_text = _inbox_entry_text(newest, C_CYAN, C_DIM, RESET)
+        blocks.append([
+            f"  {C_YEL}{C_BOLD}{proj_name}{RESET}: {len(keys)} needs-operator",
+            f"    Newest: {newest_text}",
+            f"    {C_DIM}Answer: scripts/inbox.sh --project {proj_name} list{RESET}",
+        ])
+
+    if not blocks:
+        # No needs-operator item anywhere -- emit nothing (suppress section entirely).
+        return
+
+    print(f"\n{C_YEL}{C_BOLD}{MARK} NEEDS OPERATOR{RESET}")
+    print(RULE * _INBOX_DIVIDER_WIDTH)
+    for block in blocks:
+        print("")
+        for line in block:
+            print(line)
+    print("")
+
+
+# ---------------------------------------------------------------------------
 # OVERWATCH section scanner
 # ---------------------------------------------------------------------------
 
@@ -865,9 +1082,6 @@ def _read_resolving_marker(proj_root: pathlib.Path) -> dict | None:
     return {"lane": lane, "attempt": attempt, "version": version, "started_at": fields.get("started_at", "")}
 
 
-_OVERWATCH_DECISION_BLOCK_RE = re.compile(
-    r"^## OVERWATCH Decision\n(.*?)(?=\n## |\Z)", re.DOTALL | re.MULTILINE
-)
 _OVERWATCH_DECISION_FIELD_RE = {
     "lane": re.compile(r"^Lane:\s*(.*)$", re.MULTILINE),
     "version": re.compile(r"^Version:\s*(.*)$", re.MULTILINE),
@@ -881,8 +1095,12 @@ def _read_last_overwatch_decision(release_state_path: pathlib.Path) -> dict | No
     "## OVERWATCH Decision" event block in *release_state_path*
     (release-state.md is append-only, so the last occurrence is the most
     recent decision -- resolution_stage.write_decision_event's own
-    contract). Returns None when the file is absent, unreadable, or
-    carries no such block.
+    contract). The block is read by ``task_status.read_section`` with
+    ``last=True``, as the lane verdict (``ops.verdict``) reads it: the body
+    of the last such heading, ending at the next level-2 heading. Within
+    the block the first ``Lane:``, ``Version:``, ``Outcome:`` and
+    ``Timestamp:`` lines are the fields. Returns None when the file is
+    absent, unreadable, or carries no such block.
     """
     if not release_state_path.is_file():
         return None
@@ -891,10 +1109,9 @@ def _read_last_overwatch_decision(release_state_path: pathlib.Path) -> dict | No
     except OSError:
         return None
 
-    blocks = _OVERWATCH_DECISION_BLOCK_RE.findall(text)
-    if not blocks:
+    last = read_section(text, "OVERWATCH Decision", last=True)
+    if last is None:
         return None
-    last = blocks[-1]
 
     result: dict[str, str] = {}
     for name, pattern in _OVERWATCH_DECISION_FIELD_RE.items():
@@ -1317,6 +1534,62 @@ def main() -> None:
         help="Disable ANSI color output.",
     )
 
+    # --- inbox subcommand ---
+    p_inbox = subparsers.add_parser(
+        "inbox",
+        help=(
+            "Print the OPERATOR INBOX section: each project's open inbox count "
+            "and newest open question.  Prints nothing when no entry is open."
+        ),
+    )
+    p_inbox.add_argument(
+        "kanban_root",
+        help="Path to the kanban root directory.",
+    )
+    color_group_in = p_inbox.add_mutually_exclusive_group()
+    color_group_in.add_argument(
+        "--color",
+        dest="use_color",
+        action="store_true",
+        default=True,
+        help="Enable ANSI color output (default).",
+    )
+    color_group_in.add_argument(
+        "--no-color",
+        dest="use_color",
+        action="store_false",
+        help="Disable ANSI color output.",
+    )
+
+    # --- needs-operator subcommand ---
+    p_needs_op = subparsers.add_parser(
+        "needs-operator",
+        help=(
+            "Print the NEEDS OPERATOR section: each project's count of bug and "
+            "priority items at needs-operator and the newest open inbox "
+            "question naming one of them.  Prints nothing when no project "
+            "has a needs-operator item."
+        ),
+    )
+    p_needs_op.add_argument(
+        "kanban_root",
+        help="Path to the kanban root directory.",
+    )
+    color_group_no = p_needs_op.add_mutually_exclusive_group()
+    color_group_no.add_argument(
+        "--color",
+        dest="use_color",
+        action="store_true",
+        default=True,
+        help="Enable ANSI color output (default).",
+    )
+    color_group_no.add_argument(
+        "--no-color",
+        dest="use_color",
+        action="store_false",
+        help="Disable ANSI color output.",
+    )
+
     # --- overwatch-section subcommand ---
     p_overwatch = subparsers.add_parser(
         "overwatch-section",
@@ -1381,6 +1654,10 @@ def main() -> None:
             kanban_root=args.kanban_root,
             use_color=args.use_color,
         )
+    elif args.command == "inbox":
+        scan_inbox_section(kanban_root=args.kanban_root, use_color=args.use_color)
+    elif args.command == "needs-operator":
+        scan_needs_operator_section(kanban_root=args.kanban_root, use_color=args.use_color)
     elif args.command == "overwatch-section":
         scan_overwatch_section(
             kanban_root=args.kanban_root,

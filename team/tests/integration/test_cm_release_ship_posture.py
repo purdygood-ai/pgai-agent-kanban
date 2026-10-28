@@ -6,6 +6,11 @@ End-to-end tests for cm-release.sh under the per-project ship posture
 cm-release.sh against a synthetic git repository and kanban root under
 tmp_path.
 
+"Under always" below means both ship_posture = always in project.cfg and
+the default: the key absent from project.cfg and kanban.cfg, which on these
+push_to_remote = false lanes resolves to always. Each always outcome is
+checked for both.
+
 Coverage:
   - Trigger 2 (the shape of a real report: SHIP-WITH-SERIOUS-CONCERNS,
     Systemic Risk high, the high finding a regression with integrity
@@ -26,12 +31,15 @@ Coverage:
     through the ship-policy bug filer, records that bug in the Auto-Ship
     Event, writes no HALT file and ships FUNCTIONAL, with the trigger-8
     auto-ship line as its whole Known Issues section.
-  - Trigger 1 (TESTER BLOCKED), the unrecognized-TESTER-state row and the
-    mechanical triggers reachable on a local-only lane (4 pre-squash hook,
-    5 squash conflict, 9 notes status heading, 10 strict pollution guard,
-    11 fidelity gate) write the same project HALT file with the same error
-    key under always as with the posture key absent, ship nothing and
+  - The mechanical triggers reachable on a local-only lane (4 pre-squash
+    hook, 5 squash conflict, 9 notes status heading, 10 strict pollution
+    guard, 11 fidelity gate) write the same project HALT file with the same
+    error key under always as under ship_posture = matrix, ship nothing and
     record no Auto-Ship Event.
+  - A TESTER report problem halts under neither posture: a BLOCKED TESTER
+    task is requeued (exit 4, nothing shipped) and an unrecognized TESTER
+    state ships KNOWN-BUGS, identically under matrix and always, with no
+    HALT file and no Auto-Ship Event.
 
 Fixture builders come from test_cm_release_synthetic.py, as in
 test_ship_policy_acceptance.py. The operator's live install is never
@@ -78,6 +86,11 @@ _KEY_T8 = "cm-release.trigger-8.last-3-rcs-non-functional"
 # provenance-allowlist: synthetic fixture task ID (test DATA the release
 # engine's task-scan logic reads), not a reference to a real task.
 _TESTER_TASK = "TESTER-20260601-001-verify-release"
+
+
+# The project.cfg values that resolve to always on a local-only lane: set
+# explicitly, and the key left out (the default).
+_ALWAYS_POSTURES = {"always": "always", "key_absent": None}
 
 
 def _auto_ship_line(trigger: int, error_key: str) -> str:
@@ -208,7 +221,7 @@ _UNIT_LANE_SYMPTOM = "The parallel unit lane collects different tests in each wo
 _INLINE_SYMPTOM = "Inline Python in shell scripts remains above the reduction target."
 
 
-def _trigger_2_lane(tmp_path: pathlib.Path, posture: str) -> Lane:
+def _trigger_2_lane(tmp_path: pathlib.Path, posture: Optional[str]) -> Lane:
     lane = Lane(tmp_path, posture, "v0.5.0")
     lane.open_rc()
     lane.rc_work()
@@ -218,13 +231,14 @@ def _trigger_2_lane(tmp_path: pathlib.Path, posture: str) -> Lane:
     return lane
 
 
-def test_trigger_two_ships_non_functional_under_always_and_records_the_event(tmp_path):
+@pytest.mark.parametrize("posture_id", sorted(_ALWAYS_POSTURES))
+def test_trigger_two_ships_non_functional_under_always_and_records_the_event(tmp_path, posture_id):
     matrix = _trigger_2_lane(tmp_path / "matrix", "matrix")
     matrix_result = matrix.release()
     assert matrix_result.returncode != 0, _diag(matrix_result)
     assert matrix.halt_key() == _KEY_T2, _diag(matrix_result)
 
-    lane = _trigger_2_lane(tmp_path / "always", "always")
+    lane = _trigger_2_lane(tmp_path / "always", _ALWAYS_POSTURES[posture_id])
     result = lane.release()
 
     assert result.returncode == 0, _diag(result)
@@ -272,7 +286,7 @@ _CONVERGENCE_SYMPTOM = "Two shell verbs still have no module behind them."
 _STALE_SYMPTOM = "One test still asserts the old route list."
 
 
-def _trigger_3_lane(tmp_path: pathlib.Path, posture: str) -> Lane:
+def _trigger_3_lane(tmp_path: pathlib.Path, posture: Optional[str]) -> Lane:
     lane = Lane(tmp_path, posture, "v0.6.0")
     lane.open_rc()
     lane.rc_work()
@@ -292,13 +306,14 @@ def _trigger_3_lane(tmp_path: pathlib.Path, posture: str) -> Lane:
     return lane
 
 
-def test_trigger_three_ships_non_functional_under_always_and_stamps_known_issues(tmp_path):
+@pytest.mark.parametrize("posture_id", sorted(_ALWAYS_POSTURES))
+def test_trigger_three_ships_non_functional_under_always_and_stamps_known_issues(tmp_path, posture_id):
     matrix = _trigger_3_lane(tmp_path / "matrix", "matrix")
     matrix_result = matrix.release()
     assert matrix_result.returncode != 0, _diag(matrix_result)
     assert matrix.halt_key() == _KEY_T3, _diag(matrix_result)
 
-    lane = _trigger_3_lane(tmp_path / "always", "always")
+    lane = _trigger_3_lane(tmp_path / "always", _ALWAYS_POSTURES[posture_id])
     result = lane.release()
 
     assert result.returncode == 0, _diag(result)
@@ -318,7 +333,7 @@ def test_trigger_three_ships_non_functional_under_always_and_stamps_known_issues
     assert events[0]["TESTER Task"] == _TESTER_TASK
 
 
-def _trigger_8_lane(tmp_path: pathlib.Path, posture: str) -> Lane:
+def _trigger_8_lane(tmp_path: pathlib.Path, posture: Optional[str]) -> Lane:
     lane = Lane(tmp_path, posture, "v0.4.0")
     for version in ("v0.1.0", "v0.2.0", "v0.3.0"):
         (lane.repo / "release-notes" / f"{version}.md").write_text(
@@ -332,14 +347,15 @@ def _trigger_8_lane(tmp_path: pathlib.Path, posture: str) -> Lane:
     return lane
 
 
-def test_trigger_eight_files_one_pattern_bug_and_ships_under_always(tmp_path):
+@pytest.mark.parametrize("posture_id", sorted(_ALWAYS_POSTURES))
+def test_trigger_eight_files_one_pattern_bug_and_ships_under_always(tmp_path, posture_id):
     matrix = _trigger_8_lane(tmp_path / "matrix", "matrix")
     matrix_result = matrix.release()
     assert matrix_result.returncode != 0, _diag(matrix_result)
     assert matrix.halt_key() == _KEY_T8, _diag(matrix_result)
     assert list((matrix.proj / "bugs").glob("BUG-*.md")) == []
 
-    lane = _trigger_8_lane(tmp_path / "always", "always")
+    lane = _trigger_8_lane(tmp_path / "always", _ALWAYS_POSTURES[posture_id])
     result = lane.release()
 
     assert result.returncode == 0, _diag(result)
@@ -428,8 +444,6 @@ def _fidelity_divergence(lane: Lane) -> Optional[dict]:
 
 
 _HALT_SCENARIOS: dict = {
-    "trigger_1_tester_blocked": (_blocked_tester, "cm-release.trigger-1.tester-blocked"),
-    "unrecognized_tester_state": (_working_tester, "cm-release.ship-policy.tester-state-unrecognized"),
     "trigger_4_pre_squash_hook_failed": (_failing_pre_squash_hook, "cm-release.trigger-4.pre-squash-hook-failed"),
     "trigger_5_squash_conflict": (_squash_conflict, "cm-release.trigger-5.squash-conflict"),
     "trigger_9_notes_missing_status": (_notes_without_status, "cm-release.trigger-9.notes-missing-status-heading"),
@@ -445,11 +459,12 @@ def _run_halt_scenario(tmp_path: pathlib.Path, posture: Optional[str], build: Ca
     return lane
 
 
+@pytest.mark.parametrize("posture_id", sorted(_ALWAYS_POSTURES))
 @pytest.mark.parametrize("scenario", sorted(_HALT_SCENARIOS))
-def test_every_other_halt_writes_the_same_halt_file_under_always(tmp_path, scenario):
+def test_every_other_halt_writes_the_same_halt_file_under_always(tmp_path, scenario, posture_id):
     build, expected_key = _HALT_SCENARIOS[scenario]
-    reference = _run_halt_scenario(tmp_path / "absent", None, build)
-    lane = _run_halt_scenario(tmp_path / "always", "always", build)
+    reference = _run_halt_scenario(tmp_path / "matrix", "matrix", build)
+    lane = _run_halt_scenario(tmp_path / "always", _ALWAYS_POSTURES[posture_id], build)
 
     for run in (reference, lane):
         assert run.result.returncode != 0, _diag(run.result)
@@ -458,3 +473,30 @@ def test_every_other_halt_writes_the_same_halt_file_under_always(tmp_path, scena
         assert run.auto_ship_events() == [], run.release_state()
     assert lane.halt_key() == reference.halt_key()
     assert not (lane.root / "HALT").exists(), "a release halt must never write the fleet-scoped HALT"
+
+
+# ---------------------------------------------------------------------------
+# A TESTER report problem halts under neither posture
+# ---------------------------------------------------------------------------
+
+# scenario -> (builder, exit status, the Step 4d decision line it reaches)
+_TESTER_PROBLEM_SCENARIOS: dict = {
+    "tester_blocked_requeues": (_blocked_tester, 4, "REQUEUE-VERIFICATION"),
+    "unrecognized_state_ships_known_bugs": (_working_tester, 0, "SHIP-KNOWN-BUGS"),
+}
+
+
+@pytest.mark.parametrize("posture_id", sorted(_ALWAYS_POSTURES))
+@pytest.mark.parametrize("scenario", sorted(_TESTER_PROBLEM_SCENARIOS))
+def test_a_tester_report_problem_halts_under_neither_posture(tmp_path, scenario, posture_id):
+    build, exit_status, decision = _TESTER_PROBLEM_SCENARIOS[scenario]
+    reference = _run_halt_scenario(tmp_path / "matrix", "matrix", build)
+    lane = _run_halt_scenario(tmp_path / "always", _ALWAYS_POSTURES[posture_id], build)
+
+    for run in (reference, lane):
+        assert run.result.returncode == exit_status, _diag(run.result)
+        assert run.halt_key() is None, _diag(run.result)
+        assert not (run.root / "HALT").exists()
+        assert f"Ship decision:       {decision}" in run.result.stdout, _diag(run.result)
+        assert run.auto_ship_events() == [], run.release_state()
+        assert _git_tag_exists(run.repo, run.version) == (exit_status == 0), _diag(run.result)

@@ -334,7 +334,7 @@ class TestBlockedColumnPipelineOnGitlessInstall:
         footer_lines = [
             line
             for line in result.stdout.splitlines()
-            if "Blocked tracked from v2.24.0" in line
+            if "Blocked untracked for 1 RC" in line
         ]
         assert len(footer_lines) == 1, (
             f"expected exactly one footer line across both rows, got "

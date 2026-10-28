@@ -53,7 +53,10 @@ import subprocess
 import textwrap
 from typing import Optional
 
+import pytest
+
 from pgai_agent_kanban.cm.bundle_family import parse_bundled_item_basenames
+from tests.fixtures.two_project import build_two_project_root
 
 # ---------------------------------------------------------------------------
 # Path constants (resolve from this file's own location)
@@ -223,19 +226,19 @@ class TestPiggybackUnderTheRealWakeLogChannel:
         self, two_project_root: pathlib.Path, tmp_path: pathlib.Path
     ) -> None:
         root = two_project_root
-        trigger, riders = _make_five_bug_scenario(root, "project_a")
+        trigger, riders = _make_five_bug_scenario(root, "project-a")
 
         log_file = tmp_path / "wake.log"
         real_log_fn = _extract_bash_function(_WAKE_BOOTSTRAP_SH, "log")
         result = _run_discovery(
-            root, "project_a", log_prelude=real_log_fn, log_file=log_file
+            root, "project-a", log_prelude=real_log_fn, log_file=log_file
         )
 
         assert result.returncode == 0, f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
         assert "Traceback" not in result.stdout, result.stdout
         assert "Traceback" not in result.stderr, result.stderr
 
-        bundles = _bundle_files(root, "project_a")
+        bundles = _bundle_files(root, "project-a")
         assert bundles, f"Expected a bundle for the trigger bug.\nstderr:\n{result.stderr}"
         bundle_text = bundles[0].read_text(encoding="utf-8")
 
@@ -277,7 +280,7 @@ class TestContaminatedPostFilterListRefusesTheWholeBundle:
         self, two_project_root: pathlib.Path, tmp_path: pathlib.Path
     ) -> None:
         root = two_project_root
-        trigger, riders = _make_five_bug_scenario(root, "project_a")
+        trigger, riders = _make_five_bug_scenario(root, "project-a")
 
         # Deliberately reproduce a leaking log() shape (tee's stdout copy
         # NOT redirected to stderr) as an adversarial stand-in -- the exact
@@ -292,7 +295,7 @@ class TestContaminatedPostFilterListRefusesTheWholeBundle:
 
         log_file = tmp_path / "wake.log"
         result = _run_discovery(
-            root, "project_a", log_prelude=contaminating_log_fn, log_file=log_file
+            root, "project-a", log_prelude=contaminating_log_fn, log_file=log_file
         )
 
         assert result.returncode == 0, f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
@@ -314,7 +317,7 @@ class TestContaminatedPostFilterListRefusesTheWholeBundle:
 
         # No bundle is produced: the post-filter shape guard refuses the
         # whole step before _disc_write_bundle is ever called.
-        bundles = _bundle_files(root, "project_a")
+        bundles = _bundle_files(root, "project-a")
         assert not bundles, f"Expected no bundle to be written.\nlog:\n{log_content}"
 
         # Neither the trigger nor its riders were marked running -- the
@@ -338,12 +341,12 @@ class TestFullTranscriptHasNoPythonTracebacks:
         so a regression in either would surface the same way.
         """
         root = two_project_root
-        _make_five_bug_scenario(root, "project_a")
+        _make_five_bug_scenario(root, "project-a")
 
         log_file = tmp_path / "wake.log"
         real_log_fn = _extract_bash_function(_WAKE_BOOTSTRAP_SH, "log")
         result = _run_discovery(
-            root, "project_a", log_prelude=real_log_fn, log_file=log_file
+            root, "project-a", log_prelude=real_log_fn, log_file=log_file
         )
 
         transcript = result.stdout + "\n" + result.stderr + "\n" + log_file.read_text(encoding="utf-8")
@@ -361,20 +364,173 @@ class TestDiscoveryDriverWritesNoNarrationToStdout:
     """
 
     def test_every_echo_or_printf_in_discovery_sh_is_narration_redirected_to_stderr(self) -> None:
-        discovery_sh = _SCRIPTS_LIB / "discovery.sh"
-        text = discovery_sh.read_text(encoding="utf-8")
-        offending = []
-        for lineno, line in enumerate(text.splitlines(), start=1):
-            stripped = line.strip()
-            if stripped.startswith("#"):
-                continue
-            if re.search(r"\becho\b|\bprintf\b", stripped) and ">&2" not in stripped:
-                offending.append(f"{lineno}: {line}")
+        offending = _unredirected_narration_lines(_SCRIPTS_LIB / "discovery.sh")
         assert not offending, (
             "team/scripts/lib/discovery.sh has an echo/printf site that does not "
             "redirect to stderr (narration must never reach stdout):\n"
             + "\n".join(offending)
         )
+
+    def test_check_flags_a_bare_unredirected_echo(self, tmp_path: pathlib.Path) -> None:
+        """The scan still bites: a synthetic discovery.sh whose only
+        narration is ``echo "narration"`` with no redirect is flagged."""
+        synthetic = tmp_path / "discovery.sh"
+        synthetic.write_text(
+            '#!/usr/bin/env bash\n# echo "a comment is not a site"\necho "narration"\n',
+            encoding="utf-8",
+        )
+        assert _unredirected_narration_lines(synthetic) == ['3: echo "narration"']
+
+    @pytest.mark.parametrize(
+        "line, flagged",
+        [
+            ('echo "narration"', True),
+            ("printf '%s\\n' \"$msg\"", True),
+            ('echo "narration" >&2', False),
+            # Captured by a command substitution: nothing reaches stdout.
+            ("remedy=\"run: $(printf '%q' \"${root}/scripts/unhalt.sh\")\"", False),
+            ('x="$(echo "$(printf %s inner)")"', False),
+            ("x=`echo captured`", False),
+            # The substitution is captured, but the echo around it is not.
+            ("echo \"run: $(printf '%q' \"$root\")\"", True),
+            ("$(true) ; echo outer", True),
+            # A redirect inside a substitution does not excuse the outer echo.
+            ('echo "$(cmd >&2)"', True),
+            # Single-quoted "$(" is literal text, not a substitution.
+            ("x='$(' ; echo after", True),
+        ],
+    )
+    def test_check_ignores_only_output_captured_by_a_command_substitution(
+        self, tmp_path: pathlib.Path, line: str, flagged: bool
+    ) -> None:
+        synthetic = tmp_path / "discovery.sh"
+        synthetic.write_text(line + "\n", encoding="utf-8")
+        assert bool(_unredirected_narration_lines(synthetic)) is flagged, line
+
+
+@pytest.mark.parametrize(
+    "halt_scope, project_name, remedy_scripts",
+    [
+        ("project", "project-a", ["scripts/unhalt.sh"]),
+        ("global", "project-b", ["scripts/unhalt-global.sh"]),
+    ],
+)
+def test_halt_guard_refusal_prints_quoted_remedy_on_stderr_and_nothing_on_stdout(
+    tmp_path: pathlib.Path, halt_scope: str, project_name: str, remedy_scripts: list[str]
+) -> None:
+    """Under a kanban root holding a space, each HALT guard prints its
+    shell-quoted unhalt remedy on stderr and writes nothing to stdout --
+    the only stdout line is the harness's own DISCOVERY_STATUS echo."""
+    root = build_two_project_root(tmp_path, "kanban root")
+    halt_file = root / "HALT" if halt_scope == "global" else root / "projects" / project_name / "HALT"
+    halt_file.write_text("halted\n", encoding="utf-8")
+
+    result = _run_discovery(root, project_name)
+
+    assert result.returncode == 0, f"stdout: {result.stdout}\nstderr: {result.stderr}"
+    assert result.stdout == "DISCOVERY_STATUS=blocked\n", result.stdout
+    quoted_script = _bash_quoted(str(root / remedy_scripts[0]))
+    expected_command = (
+        f"{quoted_script} --project {project_name}" if halt_scope == "project" else quoted_script
+    )
+    remedy = re.search(r"^remedy:\s*(.*)$", result.stderr, re.MULTILINE)
+    assert remedy, result.stderr
+    assert remedy.group(1).strip() == (
+        f"Once the underlying issue is resolved, run: {expected_command}"
+    ), result.stderr
+
+
+def _bash_quoted(value: str) -> str:
+    """*value* as bash's ``printf '%q'`` quotes it."""
+    run = subprocess.run(
+        ["bash", "-c", 'printf "%q" "$1"', "_", value],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert run.returncode == 0, run.stderr
+    return run.stdout
+
+
+def _unredirected_narration_lines(script: pathlib.Path) -> list[str]:
+    """``"<lineno>: <line>"`` for each non-comment line of *script* with an
+    echo/printf that writes to stdout -- one not redirected with ``>&2``
+    once every command substitution has been removed from the line."""
+    offending = []
+    for lineno, line in enumerate(script.read_text(encoding="utf-8").splitlines(), start=1):
+        stripped = line.strip()
+        if stripped.startswith("#"):
+            continue
+        uncaptured = _without_command_substitutions(stripped)
+        if re.search(r"\becho\b|\bprintf\b", uncaptured) and ">&2" not in uncaptured:
+            offending.append(f"{lineno}: {line}")
+    return offending
+
+
+def _without_command_substitutions(line: str) -> str:
+    """*line* with every ``$(...)`` and backtick substitution removed.
+
+    A substitution's output is captured into the surrounding word, so an
+    echo/printf inside one never reaches the script's stdout. Single-quoted
+    text is kept verbatim (``'$('`` there is literal); a substitution left
+    open at end of line is dropped to the end of the line.
+    """
+    out: list[str] = []
+    i, n = 0, len(line)
+    in_single = in_double = False
+    while i < n:
+        char = line[i]
+        if in_single:
+            out.append(char)
+            in_single = char != "'"
+            i += 1
+        elif char == "\\":
+            out.append(line[i : i + 2])
+            i += 2
+        elif line.startswith("$(", i):
+            i = _end_of_substitution(line, i + 2)
+        elif char == "`":
+            close = line.find("`", i + 1)
+            i = n if close == -1 else close + 1
+        else:
+            if char == "'" and not in_double:
+                in_single = True
+            elif char == '"':
+                in_double = not in_double
+            out.append(char)
+            i += 1
+    return "".join(out)
+
+
+def _end_of_substitution(line: str, i: int) -> int:
+    """Index just past the ``)`` closing the ``$(`` whose body starts at *i*,
+    skipping quoted text and nested substitutions; ``len(line)`` if open."""
+    depth, n = 1, len(line)
+    in_double = False
+    while i < n:
+        char = line[i]
+        if char == "\\":
+            i += 2
+        elif line.startswith("$(", i):
+            i = _end_of_substitution(line, i + 2)
+        elif in_double:
+            in_double = char != '"'
+            i += 1
+        elif char == '"':
+            in_double = True
+            i += 1
+        elif char == "'":
+            close = line.find("'", i + 1)
+            i = n if close == -1 else close + 1
+        else:
+            if char == "(":
+                depth += 1
+            elif char == ")":
+                depth -= 1
+                if depth == 0:
+                    return i + 1
+            i += 1
+    return n
 
 
 class TestBugDiscoveryStepWritesNoNarrationToStdout:

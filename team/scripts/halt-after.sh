@@ -94,6 +94,12 @@ operator_args_validate_known "halt-after.sh" OPERATOR_VALID_FLAGS || exit 1
 KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH}"
 export KANBAN_ROOT
 
+# --- This script as installed under the resolved kanban root, shell-quoted,
+#     so a remedy that names it runs as printed from any directory. Quoted
+#     as Python's shlex.quote does (_pp_shell_quote), so the remedy is
+#     byte-identical to the one POST /operations/halt-after builds. ---
+_halt_after_cmd="$(_pp_shell_quote "${KANBAN_ROOT}/scripts/halt-after.sh")"
+
 # --- Resolve the raw --until and --key values up front. The scope-mismatch
 #     refusal immediately below applies whether or not a project was named,
 #     so it must run before the project-required check that follows it. ---
@@ -113,7 +119,7 @@ if [[ -n "${_until_raw}" && -n "${_key_raw}" ]]; then
         pgai_emit_error_contract \
             "halt-after.until_scope_mismatch" \
             "halt-after.sh: --until targets a release boundary; scope '${_key_raw}' has none." \
-            "Drop --until to arm the ${_key_raw} scope's own drain (team/scripts/halt-after.sh --key ${_key_raw}), or drop --key ${_key_raw} to arm the versioned rc scope (team/scripts/halt-after.sh --project your-project --until vX.Y.Z)."
+            "Drop --until to arm the ${_key_raw} scope's own drain (${_halt_after_cmd} --key $(_pp_shell_quote "${_key_raw}")), or drop --key ${_key_raw} to arm the versioned rc scope (${_halt_after_cmd} --project your-project --until vX.Y.Z)."
         # CENSUS-ANCHOR: halt-after-until-scope-mismatch-01
         exit 1
     fi
@@ -129,7 +135,7 @@ if [[ -z "${_project_raw}" ]]; then
     pgai_emit_error_contract \
         "halt-after.project_required" \
         "halt-after.sh: no project named -- the HALT-AFTER sentinel is always per-project." \
-        "Set \$PGAI_PROJECT_NAME to a project registered in projects.cfg, or pass --project directly, e.g. team/scripts/halt-after.sh --project your-project."
+        "Set \$PGAI_PROJECT_NAME to a project registered in projects.cfg, or pass --project directly, e.g. ${_halt_after_cmd} --project your-project."
     # CENSUS-ANCHOR: halt-after-project-required-01
     exit 1
 fi
@@ -150,7 +156,7 @@ if [[ -n "${_until_raw}" ]]; then
         pgai_emit_error_contract \
             "halt-after.until_malformed" \
             "halt-after.sh: --until value '${_until_raw}' is not well-formed semver (expected vX.Y.Z)." \
-            "Re-run with a well-formed version, e.g. --until v2.14.0."
+            "Re-run with a well-formed version, e.g. --until v1.2.3."
         # CENSUS-ANCHOR: halt-after-until-malformed-01
         exit 1
     fi

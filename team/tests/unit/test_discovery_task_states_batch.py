@@ -76,7 +76,7 @@ def test_cli_reads_ids_on_stdin_and_prints_tab_separated_lines(tmp_path):
 
 def test_bash_wrapper_reads_every_queue_entry_and_honours_the_id_filter(two_project_root, tmp_path):
     root = two_project_root
-    tasks_dir = root / "projects" / "project_a" / "tasks"
+    tasks_dir = root / "projects" / "project-a" / "tasks"
     _task(tasks_dir, "PM-1-decompose-v0-1-0-x", "# Status\n\n## State\nDONE\n")
     _task(tasks_dir, "PM-2-decompose-v0-1-1-y", "# Status\n\n## State\nBACKLOG\n")
     _task(tasks_dir, "PM-3-other", "# Status\n\n## State\nWORKING\n")
@@ -104,8 +104,8 @@ def test_bash_wrapper_reads_every_queue_entry_and_honours_the_id_filter(two_proj
         "source scripts/lib/temp.sh\n"
         "source scripts/lib/project_paths.sh\n"
         "source scripts/lib/discovery.sh\n"
-        f'echo "ALL"; _disc_backlog_task_states project_a "{backlog}"\n'
-        f'echo "FILTERED"; _disc_backlog_task_states project_a "{backlog}" "decompose-v[0-9]"\n'
+        f'echo "ALL"; _disc_backlog_task_states project-a "{backlog}"\n'
+        f'echo "FILTERED"; _disc_backlog_task_states project-a "{backlog}" "decompose-v[0-9]"\n'
     )
 
     result = run_bash(tmp_path, script, base_env=env, timeout=60)

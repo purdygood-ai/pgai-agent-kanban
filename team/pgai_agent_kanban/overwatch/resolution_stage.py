@@ -12,7 +12,46 @@ ship-policy block reaches it within seconds: the on-BLOCK nudge a wake chain
 fires after releasing its repo lock runs block triage
 (fire_block_triage_nudge, team/scripts/lib/wake_project.sh).
 
-On every call this module does exactly one of two things:
+Which HALT it acts on, read through pgai_agent_kanban.overwatch.
+halt_provenance (the HALT body, else the sentinel-writes log):
+
+  - No HALT: no-op.
+  - An operator HALT -- the project's own, or the kanban root's, which is
+    always the operator's: decision none. It is never read as anything
+    else and never touched, and a chain HALT beside it is left alone too.
+  - A chain HALT, by the writer its provenance names:
+      cm-release            the trigger's row in the matrix's ``triggers``
+                            list (resolution_matrix.load_trigger_rows). The
+                            HALT is cleared as soon as one of the row's
+                            ``clears_on`` checks passes (halt_clearing: RC
+                            cancelled and rebundled, task reset, trigger 9
+                            re-checked green). While none passes, ``matrix``
+                            runs the ship-policy path below and ``wait``
+                            decides none. A CM HALT that names no trigger
+                            number, or one with no row, takes the ship-policy
+                            path and is never cleared by a check.
+      halt-after-promotion  a completed drain. With ``[overwatch]
+                            halt_after_auto_resume = true`` it is cleared and
+                            an inbox entry reads "stopped after rc:vX.Y.Z as
+                            armed; resume with unhalt"; false (the default)
+                            leaves it for the operator.
+      zero-progress-cap     cleared once the task its reason names is reset.
+      overwatch-runaway     never cleared here: it stops the project until the
+                            operator answers its inbox entry.
+      overwatch-repair      left to the repair that wrote it.
+
+Every clear takes one path, clear_chain_halt(): re-read the HALT and
+require the bytes the decision read, copy it under the project's
+overwatch/backups/, remove it with ops.write.unhalt, then append a
+"## OVERWATCH Decision" event naming the evidence. The drills below clear
+the ship-policy HALT through the same path.
+
+A question only a human can answer (Lane C, the Lane A single-attempt
+guard) becomes one operator inbox entry (pgai_agent_kanban.overwatch.inbox);
+a later firing that finds the same question still open writes no second
+entry.
+
+On a ship-policy HALT this module does exactly one of two things:
 
   - EXECUTE — the current block matches the shipped CANCEL-AND-REBUNDLE row.
     Performs the operator's documented cancel drill through the existing
@@ -41,6 +80,15 @@ On every call this module does exactly one of two things:
     briefing than a single-failure view. This backfill never creates a
     ledger entry and never touches any other family's entries.
 
+The same drill serves a squash conflict, before any HALT exists:
+cm/release.sh, when its squash into main conflicts, backs the squash out and
+calls resolve_squash_conflict() (through pgai_agent_kanban.cm.release_resolve).
+The matrix is asked with trigger class ``squash-conflict``; a matched
+CANCEL-AND-REBUNDLE row runs run_cancel_and_rebundle() -- the same ledger
+entry, drill and Decision event as the ship-policy path, with no HALT to
+clear -- and anything else declines, so the release writes its trigger 5
+HALT instead.
+
 This module never overrides a content verdict (SOP-core.md / OVERWATCH.md
 authority boundary): it only executes the ONE prescribed, fully-reversible
 remediation the matrix names, or does nothing at all.
@@ -57,14 +105,17 @@ Usage (import):
 from __future__ import annotations
 
 import argparse
+import contextlib
+import contextvars
 import os
 import pathlib
 import re
+import shutil
 import subprocess
 import sys
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Callable, Iterator, Optional
 
 # Run by file path (``python3 .../resolution_stage.py``) or loaded from a file
 # outside its package, this module has no parent package and the interpreter
@@ -82,9 +133,31 @@ from pgai_agent_kanban.cm.bundle_family import compute_bundle_family  # noqa: E4
 from pgai_agent_kanban.cm.read_state_field import read_state_field  # noqa: E402
 from pgai_agent_kanban.lib import ini  # noqa: E402
 from pgai_agent_kanban.lib.atomic_write import atomic_write  # noqa: E402
+from pgai_agent_kanban.lib.branch_prefix import InvalidBranchPrefixError, ini_branch_prefix_from_cfg  # noqa: E402
+from pgai_agent_kanban.lib.error_contract import format_error_contract, module_file_command  # noqa: E402
 from pgai_agent_kanban.ops.context import OpsContext  # noqa: E402
 from pgai_agent_kanban.ops.errors import OpsError  # noqa: E402
-from pgai_agent_kanban.ops.write import close_item, delete_item, reset_item, wontdo_item  # noqa: E402
+from pgai_agent_kanban.ops.write import close_item, delete_item, reset_item, unhalt, wontdo_item  # noqa: E402
+from pgai_agent_kanban.overwatch import halt_provenance, inbox  # noqa: E402
+from pgai_agent_kanban.overwatch.halt_clearing import (  # noqa: E402
+    check_notes_status_green,
+    check_rc_cancelled,
+    check_task_reset,
+    halt_after_resume_text,
+    halt_after_version,
+    halt_written_at,
+    task_id_in,
+)
+from pgai_agent_kanban.overwatch.halt_provenance import (  # noqa: E402
+    WRITER_CM_RELEASE,
+    WRITER_HALT_AFTER_PROMOTION,
+    WRITER_OVERWATCH_REPAIR,
+    WRITER_OVERWATCH_RUNAWAY,
+    WRITER_ZERO_PROGRESS_CAP,
+    HaltProvenance,
+    classify_halt,
+    installed_script_command,
+)
 from pgai_agent_kanban.overwatch.intent import read_project_intent  # noqa: E402
 from pgai_agent_kanban.overwatch.ledger import (  # noqa: E402
     LedgerEntry,
@@ -96,20 +169,27 @@ from pgai_agent_kanban.overwatch.ledger import (  # noqa: E402
 )
 from pgai_agent_kanban.overwatch.resolution_matrix import (  # noqa: E402
     CANCEL_AND_REBUNDLE,
+    CLEAR_NOTES_STATUS_GREEN,
+    CLEAR_RC_CANCELLED,
+    CLEAR_TASK_RESET,
     HALT_HARD,
     LANE_A,
     LANE_B,
     LANE_C,
+    WHILE_OPEN_MATRIX,
     BlockEvidence,
     LaneClassification,
     ResolutionMatrixError,
-    _CM_HALT_HEADER_RE,  # single-sourced ship-policy HALT header check
+    TRIGGER_CLASS_SQUASH_CONFLICT,
+    TriggerRow,
     cargo_bug_ids,
     classify_lane,
+    load_trigger_rows,
     matrix_findings,
     resolve_block,
     resolve_overwatch_resolve,
 )
+from pgai_agent_kanban.overwatch.runaway import RunawayError, resolve_halt_after_auto_resume  # noqa: E402
 from pgai_agent_kanban.reports.tester_report import parse_report  # noqa: E402
 from pgai_agent_kanban.task_status import read_state  # noqa: E402
 
@@ -121,39 +201,62 @@ DECLINED = "declined"
 EXECUTED = "executed"
 NO_OP = "no-op"
 
+# What the stage decided, in the decision wake's vocabulary: leave the HALT
+# and the block as they are, run an operator verb (a drill, a forced ship,
+# clearing a chain HALT), or park a question in the operator inbox.
+DECISION_NONE = "none"
+DECISION_VERB = "verb"
+DECISION_INBOX = "inbox"
+
+# classify_halt_file() values.
+HALT_ABSENT = "absent"
+HALT_OPERATOR = "operator"
+HALT_SHIP_POLICY = "ship-policy"
+HALT_CHAIN = "chain"
+
 
 @dataclass
 class ResolutionStageOutcome:
-    """What one resolution-stage call did, for callers (tests, CLI) to inspect."""
+    """What one resolution-stage call did, for callers (tests, CLI) to inspect.
+
+    ``decision`` is DECISION_NONE, DECISION_VERB or DECISION_INBOX;
+    ``inbox_entry_id`` names the inbox entry a DECISION_INBOX outcome wrote
+    or found still open (and the one a cleared HALT-AFTER HALT left).
+    """
 
     status: str  # NO_OP | DECLINED | EXECUTED
     reason: str
     ledger_entry_id: Optional[str] = None
     actions_taken: list = field(default_factory=list)
     action_errors: list = field(default_factory=list)
+    decision: str = DECISION_NONE
+    inbox_entry_id: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------
-# HALT file classification (single-sourced against resolution_matrix's own
-# CM-header regex so "what counts as a ship-policy HALT" is defined once)
+# HALT file classification -- through halt_provenance, the one reader that
+# tells a chain HALT from an operator's
 # ---------------------------------------------------------------------------
 
 
-def classify_halt_file(path: str) -> str:
-    """Return "ship-policy", "operator", or "absent" for the HALT file at *path*.
+def classify_halt_file(path: str, *, kanban_root: Optional[str] = None) -> str:
+    """Return "ship-policy", "chain", "operator" or "absent" for the HALT at *path*.
 
-    "ship-policy" — the file exists and its content matches the CM HALT
-    header CM.md documents ("# HALT created by CM at ..."). "operator" — the
-    file exists but the header does not match (an operator's own HALT, or
-    any other content). "absent" — the file does not exist.
+    Read through :func:`halt_provenance.classify_halt`: "ship-policy" is a
+    chain HALT CM wrote (writer cm-release); "chain" is a chain HALT any
+    other chain writer wrote; "operator" is everything the reader cannot
+    prove the chain wrote, the kanban root's own HALT included; "absent"
+    means no file. *kanban_root* defaults to the root derived from the
+    HALT's directory (``<root>/projects/<name>/HALT`` -> ``<root>``).
     """
-    if not path or not os.path.isfile(path):
-        return "absent"
-    try:
-        content = open(path, "r", encoding="utf-8").read()
-    except OSError:
-        return "operator"
-    return "ship-policy" if _CM_HALT_HEADER_RE.search(content) else "operator"
+    if not path:
+        return HALT_ABSENT
+    provenance = classify_halt(path, kanban_root=kanban_root)
+    if provenance.origin == halt_provenance.ORIGIN_ABSENT:
+        return HALT_ABSENT
+    if not provenance.is_chain:
+        return HALT_OPERATOR
+    return HALT_SHIP_POLICY if provenance.writer == WRITER_CM_RELEASE else HALT_CHAIN
 
 
 def _locate_halt_files(kanban_root: str, project_name: str) -> tuple:
@@ -203,16 +306,240 @@ def log_action(
         handle.write(line + "\n")
 
 
+def _utc_stamp() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
 # ---------------------------------------------------------------------------
-# project.cfg reading (dev_tree_path, branch_prefix) — Python counterpart of
-# project_paths.sh's pp_dev_tree_path / pp_branch_prefix, minimal by design:
-# only the two keys this module needs.
+# Clearing a chain HALT -- the one path every clear in this module takes:
+# re-check, back up, ops.write.unhalt. The caller records the Decision event.
+# ---------------------------------------------------------------------------
+
+# The Decision-event lane for a chain HALT cleared because its cause is gone
+# (the drills and lanes record their own lane).
+LANE_CHAIN_HALT = "chain-halt"
+
+
+@dataclass
+class HaltClear:
+    """What one clear_chain_halt() call did.
+
+    ``step`` is the action description the caller records; ``error`` is set
+    (and ``cleared`` False) when the HALT was left in place, saying why.
+    """
+
+    cleared: bool
+    step: str
+    backup_path: Optional[str] = None
+    error: Optional[str] = None
+
+
+def _project_halt_path(kanban_root: str, project_name: str) -> str:
+    return os.path.join(kanban_root, "projects", project_name, "HALT")
+
+
+def read_halt_bytes(path: str) -> Optional[bytes]:
+    """The HALT file's bytes, or None when it is absent or unreadable."""
+    try:
+        with open(path, "rb") as handle:
+            return handle.read()
+    except OSError:
+        return None
+
+
+def backup_halt(kanban_root: str, project_name: str, halt_path: str, timestamp: str) -> str:
+    """Copy the project HALT into OVERWATCH's backups and return the copy's path.
+
+    The layout is overwatch_backup_file's (team/scripts/lib/
+    overwatch_protocol.sh), ``<project>/overwatch/backups/<timestamp>/
+    project-root/HALT``, so team/scripts/overwatch-revert.sh restores the
+    copy to the path it came from. A copy already there for the same
+    timestamp is kept: the first copy in a firing is the pre-firing file.
+    """
+    backup_dir = os.path.join(
+        kanban_root, "projects", project_name, "overwatch", "backups", timestamp, "project-root"
+    )
+    os.makedirs(backup_dir, exist_ok=True)
+    destination = os.path.join(backup_dir, os.path.basename(halt_path))
+    if not os.path.isfile(destination):
+        shutil.copy2(halt_path, destination)
+    return destination
+
+
+#: The callback clear_chain_halt() runs immediately before ops.write.unhalt
+#: when its caller passed none of its own; set by before_each_unhalt().
+_BEFORE_UNHALT: "contextvars.ContextVar[Optional[Callable[[], None]]]" = contextvars.ContextVar(
+    "resolution_stage_before_unhalt", default=None
+)
+
+
+@contextlib.contextmanager
+def before_each_unhalt(callback: Optional[Callable[[], None]]) -> Iterator[None]:
+    """Run *callback* before every HALT clear made inside the ``with`` block.
+
+    A caller that runs the whole stage (the decision executor's
+    ``resolution-stage`` verb) cannot hand ``before_unhalt`` to each clear
+    the stage makes. Inside this block, every clear_chain_halt() call that
+    passes no ``before_unhalt`` of its own runs *callback* at that same
+    moment instead. ``None`` sets no callback. The previous callback is
+    restored on exit.
+    """
+    token = _BEFORE_UNHALT.set(callback)
+    try:
+        yield
+    finally:
+        _BEFORE_UNHALT.reset(token)
+
+
+def clear_chain_halt(
+    ctx: OpsContext,
+    kanban_root: str,
+    project_name: str,
+    *,
+    step: str,
+    expected: Optional[bytes] = None,
+    writer: Optional[str] = None,
+    timestamp: Optional[str] = None,
+    before_unhalt: Optional[Callable[[], None]] = None,
+) -> HaltClear:
+    """Clear the project's chain HALT through ``ops.write.unhalt``, after a backup.
+
+    The HALT is re-read immediately before removal. It is left in place --
+    an ``error`` saying why -- when it is gone, when *expected* is given and
+    the bytes differ from what the decision read, when it no longer reads
+    as the chain's, or when *writer* is given and the provenance names
+    another writer. Only the project HALT is ever cleared: the kanban
+    root's HALT is always the operator's.
+
+    Args:
+        step:      The action description to record (and to prefix errors).
+        expected:  The HALT bytes the decision was made on.
+        writer:    The chain writer the HALT must still name.
+        timestamp: The backup directory's timestamp (default: now).
+        before_unhalt: Called once every check has passed and the backup is
+                   written, immediately before ``ops.write.unhalt`` (the
+                   decision executor closes the HALT's blocked-ledger block
+                   class any there, before unhalt would close it class human).
+                   When None, the callback an enclosing before_each_unhalt()
+                   block set runs instead, if any.
+    """
+    halt_path = _project_halt_path(kanban_root, project_name)
+    current = read_halt_bytes(halt_path)
+    if current is None:
+        return HaltClear(False, step, error=f"{step} SKIPPED: no HALT at {halt_path} any more")
+    provenance = classify_halt(halt_path, kanban_root=kanban_root)
+    if expected is not None and current != expected:
+        problem = "its bytes changed after the decision read it"
+    elif not provenance.is_chain:
+        problem = f"it now reads as the operator's ({provenance.detail})"
+    elif writer is not None and provenance.writer != writer:
+        problem = f"it now names writer {provenance.writer}, not {writer}"
+    else:
+        problem = ""
+    if problem:
+        contract = format_error_contract(
+            "overwatch.chain-halt-changed",
+            f"OVERWATCH did not clear {halt_path}: {problem}. A HALT is cleared only when it is "
+            "still exactly the chain HALT the decision was made on.",
+            module_file_command(
+                halt_provenance.__file__, "classify", halt_path, "--kanban-root", kanban_root
+            ),
+        )
+        # BLOCK-WORTHY: an approval-by-design invariant. The stage never
+        # removes a HALT it did not decide on -- an operator's HALT, or one
+        # rewritten since the decision -- so the HALT stays and the project
+        # stays stopped until the next firing decides on what is there now.
+        # CENSUS-ANCHOR: chain-halt-clear-recheck-01
+        return HaltClear(False, step, error=f"{step} SKIPPED: {contract}")
+    try:
+        backup = backup_halt(kanban_root, project_name, halt_path, timestamp or _utc_stamp())
+    except OSError as exc:
+        return HaltClear(False, step, error=f"{step} FAILED: backup could not be written ({exc}); HALT left in place")
+    callback = before_unhalt if before_unhalt is not None else _BEFORE_UNHALT.get()
+    if callback is not None:
+        callback()
+    try:
+        unhalt(ctx, project_name)
+    except OpsError as exc:
+        return HaltClear(False, step, backup_path=backup, error=f"{step} FAILED: {exc}")
+    return HaltClear(True, step, backup_path=backup)
+
+
+# ---------------------------------------------------------------------------
+# Operator inbox -- where a question only a human can answer goes
+# ---------------------------------------------------------------------------
+
+
+def write_inbox_question(
+    ctx: OpsContext,
+    project_name: str,
+    *,
+    source: str,
+    question: str,
+    meanwhile: str,
+    how_to_answer: str,
+) -> tuple:
+    """Park *question* in the project's operator inbox once.
+
+    An open entry with the same source and question is reused, so the
+    stage firing again on an unchanged block writes no second entry.
+
+    Returns:
+        ``(entry_id, created, error)``: the entry's ID (None on failure),
+        whether this call wrote it, and the refusal text when the inbox
+        refused the write.
+    """
+    try:
+        wanted = (" ".join(source.split()), " ".join(question.split()))
+        for entry in inbox.list_open(ctx, project_name):
+            if (" ".join(entry.source.split()), " ".join(entry.question.split())) == wanted:
+                return entry.entry_id, False, None
+        entry = inbox.write_entry(
+            ctx, project_name,
+            source=source, question=question, meanwhile=meanwhile, how_to_answer=how_to_answer,
+        )
+    except OpsError as exc:
+        return None, False, str(exc)
+    return entry.entry_id, True, None
+
+
+def _inbox_close_command(ctx: OpsContext, project_name: str) -> str:
+    """The inbox close command, completed by the entry's own ID.
+
+    The command names ``<kanban root>/scripts/inbox.sh``, built through
+    :func:`halt_provenance.installed_script_command` so every word is
+    shell-quoted; the trailing prose tells the operator to append the ID.
+    """
+    command = halt_provenance.installed_script_command(
+        ctx.kanban_root, "inbox.sh", "--project", project_name, "close", "--id"
+    )
+    return f"{command} followed by this entry's INBOX ID"
+
+
+def _halt_after_command(kanban_root: str, project_name: str) -> str:
+    """The command that arms *project_name*'s HALT-AFTER again, runnable as printed.
+
+    Names ``<kanban root>/scripts/halt-after.sh --project <name>``, built
+    through :func:`halt_provenance.installed_script_command` (shell-quoted).
+    """
+    return halt_provenance.installed_script_command(kanban_root, "halt-after.sh", "--project", project_name)
+
+
+# ---------------------------------------------------------------------------
+# project.cfg reading (dev_tree_path, branch_prefix) — minimal by design:
+# only the two keys this module needs, from project.cfg alone (no legacy
+# PROJECT.cfg). branch_prefix is read through lib/branch_prefix.py; a value
+# pp_branch_prefix refuses reads as none, as an unreadable project.cfg does.
 # ---------------------------------------------------------------------------
 
 
 def _read_project_cfg(project_root: str) -> dict:
     cfg_path = os.path.join(project_root, "project.cfg")
-    result = {"dev_tree_path": "", "branch_prefix": ""}
+    try:
+        branch_prefix = ini_branch_prefix_from_cfg(cfg_path)
+    except InvalidBranchPrefixError:
+        branch_prefix = ""
+    result = {"dev_tree_path": "", "branch_prefix": branch_prefix}
     if not os.path.isfile(cfg_path):
         return result
     try:
@@ -221,8 +548,6 @@ def _read_project_cfg(project_root: str) -> dict:
         return result
     if parser.has_option("project", "dev_tree_path"):
         result["dev_tree_path"] = parser.get("project", "dev_tree_path").strip()
-    if parser.has_option("project", "branch_prefix"):
-        result["branch_prefix"] = parser.get("project", "branch_prefix").strip().strip('"')
     return result
 
 
@@ -349,6 +674,37 @@ def _run_cm_cancel_rc(kanban_root: str, project_name: str, version: str) -> tupl
     return ok, output
 
 
+def _clear_ship_policy_halt(
+    ctx: OpsContext,
+    kanban_root: str,
+    project_name: str,
+    ship_halt_path: str,
+    expected_halt: Optional[bytes],
+    clears: Optional[list],
+    completed: list,
+    errors: list,
+) -> None:
+    """The drills' last step: clear the ship-policy HALT through clear_chain_halt().
+
+    Records the step in *completed* or the reason it was left in *errors*,
+    and appends the HaltClear to *clears* when a list is given.
+    """
+    result = clear_chain_halt(
+        ctx,
+        kanban_root,
+        project_name,
+        step=f"cleared ship-policy HALT: {ship_halt_path}",
+        expected=expected_halt,
+        writer=WRITER_CM_RELEASE,
+    )
+    if clears is not None:
+        clears.append(result)
+    if result.cleared:
+        completed.append(result.step)
+    else:
+        errors.append(result.error)
+
+
 def execute_drill(
     ctx: OpsContext,
     kanban_root: str,
@@ -357,7 +713,9 @@ def execute_drill(
     rc_task_ids: list,
     bundle_key: Optional[str],
     bug_keys: list,
-    ship_halt_path: str,
+    ship_halt_path: Optional[str],
+    expected_halt: Optional[bytes] = None,
+    clears: Optional[list] = None,
 ) -> tuple:
     """Perform the five-step cancel drill, all-or-nothing on the cancel.
 
@@ -385,6 +743,14 @@ def execute_drill(
         independently — a failure in one is recorded in errors and the rest
         are still attempted, so a partially-applied drill is fully visible
         rather than silently truncated.
+
+    The HALT is cleared through clear_chain_halt(): only while it still
+    holds *expected_halt* (when given) and still names CM as its chain
+    writer, after a backup, with ops.write.unhalt. The HaltClear is
+    appended to *clears* when a list is given, for the caller's Decision
+    event. With *ship_halt_path* None there is no HALT to clear (a squash
+    conflict the release resolves before writing one) and the drill ends
+    after the cargo reset.
     """
     completed: list = []
     errors: list = []
@@ -397,7 +763,7 @@ def execute_drill(
             "status-revert steps not run because the RC cancel failed: "
             f"{len(rc_task_ids)} RC task(s), bundle intake item "
             f"{bundle_key or 'none'} and {len(bug_keys)} cargo bug(s) left "
-            f"unchanged; ship-policy HALT left in place ({ship_halt_path})"
+            + (f"unchanged; ship-policy HALT left in place ({ship_halt_path})" if ship_halt_path else "unchanged")
         )
         return completed, errors
     completed.append(step)
@@ -428,19 +794,10 @@ def execute_drill(
         except OpsError as exc:
             errors.append(f"{step} FAILED: {exc}")
 
-    step = f"cleared ship-policy HALT: {ship_halt_path}"
-    try:
-        # Re-verify content immediately before removal — closes the race
-        # window between evidence-gathering and execution where an operator
-        # could have replaced the file's content in between.
-        if classify_halt_file(ship_halt_path) == "ship-policy":
-            os.remove(ship_halt_path)
-            completed.append(step)
-        else:
-            errors.append(f"{step} SKIPPED: file no longer carries the CM header at execution time")
-    except OSError as exc:
-        errors.append(f"{step} FAILED: {exc}")
-
+    if ship_halt_path:
+        _clear_ship_policy_halt(
+            ctx, kanban_root, project_name, ship_halt_path, expected_halt, clears, completed, errors
+        )
     return completed, errors
 
 
@@ -662,6 +1019,44 @@ def clear_resolving_marker(project_root: str) -> None:
         pass
 
 
+def _park_lane_question(
+    kanban_root: str,
+    project_name: str,
+    version: str,
+    question: str,
+    ship_halt_path: str,
+    lane: str,
+) -> tuple:
+    """Write a lane's question for the operator to the inbox, once.
+
+    Returns ``(verbs_run_line, entry_id)``: the line the Decision event's
+    Verbs Run records (the entry written, the entry still open, or the
+    inbox refusal) and the entry's ID, None when the write failed.
+    """
+    ctx = OpsContext(kanban_root=kanban_root)
+    unhalt_cmd = halt_provenance.unhalt_command(kanban_root, project_name)
+    entry_id, created, error = write_inbox_question(
+        ctx,
+        project_name,
+        source=f"rc:{version}",
+        question=question,
+        meanwhile=(
+            f"Left the HALT at {ship_halt_path} and {version} as they are and recorded an OVERWATCH "
+            f"Decision (lane {lane}) in release-state.md; every other project keeps running."
+        ),
+        how_to_answer=(
+            "Take one of the options in the question. If the HALT is still there once the cause is "
+            f"fixed, resume with {unhalt_cmd}; then close this entry with "
+            f"{_inbox_close_command(ctx, project_name)}."
+        ),
+    )
+    if error is not None:
+        return f"inbox write FAILED: {error}", None
+    if created:
+        return f"inbox entry {entry_id} written", entry_id
+    return f"inbox entry {entry_id} still open (not written again)", entry_id
+
+
 def _format_lane_c_read(lane_result: LaneClassification, version: str) -> str:
     """Build Lane C's one-paragraph OVERWATCH read: names the cause (why
     classification landed on the default lane) and at least one option, so
@@ -799,6 +1194,8 @@ def execute_lane_a_drill(
     version: str,
     bundle_key: Optional[str],
     ship_halt_path: str,
+    expected_halt: Optional[bytes] = None,
+    clears: Optional[list] = None,
 ) -> tuple:
     """Perform Lane A recovery-playbook steps (b)-(e), in order: unwind-rc,
     cancel-rc, delete the bundle doc, clear the ship-policy HALT.
@@ -884,18 +1281,11 @@ def execute_lane_a_drill(
     else:
         errors.append("delete bundle doc: no bundle intake item located — skipped")
 
-    step = f"cleared ship-policy HALT: {ship_halt_path}"
-    try:
-        # Re-verify content immediately before removal — the same race-
-        # closing re-check execute_drill()'s own HALT-clear step performs.
-        if classify_halt_file(ship_halt_path) == "ship-policy":
-            os.remove(ship_halt_path)
-            completed.append(step)
-        else:
-            errors.append(f"{step} SKIPPED: file no longer carries the CM header at execution time")
-    except OSError as exc:
-        errors.append(f"{step} FAILED: {exc}")
-
+    # The same HALT-clear step, and the same re-check, execute_drill() runs.
+    if ship_halt_path:
+        _clear_ship_policy_halt(
+            ctx, kanban_root, project_name, ship_halt_path, expected_halt, clears, completed, errors
+        )
     return completed, errors
 
 
@@ -970,8 +1360,12 @@ def _format_lane_a_rewrite_missing(
         f"{lane_result.regression_bug_id}) but the blamed bug does not yet carry an "
         f"attributed OVERWATCH Fix rewrite ({bug_ref}) — the recovery drill's steps "
         "(b)-(e) do not run without it.",
-        "attach the rewrite first: team/scripts/overwatch-attach-fix-rewrite.sh "
-        f"--project {project_name} --kanban-root {kanban_root} --bug-id {bug_id_arg}, adding "
+        "attach the rewrite first: "
+        + installed_script_command(
+            kanban_root, "overwatch-attach-fix-rewrite.sh",
+            "--project", project_name, "--kanban-root", kanban_root, "--bug-id", bug_id_arg,
+        )
+        + ", adding "
         "--forbidden-approach, --correct-direction, and one or more --ground-truth-ref flags "
         "naming the actual failed approach, the actual correct fix, and a verbatim ground-truth "
         "reference respectively (run the script with --help for each flag's contract) — or "
@@ -991,6 +1385,7 @@ def _run_lane_a(
     ship_halt_path: str,
     evidence_refs: list,
     timestamp: str,
+    expected_halt: Optional[bytes] = None,
 ) -> ResolutionStageOutcome:
     """Lane A's full handling: the single-attempt guard first, then — on a
     first attempt only — the recovery drill itself. Called only from
@@ -1011,18 +1406,23 @@ def _run_lane_a(
                 combined_evidence.append(path)
 
         outcome_text = _format_lane_a_escalation(lane_result, prior, version)
+        inbox_line, entry_id = _park_lane_question(
+            kanban_root, project_name, version, outcome_text, ship_halt_path, LANE_C
+        )
         write_decision_event(
             os.path.join(project_root, "release-state.md"),
             timestamp=timestamp,
             version=version,
             lane=LANE_C,
             evidence_refs=combined_evidence,
-            verbs_run=["Needs Human raised (Lane A single-attempt guard escalation)"],
+            verbs_run=[f"{inbox_line} (Lane A single-attempt guard escalation)"],
             outcome=outcome_text,
         )
-        reason = f"Lane A single-attempt guard escalated to Lane C: {outcome_text}"
+        reason = f"Lane A single-attempt guard escalated to Lane C: {outcome_text}; {inbox_line}"
         log_action(kanban_root, project_name, "resolution-stage", f"{project_name}:{version}", "declined", reason)
-        return ResolutionStageOutcome(status=DECLINED, reason=reason)
+        return ResolutionStageOutcome(
+            status=DECLINED, reason=reason, decision=DECISION_INBOX, inbox_entry_id=entry_id
+        )
 
     # Rewrite precondition: step (a) — deferred import to avoid a circular
     # top-level import (fix_rewrite.py imports log_action from this module;
@@ -1107,6 +1507,7 @@ def _run_lane_a(
         timestamp=timestamp,
     )
 
+    clears: list = []
     completed, errors = execute_lane_a_drill(
         ctx=ctx,
         kanban_root=kanban_root,
@@ -1115,7 +1516,10 @@ def _run_lane_a(
         version=version,
         bundle_key=bundle_key,
         ship_halt_path=ship_halt_path,
+        expected_halt=expected_halt,
+        clears=clears,
     )
+    evidence_refs = list(evidence_refs) + [c.backup_path for c in clears if c.backup_path]
 
     if errors:
         outcome_text = (
@@ -1181,6 +1585,7 @@ def _run_lane_a(
         ledger_entry_id=entry_id,
         actions_taken=completed,
         action_errors=errors,
+        decision=DECISION_VERB,
     )
 
 
@@ -1259,6 +1664,7 @@ def _run_lane_b(
     ship_halt_path: str,
     evidence_refs: list,
     timestamp: str,
+    expected_halt: Optional[bytes] = None,
 ) -> ResolutionStageOutcome:
     """Lane B's full handling: force-ship through cm/release.sh, then clear
     the ship-policy HALT this stage is resolving on success. Called only
@@ -1295,21 +1701,27 @@ def _run_lane_b(
         # Re-verify content immediately before removal — the same
         # race-closing re-check execute_drill() / execute_lane_a_drill()'s
         # own HALT-clear step performs.
-        halt_step = f"cleared ship-policy HALT: {ship_halt_path}"
-        try:
-            if classify_halt_file(ship_halt_path) == "ship-policy":
-                os.remove(ship_halt_path)
-            else:
-                halt_step += " SKIPPED: file no longer carries the CM header at execution time"
-        except OSError as exc:
-            halt_step += f" FAILED: {exc}"
+        halt_clear = clear_chain_halt(
+            OpsContext(kanban_root=kanban_root),
+            kanban_root,
+            project_name,
+            step=f"cleared ship-policy HALT: {ship_halt_path}",
+            expected=expected_halt,
+            writer=WRITER_CM_RELEASE,
+        )
+        if halt_clear.cleared:
+            halt_step = f"{halt_clear.step} (backup: {halt_clear.backup_path})"
+        else:
+            halt_step = halt_clear.error
         verbs_run = [verb, halt_step]
         outcome = (
             "classified Lane B (evidence fully explained by a declared INTENT.md entry); "
             f"forced ship succeeded — reason recorded verbatim: {reason_text!r}."
         )
         status = EXECUTED
-        action_errors: list = []
+        action_errors: list = [] if halt_clear.cleared else [halt_clear.error]
+        if halt_clear.backup_path:
+            evidence_refs = list(evidence_refs) + [halt_clear.backup_path]
     else:
         verbs_run = [f"{verb} FAILED"]
         outcome = (
@@ -1344,6 +1756,7 @@ def _run_lane_b(
         reason=reason,
         actions_taken=verbs_run if ok else [],
         action_errors=action_errors,
+        decision=DECISION_VERB if ok else DECISION_NONE,
     )
 
 
@@ -1356,6 +1769,7 @@ def _run_lane_classification(
     evidence: BlockEvidence,
     ship_halt_path: str,
     tester_report_path: Optional[str],
+    expected_halt: Optional[bytes] = None,
 ) -> ResolutionStageOutcome:
     """Gather Lane A/B/C evidence, classify, record the shared Decision
     event, and execute Lane C's escalation. Called from run_resolution_stage
@@ -1397,6 +1811,7 @@ def _run_lane_classification(
             ship_halt_path=ship_halt_path,
             evidence_refs=evidence_refs,
             timestamp=timestamp,
+            expected_halt=expected_halt,
         )
 
     if lane_result.lane == LANE_B:
@@ -1409,10 +1824,13 @@ def _run_lane_classification(
             ship_halt_path=ship_halt_path,
             evidence_refs=evidence_refs,
             timestamp=timestamp,
+            expected_halt=expected_halt,
         )
 
-    verbs_run = ["Needs Human raised (existing default — no new mechanism)"]
     outcome = _format_lane_c_read(lane_result, version)
+    inbox_line, entry_id = _park_lane_question(
+        kanban_root, project_name, version, outcome, ship_halt_path, lane_result.lane
+    )
 
     write_decision_event(
         os.path.join(project_root, "release-state.md"),
@@ -1420,72 +1838,34 @@ def _run_lane_classification(
         version=version,
         lane=lane_result.lane,
         evidence_refs=evidence_refs,
-        verbs_run=verbs_run,
+        verbs_run=[inbox_line],
         outcome=outcome,
     )
 
-    reason = f"lane {lane_result.lane} classified: {lane_result.reason}"
+    reason = f"lane {lane_result.lane} classified: {lane_result.reason}; {inbox_line}"
     log_action(kanban_root, project_name, "resolution-stage", f"{project_name}:{version}", "declined", reason)
-    return ResolutionStageOutcome(status=DECLINED, reason=reason)
+    return ResolutionStageOutcome(status=DECLINED, reason=reason, decision=DECISION_INBOX, inbox_entry_id=entry_id)
 
 
 # ---------------------------------------------------------------------------
-# Main entry point
+# The ship-policy path: the fact matrix, then the three lanes
 # ---------------------------------------------------------------------------
 
 
-def run_resolution_stage(project_name: str, kanban_root: str) -> ResolutionStageOutcome:
-    """Evaluate the current block state for *project_name* and either execute
-    the matrix-prescribed drill or decline. See module docstring for the
-    full decision shape.
+def _resolve_ship_policy_halt(
+    ctx: OpsContext,
+    kanban_root: str,
+    project_name: str,
+    project_root: str,
+    ship_halt_path: str,
+    expected_halt: Optional[bytes],
+) -> ResolutionStageOutcome:
+    """The ship-policy path for a CM chain HALT: the fact matrix, then the
+    three lanes when overwatch_resolve allows them. See the module
+    docstring's EXECUTE / DECLINE shape. *expected_halt* is the HALT's
+    bytes as the decision read them; a drill clears the HALT only while it
+    still holds them.
     """
-    ctx = OpsContext(kanban_root=kanban_root)
-    project_root = str(ctx.project_root(project_name))
-
-    project_halt, global_halt = _locate_halt_files(kanban_root, project_name)
-    project_class = classify_halt_file(project_halt)
-    global_class = classify_halt_file(global_halt)
-
-    if project_class == "absent" and global_class == "absent":
-        # No HALT at all — this OVERWATCH firing was not triggered by a
-        # ship-policy block (or any block requiring a HALT). Nothing to
-        # evaluate; stay silent (every OVERWATCH firing reaches this call,
-        # including the vast majority that have no ship-policy HALT to
-        # consider — logging a decline for every one of those would drown
-        # the action log in noise for a condition that is not a decision).
-        return ResolutionStageOutcome(status=NO_OP, reason="no HALT file present")
-
-    ship_candidates = [
-        p for p, c in ((project_halt, project_class), (global_halt, global_class)) if c == "ship-policy"
-    ]
-    operator_candidates = [
-        p for p, c in ((project_halt, project_class), (global_halt, global_class)) if c == "operator"
-    ]
-
-    if not ship_candidates:
-        # A HALT is present but none of the present HALT file(s) carry the
-        # CM ship-policy header — nothing for this stage to resolve. This is
-        # the ordinary "operator halted the chain" case; OVERWATCH must not
-        # touch it.
-        reason = "HALT present but not a ship-policy HALT (no CM header found)"
-        log_action(kanban_root, project_name, "resolution-stage", project_name, "declined", reason)
-        return ResolutionStageOutcome(status=DECLINED, reason=reason)
-
-    if operator_candidates:
-        # Acceptance criterion: "Only the ship-policy HALT being resolved is
-        # cleared; an operator-authored HALT present alongside blocks
-        # resolution with a narrated reason." An operator HALT sitting
-        # alongside a ship-policy one is inviolate — decline outright,
-        # before even consulting the matrix, and touch nothing.
-        reason = (
-            "operator-authored HALT present alongside the ship-policy HALT "
-            f"({', '.join(operator_candidates)}) — declining"
-        )
-        log_action(kanban_root, project_name, "resolution-stage", project_name, "declined", reason)
-        return ResolutionStageOutcome(status=DECLINED, reason=reason)
-
-    ship_halt_path = ship_candidates[0]
-
     release_state_md = os.path.join(project_root, "release-state.md")
     version = read_state_field(release_state_md, "Active RC")
     if version in ("none", ""):
@@ -1559,6 +1939,7 @@ def run_resolution_stage(project_name: str, kanban_root: str) -> ResolutionStage
                     evidence=evidence,
                     ship_halt_path=ship_halt_path,
                     tester_report_path=tester_report_path,
+                    expected_halt=expected_halt,
                 )
 
             reason = (
@@ -1573,6 +1954,42 @@ def run_resolution_stage(project_name: str, kanban_root: str) -> ResolutionStage
         return ResolutionStageOutcome(status=DECLINED, reason=reason)
 
     # --- Matched: CANCEL-AND-REBUNDLE ---
+    evidence_paths = [p for p in (ship_halt_path, tester_report_path, evidence.release_state_path) if p]
+    return run_cancel_and_rebundle(
+        ctx, kanban_root, project_name, project_root, version, result.facts,
+        evidence_paths=evidence_paths, ship_halt_path=ship_halt_path, expected_halt=expected_halt,
+    )
+
+
+def run_cancel_and_rebundle(
+    ctx: OpsContext,
+    kanban_root: str,
+    project_name: str,
+    project_root: str,
+    version: str,
+    facts,
+    *,
+    evidence_paths: list,
+    ship_halt_path: Optional[str] = None,
+    expected_halt: Optional[bytes] = None,
+) -> ResolutionStageOutcome:
+    """Carry out a matched CANCEL-AND-REBUNDLE row for *version*.
+
+    Decide-and-log: one ledger entry naming every intended action is
+    appended first, then the drill runs (execute_drill), then one
+    "## OVERWATCH Decision" event records what ran, and the outcome is
+    narrated to the action log. *facts* is the matched BlockFacts (its
+    trigger class and attempt number go in the ledger entry).
+    *ship_halt_path* names the ship-policy HALT the drill clears last;
+    None (a squash conflict resolved before any HALT was written) clears
+    nothing. Returns EXECUTED with decision verb, whether or not the
+    cancel itself succeeded -- ``actions_taken`` says what ran.
+    """
+    release_state_md = os.path.join(project_root, "release-state.md")
+    tasks_dir = os.path.join(project_root, "tasks")
+    requirements_dir = str(ctx.requirements_dir(project_name))
+    state_dir = os.path.join(project_root, "release-state")
+    ledger_path = ledger_path_for_project(kanban_root, project_name)
     family = compute_bundle_family(requirements_dir, version, state_dir)
 
     bundle_key = None
@@ -1582,7 +1999,7 @@ def run_resolution_stage(project_name: str, kanban_root: str) -> ResolutionStage
     bug_keys = [os.path.splitext(c)[0] for c in family.get("cargo", []) if c.startswith("BUG-")]
     rc_task_ids = find_rc_task_ids(tasks_dir, version)
 
-    attempt_from = result.facts.attempt if result.facts.attempt is not None else 1
+    attempt_from = facts.attempt if facts.attempt is not None else 1
     attempt_to = attempt_from + 1
 
     actions_taken = [_cancel_rc_step(project_name, version)]
@@ -1591,17 +2008,16 @@ def run_resolution_stage(project_name: str, kanban_root: str) -> ResolutionStage
         f"close (wont-do): {bundle_key}" if bundle_key else "close (wont-do): none — no bundle file located"
     )
     actions_taken += [f"reset (open): {bug_key}" for bug_key in bug_keys]
-    actions_taken.append(f"cleared ship-policy HALT: {ship_halt_path}")
-
-    evidence_paths = [p for p in (ship_halt_path, tester_report_path, evidence.release_state_path) if p]
+    if ship_halt_path:
+        actions_taken.append(f"cleared ship-policy HALT: {ship_halt_path}")
 
     entry = LedgerEntry(
         timestamp=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         rc=version,
         attempt_from=attempt_from,
         attempt_to=attempt_to,
-        trigger=result.facts.trigger_class,
-        matrix_row=result.resolution,
+        trigger=facts.trigger_class,
+        matrix_row=CANCEL_AND_REBUNDLE,
         findings=bug_keys,
         actions_taken=actions_taken,
         evidence_paths=evidence_paths,
@@ -1614,6 +2030,7 @@ def run_resolution_stage(project_name: str, kanban_root: str) -> ResolutionStage
     # recorded — OVERWATCH's next sweep reconciles.
     entry_id = append_entry(ledger_path, entry)
 
+    clears: list = []
     completed, errors = execute_drill(
         ctx=ctx,
         kanban_root=kanban_root,
@@ -1623,6 +2040,22 @@ def run_resolution_stage(project_name: str, kanban_root: str) -> ResolutionStage
         bundle_key=bundle_key,
         bug_keys=bug_keys,
         ship_halt_path=ship_halt_path,
+        expected_halt=expected_halt,
+        clears=clears,
+    )
+    # The drill's Decision event: what it ran, and the HALT backup when it
+    # cleared the HALT.
+    write_decision_event(
+        release_state_md,
+        timestamp=entry.timestamp,
+        version=version,
+        lane=CANCEL_AND_REBUNDLE,
+        evidence_refs=evidence_paths + [c.backup_path for c in clears if c.backup_path],
+        verbs_run=completed,
+        outcome=(
+            f"CANCEL-AND-REBUNDLE drill ran for {version} (ledger entry {entry_id}); "
+            + (f"{len(errors)} action(s) reported errors: " + "; ".join(errors) if errors else "every step completed.")
+        ),
     )
 
     reason = f"CANCEL-AND-REBUNDLE matched; ledger entry {entry_id}"
@@ -1631,8 +2064,8 @@ def run_resolution_stage(project_name: str, kanban_root: str) -> ResolutionStage
         # so an operator reading only this line knows why nothing reverted.
         reason += (
             "; RC cancel FAILED, status-revert steps not run (RC task set, "
-            "bundle and cargo bug statuses unchanged; ship-policy HALT left "
-            "in place)"
+            "bundle and cargo bug statuses unchanged"
+            + ("; ship-policy HALT left in place)" if ship_halt_path else ")")
         )
     if errors:
         reason += f"; {len(errors)} action(s) reported errors (see below)"
@@ -1660,7 +2093,451 @@ def run_resolution_stage(project_name: str, kanban_root: str) -> ResolutionStage
         ledger_entry_id=entry_id,
         actions_taken=completed,
         action_errors=errors,
+        decision=DECISION_VERB,
     )
+
+
+def cancel_landed(outcome: ResolutionStageOutcome, project_name: str, version: str) -> bool:
+    """Whether a run_cancel_and_rebundle() outcome's cancel step succeeded."""
+    return outcome.status == EXECUTED and _cancel_rc_step(project_name, version) in outcome.actions_taken
+
+
+def resolve_squash_conflict(
+    project_name: str,
+    kanban_root: str,
+    version: str,
+    *,
+    repo_root: Optional[str] = None,
+) -> ResolutionStageOutcome:
+    """Ask the matrix whether *version*'s RC may be cancelled and rebundled
+    after its squash into main conflicted, and carry the answer out.
+
+    The block is described to the matrix with trigger class
+    ``squash-conflict`` and the same evidence a ship-policy HALT gets (the
+    TESTER report, the per-RC release-state JSON, the dev tree's RC and
+    main branches, the task graph, the retry ceiling). A matched
+    CANCEL-AND-REBUNDLE row runs run_cancel_and_rebundle() with no HALT to
+    clear; anything else -- no row matched (an approval gate, the retry
+    ceiling, a tag already cut), or evidence the matrix could not read --
+    is DECLINED with the reason, having changed nothing, so the caller
+    writes its trigger 5 HALT instead. *repo_root* names the dev tree when
+    the caller knows it (cm/release.sh's REPO_ROOT); project.cfg's
+    dev_tree_path otherwise.
+    """
+    ctx = OpsContext(kanban_root=kanban_root)
+    project_root = str(ctx.project_root(project_name))
+    cfg = _read_project_cfg(project_root)
+    dev_tree_path = repo_root or cfg["dev_tree_path"] or None
+    branch_prefix = cfg["branch_prefix"]
+    tasks_dir = os.path.join(project_root, "tasks")
+    release_state_json = os.path.join(project_root, "release-state", f"{version}.json")
+    tester_report_path = find_tester_report(tasks_dir, version)
+    target = f"{project_name}:{version}"
+    evidence = BlockEvidence(
+        trigger_class=TRIGGER_CLASS_SQUASH_CONFLICT,
+        tester_report_path=tester_report_path,
+        release_state_path=release_state_json if os.path.isfile(release_state_json) else None,
+        dev_tree_path=dev_tree_path,
+        target_version=version,
+        branch_prefix=branch_prefix,
+        rc_branch=f"{branch_prefix}rc/{version}",
+        base_branch=f"{branch_prefix}main",
+        project_tasks_dir=tasks_dir,
+        project_name=project_name,
+        kanban_root=kanban_root,
+    )
+    try:
+        result = resolve_block(evidence, kanban_root=kanban_root)
+    except ResolutionMatrixError as exc:
+        return _decline(kanban_root, project_name, target, f"squash conflict: resolution matrix error: {exc}")
+    if result.resolution == HALT_HARD:
+        facts = result.facts
+        if _is_ceiling_reached(facts):
+            family = compute_bundle_family(
+                str(ctx.requirements_dir(project_name)), version, os.path.join(project_root, "release-state")
+            )
+            why = _format_ceiling_block_text(facts, family)
+        else:
+            why = (
+                f"no matrix row matched (trigger_class={facts.trigger_class}, "
+                f"shipped_or_tagged={facts.shipped_or_tagged}, "
+                f"approval_gate_present={facts.approval_gate_present}, "
+                f"attempts_below_ceiling={facts.attempts_below_ceiling})"
+            )
+        return _decline(kanban_root, project_name, target, f"squash conflict: {why}")
+    evidence_paths = [p for p in (tester_report_path, evidence.release_state_path) if p]
+    return run_cancel_and_rebundle(
+        ctx, kanban_root, project_name, project_root, version, result.facts, evidence_paths=evidence_paths,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Chain HALTs: clear once the cause is resolved, by writer
+# ---------------------------------------------------------------------------
+
+
+def _decline(kanban_root: str, project_name: str, target: str, reason: str) -> ResolutionStageOutcome:
+    """Narrate a decision-none decline to the action log and return it."""
+    log_action(kanban_root, project_name, "resolution-stage", target, "declined", reason)
+    return ResolutionStageOutcome(status=DECLINED, reason=reason, decision=DECISION_NONE)
+
+
+def _record_decision(project_root: str, **event) -> bool:
+    """Append a Decision event to the project's release-state.md when it exists.
+
+    A project with no release-state.md gets none: creating one here would
+    leave a file without the headings its loader requires. Returns whether
+    the event was written.
+    """
+    release_state_md = os.path.join(project_root, "release-state.md")
+    if not os.path.isfile(release_state_md):
+        return False
+    write_decision_event(release_state_md, **event)
+    return True
+
+
+def _rc_branch_and_tree(project_root: str, version: str) -> tuple:
+    """``(dev_tree_path, rc_branch)`` for *version* from project.cfg; dev tree None when unset."""
+    cfg = _read_project_cfg(project_root)
+    return cfg["dev_tree_path"] or None, f"{cfg['branch_prefix']}rc/{version}"
+
+
+def find_latest_tester_task(tasks_dir: str, version: str) -> Optional[str]:
+    """The newest TESTER-* task whose README names *version*, in any state; None when none does."""
+    if not version or not os.path.isdir(tasks_dir):
+        return None
+    found = []
+    for entry in sorted(os.listdir(tasks_dir)):
+        readme = os.path.join(tasks_dir, entry, "README.md")
+        if not entry.startswith("TESTER-") or not os.path.isfile(readme):
+            continue
+        try:
+            text = open(readme, "r", encoding="utf-8").read()
+        except OSError:
+            continue
+        if references_version(text, version):
+            found.append(entry)
+    # Task IDs embed YYYYMMDD-NNN; lexical order is chronological order.
+    return found[-1] if found else None
+
+
+def run_cause_checks(
+    row: TriggerRow,
+    kanban_root: str,
+    project_name: str,
+    project_root: str,
+    halt_path: str,
+    halt_text: str,
+) -> list:
+    """Run *row*'s clears_on checks for the project's CM HALT; one CauseCheck each."""
+    active_rc = read_state_field(os.path.join(project_root, "release-state.md"), "Active RC").strip()
+    version = "" if active_rc in ("", "none") else active_rc
+    results = []
+    for name in row.clears_on:
+        if name == CLEAR_RC_CANCELLED:
+            results.append(check_rc_cancelled(project_root, halt_written_at(halt_path, halt_text)))
+        elif name == CLEAR_TASK_RESET:
+            task_id = find_latest_tester_task(os.path.join(project_root, "tasks"), version)
+            results.append(check_task_reset(project_root, task_id))
+        elif name == CLEAR_NOTES_STATUS_GREEN:
+            dev_tree, rc_branch = _rc_branch_and_tree(project_root, version)
+            results.append(check_notes_status_green(version, dev_tree, rc_branch if version else None))
+    return results
+
+
+def _clear_resolved_halt(
+    ctx: OpsContext,
+    kanban_root: str,
+    project_name: str,
+    project_root: str,
+    provenance: HaltProvenance,
+    expected: bytes,
+    label: str,
+    checks: list,
+) -> ResolutionStageOutcome:
+    """Clear a chain HALT whose cause a check proved resolved, and record why."""
+    halt_path = provenance.path
+    timestamp = _utc_stamp()
+    version = read_state_field(os.path.join(project_root, "release-state.md"), "Active RC").strip() or "none"
+    result = clear_chain_halt(
+        ctx,
+        kanban_root,
+        project_name,
+        step=f"ops.write unhalt --project {project_name}: cleared {label} HALT {halt_path}",
+        expected=expected,
+        writer=provenance.writer,
+        timestamp=timestamp,
+    )
+    passed = [check for check in checks if check.passed]
+    evidence = [halt_path] + [f"{check.check}: {check.evidence}" for check in checks]
+    for check in checks:
+        evidence += [path for path in check.paths if path not in evidence]
+    if result.backup_path:
+        evidence.append(result.backup_path)
+    cause = "; ".join(f"{check.check}: {check.evidence}" for check in passed)
+    if result.cleared:
+        outcome = f"{label} HALT cleared, its cause resolved ({cause}); backup at {result.backup_path}."
+        verbs = [f"{result.step} (backup: {result.backup_path})"]
+    else:
+        outcome = f"{label} HALT not cleared although its cause is resolved ({cause}): {result.error}"
+        verbs = [result.error]
+    _record_decision(
+        project_root,
+        timestamp=timestamp,
+        version=version,
+        lane=LANE_CHAIN_HALT,
+        evidence_refs=evidence,
+        verbs_run=verbs,
+        outcome=outcome,
+    )
+    log_action(
+        kanban_root,
+        project_name,
+        "resolution-stage",
+        project_name,
+        "auto-fix:clear-chain-halt" if result.cleared else "declined",
+        outcome,
+        backup_path=result.backup_path or "none",
+    )
+    if result.cleared:
+        return ResolutionStageOutcome(
+            status=EXECUTED, reason=outcome, actions_taken=verbs, decision=DECISION_VERB
+        )
+    return ResolutionStageOutcome(
+        status=DECLINED, reason=outcome, action_errors=[result.error], decision=DECISION_NONE
+    )
+
+
+def _resolve_halt_after(
+    ctx: OpsContext,
+    kanban_root: str,
+    project_name: str,
+    project_root: str,
+    provenance: HaltProvenance,
+    expected: bytes,
+) -> ResolutionStageOutcome:
+    """A HALT the HALT-AFTER promotion wrote: clear it only for a completed
+    drain with ``[overwatch] halt_after_auto_resume = true``, leaving an
+    inbox entry that names the release it stopped after."""
+    halt_path = provenance.path
+    if os.path.exists(os.path.join(project_root, "HALT-AFTER")):
+        return _decline(
+            kanban_root, project_name, project_name,
+            f"HALT-AFTER promotion HALT at {halt_path} is not complete (HALT-AFTER is still present) "
+            "— decision none",
+        )
+    try:
+        auto_resume = resolve_halt_after_auto_resume(kanban_root, project_name)
+    except RunawayError as exc:
+        return _decline(kanban_root, project_name, project_name, f"HALT-AFTER HALT left in place — {exc}")
+    if not auto_resume:
+        return _decline(
+            kanban_root, project_name, project_name,
+            f"HALT-AFTER drain completed ({provenance.reason or 'no reason recorded'}); "
+            "[overwatch] halt_after_auto_resume is false, so the HALT stays for the operator — decision none",
+        )
+    release_state_md = os.path.join(project_root, "release-state.md")
+    version = halt_after_version(provenance.reason, release_state_md)
+    if version is None:
+        return _decline(
+            kanban_root, project_name, project_name,
+            f"HALT-AFTER drain completed but no release can be named for it (no rc:vX.Y.Z token in "
+            f"{halt_path}, no Last Released value in {release_state_md}) — HALT left in place, decision none",
+        )
+
+    timestamp = _utc_stamp()
+    result = clear_chain_halt(
+        ctx,
+        kanban_root,
+        project_name,
+        step=f"ops.write unhalt --project {project_name}: cleared HALT-AFTER HALT {halt_path}",
+        expected=expected,
+        writer=WRITER_HALT_AFTER_PROMOTION,
+        timestamp=timestamp,
+    )
+    evidence = [halt_path, f"halt-reason: {provenance.reason or 'none recorded'}", release_state_md]
+    if not result.cleared:
+        outcome = f"HALT-AFTER HALT not cleared: {result.error}"
+        _record_decision(
+            project_root, timestamp=timestamp, version=version, lane=LANE_CHAIN_HALT,
+            evidence_refs=evidence, verbs_run=[result.error], outcome=outcome,
+        )
+        log_action(kanban_root, project_name, "resolution-stage", project_name, "declined", outcome)
+        return ResolutionStageOutcome(
+            status=DECLINED, reason=outcome, action_errors=[result.error], decision=DECISION_NONE
+        )
+
+    evidence.append(result.backup_path)
+    halt_after_cmd = _halt_after_command(kanban_root, project_name)
+    entry_id, created, error = write_inbox_question(
+        ctx,
+        project_name,
+        source=f"rc:{version}",
+        question=halt_after_resume_text(version),
+        meanwhile=(
+            f"Cleared the HALT the HALT-AFTER promotion wrote at {halt_path} because [overwatch] "
+            f"halt_after_auto_resume = true (backup: {result.backup_path}); the chain runs again."
+        ),
+        how_to_answer=(
+            f"Nothing to decide: the chain is running. To stop it after a later release, arm "
+            f"{halt_after_cmd} again; close this entry with {_inbox_close_command(ctx, project_name)}."
+        ),
+    )
+    verbs = [f"{result.step} (backup: {result.backup_path})"]
+    errors = []
+    if error is not None:
+        verbs.append(f"inbox write FAILED: {error}")
+        errors.append(error)
+    else:
+        verbs.append(f"inbox entry {entry_id} {'written' if created else 'still open (not written again)'}")
+    outcome = (
+        f"HALT-AFTER drain completed after {version}; halt_after_auto_resume = true, so the HALT was "
+        f"cleared and the inbox says: {halt_after_resume_text(version)}"
+    )
+    _record_decision(
+        project_root, timestamp=timestamp, version=version, lane=LANE_CHAIN_HALT,
+        evidence_refs=evidence, verbs_run=verbs, outcome=outcome,
+    )
+    log_action(
+        kanban_root, project_name, "resolution-stage", project_name, "auto-fix:clear-chain-halt",
+        outcome, backup_path=result.backup_path,
+    )
+    return ResolutionStageOutcome(
+        status=EXECUTED, reason=outcome, actions_taken=verbs, action_errors=errors,
+        decision=DECISION_VERB, inbox_entry_id=entry_id,
+    )
+
+
+def _resolve_cm_halt(
+    ctx: OpsContext,
+    kanban_root: str,
+    project_name: str,
+    project_root: str,
+    provenance: HaltProvenance,
+    expected: bytes,
+) -> ResolutionStageOutcome:
+    """A HALT CM wrote: its trigger row's checks first, then its while_open action."""
+    halt_path = provenance.path
+    try:
+        rows = load_trigger_rows(kanban_root=kanban_root)
+    except ResolutionMatrixError as exc:
+        return _decline(kanban_root, project_name, project_name, f"resolution matrix error: {exc}")
+    row = rows.get(provenance.trigger) if provenance.trigger else None
+
+    checks: list = []
+    if row is not None and row.clears_on:
+        halt_text = expected.decode("utf-8", errors="replace")
+        checks = run_cause_checks(row, kanban_root, project_name, project_root, halt_path, halt_text)
+        if any(check.passed for check in checks):
+            return _clear_resolved_halt(
+                ctx, kanban_root, project_name, project_root, provenance, expected,
+                f"CM trigger {row.trigger} ({row.name})", checks,
+            )
+
+    if row is None or row.while_open == WHILE_OPEN_MATRIX:
+        return _resolve_ship_policy_halt(ctx, kanban_root, project_name, project_root, halt_path, expected)
+
+    unresolved = "; ".join(f"{check.check}: {check.evidence}" for check in checks)
+    return _decline(
+        kanban_root, project_name, project_name,
+        f"CM trigger {row.trigger} ({row.name}) HALT at {halt_path}: "
+        + (f"cause not resolved ({unresolved})" if checks else "no cause check clears this trigger")
+        + " — decision none; it waits for the operator",
+    )
+
+
+def _resolve_chain_halt(
+    ctx: OpsContext,
+    kanban_root: str,
+    project_name: str,
+    project_root: str,
+    provenance: HaltProvenance,
+    expected: bytes,
+) -> ResolutionStageOutcome:
+    """Dispatch a project chain HALT on the writer its provenance names."""
+    halt_path = provenance.path
+    writer = provenance.writer
+    why = provenance.reason or "no reason recorded"
+    if writer == WRITER_CM_RELEASE:
+        return _resolve_cm_halt(ctx, kanban_root, project_name, project_root, provenance, expected)
+    if writer == WRITER_HALT_AFTER_PROMOTION:
+        return _resolve_halt_after(ctx, kanban_root, project_name, project_root, provenance, expected)
+    if writer == WRITER_OVERWATCH_RUNAWAY:
+        return _decline(
+            kanban_root, project_name, project_name,
+            f"runaway HALT at {halt_path} ({why}) — decision none: the resolution stage never clears a "
+            "runaway HALT; it stays until the operator answers its inbox entry",
+        )
+    if writer == WRITER_ZERO_PROGRESS_CAP:
+        check = check_task_reset(project_root, task_id_in(provenance.reason))
+        if check.passed:
+            return _clear_resolved_halt(
+                ctx, kanban_root, project_name, project_root, provenance, expected, "zero-progress-cap", [check]
+            )
+        return _decline(
+            kanban_root, project_name, project_name,
+            f"zero-progress-cap HALT at {halt_path}: cause not resolved ({check.evidence}) — decision none",
+        )
+    if writer == WRITER_OVERWATCH_REPAIR:
+        return _decline(
+            kanban_root, project_name, project_name,
+            f"OVERWATCH repair HALT at {halt_path} ({why}) — decision none: the repair that wrote it clears it",
+        )
+    return _decline(
+        kanban_root, project_name, project_name,
+        f"chain HALT at {halt_path} names writer {writer}, which this stage has no rule for — decision none",
+    )
+
+
+# ---------------------------------------------------------------------------
+# Main entry point
+# ---------------------------------------------------------------------------
+
+
+def run_resolution_stage(project_name: str, kanban_root: str) -> ResolutionStageOutcome:
+    """Decide on the project's HALT state and act on the decision. Never
+    touches an operator HALT. See the module docstring for the full
+    decision shape.
+    """
+    ctx = OpsContext(kanban_root=kanban_root)
+    project_root = str(ctx.project_root(project_name))
+
+    project_halt, global_halt = _locate_halt_files(kanban_root, project_name)
+    # The bytes are read before the provenance, so a HALT replaced in between
+    # never matches what a clear later requires.
+    expected = read_halt_bytes(project_halt)
+    project_provenance = classify_halt(project_halt, kanban_root=kanban_root)
+    global_provenance = classify_halt(global_halt, kanban_root=kanban_root)
+
+    if project_provenance.origin == halt_provenance.ORIGIN_ABSENT and global_provenance.origin == halt_provenance.ORIGIN_ABSENT:
+        # No HALT at all — nothing to decide; stay silent (every OVERWATCH
+        # firing reaches this call, and logging a decline for each one with
+        # no HALT would drown the action log in noise).
+        return ResolutionStageOutcome(status=NO_OP, reason="no HALT file present")
+
+    operator_halts = [
+        p.path for p in (project_provenance, global_provenance) if p.origin == halt_provenance.ORIGIN_OPERATOR
+    ]
+    if not project_provenance.is_chain:
+        # The ordinary "operator halted the chain" case. OVERWATCH never
+        # reads an operator HALT as anything else and never touches it.
+        return _decline(
+            kanban_root, project_name, project_name,
+            f"operator HALT present ({', '.join(operator_halts)}) — not a ship-policy or other chain "
+            "HALT; decision none: OVERWATCH never clears an operator HALT",
+        )
+    if operator_halts:
+        # An operator HALT beside a chain HALT is inviolate, and so is the
+        # chain HALT while it is there: decline before any check or matrix.
+        kind = "ship-policy" if project_provenance.writer == WRITER_CM_RELEASE else "chain"
+        return _decline(
+            kanban_root, project_name, project_name,
+            f"operator-authored HALT present alongside the {kind} HALT ({', '.join(operator_halts)}) "
+            "— decision none; declining",
+        )
+    if expected is None:
+        return _decline(kanban_root, project_name, project_name, f"the HALT at {project_halt} could not be read — decision none")
+    return _resolve_chain_halt(ctx, kanban_root, project_name, project_root, project_provenance, expected)
 
 
 # ---------------------------------------------------------------------------

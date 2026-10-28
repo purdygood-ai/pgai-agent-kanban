@@ -27,6 +27,10 @@
 #                                     did not pin one via -m
 #   codex_parse_jsonl_result       — parse the Codex JSONL event stream
 #
+# Everything that reads or rewrites what the CLI produced (the preflight
+# scan, the config model read, the usage parse) is Python in
+# pgai_agent_kanban.lib.codex_provider, called through pp_run_ops.
+#
 # -------------------------------------------------------------------------
 # Codex CLI interface notes
 # -------------------------------------------------------------------------
@@ -76,6 +80,13 @@ source "${SCRIPT_DIR}/../lib/token_capture.sh"
 # Source temp helpers so pgai_temp_dir / pgai_mktemp are available.
 # shellcheck source=scripts/lib/temp.sh
 source "${SCRIPT_DIR}/../lib/temp.sh"
+
+# pp_run_ops runs pgai_agent_kanban.lib.codex_provider with the package
+# root this tree's own lib/ sits under, never the caller's working directory.
+if ! declare -F pp_run_ops >/dev/null 2>&1; then
+    # shellcheck source=scripts/lib/pp_run_ops.sh
+    source "$(dirname "${BASH_SOURCE[0]}")/pp_run_ops.sh"
+fi
 
 # ---------------------------------------------------------------------------
 # provider_env_preflight
@@ -171,8 +182,8 @@ provider_model_preflight() {
         _pf_cmd=(timeout -k 5 "$_pf_timeout" "${_pf_cmd[@]}")
     fi
 
-    # Write the JSONL output to a temp file so it can be passed to Python
-    # without stdin-redirect conflicts (heredoc script vs. input data).
+    # Write the JSONL output to a temp file so the scan below reads it by
+    # path.
     local _pf_jsonl_file _pf_exit
     _pf_jsonl_file="$(mktemp "$(pgai_temp_dir)/pf_jsonl.XXXXXX" 2>/dev/null || echo "")"
     _pf_exit=0
@@ -190,61 +201,18 @@ provider_model_preflight() {
         _pf_output="$("${_pf_cmd[@]}" </dev/null 2>>"$log_file")"
         _pf_exit=$?
         set -e
-        # Write to a temp file via /dev/stdin pipe so the python path is uniform.
-        _pf_jsonl_file="$(echo "$_pf_output" | python3 -c "
-import sys, tempfile, pathlib
-data = sys.stdin.buffer.read()
-with tempfile.NamedTemporaryFile(delete=False, prefix='pf_jsonl_') as f:
-    f.write(data)
-    print(f.name)
-" 2>/dev/null || echo "")"
+        # Copy it into a file under the kanban temp root so the scan below is uniform.
+        # printf '%s' writes the output as captured: echo would add a newline,
+        # turning "no output" into one blank line.
+        _pf_jsonl_file="$(printf '%s' "$_pf_output" | pp_run_ops pgai_agent_kanban.lib.codex_provider capture-stdin 2>/dev/null || echo "")"
     fi
 
-    # Scan the JSONL stream for an error event. The error event has the form:
-    #   {"type":"error","message":"..."}
-    # We look for the first non-empty line and check its type field.
-    # Pass the JSONL file path and metadata as arguments — no stdin conflict.
+    # Scan the JSONL stream for an error event, {"type":"error","message":"..."}:
+    # the first JSON line decides. Prints the failure message, or nothing
+    # when the model was accepted.
     local _pf_error_msg=""
-    _pf_error_msg="$(python3 - "$_pf_model" "$_pf_exit" "${_pf_jsonl_file:-}" <<'PY'
-import json, sys, pathlib
-
-model = sys.argv[1]
-cli_exit = int(sys.argv[2])
-jsonl_path = sys.argv[3] if len(sys.argv) > 3 else ""
-
-try:
-    if jsonl_path:
-        text = pathlib.Path(jsonl_path).read_text(encoding="utf-8")
-    else:
-        text = ""
-    lines = text.splitlines()
-except OSError:
-    lines = []
-
-for raw in lines:
-    raw = raw.strip()
-    if not raw:
-        continue
-    try:
-        obj = json.loads(raw)
-    except json.JSONDecodeError:
-        continue
-    if obj.get("type") == "error":
-        msg = obj.get("message", "unknown error")
-        print(f"model '{model}' rejected by codex: {msg}")
-        sys.exit(0)
-    # Any non-error event means the model was accepted.
-    break
-
-if cli_exit != 0 and not lines:
-    # CLI exited non-zero with no output — codex itself may be broken.
-    print(f"codex exited {cli_exit} with no output; check CLI installation")
-    sys.exit(0)
-
-# No error event found: model is usable.
-sys.exit(1)
-PY
-    )" || true
+    _pf_error_msg="$(pp_run_ops pgai_agent_kanban.lib.codex_provider preflight-error \
+        "$_pf_model" "$_pf_exit" "${_pf_jsonl_file:-}")" || true
 
     rm -f "${_pf_jsonl_file:-}" 2>/dev/null || true
 
@@ -315,18 +283,9 @@ codex_read_model_from_config() {
         return 0
     fi
     # Parse model = "..." or model = '...' from TOML.
-    # Uses python3 for correctness; avoids brittle regex on a real config format.
     local model_value
-    model_value="$(python3 - "$config_file" <<'PY' 2>/dev/null
-import sys, re, pathlib
-try:
-    text = pathlib.Path(sys.argv[1]).read_text(encoding='utf-8')
-    m = re.search(r'^\s*model\s*=\s*["\']?([^"\'#\n\r]+)["\']?', text, re.M)
-    print(m.group(1).strip() if m else 'unknown')
-except Exception:
-    print('unknown')
-PY
-    )" || model_value="unknown"
+    model_value="$(pp_run_ops pgai_agent_kanban.lib.codex_provider config-model "$config_file" 2>/dev/null)" \
+        || model_value="unknown"
     echo "${model_value:-unknown}"
 }
 
@@ -375,74 +334,8 @@ codex_parse_jsonl_result() {
 
     local parse_exit=0
     local usage_json
-    usage_json="$(python3 - "$jsonl_file" "$result_text_file" <<'PY'
-import json, sys, pathlib
-
-jsonl_path   = pathlib.Path(sys.argv[1])
-result_path  = pathlib.Path(sys.argv[2])
-
-try:
-    lines = jsonl_path.read_text(encoding='utf-8').splitlines()
-except OSError as e:
-    print(f"provider_codex: cannot read jsonl_file: {e}", file=sys.stderr)
-    result_path.write_text('', encoding='utf-8')
-    print(json.dumps({"captured": False, "reason": f"cannot read jsonl_file: {e}"}))
-    sys.exit(1)
-
-agent_text_parts = []
-usage_record = {
-    'input_tokens':                0,
-    'output_tokens':               0,
-    'cache_read_input_tokens':     0,
-    'cache_creation_input_tokens': 0,   # always 0; Codex does not expose this field
-}
-usage_found = False
-
-for raw_line in lines:
-    raw_line = raw_line.strip()
-    if not raw_line:
-        continue
-    try:
-        obj = json.loads(raw_line)
-    except json.JSONDecodeError:
-        continue
-
-    event_type = obj.get('type', '')
-
-    # item.completed with type=agent_message => collect agent text
-    if event_type == 'item.completed':
-        item = obj.get('item', {})
-        if isinstance(item, dict) and item.get('type') == 'agent_message':
-            text = item.get('text', '')
-            if isinstance(text, str) and text:
-                agent_text_parts.append(text)
-
-    # turn.completed => extract usage block
-    elif event_type == 'turn.completed':
-        u = obj.get('usage', {})
-        if isinstance(u, dict):
-            usage_found = True
-            usage_record['input_tokens']            = int(u.get('input_tokens',         0))
-            usage_record['output_tokens']           = int(u.get('output_tokens',        0))
-            # Codex uses "cached_input_tokens"; map to cache_read_input_tokens
-            # for tokens.json schema compatibility.
-            usage_record['cache_read_input_tokens'] = int(u.get('cached_input_tokens',  0))
-            # cache_creation_input_tokens is never present in Codex output.
-            usage_record['cache_creation_input_tokens'] = 0
-
-# Write agent text result
-agent_text = '\n'.join(agent_text_parts)
-try:
-    result_path.write_text(agent_text, encoding='utf-8')
-except OSError as e:
-    print(f"provider_codex: cannot write result_text_file: {e}", file=sys.stderr)
-
-if not usage_found:
-    print("provider_codex: WARNING: no turn.completed event found in JSONL — usage will be 0", file=sys.stderr)
-
-print(json.dumps(usage_record, separators=(',', ':')))
-PY
-    )" || parse_exit=$?
+    usage_json="$(pp_run_ops pgai_agent_kanban.lib.codex_provider parse-jsonl \
+        "$jsonl_file" "$result_text_file")" || parse_exit=$?
 
     if [[ $parse_exit -ne 0 ]]; then
         echo "provider_codex.sh: WARNING: codex_parse_jsonl_result failed (exit ${parse_exit})" >&2
@@ -585,13 +478,8 @@ provider_parse_output() {
     local _codex_model
     _codex_model="$(codex_read_model_from_config 2>/dev/null || echo "unknown")"
     if [[ -n "$_codex_model" && "$_codex_model" != "unknown" ]]; then
-      usage_json="$(python3 - "$usage_json" "$_codex_model" <<'PY'
-import json, sys
-record = json.loads(sys.argv[1])
-record["canonical_model_id"] = sys.argv[2]
-print(json.dumps(record, separators=(",", ":")))
-PY
-      )"
+      usage_json="$(pp_run_ops pgai_agent_kanban.lib.codex_provider stamp-model \
+        "$usage_json" "$_codex_model")"
     fi
   fi
 

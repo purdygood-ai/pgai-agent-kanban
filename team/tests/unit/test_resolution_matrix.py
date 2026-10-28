@@ -6,8 +6,14 @@ Goal 1 ("the resolution matrix") config-declared matrix and fail-closed
 matcher.
 
 Coverage:
-  - The shipped default matrix loads exactly one CANCEL-AND-REBUNDLE row
-    from config, not a hardcoded value.
+  - The shipped default matrix loads its CANCEL-AND-REBUNDLE rows from
+    config, not hardcoded values: one for a ship-policy HALT, then four for
+    a squash conflict that accept either value of findings_all_filed and
+    operator_commits_in_lineage.
+  - A squash conflict matches CANCEL-AND-REBUNDLE with nothing shipped, no
+    approval gate and attempts below the ceiling, whatever its findings and
+    lineage; any of those three off, it is HALT-hard. A ship-policy HALT
+    with an unfiled finding or an operator commit still is.
   - The 2026-07-18 golden fixture facts match CANCEL-AND-REBUNDLE.
   - Any single fact off (each of the six, one at a time) yields HALT-hard.
   - Unknown/unmatched shapes (unrecognized trigger_class, empty matrix)
@@ -45,6 +51,7 @@ import pytest
 from pgai_agent_kanban.overwatch.resolution_matrix import (
     CANCEL_AND_REBUNDLE,
     HALT_HARD,
+    TRIGGER_CLASS_SQUASH_CONFLICT,
     BlockEvidence,
     BlockFacts,
     CeilingConfigError,
@@ -115,11 +122,22 @@ def _shipped_matrix() -> list:
 # ---------------------------------------------------------------------------
 
 
-def test_shipped_default_matrix_has_exactly_one_cancel_and_rebundle_row() -> None:
-    """The shipped v2.0.0 default matrix ships exactly one row, and it is
-    the CANCEL-AND-REBUNDLE golden row — not hardcoded in Python."""
+def test_shipped_default_matrix_has_the_ship_policy_row_then_the_squash_conflict_rows() -> None:
+    """The shipped default matrix opens with the CANCEL-AND-REBUNDLE golden
+    row for a ship-policy HALT, followed by the four squash-conflict rows —
+    all read from config, not hardcoded in Python."""
     matrix = load_matrix()
-    assert len(matrix) == 1
+    assert len(matrix) == 5
+    assert all(row.resolution == CANCEL_AND_REBUNDLE for row in matrix)
+    squash_rows = matrix[1:]
+    assert {row.trigger_class for row in squash_rows} == {TRIGGER_CLASS_SQUASH_CONFLICT}
+    assert {(row.findings_all_filed, row.operator_commits_in_lineage) for row in squash_rows} == {
+        (True, False), (True, True), (False, False), (False, True),
+    }
+    for row in squash_rows:
+        assert row.shipped_or_tagged is False
+        assert row.approval_gate_present is False
+        assert row.attempts_below_ceiling is True
     row = matrix[0]
     assert isinstance(row, MatrixRow)
     assert row.resolution == CANCEL_AND_REBUNDLE
@@ -297,6 +315,26 @@ def test_any_single_fact_off_yields_halt_hard(override: dict) -> None:
     matrix = _shipped_matrix()
     facts = _golden_facts(**override)
     assert match_resolution(facts, matrix) == HALT_HARD
+
+
+@pytest.mark.parametrize("findings_filed", [True, False])
+@pytest.mark.parametrize("operator_commits", [False, True])
+def test_squash_conflict_matches_whatever_its_findings_and_lineage(findings_filed, operator_commits) -> None:
+    facts = _golden_facts(
+        trigger_class=TRIGGER_CLASS_SQUASH_CONFLICT,
+        findings_all_filed=findings_filed,
+        operator_commits_in_lineage=operator_commits,
+    )
+    assert match_resolution(facts, _shipped_matrix()) == CANCEL_AND_REBUNDLE
+
+
+@pytest.mark.parametrize(
+    "override",
+    [{"shipped_or_tagged": True}, {"approval_gate_present": True}, {"attempts_below_ceiling": False}],
+)
+def test_squash_conflict_with_a_safety_fact_off_yields_halt_hard(override: dict) -> None:
+    facts = _golden_facts(trigger_class=TRIGGER_CLASS_SQUASH_CONFLICT, **override)
+    assert match_resolution(facts, _shipped_matrix()) == HALT_HARD
 
 
 def test_unrecognized_trigger_class_is_an_unknown_shape_and_fails_closed() -> None:
@@ -1012,6 +1050,101 @@ def test_resolve_block_triage_agrees_with_bash_accessor(
 
 
 # ---------------------------------------------------------------------------
+# Tier walk through the shared resolver: value syntax and unparseable files
+# ---------------------------------------------------------------------------
+
+_LINE_RULE_SYNTAX_CASES = [
+    pytest.param(
+        "[release]\nmax_rc_retries = 2  # two\noverwatch_resolve = true  # on\n"
+        "[overwatch]\nblock_triage = false  # off\n",
+        id="inline_comment_stripped",
+    ),
+    pytest.param(
+        "[release]\nMAX_RC_RETRIES = 2\nOVERWATCH_RESOLVE = true\n[overwatch]\nBLOCK_TRIAGE = false\n",
+        id="key_matched_case_sensitively",
+    ),
+    pytest.param(
+        "[release]\nmax_rc_retries: 2\noverwatch_resolve: true\n[overwatch]\nblock_triage: false\n",
+        id="equals_is_the_only_delimiter",
+    ),
+]
+
+
+@pytest.mark.parametrize("project_cfg_text", _LINE_RULE_SYNTAX_CASES)
+def test_cfg_resolvers_read_values_by_the_bash_line_rules(
+    tmp_path: pathlib.Path, project_cfg_text: str
+) -> None:
+    """max_rc_retries, overwatch_resolve and block_triage read project.cfg by
+    the bash read_ini line rules, so each answers what its pp_* twin answers
+    for the same file."""
+    _write_cfg(tmp_path / "kanban.cfg", "[release]\nmax_rc_retries = 3\n")
+    _write_cfg(tmp_path / "projects" / "myproj" / "project.cfg", project_cfg_text)
+    python_answer = " ".join(
+        [
+            str(resolve_max_rc_retries("myproj", str(tmp_path))),
+            "true" if resolve_overwatch_resolve("myproj", str(tmp_path)) else "false",
+            "true" if resolve_block_triage("myproj", str(tmp_path)) else "false",
+        ]
+    )
+
+    dev_tree_root = pathlib.Path(__file__).resolve().parents[2]
+    bash_lib = dev_tree_root / "scripts" / "lib" / "project_paths.sh"
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    result = subprocess.run(
+        [
+            "bash",
+            "-c",
+            f"source {bash_lib} && echo "
+            "$(pp_max_rc_retries myproj) $(pp_overwatch_resolve myproj) $(pp_block_triage myproj)",
+        ],
+        env=build_scrubbed_env(
+            home_dir=tmp_path / "home",
+            extra_env={"KANBAN_ROOT": str(tmp_path), "PGAI_AGENT_KANBAN_TEMP_DIR": str(scratch)},
+        ),
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == python_answer, (
+        f"bash said {result.stdout.strip()!r}, python said {python_answer!r}; "
+        f"bash stderr: {result.stderr!r}"
+    )
+
+
+_DUPLICATE_KEY_PROJECT_CFG = (
+    "[release]\nmax_rc_retries = 1\nmax_rc_retries = 1\n"
+    "overwatch_resolve = true\noverwatch_resolve = true\n"
+    "[overwatch]\nblock_triage = false\nblock_triage = false\n"
+)
+
+
+def test_resolve_max_rc_retries_refuses_a_project_cfg_that_cannot_be_parsed(
+    tmp_path: pathlib.Path,
+) -> None:
+    """A project.cfg with a duplicate key is refused naming the file, never
+    read past to a value or to kanban.cfg."""
+    _write_cfg(tmp_path / "kanban.cfg", "[release]\nmax_rc_retries = 3\n")
+    project_cfg = tmp_path / "projects" / "myproj" / "project.cfg"
+    _write_cfg(project_cfg, _DUPLICATE_KEY_PROJECT_CFG)
+    with pytest.raises(CeilingConfigError, match="Cannot parse config file") as excinfo:
+        resolve_max_rc_retries("myproj", str(tmp_path))
+    assert str(project_cfg) in str(excinfo.value)
+
+
+def test_cfg_switches_read_an_unparseable_project_cfg_as_absent(tmp_path: pathlib.Path) -> None:
+    """overwatch_resolve and block_triage skip a project.cfg that cannot be
+    parsed and take kanban.cfg's value, never the unparseable file's."""
+    _write_cfg(
+        tmp_path / "kanban.cfg",
+        "[release]\noverwatch_resolve = false\n[overwatch]\nblock_triage = true\n",
+    )
+    _write_cfg(tmp_path / "projects" / "myproj" / "project.cfg", _DUPLICATE_KEY_PROJECT_CFG)
+    assert resolve_overwatch_resolve("myproj", str(tmp_path)) is False
+    assert resolve_block_triage("myproj", str(tmp_path)) is True
+
+
+# ---------------------------------------------------------------------------
 # Git-backed evidence helpers
 # ---------------------------------------------------------------------------
 
@@ -1225,6 +1358,31 @@ def test_resolve_block_attempt_at_ceiling_declines_to_halt_hard(tmp_path: pathli
     assert result.facts.attempts_below_ceiling is False
     assert result.facts.attempt == 3
     assert result.facts.ceiling == 3
+
+
+def test_resolve_block_squash_conflict_resolves_to_cancel_and_rebundle_despite_a_direct_rc_commit(
+    tmp_path: pathlib.Path,
+) -> None:
+    evidence = _golden_evidence(tmp_path, halt_file_path=None, trigger_class=TRIGGER_CLASS_SQUASH_CONFLICT)
+    repo = pathlib.Path(evidence.dev_tree_path)
+    _git(repo, "checkout", "-q", "ai_rc/v2.0.1")
+    (repo / "direct.txt").write_text("measured-pace refresh\n")
+    _git(repo, "add", "direct.txt")
+    _git(repo, "commit", "-q", "-m", "direct commit on the RC branch")
+    result = resolve_block(evidence)
+    assert result.facts.trigger_class == TRIGGER_CLASS_SQUASH_CONFLICT
+    assert result.facts.operator_commits_in_lineage is True
+    assert result.resolution == CANCEL_AND_REBUNDLE
+
+
+def test_resolve_block_squash_conflict_at_the_ceiling_declines_to_halt_hard(tmp_path: pathlib.Path) -> None:
+    evidence = _golden_evidence(tmp_path, halt_file_path=None, trigger_class=TRIGGER_CLASS_SQUASH_CONFLICT)
+    pathlib.Path(evidence.release_state_path).write_text(
+        json.dumps({"rc": "v2.0.1", "outcome": "in_progress", "attempt": 3}), encoding="utf-8"
+    )
+    result = resolve_block(evidence)
+    assert result.resolution == HALT_HARD
+    assert result.facts.attempts_below_ceiling is False
 
 
 def test_resolve_block_with_no_evidence_at_all_fails_closed_to_halt_hard(tmp_path: pathlib.Path) -> None:

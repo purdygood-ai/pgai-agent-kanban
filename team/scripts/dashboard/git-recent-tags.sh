@@ -233,15 +233,10 @@ for _proj in "${_PROJECTS[@]}"; do
     _dev_tree="$(_pp_read_cfg_key "$_proj_cfg_file" project dev_tree_path "" 2>/dev/null || true)"
   fi
 
-  # Resolve branch_prefix for this project (best-effort; empty = no prefix).
-  _branch_prefix=""
-  if [[ -n "$_proj_cfg_file" && -f "$_proj_cfg_file" ]]; then
-    _raw_prefix="$(_pp_read_cfg_key "$_proj_cfg_file" project branch_prefix "" 2>/dev/null || true)"
-    # Strip surrounding double-quotes (mirrors pp_branch_prefix strip treatment).
-    _raw_prefix="${_raw_prefix%\"}"
-    _raw_prefix="${_raw_prefix#\"}"
-    _branch_prefix="$_raw_prefix"
-  fi
+  # Resolve branch_prefix for this project (pp_branch_prefix). An invalid
+  # value, which pp_branch_prefix refuses, renders with no prefix -- a
+  # render never refuses.
+  _branch_prefix="$(pp_branch_prefix "$_proj" 2>/dev/null)" || _branch_prefix=""
 
   # Render the recent tags block for this project.
   render_project_recent_tags "$_proj" "$_dev_tree" "$_branch_prefix"

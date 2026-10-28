@@ -34,6 +34,12 @@ Coverage:
     repository, or a git repository with no commits yet, this filer files
     nothing at all for the run and names the reason on stderr -- never
     stamping "## Observed At Commit" with the literal "unknown".
+  - A needs-operator bug for a class is cited like an open one: the CLI
+    prints its ID and nothing is filed.
+  - A hand-filed open or running bug whose slug differs from the drafted
+    report's only by a re-file marker is cited although its class
+    section does not match; closed bugs (done, wont-do, duplicate)
+    matching by class or slug never suppress a filing.
 
 Most assertions are against the pure file_or_cite_hygiene_bugs() function
 operating on a tmp_path bugs/ directory and a tmp_path findings.json file --
@@ -60,11 +66,15 @@ import shutil
 import subprocess
 import sys
 
+import pytest
+
 from pgai_agent_kanban.lint.bug_filer import (
     FilingResult,
     file_or_cite_hygiene_bugs,
-    find_existing_bug_for_class,
+    main,
 )
+from pgai_agent_kanban.lib.bug_filing import find_existing_bug
+from tests.fixtures.hand_filed_bug import CLOSED_STATUSES, write_hand_filed_bug
 
 _LINT_HYGIENE_SOURCE = pathlib.Path(__file__).resolve().parents[2] / "scripts" / "lint_hygiene.py"
 
@@ -558,11 +568,11 @@ def test_bug_moved_to_done_no_longer_suppresses_a_fresh_filing(tmp_path: pathlib
     assert results[0].bug_id != "BUG-0044"
 
 
-def test_find_existing_bug_for_class_returns_none_when_bugs_dir_absent(
+def test_class_lookup_returns_none_when_bugs_dir_absent(
     tmp_path: pathlib.Path,
 ) -> None:
     missing_dir = tmp_path / "bugs"
-    assert find_existing_bug_for_class(str(missing_dir), "provenance") is None
+    assert find_existing_bug(str(missing_dir), "Hygiene Lint Class", "provenance") is None
 
 
 def test_existing_bug_for_a_different_class_does_not_suppress_a_fresh_filing(
@@ -829,3 +839,76 @@ def test_filed_bug_for_an_unregistered_class_omits_the_scan_root_and_runs(
     assert unregistered_class in repro_result.stdout or "hygiene-lint-allowlist.json" in repro_result.stdout, (
         f"reproduction command output does not surface the finding it claims to reproduce: {repro_result.stdout}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Live statuses and the shared same-defect rule. Each test commits one
+# unrelated file to a throwaway repository so a commit resolves; the
+# synthetic finding's file is absent at that commit, which the proof gate
+# treats as provable.
+# ---------------------------------------------------------------------------
+
+
+def _repo_with_one_commit(root: pathlib.Path) -> pathlib.Path:
+    _init_repo(root)
+    _commit_file(root, "README", "fixture\n", "add README")
+    return root
+
+
+def test_needs_operator_bug_for_the_class_is_cited_and_nothing_is_filed(
+    tmp_path: pathlib.Path, monkeypatch, capsys
+) -> None:
+    monkeypatch.setenv("PGAI_DEV_TREE_PATH", str(_repo_with_one_commit(tmp_path / "repo")))
+    bugs_dir = tmp_path / "bugs"
+    bugs_dir.mkdir()
+    existing = _write_bug(bugs_dir, "BUG-9401", status="needs-operator", cls="provenance")
+    findings_path = tmp_path / "findings.json"
+    _write_findings_file(findings_path, [_hygiene_finding("provenance", "a.py", 1, "BUG-0009")])
+
+    exit_code = main([str(bugs_dir), "demo", str(findings_path)])
+
+    assert exit_code == 0
+    lines = capsys.readouterr().out.splitlines()
+    assert lines[:5] == ["class=provenance", "outcome=duplicate", "bug_id=BUG-9401", "bug_path=", "count=1"]
+    assert sorted(bugs_dir.glob("BUG-*.md")) == [existing]
+
+
+@pytest.mark.parametrize("status", ["open", "running"])
+def test_live_bug_with_an_ordinal_variant_slug_is_cited_and_nothing_is_filed(
+    tmp_path: pathlib.Path, status: str
+) -> None:
+    repo = _repo_with_one_commit(tmp_path / "repo")
+    bugs_dir = tmp_path / "bugs"
+    hand_filed = write_hand_filed_bug(bugs_dir, "BUG-9402", "hygiene-lint-provenance-2", status=status)
+    assert find_existing_bug(str(bugs_dir), "Hygiene Lint Class", "provenance") is None
+    findings_path = tmp_path / "findings.json"
+    _write_findings_file(findings_path, [_hygiene_finding("provenance", "a.py", 1, "BUG-0009")])
+
+    results = file_or_cite_hygiene_bugs(
+        str(bugs_dir), project="demo", findings_path=str(findings_path), repo_root=repo
+    )
+
+    assert results == [FilingResult(cls="provenance", outcome="duplicate", bug_id="BUG-9402", bug_path=None, count=1)]
+    assert sorted(bugs_dir.glob("BUG-*.md")) == [hand_filed]
+
+
+@pytest.mark.parametrize("status", CLOSED_STATUSES)
+def test_closed_bugs_matching_by_class_or_slug_do_not_suppress_a_fresh_filing(
+    tmp_path: pathlib.Path, status: str
+) -> None:
+    repo = _repo_with_one_commit(tmp_path / "repo")
+    bugs_dir = tmp_path / "bugs"
+    bugs_dir.mkdir()
+    _write_bug(bugs_dir, "BUG-9403", status=status, cls="provenance")
+    write_hand_filed_bug(bugs_dir, "BUG-9404", "hygiene-lint-provenance-again", status=status)
+    findings_path = tmp_path / "findings.json"
+    _write_findings_file(findings_path, [_hygiene_finding("provenance", "a.py", 1, "BUG-0009")])
+
+    results = file_or_cite_hygiene_bugs(
+        str(bugs_dir), project="demo", findings_path=str(findings_path), repo_root=repo
+    )
+
+    assert len(results) == 1
+    assert results[0].outcome == "filed"
+    assert results[0].bug_id not in ("BUG-9403", "BUG-9404")
+    assert len(list(bugs_dir.glob("BUG-*.md"))) == 3

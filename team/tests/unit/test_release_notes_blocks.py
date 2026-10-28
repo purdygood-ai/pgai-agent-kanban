@@ -15,6 +15,12 @@ Behaviour under test:
      output recorded from the stage before its Python moved into the module.
   2. The inline-Python lint reports no heredoc and no ``python3 -c`` in
      release_known_issue.sh.
+  3. A Bugs Skipped row's severity comes from ``## Severity``, else the
+     ``**Severity:**`` header field, else UNSPECIFIED.
+  4. A Symptom whose first period sits inside a backtick code span renders
+     through the end of its real first sentence, and the release-notes and
+     CHANGELOG first-sentence splits agree.
+  5. A Symptom's commit id, RC branch name and task id never reach the row.
 
 Every fixture lives under tmp_path; nothing touches a kanban root.
 """
@@ -25,6 +31,10 @@ import pathlib
 import subprocess
 import sys
 
+import pytest
+
+from pgai_agent_kanban.cm import changelog_writer, release_notes_generator
+from pgai_agent_kanban.cm.release_notes_blocks import bugs_skipped_rows
 from tests.unit.shell_harness import run_bash
 
 _TEAM_DIR = pathlib.Path(__file__).resolve().parents[2]
@@ -73,3 +83,78 @@ def test_inline_python_lint_finds_no_python_in_the_stage() -> None:
 
     assert result.returncode == 0, result.stderr
     assert "release_known_issue.sh" not in result.stdout, result.stdout
+
+
+def _bug_file(tmp_path: pathlib.Path, header: str = "", sections: str = "", symptom: str = "It breaks.") -> str:
+    """Write a bug file with *header* lines under its H1 and return its path."""
+    path = tmp_path / "BUG-0001-x.md"
+    path.write_text(
+        f"# BUG-0001-x\n\n{header}\n\n## Status\nopen\n\n{sections}## Symptom\n{symptom}\n",
+        encoding="utf-8",
+    )
+    return str(path)
+
+
+def _row_cells(row: str) -> "list[str]":
+    """The four cells of one rendered Bugs Skipped row."""
+    return [cell.strip() for cell in row.strip().strip("|").split(" | ")]
+
+
+@pytest.mark.parametrize(
+    ("header", "sections", "expected"),
+    [
+        ("**Bug ID:** BUG-0001-x\n**Severity:** medium", "", "MEDIUM"),
+        ("**Severity:** low.", "", "LOW"),
+        ("**Severity:** low", "## Severity\nhigh\n\n", "HIGH"),
+        ("**Bug ID:** BUG-0001-x", "", "UNSPECIFIED"),
+    ],
+    ids=["header-field-only", "header-field-trailing-period", "section-wins", "neither"],
+)
+def test_bugs_skipped_severity_reads_section_then_header_field(
+    tmp_path: pathlib.Path, header: str, sections: str, expected: str
+) -> None:
+    row = bugs_skipped_rows([_bug_file(tmp_path, header, sections), "why"])
+
+    assert _row_cells(row)[2] == expected
+
+
+_CODE_SPAN_SYMPTOM = "Running `pvg build . --scene 2` fails. More text."
+_CODE_SPAN_SENTENCE = "Running `pvg build . --scene 2` fails."
+
+
+def test_bugs_skipped_substance_does_not_end_inside_a_code_span(tmp_path: pathlib.Path) -> None:
+    row = bugs_skipped_rows([_bug_file(tmp_path, symptom=_CODE_SPAN_SYMPTOM), "why"])
+
+    assert _row_cells(row)[0] == _CODE_SPAN_SENTENCE
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        _CODE_SPAN_SYMPTOM,
+        "Plain first. Second.",
+        "Ends `with.` a span. Then more.",
+        "Double ``a ` b. c`` span! Next.",
+        "An unmatched ` backtick. Next.",
+        "No terminal punctuation",
+        "  spread\nover   lines.  Next ",
+        "",
+    ],
+    ids=["code-span", "plain", "span-then-period", "double-backtick", "unmatched", "none", "multiline", "empty"],
+)
+def test_release_notes_and_changelog_first_sentence_agree(text: str) -> None:
+    notes = release_notes_generator._first_sentence(text)
+
+    assert changelog_writer._first_sentence(text) == notes
+    if text == _CODE_SPAN_SYMPTOM:
+        assert notes == _CODE_SPAN_SENTENCE
+
+
+def test_bugs_skipped_substance_carries_no_commit_branch_or_task_id(tmp_path: pathlib.Path) -> None:
+    symptom = "On ai_rc/v1.2.3 the unit suite (a1b2c3d4) fails, as TESTER-20260101-001 found."
+    row = bugs_skipped_rows([_bug_file(tmp_path, symptom=symptom), "why"])
+
+    substance = _row_cells(row)[0]
+    for token in ("a1b2c3d4", "ai_rc/v1.2.3", "TESTER-20260101-001", "()"):
+        assert token not in substance
+    assert substance == "On the release candidate the unit suite fails, as another item found."

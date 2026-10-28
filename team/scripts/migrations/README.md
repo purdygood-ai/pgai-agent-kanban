@@ -5,9 +5,17 @@ The directory and its convention give every migration a documented,
 forward-compatible home. `migrate_v2.22.5_to_v2.23.0.sh` is the first real
 migration to land in it (seeds the commented `overwatch_resolve` key into
 every already-registered project's project.cfg — see that script's own
-header for its contract). `migrate_v2.24.7_to_v2.24.8.sh` seeds
-`tasks/queues/overwatch_backlog.md` into every already-registered project,
-matching what `create-project.sh` now writes for a brand-new one — see that
+header for its contract). `migrate_v2.24.7_to_v2.24.8.sh` is a narrated
+no-op: OVERWATCH keeps no queue file, so it writes nothing — see that
+script's own header for its contract. `migrate_v2.50.9_to_v2.51.0.sh`
+rewrites kanban.cfg's `[release] ship_posture = matrix` to `always` and
+`[wake] stop_on_blocked = true` to `false`, prints each change with the one
+line that reverts it, and never writes a project.cfg — see that script's
+own header for its contract. `migrate_v2.53.1_to_v2.53.2.sh` seeds the
+kanban's own `[testing]` runner commands (`targeted_test_command`,
+`pre_merge_command`) into the project.cfg of each registered project whose
+dev tree is the kanban's own source tree, under whatever name it is
+registered, when it lacks them, and writes no other project.cfg — see that
 script's own header for its contract.
 
 ---

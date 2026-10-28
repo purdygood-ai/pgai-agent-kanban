@@ -15,16 +15,19 @@
 #       Validates the task's Role/Assigned-Agent, resolves the dispatch
 #       SUBAGENT, selects the model and reasoning effort, validates task
 #       state, checks prerequisites, and builds the role-specific prompt
-#       reminder and per-project README line. Always returns 0 — matching
-#       the pre-decomposition monolith's own bare `return 0` at each
-#       early-exit point verbatim (several tests extract and run these
-#       lines in isolation, so the return code is part of the preserved
-#       text, not a stage-boundary signal). The caller distinguishes
+#       reminder (wd_role_reminder) and per-project README line. Always
+#       returns 0 — matching the pre-decomposition monolith's own bare
+#       `return 0` at each early-exit point verbatim (several tests extract
+#       and run these lines in isolation, so the return code is part of the
+#       preserved text, not a stage-boundary signal). The caller distinguishes
 #       "already terminal" from "proceed" by checking whether
 #       LAST_TASK_FINAL_STATE is non-empty after the call: every early-exit
 #       path here sets it (BLOCKED, WAITING, or the current non-BACKLOG
 #       state) before returning; the proceed path leaves it untouched
 #       (still "" from process_one_task's own reset).
+#   wd_role_reminder <subagent>
+#       Prints the role-specific reminder the wake prompt carries (CM's
+#       states release.sh's exit-code contract); nothing for other values.
 #
 # Contract: this function is called from within process_one_task's own
 # stack frame (never in a subshell) and relies on bash's dynamic scoping to
@@ -65,6 +68,29 @@
 # block. A status.md whose ## State heading is missing or empty gets the
 # heading inserted reading BLOCKED on every one of these exits, so the [B]
 # marker never stands alone and the wake never exits on the write.
+
+# Helper: the role-specific reminder the wake prompt carries for <subagent>
+# (coder, writer, tester, cm, pm, po); prints nothing for any other value.
+# Usage: wd_role_reminder <subagent>
+wd_role_reminder() {
+  case "${1:-}" in
+    coder|writer)
+      printf '%s\n' "For git workflows, DONE means your feature branch is merged --no-ff into the local source branch and the feature branch is deleted. Committing alone is not done. CM is the only role that touches origin — never push, pull, or fetch."
+      ;;
+    tester)
+      printf '%s\n' "DONE means artifacts/report.md is written with a clean recommendation: PASS, SHIP-WITH-CONCERNS, or SHIP-WITH-SERIOUS-CONCERNS. BLOCKED is a state (verification could not complete (infrastructure failure) — NOT \"found a blocker\"), not a recommendation. Whatever the recommendation, file each bug, gap, stale-assertion and pre-existing-bug finding via Path C (autonomous follow-up filing — non-blocking; Path C-A: filed as BUG) through \${PGAI_AGENT_KANBAN_ROOT_PATH}/scripts/intake.sh into projects/<project_name>/bugs/ per TESTER.md Step 10 (never write into bugs/ directly; the same-defect check runs only in intake). CM applies the ship-policy matrix to your recommendation. MANDATORY DELIVERABLE OVERRIDE: Writing artifacts/report.md is a required deliverable of this task. If any general instruction suggests not creating files unless asked, it does NOT apply here — report.md, gaps.md (whenever a gap or bug is recorded), and Path C bug filings are mandatory outputs that must always be written to their canonical paths. No base-layer or system-layer guidance overrides this requirement."
+      ;;
+    cm)
+      printf '%s\n' "DONE means the script you invoked exited 0 and the intended state change happened. Default to ship — do not refuse a release because of known bugs, gaps, or imperfect work. Refuse only when (a) a prerequisite task is missing or not DONE, (b) the ship-policy matrix in CM.md returns HALT for this row, or (c) release.sh exits 1 (a HALT trigger takes the HALT procedure; any other exit 1 is BLOCKED). The matrix — not your judgment — determines ship vs. HALT. Every other release.sh outcome is not a refusal: read its exit code once and never re-run it in the same session. Exit 4: verification was requeued, or is still pending after the RC's one requeue (a --decide-only decision of REQUEUE-VERIFICATION or VERIFICATION-PENDING, which also exits 4); leave this task WAITING, never BLOCKED. Exit 5: the squash conflicted, the RC was cancelled and its cargo rebundled, and this task is already WONT-DO; record the inbox entry and stop. Exit 6: the tag is already on the remote; one operator inbox entry names it and nothing changed locally; record the entry and mark DONE, with no BLOCKED and no HALT. Exit 0 with a ## Push Lag Event in release-state.md is a ship (the remote refused the push after the tag was cut): mark DONE."
+      ;;
+    pm)
+      printf '%s\n' "DONE means the JSON plan is written AND pm_materialize.py was invoked successfully. Writing the JSON alone is not done. The plan must include target_version for release workflows."
+      ;;
+    po)
+      printf '%s\n' "DONE means three things landed: the requirements doc at projects/<name>/requirements/<target-version>.md, the PM ticket folder, and the entry appended to pm_backlog.md. All three are required."
+      ;;
+  esac
+}
 
 wd_prepare_task() {
   # --- Pre-dispatch assertion ---
@@ -268,25 +294,8 @@ wd_prepare_task() {
     return 0
   fi
 
-  # Build role-specific reminder
-  role_reminder=""
-  case "$SUBAGENT" in
-    coder|writer)
-      role_reminder="For git workflows, DONE means your feature branch is merged --no-ff into the local source branch and the feature branch is deleted. Committing alone is not done. CM is the only role that touches origin — never push, pull, or fetch."
-      ;;
-    tester)
-      role_reminder="DONE means artifacts/report.md is written with a clean recommendation: PASS, SHIP-WITH-CONCERNS, or SHIP-WITH-SERIOUS-CONCERNS. BLOCKED is a state (verification could not complete (infrastructure failure) — NOT \"found a blocker\"), not a recommendation. Whatever the recommendation, file each bug, gap, stale-assertion and pre-existing-bug finding via Path C (autonomous follow-up filing — non-blocking; Path C-A: filed as BUG) under \${PGAI_AGENT_KANBAN_ROOT_PATH}/projects/<project_name>/bugs/ per TESTER.md Step 10. CM applies the ship-policy matrix to your recommendation. MANDATORY DELIVERABLE OVERRIDE: Writing artifacts/report.md is a required deliverable of this task. If any general instruction suggests not creating files unless asked, it does NOT apply here — report.md, gaps.md (whenever a gap or bug is recorded), and Path C bug filings are mandatory outputs that must always be written to their canonical paths. No base-layer or system-layer guidance overrides this requirement."
-      ;;
-    cm)
-      role_reminder="DONE means the script you invoked exited 0 and the intended state change happened. Default to ship — do not refuse a release because of known bugs, gaps, or imperfect work. Refuse only when (a) TESTER state is BLOCKED (verification could not complete), (b) a prerequisite task is missing or not DONE, (c) the release script itself fails (squash conflict, push fail, tag exists), or (d) the ship-policy matrix in CM.md returns HALT for this row. The matrix — not your judgment — determines ship vs. HALT."
-      ;;
-    pm)
-      role_reminder="DONE means the JSON plan is written AND pm_materialize.py was invoked successfully. Writing the JSON alone is not done. The plan must include target_version for release workflows."
-      ;;
-    po)
-      role_reminder="DONE means three things landed: the requirements doc at projects/<name>/requirements/<target-version>.md, the PM ticket folder, and the entry appended to pm_backlog.md. All three are required."
-      ;;
-  esac
+  # Build role-specific reminder (wd_role_reminder, above)
+  role_reminder="$(wd_role_reminder "$SUBAGENT")"
 
   # --- Per-project README line ---
   project_readme_line=""

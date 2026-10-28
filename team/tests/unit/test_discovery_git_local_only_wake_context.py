@@ -92,6 +92,9 @@ def _require_git() -> None:
     require_binary("git", label="discovery-git-local-only-wake-context")
 
 _LIB = "scripts/lib/discovery.sh"
+# discovery.sh is sourced after project_paths.sh, as every production caller
+# does: the ls-remote fallthrough names its remote through pp_git_remote_name.
+_PROJECT_PATHS_LIB = "scripts/lib/project_paths.sh"
 
 # Printed by every probe ahead of the lookup so a test can assert on the
 # flag state the child process actually received.
@@ -159,7 +162,7 @@ def _probe_tag_exists(
     """
     script = (
         f"printf '%s\\n' \"${{PGAI_GIT_LOCAL_ONLY-{_FLAG_UNSET_MARKER}}}\"; "
-        f"source {_LIB} && _disc_git_tag_exists {tag} {repo!s}"
+        f"source {_PROJECT_PATHS_LIB} && source {_LIB} && _disc_git_tag_exists {tag} {repo!s}"
     )
     result = run_bash(
         tmp_path,

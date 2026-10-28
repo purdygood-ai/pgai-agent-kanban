@@ -31,6 +31,7 @@ Functions under test:
 from __future__ import annotations
 
 import pathlib
+import shlex
 
 import pytest
 
@@ -755,7 +756,15 @@ def test_resolve_project_name_not_found_with_empty_registry_names_add_project(
     assert "project_resolve.not_found" in result.stderr
     assert "remedy:" in result.stderr
     assert "(registered: )" not in result.stderr
-    assert "team/scripts/add-project.sh --project nonexistent-project" in result.stderr
+    # The registering verb is the add-project.sh installed under the kanban
+    # root, shell-quoted, so the command runs as printed from any directory.
+    remedy = next(line for line in result.stderr.splitlines() if line.startswith("remedy:"))
+    command = remedy.split("Register one first: ", 1)[1].rstrip(".")
+    assert shlex.split(command) == [
+        f"{tmp_path}/scripts/add-project.sh",
+        "--project",
+        "nonexistent-project",
+    ], remedy
 
 
 # ---------------------------------------------------------------------------
@@ -1133,3 +1142,30 @@ def test_stale_lock_reap_after_wake_periods_rejects_zero(tmp_path: pathlib.Path)
     result = _run(tmp_path, "pp_stale_lock_reap_after_wake_periods myproj", tmp_path)
     assert result.returncode != 0
     assert "invalid value" in result.stderr.lower()
+
+
+# ---------------------------------------------------------------------------
+# pp_dev_tree_path
+# ---------------------------------------------------------------------------
+
+
+def test_dev_tree_path_reads_the_project_cfg_key(tmp_path: pathlib.Path) -> None:
+    project_dir = _make_project(tmp_path, "my-app")
+    (project_dir / "project.cfg").write_text(
+        "[project]\nproject_name = my-app\ndev_tree_path = /srv/develop/my-app\n", encoding="utf-8"
+    )
+    result = _run(tmp_path, "pp_dev_tree_path my-app", tmp_path)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "/srv/develop/my-app"
+
+
+def test_dev_tree_path_is_empty_without_a_config_or_key(tmp_path: pathlib.Path) -> None:
+    _make_project(tmp_path, "bare")
+    result = _run(tmp_path, "pp_dev_tree_path bare", tmp_path)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == ""
+
+
+def test_dev_tree_path_needs_a_project_name(tmp_path: pathlib.Path) -> None:
+    result = _run(tmp_path, "pp_dev_tree_path", tmp_path, PGAI_PROJECT_NAME="")
+    assert result.returncode == 1

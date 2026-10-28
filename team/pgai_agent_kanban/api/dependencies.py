@@ -2,7 +2,7 @@
 dependencies.py — Shared FastAPI dependencies for the pgai-agent-kanban operator API.
 
 Provides reusable Depends() callables that are wired into read (GET) route
-handlers, and the two per-request path resolvers every route shares:
+handlers, and the per-request path resolvers every route shares:
 
   route_kanban_root(request)
     The kanban root the server resolved at startup (``app.state.api_cfg``):
@@ -13,6 +13,10 @@ handlers, and the two per-request path resolvers every route shares:
   route_temp_root(request)
     The framework temp root for that kanban root
     (:func:`pgai_agent_kanban.api.config.kanban_temp_root`).
+
+  route_scripts_dir(request) / route_script_path(request, relative)
+    The ``<kanban_root>/scripts/`` directory, and one script under it as an
+    absolute path string, for a route that shells out to an operator script.
 
 Dependency:
 
@@ -64,6 +68,37 @@ def route_kanban_root(request: Request) -> pathlib.Path:
 def route_temp_root(request: Request) -> pathlib.Path:
     """Return the framework temp root for this server's kanban root."""
     return kanban_temp_root(route_kanban_root(request))
+
+
+def route_scripts_dir(request: Request) -> pathlib.Path:
+    """Return the scripts/ directory path from the app's ApiConfig.
+
+    Scripts live at ``<kanban_root>/scripts/`` in both the live install
+    and any install produced by install.sh.  The kanban_root is read from
+    cfg stored on app.state.
+
+    Args:
+        request: The FastAPI request object (provides access to app.state).
+
+    Returns:
+        Absolute path to the scripts/ directory.
+    """
+    kanban_root: pathlib.Path = request.app.state.api_cfg.kanban_root
+    return kanban_root / "scripts"
+
+
+def route_script_path(request: Request, relative: str) -> str:
+    """Resolve a script path relative to scripts/ and return it as a string.
+
+    Args:
+        request:  FastAPI request (for kanban_root).
+        relative: Relative path within scripts/; e.g. ``"verify-rc-state.sh"``
+                  or ``"dashboard/show-header.sh"``.
+
+    Returns:
+        Absolute script path string suitable for subprocess invocation.
+    """
+    return str(route_scripts_dir(request) / relative)
 
 
 def warn_unknown_query_params(request: Request) -> list[str]:

@@ -52,6 +52,16 @@ pytest node ids, recorded in a "## Deep-Verify Tests" section (one node id
 per line): a later run failing the same tests cites the open/running bug,
 and a different set files a fresh one.
 
+"Open/running" here means live: status open, running or needs-operator
+(lib.bug_filing.iter_live_bugs); a done, wont-do or duplicate bug never
+suppresses a filing. When this filer's own key matches no live bug, the
+shared same-defect rule (lib.bug_filing.find_same_defect_for_draft) is
+consulted for the drafted report before a slot is claimed: a live bug
+whose slug differs from the draft's only by re-file markers (a re-file
+word, an ordinal or a trailing counter), or one the draft's body cites as
+its defect, is cited the same way and nothing is filed. That rule is an
+additional match, never a replacement for the key.
+
 Filed-bug shape
 ----------------
 Follows team/templates/project/release/BUG-TEMPLATE.md's header/section
@@ -65,10 +75,11 @@ team/roles/CODER.md Principle 6) since pm-agent/ is a sibling of
 pgai_agent_kanban/ in both the dev tree (team/pgai_agent_kanban,
 team/pm-agent) and the live install (<root>/pgai_agent_kanban,
 <root>/pm-agent), never a package this module is normally importable from.
-The claim helper and the open/running bugs_dir scan are shared with
-pgai_agent_kanban.lint.bug_filer via that same module (docs/coding-
-standards.md directive 1); only this filer's own dedup key (a failing-pair
-set) and its report content are specific to this module.
+The record shape, the existing-bug lookup, the claim helper and the
+same-defect rule are shared with the other autonomous filers via that same
+module (lib.bug_filing.file_or_cite_record; docs/coding-standards.md
+directive 1); only this filer's own dedup key (a failing-pair or
+failing-test set) and its report's fields are specific to this module.
 
 The `**Filed By:**` line follows the self-documenting label convention
 (team/roles/TESTER.md, "Self-documenting label convention"): the token
@@ -111,7 +122,6 @@ import re
 import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from pathlib import Path
 
 # Run by file path (``python3 .../bug_filer.py``) or loaded from a file
 # outside its package, this module has no parent package and the interpreter
@@ -131,80 +141,22 @@ from pgai_agent_kanban.deep_verify.classify import (  # noqa: E402
     extract_failing_tests,
     shows_build_evidence,
 )
-from pgai_agent_kanban.lib.bug_filing import iter_open_or_running_bugs  # noqa: E402
-from pgai_agent_kanban.lib.bug_filing import import_bug_scanner as _import_bug_scanner  # noqa: E402
+from pgai_agent_kanban.lib.bug_filing import BugRecord, file_or_cite_record  # noqa: E402
 
 # ---------------------------------------------------------------------------
-# Bug-file field parsing (reads a small, deliberately narrow slice of an
-# existing bug file's shape — the Deep-Verify Pairs section this module
-# itself writes — never the full BUG-TEMPLATE.md field set). Status parsing
-# and the open/running walk over bugs_dir are shared with
-# pgai_agent_kanban.lint.bug_filer via pgai_agent_kanban.lib.bug_filing
-# (docs/coding-standards.md directive 1) — only the pairs-section
-# extraction and the match predicate below are specific to this filer's own
-# dedup key.
+# Dedup keys: the "## Deep-Verify Pairs" section (one engine/flavor per
+# line) or, when no pair was named, the "## Deep-Verify Tests" section (one
+# pytest node id per line). The shared lookup (lib.bug_filing.
+# find_existing_bug, through file_or_cite_record) matches a live bug whose
+# section holds exactly the same set.
 # ---------------------------------------------------------------------------
 
-_PAIRS_SECTION_RE = re.compile(
-    r"^##\s+Deep-Verify Pairs\s*\n(?P<body>(?:.*\n?)*?)(?=^##\s|\Z)",
-    re.MULTILINE,
-)
-
-_TESTS_SECTION_RE = re.compile(
-    r"^##\s+Deep-Verify Tests\s*\n(?P<body>(?:.*\n?)*?)(?=^##\s|\Z)",
-    re.MULTILINE,
-)
-
-
-def _read_section_lines(section_re: "re.Pattern", text: str) -> frozenset:
-    match = section_re.search(text)
-    if not match:
-        return frozenset()
-    lines = (line.strip() for line in match.group("body").splitlines())
-    return frozenset(line for line in lines if line)
-
-
-def _read_recorded_pairs(text: str) -> frozenset:
-    return _read_section_lines(_PAIRS_SECTION_RE, text)
-
-
-def find_existing_bug_for_tests(bugs_dir: str, nodeids) -> "str | None":
-    """Return the BUG-NNNN id of an open/running bug in *bugs_dir* whose
-    recorded '## Deep-Verify Tests' set is exactly *nodeids* (a set of
-    pytest node ids), or None when no such bug exists. Same scan order and
-    exact-set rule as find_existing_bug_for_pairs()."""
-    nodeids = frozenset(nodeids)
-    if not nodeids:
-        return None
-
-    for bug_id, text in iter_open_or_running_bugs(bugs_dir):
-        if _read_section_lines(_TESTS_SECTION_RE, text) == nodeids:
-            return bug_id
-    return None
-
-
-def find_existing_bug_for_pairs(bugs_dir: str, pair_keys) -> "str | None":
-    """Return the BUG-NNNN id of an open/running bug in *bugs_dir* whose
-    recorded '## Deep-Verify Pairs' set is exactly *pair_keys* (a set of
-    "engine/flavor" strings), or None when no such bug exists.
-
-    Scans in filename-sorted order (via iter_open_or_running_bugs) so a
-    caller comparing two candidate matches (should the input ever be
-    ambiguous) sees a deterministic pick; in practice exactly one bug is
-    expected to carry a given pair set.
-    """
-    pair_keys = frozenset(pair_keys)
-    if not pair_keys:
-        return None
-
-    for bug_id, text in iter_open_or_running_bugs(bugs_dir):
-        if _read_recorded_pairs(text) == pair_keys:
-            return bug_id
-    return None
+_PAIRS_HEADING = "Deep-Verify Pairs"
+_TESTS_HEADING = "Deep-Verify Tests"
 
 
 # ---------------------------------------------------------------------------
-# Bug content rendering
+# Bug record fields
 # ---------------------------------------------------------------------------
 
 
@@ -212,16 +164,23 @@ def _pair_key(pair: FailingPair) -> str:
     return f"{pair.engine}/{pair.flavor}"
 
 
-def _render_bug_content(
+def _run_section(project: str, version: str, commit: str) -> tuple:
+    """The "## Deep-Verify Run" extra section every deep-verify record carries."""
+    return ("Deep-Verify Run", f"- Project: {project}\n- Version: {version}\n- Commit: {commit}")
+
+
+def _pairs_record(
     *,
-    bug_id: str,
     slug: str,
     project: str,
     version: str,
     commit: str,
     pairs: list,
     filed_at: str,
-) -> str:
+) -> BugRecord:
+    """The bug record for a run whose output names failing (engine, flavor)
+    pairs -- or none at all -- keyed on the pair set in
+    "## Deep-Verify Pairs"."""
     pair_keys = [_pair_key(p) for p in pairs]
     pair_summary = "; ".join(pair_keys) if pair_keys else "unknown pair"
     step_lines = "\n".join(
@@ -240,45 +199,38 @@ def _render_bug_content(
         "engine/flavor/step detail is present in the captured output -- see the "
         "project's deep-verify-ledger.md for the run's raw detail line"
     )
-
-    pairs_section = "\n".join(pair_keys) if pair_keys else ""
-
-    return (
-        f"# {bug_id}-{slug}\n\n"
-        f"**Bug ID:** {bug_id}-{slug}\n"
-        f"**Filed By:** deep-verify (autonomous) — the cold-build lane failed to build "
-        f"{pair_summary} for {project} at {version} (commit {commit}).\n"
-        f"**Date:** {filed_at}\n"
-        "**Severity:** critical\n\n"
-        "## Status\nopen\n\n"
-        "## Category\ndeep-verify\n\n"
-        "---\n\n"
-        "## Symptom\n"
-        f"The DEEP-VERIFY tier's cold-build lane failed to build cold for {project} at "
-        f"{version} (commit {commit}). Failing pair(s):\n"
-        f"{step_lines}\n\n"
-        "## Expected\n"
-        "Every (engine, flavor) pair declared in team/config/container-images.txt "
-        "builds cold (no cache, "
-        "freshly pulled base image) without error.\n\n"
-        "## Actual\n"
-        f"{step_lines}\n\n"
-        "## Reproduction\n"
-        f"{reproduction}\n\n"
-        "## Files Involved\n"
-        + "\n".join(f"- docker/{p.flavor}/Dockerfile" for p in pairs)
-        + ("\n" if pairs else "- (no structured pair extracted; see captured output)\n")
-        + "\n"
-        "## Hypothesis (optional)\n"
-        "Speculative -- see the failing step named above for the Dockerfile line to "
-        "start from.\n\n"
-        "---\n\n"
-        "## Deep-Verify Pairs\n"
-        f"{pairs_section}\n\n"
-        "## Deep-Verify Run\n"
-        f"- Project: {project}\n"
-        f"- Version: {version}\n"
-        f"- Commit: {commit}\n"
+    files_involved = "\n".join(f"- docker/{p.flavor}/Dockerfile" for p in pairs) or (
+        "- (no structured pair extracted; see captured output)"
+    )
+    return BugRecord(
+        slug=slug,
+        filed_by=(
+            f"deep-verify (autonomous) — the cold-build lane failed to build "
+            f"{pair_summary} for {project} at {version} (commit {commit})."
+        ),
+        filed_at=filed_at,
+        severity="critical",
+        category="deep-verify",
+        symptom=(
+            f"The DEEP-VERIFY tier's cold-build lane failed to build cold for {project} at "
+            f"{version} (commit {commit}). Failing pair(s):\n"
+            f"{step_lines}"
+        ),
+        expected=(
+            "Every (engine, flavor) pair declared in team/config/container-images.txt "
+            "builds cold (no cache, "
+            "freshly pulled base image) without error."
+        ),
+        actual=step_lines,
+        reproduction=reproduction,
+        files_involved=files_involved,
+        hypothesis=(
+            "Speculative -- see the failing step named above for the Dockerfile line to "
+            "start from."
+        ),
+        key_heading=_PAIRS_HEADING,
+        key=tuple(pair_keys),
+        extra_sections=(_run_section(project, version, commit),),
     )
 
 
@@ -304,9 +256,8 @@ def _slug_for_tests(tests: list) -> str:
     return f"cold-test-{module_slug}-failure"
 
 
-def _render_test_bug_content(
+def _tests_record(
     *,
-    bug_id: str,
     slug: str,
     project: str,
     version: str,
@@ -314,9 +265,10 @@ def _render_test_bug_content(
     tests: list,
     filed_at: str,
     build_evidence: bool = True,
-) -> str:
-    """Bug content for a cold-lane run whose failure is a named test rather
-    than a structured Dockerfile-step failure.
+) -> BugRecord:
+    """The bug record for a cold-lane run whose failure is a named test
+    rather than a structured Dockerfile-step failure, keyed on the
+    failing-test set in "## Deep-Verify Tests".
 
     *build_evidence* is classify.shows_build_evidence() of the run's
     captured output. When every failing test is a non-build test, the note
@@ -339,58 +291,50 @@ def _render_test_bug_content(
         build_note = ""
     elif build_evidence:
         build_note = (
-            "No image-build test failed, so the deep-verify ledger records the "
-            "builds as `built`; this report is for the failing test(s) alone.\n\n"
+            "\n\nNo image-build test failed, so the deep-verify ledger records the "
+            "builds as `built`; this report is for the failing test(s) alone."
         )
     else:
         build_note = (
-            "No image was built: every (engine, flavor) pair the run reached was "
+            "\n\nNo image was built: every (engine, flavor) pair the run reached was "
             "narrate-skipped for an unavailable build environment, so the "
             "deep-verify ledger records the run as `could-not-attempt`; this "
-            "report is for the failing test(s) alone.\n\n"
+            "report is for the failing test(s) alone."
         )
 
-    return (
-        f"# {bug_id}-{slug}\n\n"
-        f"**Bug ID:** {bug_id}-{slug}\n"
-        f"**Filed By:** deep-verify (autonomous) — the cold-build lane test "
-        f"{first.nodeid}{more} failed for {project} at {version} (commit {commit}).\n"
-        f"**Date:** {filed_at}\n"
-        "**Severity:** medium\n\n"
-        "## Status\nopen\n\n"
-        "## Category\ndeep-verify\n\n"
-        "---\n\n"
-        "## Symptom\n"
-        f"The DEEP-VERIFY tier's cold-build lane failed for {project} at {version} "
-        f"(commit {commit}). Failing test(s):\n"
-        f"{test_lines}\n\n"
-        f"{build_note}"
-        "## Expected\n"
-        "Every test the cold-build lane collects under team/tests/cold/ passes.\n\n"
-        "## Actual\n"
-        f"{test_lines}\n\n"
-        "## Reproduction\n"
-        "1. From an operator shell (the container tier is operator-only), run "
-        f"`PGAI_CONTAINER_TIER=1 team/scripts/deep-verify.sh --project {project} --image all` "
-        f"against commit `{commit}` ({version}).\n"
-        "2. Read pytest's short test summary in the output: it names "
-        + ", ".join(f"`{n}`" for n in nodeids)
-        + " as failed.\n\n"
-        "## Files Involved\n"
-        + "\n".join(f"- {f}" for f in files)
-        + "\n\n"
-        "## Hypothesis (optional)\n"
-        "Speculative -- the test may be stale against the script it exercises, "
-        "or that script may have regressed; the failure message pytest prints "
-        "for the test is the place to start.\n\n"
-        "---\n\n"
-        "## Deep-Verify Tests\n"
-        + "\n".join(nodeids)
-        + "\n\n"
-        "## Deep-Verify Run\n"
-        f"- Project: {project}\n"
-        f"- Version: {version}\n"
-        f"- Commit: {commit}\n"
+    return BugRecord(
+        slug=slug,
+        filed_by=(
+            f"deep-verify (autonomous) — the cold-build lane test "
+            f"{first.nodeid}{more} failed for {project} at {version} (commit {commit})."
+        ),
+        filed_at=filed_at,
+        severity="medium",
+        category="deep-verify",
+        symptom=(
+            f"The DEEP-VERIFY tier's cold-build lane failed for {project} at {version} "
+            f"(commit {commit}). Failing test(s):\n"
+            f"{test_lines}{build_note}"
+        ),
+        expected="Every test the cold-build lane collects under team/tests/cold/ passes.",
+        actual=test_lines,
+        reproduction=(
+            "1. From an operator shell (the container tier is operator-only), run "
+            f"`PGAI_CONTAINER_TIER=1 team/scripts/deep-verify.sh --project {project} --image all` "
+            f"against commit `{commit}` ({version}).\n"
+            "2. Read pytest's short test summary in the output: it names "
+            + ", ".join(f"`{n}`" for n in nodeids)
+            + " as failed."
+        ),
+        files_involved="\n".join(f"- {f}" for f in files),
+        hypothesis=(
+            "Speculative -- the test may be stale against the script it exercises, "
+            "or that script may have regressed; the failure message pytest prints "
+            "for the test is the place to start."
+        ),
+        key_heading=_TESTS_HEADING,
+        key=tuple(nodeids),
+        extra_sections=(_run_section(project, version, commit),),
     )
 
 
@@ -403,10 +347,11 @@ def _render_test_bug_content(
 class FilingResult:
     """Outcome of one file_or_cite_bug() call.
 
-    outcome   -- "filed" (a new bug file was written), "duplicate" (an
-                 existing open/running bug already covers the exact same
-                 failing-pair set, or failing-test set; nothing was
-                 written), or "no-pairs" (the captured output carried
+    outcome   -- "filed" (a new bug file was written), "duplicate" (a
+                 live bug -- open, running or needs-operator -- already
+                 covers the exact same failing-pair set, or failing-test
+                 set, or the shared same-defect rule matches it; nothing
+                 was written), or "no-pairs" (the captured output carried
                  neither a structured failing pair nor a failing test
                  pytest named; a bug is still filed under a generic
                  identity, but dedup has nothing to key on, so this outcome
@@ -449,6 +394,12 @@ def file_or_cite_bug(
     built, or a build test failing without a structured step line -- is
     filed by its failing-test set, naming each test's file and test id.
 
+    Before a slot is claimed, a live bug (open, running or needs-operator)
+    is cited instead when it records the same key, or -- failing that --
+    when the shared same-defect rule matches the drafted report to it
+    (lib.bug_filing.find_same_defect_for_draft). A citation claims no slot
+    and writes nothing.
+
     Creates *bugs_dir* if it does not yet exist (a fresh project's first
     deep-verify failure has no bugs/ directory yet). Never touches anything
     outside *bugs_dir* -- no ledger write, no release-state.md, no task or
@@ -461,30 +412,10 @@ def file_or_cite_bug(
     tests = [] if pairs else extract_failing_tests(output_text)
     test_keys = frozenset(t.nodeid for t in tests)
 
-    existing = None
-    if pair_keys:
-        existing = find_existing_bug_for_pairs(bugs_dir, pair_keys)
-    elif test_keys:
-        existing = find_existing_bug_for_tests(bugs_dir, test_keys)
-    if existing:
-        return FilingResult(
-            outcome="duplicate",
-            bug_id=existing,
-            bug_path=None,
-            pairs=tuple(sorted(pair_keys)),
-            tests=tuple(sorted(test_keys)),
-        )
-
-    claim_next_bug_id, release_bug_id_claim = _import_bug_scanner()
     slug = _slug_for_tests(tests) if tests else _slug_for_pairs(pairs)
-    bug_id, bug_path, lock_path = claim_next_bug_id(
-        bugs_dir, slug, claimed_by="deep-verify-cold-build-filer"
-    )
     filed_at = filed_at or datetime.now(timezone.utc).strftime("%Y-%m-%d")
-
     if tests:
-        content = _render_test_bug_content(
-            bug_id=bug_id,
+        record = _tests_record(
             slug=slug,
             project=project,
             version=version,
@@ -494,8 +425,7 @@ def file_or_cite_bug(
             build_evidence=shows_build_evidence(output_text),
         )
     else:
-        content = _render_bug_content(
-            bug_id=bug_id,
+        record = _pairs_record(
             slug=slug,
             project=project,
             version=version,
@@ -503,15 +433,21 @@ def file_or_cite_bug(
             pairs=pairs,
             filed_at=filed_at,
         )
-    try:
-        Path(bug_path).write_text(content, encoding="utf-8")
-    finally:
-        release_bug_id_claim(lock_path)
+
+    filed = file_or_cite_record(bugs_dir, record, claimed_by="deep-verify-cold-build-filer")
+    if filed.outcome == "duplicate":
+        return FilingResult(
+            outcome="duplicate",
+            bug_id=filed.bug_id,
+            bug_path=None,
+            pairs=tuple(sorted(pair_keys)),
+            tests=tuple(sorted(test_keys)),
+        )
 
     return FilingResult(
         outcome="filed" if pair_keys or test_keys else "no-pairs",
-        bug_id=bug_id,
-        bug_path=str(bug_path),
+        bug_id=filed.bug_id,
+        bug_path=filed.bug_path,
         pairs=tuple(sorted(pair_keys)),
         tests=tuple(sorted(test_keys)),
     )
@@ -525,9 +461,13 @@ def file_or_cite_bug(
 _CLI_HELP = """\
 usage: bug_filer.py <bugs_dir> <project> <version> <commit> <captured_output_file>
 
-File a bug for a failed deep-verify run, or cite the open or running bug
-that already records the same failing engine/flavor pairs (or, when no
-structured pair is named, the same failing cold-lane tests).
+File a bug for a failed deep-verify run, or cite the open, running or
+needs-operator bug that already records the same failing engine/flavor
+pairs (or, when no structured pair is named, the same failing cold-lane
+tests), or that reports the same defect: a slug differing only by a
+re-file word, ordinal or trailing counter, or a body citing it as its
+defect. A cited bug prints as outcome=duplicate with its ID on the bug_id
+line.
 
 Positional arguments (all five required, in this order):
   bugs_dir              the project's bugs/ directory; created when absent

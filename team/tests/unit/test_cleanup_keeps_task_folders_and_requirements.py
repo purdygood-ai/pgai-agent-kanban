@@ -176,6 +176,6 @@ def test_help_says_task_folders_are_never_deleted_and_lists_no_step_three(tmp_pa
 
     assert result.returncode == 0, _diagnostic(result)
     steps = [line.split()[1] for line in result.stdout.splitlines() if line.strip().startswith("Step ")]
-    assert steps == ["0", "1", "2", "4", "5", "6"], result.stdout
+    assert steps == ["0", "1", "2", "2b", "4", "5", "6"], result.stdout
     assert "task folders are never deleted" in result.stdout, result.stdout
     assert "scripts/archive.sh" in result.stdout, result.stdout

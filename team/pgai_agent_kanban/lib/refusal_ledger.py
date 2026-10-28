@@ -110,6 +110,12 @@ same record shape):
 
     python3 refusal_ledger.py record [--kanban-root <root>] <ledger_path> <project> <error> <message> <remedy> <surface>
     python3 refusal_ledger.py latest <ledger_path>
+    python3 refusal_ledger.py latest-fields <ledger_path>
+
+    'latest-fields' prints the current record as the key=value lines
+    refusal_ledger.sh's refusal_ledger_read_latest documents (see
+    latest_field_lines()); a malformed ledger exits 1 with one
+    ``refusal_ledger:`` line on stderr and nothing on stdout.
 
     The 'record' subcommand always stamps context itself (see "Context"
     above) — there is no CLI flag for it, so a caller (bash or Python)
@@ -158,6 +164,8 @@ if not __package__:
         sys.path.insert(0, _OWN_PACKAGE_ROOT)
 
 from pgai_agent_kanban.lib.atomic_write import atomic_write  # noqa: E402
+from pgai_agent_kanban.lib.text import lf_to_spaces  # noqa: E402
+from pgai_agent_kanban.lib.timeutil import utc_now_iso  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Errors
@@ -234,12 +242,6 @@ class RefusalRecord:
         return {f.name: getattr(self, f.name) for f in fields(self)}
 
 
-def _single_line(value: str) -> str:
-    """Collapse any stray newline -- this ledger's field-parse format is one
-    value per line; a multi-line value would corrupt the record shape."""
-    return " ".join(str(value).split("\n"))
-
-
 def _validate_record(record: RefusalRecord) -> None:
     blank = [
         name for name in _WRITE_REQUIRED_FIELDS if not str(getattr(record, name) or "").strip()
@@ -263,11 +265,11 @@ def format_record(record: RefusalRecord) -> str:
     return "\n".join(
         [
             f"## Refusal: {record.timestamp} — {record.project} — "
-            f"{_single_line(record.surface)}",
-            f"- Context: {_single_line(record.context)}",
-            f"- Error: {_single_line(record.error)}",
-            f"- Message: {_single_line(record.message)}",
-            f"- Remedy: {_single_line(record.remedy)}",
+            f"{lf_to_spaces(record.surface)}",
+            f"- Context: {lf_to_spaces(record.context)}",
+            f"- Error: {lf_to_spaces(record.error)}",
+            f"- Message: {lf_to_spaces(record.message)}",
+            f"- Remedy: {lf_to_spaces(record.remedy)}",
         ]
     )
 
@@ -409,6 +411,28 @@ def read_latest(ledger_path: str) -> dict | None:
     return record
 
 
+#: The record fields latest_field_lines() prints, in order, after found=true.
+LATEST_FIELD_KEYS = ("timestamp", "project", "surface", "error", "message", "remedy", "context")
+
+
+def latest_field_lines(record: dict | None) -> list[str]:
+    """Render a read_latest() result as ``key=value`` lines.
+
+    None (no record) renders as the single line ``found=false``. A record
+    renders as ``found=true`` followed by one ``<key>=<value>`` line per
+    LATEST_FIELD_KEYS entry, in that order; a missing or empty value prints
+    as empty, and any newline in a value becomes a space so every field
+    stays on one line, matching the ledger's own one-line field shape.
+    """
+    if record is None:
+        return ["found=false"]
+    lines = ["found=true"]
+    for key in LATEST_FIELD_KEYS:
+        value = str(record.get(key) or "").replace("\n", " ")
+        lines.append(f"{key}={value}")
+    return lines
+
+
 # ---------------------------------------------------------------------------
 # Path convention helper
 # ---------------------------------------------------------------------------
@@ -496,7 +520,7 @@ def unregistered_project_narration(kanban_root: str, project: str) -> str | None
         if names is None:
             return (
                 f"refusal_ledger: not recording this refusal for project '{project}': "
-                f"{registry} could not be read ({_single_line(exc)}), so it cannot "
+                f"{registry} could not be read ({lf_to_spaces(exc)}), so it cannot "
                 "confirm the project is registered; nothing was written and no folder "
                 "was created. Check the registry with: scripts/migrate/projects-cfg.sh"
             )
@@ -597,7 +621,7 @@ def record_refusal(
         ledger_path = ledger_path_for_project(kanban_root, resolved_project)
 
         if timestamp is None:
-            timestamp = _now_iso8601()
+            timestamp = utc_now_iso()
 
         record = RefusalRecord(
             timestamp=timestamp,
@@ -612,12 +636,6 @@ def record_refusal(
         return True
     except Exception:  # noqa: BLE001 - recording is diagnostics, never a gate
         return False
-
-
-def _now_iso8601() -> str:
-    import datetime
-
-    return datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S+00:00")
 
 
 def _detect_context() -> str:
@@ -651,7 +669,8 @@ def main() -> int:
     ``record [--kanban-root ROOT] LEDGER PROJECT ERROR MESSAGE REMEDY SURFACE``
     replaces the ledger with one new record and prints ``{"written": true}``;
     ``latest LEDGER`` prints the current record as JSON (``{"found": false}``
-    when there is none). Exit codes: 0 done; 1 a ledger error (named on
+    when there is none); ``latest-fields LEDGER`` prints it as
+    latest_field_lines() renders it. Exit codes: 0 done; 1 a ledger error (named on
     stderr); 2 usage error (argparse); 3 (``EXIT_UNREGISTERED_PROJECT``)
     ``--kanban-root`` exists and does not register PROJECT, so nothing was
     written.
@@ -696,6 +715,15 @@ def main() -> int:
         help="path to the project's most-recent-refusal ledger file",
     )
 
+    p_fields = subparsers.add_parser(
+        "latest-fields",
+        help="Print the current record as found=/key=value lines.",
+    )
+    p_fields.add_argument(
+        "ledger_path",
+        help="path to the project's most-recent-refusal ledger file",
+    )
+
     args = parser.parse_args()
 
     try:
@@ -706,7 +734,7 @@ def main() -> int:
                     print(narration, file=sys.stderr)
                     return EXIT_UNREGISTERED_PROJECT
             record = RefusalRecord(
-                timestamp=_now_iso8601(),
+                timestamp=utc_now_iso(),
                 project=args.project,
                 surface=args.surface,
                 error=args.error,
@@ -724,8 +752,17 @@ def main() -> int:
                 payload = dict(record)
                 payload["found"] = True
                 sys.stdout.write(json.dumps(payload, sort_keys=True) + "\n")
+        elif args.command == "latest-fields":
+            for line in latest_field_lines(read_latest(args.ledger_path)):
+                print(line)
     except RefusalLedgerError as exc:
-        print(f"refusal_ledger: {exc}", file=sys.stderr)
+        # Every RefusalLedgerError message already opens with the module's
+        # "refusal_ledger:" label; add it only to one that does not, so the
+        # stderr line carries the label exactly once.
+        text = str(exc)
+        if not text.startswith("refusal_ledger:"):
+            text = f"refusal_ledger: {text}"
+        print(text, file=sys.stderr)
         return 1
 
     return 0

@@ -61,6 +61,10 @@
 # Exit codes:
 #   0 — always (REPORT-ONLY check)
 
+# overwatch_registered_projects: the shared projects.cfg reader.
+# shellcheck source=../overwatch_config.sh
+source "$(dirname "${BASH_SOURCE[0]}")/../overwatch_config.sh"
+
 # ---------------------------------------------------------------------------
 # _cbtl_resolve_env
 # Resolve KANBAN_ROOT and OVERWATCH_PROJECT from the environment.
@@ -78,14 +82,9 @@ _cbtl_resolve_env() {
 
     if [[ -z "${OVERWATCH_PROJECT:-}" ]]; then
         local _all_projects=""
-        if declare -f projects_cfg_list >/dev/null 2>&1; then
-            _all_projects="$(projects_cfg_list 2>/dev/null)"
-        else
-            local _cfg="${KANBAN_ROOT}/projects.cfg"
-            _all_projects="$(awk '/^\[project:[a-zA-Z0-9_-]+\]/{match($0,/\[project:([a-zA-Z0-9_-]+)\]/,a);print a[1]}' "${_cfg}" 2>/dev/null)"
-        fi
+        _all_projects="$(overwatch_registered_projects)"
         local _project_count
-        _project_count="$(echo "${_all_projects}" | grep -c '[^[:space:]]' 2>/dev/null || echo 0)"
+        _project_count="$(echo "${_all_projects}" | grep -c '[^[:space:]]' 2>/dev/null)" || _project_count=0
         if [[ "${_project_count}" -gt 1 ]]; then
             echo "check-bare-tmp-litter: ERROR: OVERWATCH_PROJECT is not set and multiple projects are registered." >&2
             echo "  Set OVERWATCH_PROJECT to the target project name before running this check." >&2
@@ -99,28 +98,25 @@ _cbtl_resolve_env() {
         fi
     fi
 
-    # Resolve the framework temp root via temp.sh when available; fall back to
-    # the env-var direct value when the library is not yet sourced.
+    # Resolve the framework temp root via temp.sh's pgai_temp_dir, the one
+    # resolver. A missing temp.sh beside this tree is a broken install: say
+    # so, naming the path, rather than guessing the root by hand.
+    local _temp_sh=""
     if ! declare -f pgai_temp_dir >/dev/null 2>&1; then
         local _lib_dir
         _lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd)" || true
-        local _temp_sh="${_lib_dir}/../temp.sh"
+        _temp_sh="${_lib_dir}/../temp.sh"
         if [[ -f "${_temp_sh}" ]]; then
             # shellcheck source=/dev/null
             source "${_temp_sh}"
         fi
     fi
 
-    if declare -f pgai_temp_dir >/dev/null 2>&1; then
-        _CBTL_FW_TEMP_ROOT="$(pgai_temp_dir)"
-    else
-        # temp.sh unavailable: honour env var directly (resolver not loaded).
-        _CBTL_FW_TEMP_ROOT="${PGAI_AGENT_KANBAN_TEMP_DIR:-}"
-        if [[ -z "${_CBTL_FW_TEMP_ROOT}" ]]; then
-            echo "check-bare-tmp-litter: WARNING: temp.sh not found and PGAI_AGENT_KANBAN_TEMP_DIR unset; skipping temp-root resolution" >&2
-            return 1
-        fi
+    if ! declare -f pgai_temp_dir >/dev/null 2>&1; then
+        echo "check-bare-tmp-litter: WARNING: temp root resolver not found at ${_temp_sh}; skipping temp-root resolution" >&2
+        return 1
     fi
+    _CBTL_FW_TEMP_ROOT="$(pgai_temp_dir)"
 
     return 0
 }

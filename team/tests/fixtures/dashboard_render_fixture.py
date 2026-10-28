@@ -166,6 +166,7 @@ def run_dashboard_script(
 _TEAM_DIR = pathlib.Path(__file__).parent.parent.parent
 _REAL_WORKFLOWS_DIR = _TEAM_DIR / "workflows"
 _REAL_PGAI_AGENT_KANBAN_PKG = _TEAM_DIR / "pgai_agent_kanban"
+_REAL_PROJECTS_CFG_SH = _TEAM_DIR / "scripts" / "lib" / "projects_cfg.sh"
 _WORKFLOW_PLUGIN_DIRS = ["release", "document"]
 
 _QUEUE_FILES = [
@@ -178,7 +179,7 @@ _QUEUE_FILES = [
     "priority_backlog.md",
 ]
 
-DEFAULT_PROJECT_NAME = "dash_fixture_project"
+DEFAULT_PROJECT_NAME = "dash-fixture-project"
 
 
 @dataclass(frozen=True)
@@ -329,6 +330,10 @@ def build_dashboard_project_root(
         if dest_pkg.exists():
             shutil.rmtree(dest_pkg)
         shutil.copytree(_REAL_PGAI_AGENT_KANBAN_PKG, dest_pkg)
+        # The package reads the project-name rule from scripts/lib/projects_cfg.sh
+        # beside it (ini.PROJECT_NAME_RULE_FILE), as on a real install.
+        (root / "scripts" / "lib").mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(_REAL_PROJECTS_CFG_SH, root / "scripts" / "lib" / "projects_cfg.sh")
 
     # --- Project directory ---
     proj = root / "projects" / project_name

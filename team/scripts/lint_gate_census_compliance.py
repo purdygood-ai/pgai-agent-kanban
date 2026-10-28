@@ -115,6 +115,45 @@ halves the new-gate rule names, but never the rollup -- now produces a
 finding instead of a silently wrong self-report (see
 ``_scan_census_rollup``).
 
+DECISION COLUMN (every table row names what the decision wake does)
+-----------------------------------------------------------------------
+A sixth finding kind, ``decision_invalid``, also reads the census document
+alone: every numbered row of the "At-a-glance rollup" table carries a
+trailing Decision cell after its Class cell, naming what OVERWATCH's
+decision wake does when the site fires. The value comes from a closed set:
+``verb(<name>)``, ``inbox``, ``runaway`` or ``none``. A row is reported when
+it has no Decision cell (Class is still its last cell), the cell is empty,
+the value is outside the set, or ``<name>`` is not one of
+``pgai_agent_kanban.overwatch.decide.VERBS``. Verb names are checked only
+when that module imports from this script's own tree; otherwise any
+lower-case hyphenated name is accepted (see ``_scan_census_decisions``).
+Matching is liberal: surrounding backticks, case and spaces inside the
+parentheses are ignored.
+
+CONVERTED COLUMN (every CONVERT row's call sites are checked)
+-----------------------------------------------------------------------
+Two more finding kinds read the table's trailing Converted cell, the cell
+after Decision (see ``_scan_census_converted``):
+
+  - ``converted_invalid`` -- a numbered row has no Converted cell, an empty
+    one, a value outside ``yes`` / ``no`` / ``n/a``, or one its class does
+    not take (a CONVERT row reads ``yes`` or ``no``, every other row
+    ``n/a``). Matching ignores backticks and case.
+  - ``convert_site_fatal`` -- a CONVERT row's call site still exits
+    non-zero, whatever its Converted cell says: one finding per row and
+    file, at that file's first fatal line.
+
+A row's call sites are what its Source cell names (``_census_row_call_sites``):
+the backticked tokens that are Locator Index keys, each read through its
+key's window, or -- when it names no key -- every backticked ``*.sh`` /
+``*.py`` path, read whole minus the exits another class claims and the
+operator-CLI argument refusals (``_site_fatal_lines_whole_file``). A site
+exits non-zero through a literal bash ``exit N``, or a Python
+``sys.exit(N)`` / ``raise SystemExit(N)`` / literal non-zero return from
+``main`` or a function ``main`` returns through (``_python_fatal_exits``).
+A status computed at run time (``return len(findings)``) is not seen, nor is
+an abort by ``set -e``; the census vocabulary section states the same rule.
+
 SCOPE DECISION (documented)
 ----------------------------
 This is a textual, line-window scan, not a control-flow or data-flow
@@ -256,6 +295,7 @@ Examples
 from __future__ import annotations
 
 import argparse
+import ast
 import json
 import re
 import sys
@@ -273,7 +313,7 @@ _SIGNAL_CENSUS = "census_classification"
 _SIGNAL_DUAL_CHANNEL = "dual_channel_contract"
 _SIGNAL_NAMES = (_SIGNAL_CENSUS, _SIGNAL_DUAL_CHANNEL)
 
-# The five finding kinds this lint produces. "missing_signal" is the
+# The eight finding kinds this lint produces. "missing_signal" is the
 # original (and still most common) kind -- a candidate refusal site missing
 # its classification comment and/or emitter call. The next two are the
 # marker-to-index reconciliation direction (team/roles/CODER.md, "Writing a
@@ -289,11 +329,22 @@ _SIGNAL_NAMES = (_SIGNAL_CENSUS, _SIGNAL_DUAL_CHANNEL)
 # the census's own "**Rollup: N sites...**" summary line
 # disagrees with the inventory table it summarizes -- see "ROLLUP
 # RECONCILIATION" in the module docstring and `_scan_census_rollup`.
+# The sixth, "decision_invalid", is a numbered table row whose Decision cell
+# is missing or outside the closed set -- see "DECISION COLUMN" in the
+# module docstring and `_scan_census_decisions`.
+# The seventh, "converted_invalid", is a numbered table row whose Converted
+# cell is missing, outside the closed set, or disagrees with the row's
+# class; the eighth, "convert_site_fatal", is a CONVERT row whose call site
+# still exits non-zero -- see "CONVERTED COLUMN" in the module docstring
+# and `_scan_census_converted`.
 _FINDING_KIND_MISSING_SIGNAL = "missing_signal"
 _FINDING_KIND_UNINDEXED_ANCHOR = "unindexed_anchor"
 _FINDING_KIND_ANCHOR_CLASS_MISMATCH = "anchor_class_mismatch"
 _FINDING_KIND_UNRESOLVED_LOCATOR = "unresolved_locator"
 _FINDING_KIND_ROLLUP_MISMATCH = "rollup_mismatch"
+_FINDING_KIND_DECISION_INVALID = "decision_invalid"
+_FINDING_KIND_CONVERTED_INVALID = "converted_invalid"
+_FINDING_KIND_CONVERT_SITE_FATAL = "convert_site_fatal"
 
 # How many lines (including the exit line itself) count as "the refusal
 # site" when looking for the two required signals.
@@ -414,6 +465,13 @@ _CENSUS_BASH_FILES = (
     "cm/release.sh",  # rows 8-24
     "cm/finalize-release.sh",  # row 16
     "harness/doc-lint.sh",  # rows 47-50
+)
+
+# Bash files the default scan takes by glob, relative to team/scripts/: the
+# verification scripts under team/verification/ carry census anchors of
+# their own, so every one of them is on the default scan surface.
+_CENSUS_BASH_GLOBS = (
+    "../verification/*.sh",
 )
 
 _CENSUS_PYTHON_FILES = (
@@ -719,7 +777,20 @@ class _Finding:
         inventory table actually contains; ``rollup_summary`` names what
         the document's own "**Rollup: ...**" line claims -- the two
         disagree. There is at most one of these per run (the whole
-        document has exactly one rollup line to reconcile)."""
+        document has exactly one rollup line to reconcile).
+      - ``decision_invalid``: ``row_number`` is the table row's ``#``,
+        ``decision`` the Decision cell as written (``None`` when the row has
+        no Decision cell), and ``decision_problem`` says what is wrong with
+        it, as a phrase that completes "the row ...".
+      - ``converted_invalid``: ``row_number`` is the table row's ``#``,
+        ``converted`` the Converted cell as written (``None`` when the row
+        has no Converted cell), and ``converted_problem`` says what is
+        wrong with it, completing "the row ...".
+      - ``convert_site_fatal``: ``path``/``line`` name the CONVERT row's
+        call site and its first non-zero exit, ``row_number`` the row,
+        ``token`` the Locator Index key the site was read through (``None``
+        when the Source cell's whole file was read), and ``converted`` the
+        row's Converted cell."""
 
     path: Path
     line: int
@@ -731,6 +802,11 @@ class _Finding:
     site_class: Optional[str] = None
     table_summary: Optional[str] = None
     rollup_summary: Optional[str] = None
+    row_number: Optional[int] = None
+    decision: Optional[str] = None
+    decision_problem: Optional[str] = None
+    converted: Optional[str] = None
+    converted_problem: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------
@@ -1062,16 +1138,60 @@ def _scan_locator_resolution(census_locators: _CensusLocators, repo_root: Path) 
 # that command by hand would get.
 _CENSUS_TABLE_ANY_ROW_RE = re.compile(r"^\|\s*\d+\s*\|")
 
-# The same row, additionally capturing its trailing Class column -- greedy
-# `.*` is intentional and safe here: it is anchored at both ends (the
-# leading `| N |` and the trailing `| CLASS |$`), so it always lands on the
-# LAST pipe-delimited field regardless of how many literal `|` characters
-# (escaped table pipes, code spans) appear in the row's middle columns.
+# The same row, additionally capturing its Class cell: the cell before the
+# trailing Decision and Converted cells, or the trailing cell itself on a
+# row that has neither (that row is still counted by class;
+# `_scan_census_decisions` and `_scan_census_converted` report the missing
+# cells). Greedy `.*` is intentional and safe here: it is anchored at both
+# ends (the leading `| N |` and the trailing `| CLASS |` plus at most two
+# more cells), so it always lands on the last Class-shaped field regardless
+# of how many literal `|` characters (escaped table pipes, code spans)
+# appear in the row's middle columns.
 _CENSUS_TABLE_ROW_RE = re.compile(
     r"^\|\s*\d+\s*\|.*\|\s*(?P<cls>"
     + "|".join(re.escape(t) for t in CLASSIFICATION_TOKENS)
-    + r")\s*\|\s*$"
+    + r")\s*\|(?:[^|]*\|){0,2}\s*$"
 )
+
+# A numbered row split at its Class cell: the class, and every cell after
+# it (the Decision cell, then the Converted cell). Neither trailing
+# vocabulary contains a `|`, so the cells after Class are pipe-free, and the
+# greedy `.*` lands on the last Class-shaped cell for the same reason as in
+# `_CENSUS_TABLE_ROW_RE`.
+_CENSUS_TABLE_TAIL_RE = re.compile(
+    r"^\|\s*\d+\s*\|.*\|\s*(?P<cls>"
+    + "|".join(re.escape(t) for t in CLASSIFICATION_TOKENS)
+    + r")\s*\|(?P<tail>(?:[^|]*\|)*)\s*$"
+)
+
+
+def _census_row_tail(raw_line: str) -> Optional[tuple[str, list[str]]]:
+    """``(class, cells after the Class cell)`` for one numbered table row,
+    each cell unstripped, or ``None`` when no Class cell parses (the rollup
+    check reports that row as unclassified)."""
+    match = _CENSUS_TABLE_TAIL_RE.match(raw_line.rstrip())
+    if not match:
+        return None
+    return match.group("cls"), match.group("tail").split("|")[:-1]
+
+# A numbered row's number and its trailing cell -- the Decision cell, or the
+# Class cell on a row that has none. The Decision vocabulary never contains
+# a `|`, so the trailing cell is everything after the last inner pipe.
+_CENSUS_TABLE_ROW_NUMBER_RE = re.compile(r"^\|\s*(?P<num>\d+)\s*\|")
+_CENSUS_TABLE_LAST_CELL_RE = re.compile(r"\|(?P<cell>[^|]*)\|\s*$")
+
+# The Decision column's closed set (see "DECISION COLUMN" in the module
+# docstring): the decision wake's four outcomes
+# (pgai_agent_kanban.overwatch.decide.OUTCOMES), a verb written with its
+# name as verb(<name>).
+_CENSUS_DECISION_WORDS = ("inbox", "runaway", "none")
+_CENSUS_DECISION_VERB_RE = re.compile(r"^verb\s*\(\s*(?P<name>[^()]*?)\s*\)$", re.IGNORECASE)
+_CENSUS_DECISION_VERB_NAME_RE = re.compile(r"^[a-z][a-z0-9-]*$")
+_CENSUS_DECISION_VOCABULARY = "verb(<name>), inbox, runaway or none"
+
+# A finding's snippet for a table row is cut to this many characters -- a
+# census row can run to a long paragraph.
+_CENSUS_ROW_SNIPPET_CHARS = 120
 
 # The two-line hand-authored summary beneath the table:
 #   **Rollup: 57 sites, 0 unclassified.**
@@ -1209,6 +1329,467 @@ def _scan_census_rollup(repo_root: Path) -> list[_Finding]:
     ]
 
 
+def _decision_wake_verbs() -> Optional[frozenset[str]]:
+    """The decision wake's verb names (``decide.VERBS``), imported from the
+    package that sits beside this script's own directory -- ``team/`` in
+    the dev tree, the kanban root in an install. Returns ``None`` when that
+    tree has no such module or it cannot be imported (a copied script, a
+    missing dependency); the caller then checks verb names by shape only."""
+    package_parent = Path(__file__).resolve().parent.parent
+    if not (package_parent / "pgai_agent_kanban" / "overwatch" / "decide.py").is_file():
+        return None
+    if str(package_parent) not in sys.path:
+        sys.path.insert(0, str(package_parent))
+    try:
+        from pgai_agent_kanban.overwatch.decide import VERBS
+    except Exception:  # noqa: BLE001 -- any import failure only narrows the check
+        return None
+    return frozenset(VERBS)
+
+
+def _decision_problem(cell: str, known_verbs: Optional[frozenset[str]]) -> Optional[str]:
+    """What is wrong with one Decision cell, as a phrase completing "the
+    row ...", or ``None`` when it holds a value from the closed set."""
+    value = cell.strip().strip("`").strip()
+    if not value:
+        return "has an empty Decision cell"
+    if value.lower() in _CENSUS_DECISION_WORDS:
+        return None
+    verb_match = _CENSUS_DECISION_VERB_RE.match(value)
+    if not verb_match:
+        return f"has Decision '{value}', which is not one of {_CENSUS_DECISION_VOCABULARY}"
+    name = verb_match.group("name").lower()
+    if not _CENSUS_DECISION_VERB_NAME_RE.match(name):
+        return f"has Decision '{value}', whose verb name is not a lower-case hyphenated name"
+    if known_verbs is not None and name not in known_verbs:
+        return (
+            f"has Decision '{value}', but {name} is not a decision-wake verb "
+            f"(one of {', '.join(sorted(known_verbs))})"
+        )
+    return None
+
+
+def _scan_census_decisions(
+    repo_root: Path, known_verbs: Optional[Iterable[str]] = None
+) -> list[_Finding]:
+    """The Decision-column check (see "DECISION COLUMN" in the module
+    docstring): every numbered row of the census's "At-a-glance rollup"
+    table must carry a Decision cell, the first cell after its Class cell,
+    holding a value from the closed set. A row whose last cell is its Class
+    has no Decision cell; a row whose Decision cell is empty, outside the
+    set, or names an unknown verb carries a wrong one. Each is one
+    ``decision_invalid`` finding.
+
+    *known_verbs* is the verb vocabulary to check ``verb(<name>)`` against;
+    by default it is ``decide.VERBS`` from this script's own tree
+    (``_decision_wake_verbs``), and verb names are checked by shape only
+    when that cannot be loaded. Fails soft like ``_scan_census_rollup``: a
+    missing census file costs this check, never a crash."""
+    census_path = repo_root / _CENSUS_DOC_RELATIVE_PATH
+    try:
+        text = census_path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return []
+    verbs = frozenset(known_verbs) if known_verbs is not None else _decision_wake_verbs()
+
+    findings: list[_Finding] = []
+    for idx, raw_line in enumerate(text.splitlines()):
+        number_match = _CENSUS_TABLE_ROW_NUMBER_RE.match(raw_line)
+        if not number_match:
+            continue
+        decision: Optional[str]
+        problem: Optional[str]
+        tail = _census_row_tail(raw_line)
+        if tail is not None:
+            # The Decision cell is the first cell after Class; a Converted
+            # cell may follow it (`_scan_census_converted` checks that one).
+            cells_after_class = tail[1]
+            if not cells_after_class:
+                decision, problem = None, "has no Decision cell after its Class cell"
+            else:
+                decision = cells_after_class[0].strip()
+                problem = _decision_problem(cells_after_class[0], verbs)
+        else:
+            # No Class cell parses: read the trailing cell as the Decision.
+            cell_match = _CENSUS_TABLE_LAST_CELL_RE.search(raw_line)
+            cell = cell_match.group("cell") if cell_match else ""
+            if cell.strip().strip("`").strip() in CLASSIFICATION_TOKENS:
+                decision, problem = None, "has no Decision cell after its Class cell"
+            else:
+                decision = cell.strip()
+                problem = _decision_problem(cell, verbs)
+        if problem is None:
+            continue
+        snippet = raw_line.strip()
+        if len(snippet) > _CENSUS_ROW_SNIPPET_CHARS:
+            snippet = snippet[: _CENSUS_ROW_SNIPPET_CHARS - 3] + "..."
+        findings.append(
+            _Finding(
+                path=census_path,
+                line=idx + 1,
+                snippet=snippet,
+                kind=_FINDING_KIND_DECISION_INVALID,
+                row_number=int(number_match.group("num")),
+                decision=decision,
+                decision_problem=problem,
+            )
+        )
+    return findings
+
+
+# ---------------------------------------------------------------------------
+# Converted column and CONVERT call-site check (see "CONVERTED COLUMN" in
+# the module docstring)
+# ---------------------------------------------------------------------------
+
+# The Converted column's closed set (docs/blocking-site-census.md,
+# "Classification vocabulary"): a CONVERT row reads yes or no, every other
+# row reads n/a.
+_CENSUS_CONVERTED_YES = "yes"
+_CENSUS_CONVERTED_NO = "no"
+_CENSUS_CONVERTED_NA = "n/a"
+_CENSUS_CONVERTED_VALUES = (_CENSUS_CONVERTED_YES, _CENSUS_CONVERTED_NO, _CENSUS_CONVERTED_NA)
+_CENSUS_CONVERTED_VOCABULARY = "yes, no or n/a"
+
+# A table cell boundary: a `|` not escaped as `\|` (code spans in the
+# Source and Trigger cells escape theirs).
+_CENSUS_CELL_SPLIT_RE = re.compile(r"(?<!\\)\|")
+# A backticked token in a Source cell: a path, a locator key, or prose.
+_CENSUS_SOURCE_TOKEN_RE = re.compile(r"`([^`]+)`")
+# Source-cell tokens that name a file the check can read.
+_CENSUS_SOURCE_FILE_SUFFIXES = (".sh", ".py")
+# Where a Source-cell path is resolved from, relative to the repo root, in
+# order: the census writes repo-relative paths (`team/scripts/x.sh`) and
+# short ones relative to team/scripts/ (`lib/temp.sh`).
+_CENSUS_SOURCE_BASES = (".", "team/scripts", "team")
+
+# Python's usage-error status (argparse exits 2 on a malformed command
+# line, and this tree's scripts return 2 for their own argument errors): a
+# Python exit whose only status is 2 is an operator-CLI refusal, the
+# SITE-TYPE the census scope excludes, unless a CONVERT Locator Index entry
+# names it as a site.
+_PYTHON_USAGE_ERROR_STATUS = 2
+
+# Calls that end a Python process with the status of their first argument.
+_PYTHON_EXIT_CALL_NAMES = frozenset({"sys.exit", "exit", "quit", "os._exit"})
+
+
+def _census_row_source_cell(raw_line: str) -> str:
+    """The Source cell (the third column) of one numbered table row, or an
+    empty string when the row has fewer cells."""
+    cells = _CENSUS_CELL_SPLIT_RE.split(raw_line.strip())
+    # cells[0] is the empty text before the leading pipe; # is cells[1].
+    return cells[3] if len(cells) > 3 else ""
+
+
+def _census_row_call_sites(
+    source_cell: str, repo_root: Path, census_locators: _CensusLocators
+) -> list[tuple[Path, Optional[str]]]:
+    """The call sites one CONVERT row's Source cell names, as
+    ``(resolved file, locator key or None)``.
+
+    A backticked token that is a Locator Index key names one site, read
+    through that key's window; when any token is a key, the keys are the
+    row's call sites. Otherwise every backticked ``*.sh``/``*.py`` path that
+    resolves to a file is a call site, read whole (``None`` key)."""
+    tokens = [token.strip() for token in _CENSUS_SOURCE_TOKEN_RE.findall(source_cell)]
+    keyed: list[tuple[Path, Optional[str]]] = []
+    for token in tokens:
+        for entry_path in sorted(census_locators.by_token, key=str):
+            if token in census_locators.by_token[entry_path] and (entry_path, token) not in keyed:
+                keyed.append((entry_path, token))
+    if keyed:
+        return keyed
+
+    files: list[tuple[Path, Optional[str]]] = []
+    for token in tokens:
+        if not token.endswith(_CENSUS_SOURCE_FILE_SUFFIXES) or re.search(r"[\s{}*<>]", token):
+            continue
+        for base in _CENSUS_SOURCE_BASES:
+            candidate = (repo_root / base / token).resolve()
+            if candidate.is_file():
+                if (candidate, None) not in files:
+                    files.append((candidate, None))
+                break
+    return files
+
+
+def _python_call_name(func: ast.expr) -> str:
+    """Dotted name of a call's target (``sys.exit``), or ``""``."""
+    if isinstance(func, ast.Name):
+        return func.id
+    if isinstance(func, ast.Attribute):
+        owner = _python_call_name(func.value)
+        return f"{owner}.{func.attr}" if owner else ""
+    return ""
+
+
+def _python_nonzero_statuses(expr: Optional[ast.expr]) -> set[int]:
+    """The literal non-zero integer statuses *expr* can evaluate to: the
+    literal itself, or one inside a conditional or boolean expression
+    (``0 if ok else 1``). Arguments of nested calls are not statuses."""
+    statuses: set[int] = set()
+    pending = [expr] if expr is not None else []
+    while pending:
+        node = pending.pop()
+        if isinstance(node, ast.Constant):
+            if isinstance(node.value, int) and not isinstance(node.value, bool) and node.value != 0:
+                statuses.add(node.value)
+            continue
+        if isinstance(node, (ast.Call, ast.Lambda)):
+            continue
+        pending.extend(ast.iter_child_nodes(node))
+    return statuses
+
+
+def _python_own_returns(function: ast.AST) -> list[ast.Return]:
+    """``return`` statements of *function* itself, not of functions or
+    classes nested inside it."""
+    returns: list[ast.Return] = []
+    pending = list(ast.iter_child_nodes(function))
+    while pending:
+        node = pending.pop()
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)):
+            continue
+        if isinstance(node, ast.Return):
+            returns.append(node)
+        pending.extend(ast.iter_child_nodes(node))
+    return returns
+
+
+def _python_fatal_exits(text: str) -> dict[int, set[int]]:
+    """``{line: statuses}`` for the 1-indexed lines of a Python file that
+    end its process non-zero: an exit call (``sys.exit``, ``exit``,
+    ``os._exit``) or ``raise SystemExit`` with a literal non-zero status,
+    and a literal non-zero ``return`` in ``main`` -- the status
+    ``sys.exit(main())`` exits with -- or in any function ``main`` hands its
+    return to (``return _report(...)``), followed transitively. A file that
+    does not parse falls back to the missing-signal scan's ``sys.exit(N)``
+    pattern, status unknown (``{0}``)."""
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        return {
+            idx + 1: {0}
+            for idx, line in enumerate(text.splitlines())
+            if _PYTHON_FATAL_EXIT_RE.search(line.split("#", 1)[0])
+        }
+
+    fatal: dict[int, set[int]] = {}
+
+    def _record(line_no: int, statuses: set[int]) -> None:
+        if statuses:
+            fatal.setdefault(line_no, set()).update(statuses)
+
+    functions: dict[str, ast.AST] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            functions.setdefault(node.name, node)
+        elif isinstance(node, ast.Call) and _python_call_name(node.func) in _PYTHON_EXIT_CALL_NAMES:
+            if node.args:
+                _record(node.lineno, _python_nonzero_statuses(node.args[0]))
+        elif isinstance(node, ast.Raise) and isinstance(node.exc, ast.Call):
+            if _python_call_name(node.exc.func) == "SystemExit" and node.exc.args:
+                _record(node.lineno, _python_nonzero_statuses(node.exc.args[0]))
+
+    status_functions: set[str] = set()
+    pending = ["main"]
+    while pending:
+        name = pending.pop()
+        if name in status_functions or name not in functions:
+            continue
+        status_functions.add(name)
+        for ret in _python_own_returns(functions[name]):
+            if isinstance(ret.value, ast.Call):
+                pending.append(_python_call_name(ret.value.func))
+            else:
+                _record(ret.lineno, _python_nonzero_statuses(ret.value))
+    return fatal
+
+
+_BASH_EXIT_STATUS_RE = re.compile(r"\bexit\s+([1-9]\d*)\b")
+
+
+def _fatal_exits(path: Path, lines: list[str]) -> dict[int, set[int]]:
+    """``{line: statuses}`` for the 1-indexed lines of *path* that end its
+    process non-zero: bash ``exit N`` with a literal non-zero N, or the
+    Python statements ``_python_fatal_exits`` names."""
+    if path.suffix == ".py":
+        return _python_fatal_exits("\n".join(lines))
+    fatal: dict[int, set[int]] = {}
+    for idx, line in enumerate(lines):
+        statuses = {int(m.group(1)) for m in _BASH_EXIT_STATUS_RE.finditer(_strip_bash_comment(line))}
+        if statuses:
+            fatal[idx + 1] = statuses
+    return fatal
+
+
+def _key_window_lines(lines: list[str], key: str, is_python: bool) -> set[int]:
+    """The lines one Locator Index key resolves to in *lines*: a marker's
+    forward window, or an emitter call's (the exemption windows)."""
+    emitter_re = _PYTHON_EMITTER_RE if is_python else _BASH_EMITTER_RE
+    return _resolve_anchor_marker_lines(lines, {key}) | _resolve_error_key_lines(
+        lines, {key}, emitter_re, is_python
+    )
+
+
+def _site_fatal_lines_whole_file(
+    path: Path, lines: list[str], census_locators: _CensusLocators
+) -> list[int]:
+    """Fatal exit lines of a whole-file call site that belong to no other
+    site. Not this row's: an exit some other class claims -- a non-CONVERT
+    Locator Index entry resolves to it, or an inline ``BLOCK-WORTHY`` /
+    ``AGENT-RESOLVABLE`` comment sits in its window -- and an operator-CLI
+    argument refusal, the SITE-TYPE scope (a bash positional ``case``
+    dispatch or usage-guarded exit, a Python usage-guarded exit, or a Python
+    exit whose only status is the usage-error status 2 that no CONVERT
+    Locator Index entry names)."""
+    is_python = path.suffix == ".py"
+    resolved = path.resolve()
+    claimed: set[int] = set()
+    convert_named: set[int] = set()
+    for key, cls in census_locators.token_class.get(resolved, {}).items():
+        if cls == "CONVERT":
+            convert_named |= _key_window_lines(lines, key, is_python)
+        else:
+            claimed |= _key_window_lines(lines, key, is_python)
+    for line_no, cls in census_locators.line_class.get(resolved, {}).items():
+        (convert_named if cls == "CONVERT" else claimed).add(line_no)
+
+    case_ranges = [] if is_python else _bash_positional_case_ranges(lines)
+    own: list[int] = []
+    for line_no, statuses in sorted(_fatal_exits(path, lines).items()):
+        if line_no in claimed:
+            continue
+        idx = line_no - 1
+        window = lines[max(0, idx - _WINDOW_LINES + 1) : idx + 1]
+        declared = {
+            match.group(1) for line in window for match in _CLASSIFICATION_TOKEN_RE.finditer(line)
+        }
+        if declared and "CONVERT" not in declared:
+            continue
+        if is_python:
+            if statuses == {_PYTHON_USAGE_ERROR_STATUS} and line_no not in convert_named:
+                continue
+            if _window_has_usage_guard(
+                window, lambda l: l.split("#", 1)[0], _PYTHON_USAGE_DEFINITION_RE
+            ):
+                continue
+        elif _is_operator_cli_bash_site(idx, case_ranges, window):
+            continue
+        own.append(line_no)
+    return own
+
+
+def _converted_problem(cell: Optional[str], cls: str) -> Optional[str]:
+    """What is wrong with one Converted cell, as a phrase completing "the
+    row ...", or ``None`` when it holds the closed-set value its class
+    takes. *cell* is ``None`` when the row has no Converted cell."""
+    if cell is None:
+        return "has no Converted cell after its Decision cell"
+    value = cell.strip().strip("`").strip()
+    if not value:
+        return "has an empty Converted cell"
+    if value.lower() not in _CENSUS_CONVERTED_VALUES:
+        return f"has Converted '{value}', which is not one of {_CENSUS_CONVERTED_VOCABULARY}"
+    if cls == "CONVERT" and value.lower() == _CENSUS_CONVERTED_NA:
+        return "is classed CONVERT but its Converted cell reads n/a; a CONVERT row reads yes or no"
+    if cls != "CONVERT" and value.lower() != _CENSUS_CONVERTED_NA:
+        return (
+            f"is classed {cls} but its Converted cell reads {value}; "
+            "only a CONVERT row is converted, so it reads n/a"
+        )
+    return None
+
+
+def _scan_census_converted(
+    repo_root: Path, census_locators: Optional[_CensusLocators] = None
+) -> list[_Finding]:
+    """The Converted-column check (see "CONVERTED COLUMN" in the module
+    docstring), two finding kinds:
+
+      - ``converted_invalid`` -- a numbered row has no Converted cell (the
+        cell after Decision), an empty one, a value outside yes / no / n/a,
+        or a value its class does not take.
+      - ``convert_site_fatal`` -- a CONVERT row's call site (see
+        ``_census_row_call_sites``) still exits non-zero: one finding per
+        row and file, at the file's first fatal line, whatever the row's
+        Converted cell says.
+
+    *census_locators* defaults to the census's own Locator Index. Fails
+    soft like ``_scan_census_decisions``: a missing census file costs this
+    check, and an unreadable call-site file costs that one site."""
+    census_path = repo_root / _CENSUS_DOC_RELATIVE_PATH
+    try:
+        text = census_path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return []
+    locators = census_locators if census_locators is not None else _load_census_locators(repo_root)
+
+    findings: list[_Finding] = []
+    for idx, raw_line in enumerate(text.splitlines()):
+        number_match = _CENSUS_TABLE_ROW_NUMBER_RE.match(raw_line)
+        if not number_match:
+            continue
+        tail = _census_row_tail(raw_line)
+        if tail is None:
+            # No Class cell parses; the rollup check reports the row.
+            continue
+        cls, cells_after_class = tail
+        row_number = int(number_match.group("num"))
+        converted_cell = cells_after_class[1] if len(cells_after_class) > 1 else None
+        converted = converted_cell.strip().strip("`").strip() if converted_cell is not None else None
+        snippet = raw_line.strip()
+        if len(snippet) > _CENSUS_ROW_SNIPPET_CHARS:
+            snippet = snippet[: _CENSUS_ROW_SNIPPET_CHARS - 3] + "..."
+
+        problem = _converted_problem(converted_cell, cls)
+        if problem is not None:
+            findings.append(
+                _Finding(
+                    path=census_path,
+                    line=idx + 1,
+                    snippet=snippet,
+                    kind=_FINDING_KIND_CONVERTED_INVALID,
+                    row_number=row_number,
+                    converted=converted,
+                    converted_problem=problem,
+                )
+            )
+        if cls != "CONVERT":
+            continue
+
+        fatal_by_file: dict[Path, tuple[int, Optional[str], list[str]]] = {}
+        for site_path, key in _census_row_call_sites(
+            _census_row_source_cell(raw_line), repo_root, locators
+        ):
+            try:
+                site_lines = site_path.read_text(encoding="utf-8", errors="replace").splitlines()
+            except OSError:
+                continue
+            if key is None:
+                fatal_lines = _site_fatal_lines_whole_file(site_path, site_lines, locators)
+            else:
+                window = _key_window_lines(site_lines, key, site_path.suffix == ".py")
+                fatal_lines = sorted(n for n in _fatal_exits(site_path, site_lines) if n in window)
+            if fatal_lines and (
+                site_path not in fatal_by_file or fatal_lines[0] < fatal_by_file[site_path][0]
+            ):
+                fatal_by_file[site_path] = (fatal_lines[0], key, site_lines)
+        for site_path, (line_no, key, site_lines) in fatal_by_file.items():
+            findings.append(
+                _Finding(
+                    path=site_path,
+                    line=line_no,
+                    snippet=site_lines[line_no - 1].strip(),
+                    kind=_FINDING_KIND_CONVERT_SITE_FATAL,
+                    token=key,
+                    row_number=row_number,
+                    converted=converted,
+                )
+            )
+    return findings
+
 # ---------------------------------------------------------------------------
 # Remedy block (docs/coding-standards.md "Gates prescribe, not just diagnose")
 # ---------------------------------------------------------------------------
@@ -1268,6 +1849,27 @@ def _finding_cause(finding: _Finding, rel: str) -> str:
             f"'{finding.rollup_summary}' but the inventory table above it actually "
             f"contains {finding.table_summary}"
         )
+    if finding.kind == _FINDING_KIND_DECISION_INVALID:
+        return (
+            f"{rel}:{finding.line} -- At-a-glance rollup row {finding.row_number} "
+            f"{finding.decision_problem}"
+        )
+    if finding.kind == _FINDING_KIND_CONVERTED_INVALID:
+        return (
+            f"{rel}:{finding.line} -- At-a-glance rollup row {finding.row_number} "
+            f"{finding.converted_problem}"
+        )
+    if finding.kind == _FINDING_KIND_CONVERT_SITE_FATAL:
+        via = f" (through Locator Index key '{finding.token}')" if finding.token else ""
+        marked = (
+            ", although the row's Converted cell reads yes"
+            if (finding.converted or "").lower() == _CENSUS_CONVERTED_YES
+            else ""
+        )
+        return (
+            f"{rel}:{finding.line} -- census row {finding.row_number} is CONVERT but this "
+            f"call site{via} still exits non-zero ('{finding.snippet}'){marked}"
+        )
     return (
         f"{rel}:{finding.line} -- CENSUS-ANCHOR token '{finding.token}' is indexed "
         f"as {finding.index_class} in docs/blocking-site-census.md but its own "
@@ -1302,6 +1904,28 @@ def _finding_remedy(finding: _Finding, rel: str) -> str:
             "(the document itself is a WRITER-owned edit; this lint only "
             "reports the drift)"
         )
+    if finding.kind == _FINDING_KIND_DECISION_INVALID:
+        return (
+            f"Edit row {finding.row_number} of the At-a-glance rollup table in {rel} so it "
+            "ends in a Decision cell after its Class cell, naming what the decision wake does "
+            f"when the site fires: {_CENSUS_DECISION_VOCABULARY} (none when it never acts on "
+            "the site; the description above the table says how to choose)"
+        )
+    if finding.kind == _FINDING_KIND_CONVERTED_INVALID:
+        return (
+            f"Edit row {finding.row_number} of the At-a-glance rollup table in {rel} so its "
+            "Converted cell, after the Decision cell, reads yes (a CONVERT row whose call sites "
+            "all warn and continue), no (a CONVERT row with a call site that still exits "
+            "non-zero) or n/a (a BLOCK-WORTHY or AGENT-RESOLVABLE row)"
+        )
+    if finding.kind == _FINDING_KIND_CONVERT_SITE_FATAL:
+        return (
+            f"Make {rel}:{finding.line} warn and continue: report the finding through the "
+            "dual-channel emitter and exit 0, so the gated runners merge it per instance "
+            "(team/scripts/lint_hygiene.py is the model), then set census row "
+            f"{finding.row_number}'s Converted cell to yes; if the site cannot be converted, "
+            f"reclassify row {finding.row_number} with a one-sentence justification instead"
+        )
     return (
         f"Reconcile '{rel}:{finding.token}' in docs/blocking-site-census.md's "
         f"CENSUS-LOCATOR-INDEX (currently {finding.index_class}) with the site's "
@@ -1312,13 +1936,16 @@ def _finding_remedy(finding: _Finding, rel: str) -> str:
 def _format_summary_line(findings: list[_Finding]) -> str:
     """The remedy block's header, naming how many findings of each kind
     were produced -- generalizes the old "N refusal site(s)..." text now
-    that this lint reports five finding kinds, not just one."""
+    that this lint reports eight finding kinds, not just one."""
     counts = {
         _FINDING_KIND_MISSING_SIGNAL: 0,
         _FINDING_KIND_UNINDEXED_ANCHOR: 0,
         _FINDING_KIND_ANCHOR_CLASS_MISMATCH: 0,
         _FINDING_KIND_UNRESOLVED_LOCATOR: 0,
         _FINDING_KIND_ROLLUP_MISMATCH: 0,
+        _FINDING_KIND_DECISION_INVALID: 0,
+        _FINDING_KIND_CONVERTED_INVALID: 0,
+        _FINDING_KIND_CONVERT_SITE_FATAL: 0,
     }
     for finding in findings:
         counts[finding.kind] = counts.get(finding.kind, 0) + 1
@@ -1348,6 +1975,21 @@ def _format_summary_line(findings: list[_Finding]) -> str:
         parts.append(
             f"{counts[_FINDING_KIND_ROLLUP_MISMATCH]} rollup summary line(s) that "
             "disagree with the inventory table"
+        )
+    if counts[_FINDING_KIND_DECISION_INVALID]:
+        parts.append(
+            f"{counts[_FINDING_KIND_DECISION_INVALID]} inventory table row(s) with a "
+            "missing or unknown Decision"
+        )
+    if counts[_FINDING_KIND_CONVERTED_INVALID]:
+        parts.append(
+            f"{counts[_FINDING_KIND_CONVERTED_INVALID]} inventory table row(s) with a "
+            "missing or out-of-set Converted cell"
+        )
+    if counts[_FINDING_KIND_CONVERT_SITE_FATAL]:
+        parts.append(
+            f"{counts[_FINDING_KIND_CONVERT_SITE_FATAL]} CONVERT call site(s) that still "
+            "exit non-zero"
         )
     return f"lint_gate_census_compliance: {len(findings)} finding(s) -- " + "; ".join(parts) + " (non-blocking finding)"
 
@@ -1399,6 +2041,11 @@ def _finding_to_dict(finding: _Finding, repo_root: Path) -> dict:
         "site_class": finding.site_class,
         "table_summary": finding.table_summary,
         "rollup_summary": finding.rollup_summary,
+        "row": finding.row_number,
+        "decision": finding.decision,
+        "decision_problem": finding.decision_problem,
+        "converted": finding.converted,
+        "converted_problem": finding.converted_problem,
         "cause": _finding_cause(finding, rel),
         "remedy": _finding_remedy(finding, rel),
     }
@@ -1410,12 +2057,15 @@ def _finding_to_dict(finding: _Finding, repo_root: Path) -> dict:
 
 
 def _default_bash_files(script_dir: Path) -> list[Path]:
-    """Resolve ``_CENSUS_BASH_FILES`` against *script_dir*, skipping any
-    entry that no longer exists (a stale list entry costs a silently
-    narrower scan, not a crash -- the same fail-soft posture the Python
-    counterpart uses for unreadable files)."""
+    """Resolve ``_CENSUS_BASH_FILES`` and ``_CENSUS_BASH_GLOBS`` against
+    *script_dir*, skipping any entry that no longer exists (a stale list
+    entry costs a silently narrower scan, not a crash -- the same fail-soft
+    posture the Python counterpart uses for unreadable files)."""
     files = [script_dir / rel for rel in _CENSUS_BASH_FILES]
-    return sorted(f for f in files if f.is_file())
+    for pattern in _CENSUS_BASH_GLOBS:
+        files.extend(sorted(script_dir.glob(pattern)))
+    unique = {f.resolve(): f for f in files if f.is_file()}
+    return sorted(unique.values())
 
 
 def _default_python_files(script_dir: Path) -> list[Path]:
@@ -1432,7 +2082,13 @@ def _parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
             "Scan candidate refusal sites (fatal, literal-nonzero process "
             "exits) in bash and Python and report any site that does not "
             "declare a census classification comment and/or does not carry "
-            "the dual-channel error contract. Quality-class lint: findings "
+            "the dual-channel error contract. With neither --bash-dirs nor "
+            "--python-dir it also checks docs/blocking-site-census.md against "
+            "the tree and itself: Locator Index entries resolve, the rollup "
+            "line matches the inventory table, every table row carries a "
+            "Decision of verb(<name>), inbox, runaway or none and a Converted "
+            "cell of yes, no or n/a, and no CONVERT row's call site still exits "
+            "non-zero. Quality-class lint: findings "
             "print in full and are emitted as machine-readable JSON, but "
             "this script never exits non-zero."
         ),
@@ -1545,6 +2201,17 @@ def main(argv: Optional[list[str]] = None) -> int:
     # to say about.
     if not args.bash_dirs and not args.python_dir:
         findings.extend(_scan_census_rollup(repo_root))
+
+    # DECISION COLUMN: every inventory table row names a decision from the
+    # closed set -- again the census document alone, so default scope only.
+    if not args.bash_dirs and not args.python_dir:
+        findings.extend(_scan_census_decisions(repo_root))
+
+    # CONVERTED COLUMN: every row's Converted cell is from the closed set,
+    # and every CONVERT row whose call site still exits non-zero is
+    # reported -- the census against the tree it names, so default scope only.
+    if not args.bash_dirs and not args.python_dir:
+        findings.extend(_scan_census_converted(repo_root, census_locators))
 
     findings.sort(key=lambda f: (str(f.path), f.line))
 

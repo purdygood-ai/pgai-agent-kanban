@@ -405,9 +405,10 @@ class TestLaneWiringWithFlagOn:
     def test_same_block_with_no_intent_entries_writes_lane_c_event_with_oriented_read(
         self, tmp_path: pathlib.Path
     ) -> None:
-        fx = _build_fixture(tmp_path, "proj_lane_c", overwatch_resolve="true")
+        # A registrable project name: the inbox refuses any other.
+        fx = _build_fixture(tmp_path, "proj-lane-c", overwatch_resolve="true")
 
-        outcome = run_resolution_stage("proj_lane_c", str(fx["kanban_root"]))
+        outcome = run_resolution_stage("proj-lane-c", str(fx["kanban_root"]))
 
         assert outcome.status == DECLINED
         text = (fx["proj"] / "release-state.md").read_text(encoding="utf-8")
@@ -417,7 +418,11 @@ class TestLaneWiringWithFlagOn:
         # The one-paragraph read names a cause and at least one option.
         assert "OVERWATCH read" in blocks[0]
         assert "Options:" in blocks[0]
-        assert "Needs Human raised" in blocks[0]
+        # The question goes to the operator inbox instead of raising Needs Human.
+        assert "inbox entry INBOX-0001 written" in blocks[0]
+        assert outcome.decision == "inbox" and outcome.inbox_entry_id == "INBOX-0001"
+        inbox_text = (fx["proj"] / "operator-inbox.md").read_text(encoding="utf-8")
+        assert "### INBOX-0001" in inbox_text and "OVERWATCH read" in inbox_text
         assert fx["halt_path"].is_file()
 
     def test_second_firing_appends_a_second_event_without_altering_the_first(

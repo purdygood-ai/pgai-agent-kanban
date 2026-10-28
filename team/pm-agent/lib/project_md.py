@@ -24,8 +24,12 @@ a creative/document project:
     ## Next Version
     <integer>
 
-All section parsing follows the liberal regex principle: whitespace variations,
-extra blank lines, and mixed case are tolerated.
+Sections are read through ``pgai_agent_kanban.task_status.read_section``.
+Headings match liberally: any letter case and any run of blanks (none
+included) between ``##`` and each word, so ``##OutputFormats`` and
+``## output   format`` both read the Output Formats field.  Extra blank lines
+are tolerated, and a body ends at the next line starting ``##`` (a ``###``
+subheading included).
 
 Public API
 ----------
@@ -39,6 +43,7 @@ structurally unparseable.  Validation errors are returned as a list (not raised)
 
 import os
 import re
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
@@ -48,27 +53,27 @@ try:
 except ImportError:
     from workflow_loader import WorkflowDefinition  # type: ignore[no-redef]
 
+# The pgai_agent_kanban package sits beside pm-agent/ in the same tree
+# (team/pm-agent/lib -> team/); each tree finds its own copy.
+_TEAM_ROOT = str(Path(__file__).resolve().parents[2])
+if _TEAM_ROOT not in sys.path:
+    sys.path.insert(0, _TEAM_ROOT)
+from pgai_agent_kanban.task_status import read_section  # noqa: E402
+
 
 # ---------------------------------------------------------------------------
 # Constants — liberal field-header patterns
 # ---------------------------------------------------------------------------
 
-# Each pattern matches a section heading and captures the body text that
-# follows (up to the next ## heading or end of file).
-# We use re.IGNORECASE so "workflow type" == "Workflow Type".
-
-_SECTION_RE = re.compile(
-    r'##[^\S\n]*([^\n]+?)[^\S\n]*\n(.*?)(?=\n##|\Z)',
-    re.DOTALL | re.IGNORECASE,
-)
-
-# Heading alias patterns — liberal matching so minor wording differences work.
-_HEADING_WORKFLOW_TYPE = re.compile(r'workflow\s*type', re.IGNORECASE)
-_HEADING_DESCRIPTION   = re.compile(r'description', re.IGNORECASE)
-_HEADING_OUTPUT_NAME   = re.compile(r'output\s*name', re.IGNORECASE)
-_HEADING_OUTPUT_FORMATS = re.compile(r'output\s*formats?', re.IGNORECASE)
-_HEADING_PRIORITY      = re.compile(r'priority', re.IGNORECASE)
-_HEADING_NEXT_VERSION  = re.compile(r'next\s*version', re.IGNORECASE)
+# Heading names per field, tried in order.  read_section's free-spacing
+# reading matches each in any letter case with any run of blanks (none
+# included) around its words, so minor spacing and case differences work.
+_HEADING_WORKFLOW_TYPE = ("Workflow Type",)
+_HEADING_DESCRIPTION   = ("Description",)
+_HEADING_OUTPUT_NAME   = ("Output Name",)
+_HEADING_OUTPUT_FORMATS = ("Output Formats", "Output Format")
+_HEADING_PRIORITY      = ("Priority",)
+_HEADING_NEXT_VERSION  = ("Next Version",)
 
 # Project title: "# Project: <name>" (first line, liberal spacing)
 _TITLE_RE = re.compile(r'^#\s*Project\s*:\s*(.+?)\s*$', re.IGNORECASE | re.MULTILINE)
@@ -105,23 +110,16 @@ class ProjectMdError(Exception):
 # Internal helpers
 # ---------------------------------------------------------------------------
 
-def _extract_sections(text: str) -> dict:
-    """Parse text into a dict mapping lowercased heading -> body text.
+def _find_section(text: str, headings: tuple) -> Optional[str]:
+    """Return the body of the first ``## <heading>`` section found, or None.
 
-    The title line (# Project: ...) is not included in sections.
+    Each name in *headings* is read in turn through ``task_status.read_section``
+    (free-spacing heading match; any line starting ``##`` ends the body), and
+    the first one present wins.  An empty section returns ``""``.
     """
-    sections = {}
-    for m in _SECTION_RE.finditer(text):
-        heading = m.group(1).strip()
-        body = m.group(2).strip()
-        sections[heading.lower()] = (heading, body)
-    return sections
-
-
-def _find_section(sections: dict, heading_re: re.Pattern) -> Optional[str]:
-    """Return the body text for the first heading matching heading_re, or None."""
-    for key, (_heading, body) in sections.items():
-        if heading_re.search(key):
+    for heading in headings:
+        body = read_section(text, heading, free_spacing=True, end_at_subheading=True)
+        if body is not None:
             return body
     return None
 
@@ -181,29 +179,27 @@ def read_project_md(project_path) -> ProjectMetadata:
         # Fallback: use directory name
         name = project_path.name
 
-    sections = _extract_sections(text)
-
     # Workflow Type
     workflow_type = ""
-    raw = _find_section(sections, _HEADING_WORKFLOW_TYPE)
+    raw = _find_section(text, _HEADING_WORKFLOW_TYPE)
     if raw is not None:
         workflow_type = raw.strip()
 
     # Description
     description = ""
-    raw = _find_section(sections, _HEADING_DESCRIPTION)
+    raw = _find_section(text, _HEADING_DESCRIPTION)
     if raw is not None:
         description = raw.strip()
 
     # Output Name
     output_name = ""
-    raw = _find_section(sections, _HEADING_OUTPUT_NAME)
+    raw = _find_section(text, _HEADING_OUTPUT_NAME)
     if raw is not None:
         output_name = raw.strip()
 
     # Output Formats — list items
     output_formats = []
-    raw = _find_section(sections, _HEADING_OUTPUT_FORMATS)
+    raw = _find_section(text, _HEADING_OUTPUT_FORMATS)
     if raw is not None:
         output_formats = _parse_list_body(raw)
         if not output_formats:
@@ -214,7 +210,7 @@ def read_project_md(project_path) -> ProjectMetadata:
 
     # Priority
     priority = None
-    raw = _find_section(sections, _HEADING_PRIORITY)
+    raw = _find_section(text, _HEADING_PRIORITY)
     if raw is not None:
         try:
             priority = int(raw.strip())
@@ -223,7 +219,7 @@ def read_project_md(project_path) -> ProjectMetadata:
 
     # Next Version
     next_version = 1
-    raw = _find_section(sections, _HEADING_NEXT_VERSION)
+    raw = _find_section(text, _HEADING_NEXT_VERSION)
     if raw is not None:
         try:
             next_version = int(raw.strip())

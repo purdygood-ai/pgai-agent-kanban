@@ -72,7 +72,7 @@ if [[ -z "${_project_raw}" ]]; then
     pgai_emit_error_contract \
         "undefer.project_required" \
         "undefer.sh: no project named -- a deferral campaign is always per-project." \
-        "Set \$PGAI_PROJECT_NAME to a project registered in projects.cfg, or pass --project directly, e.g. team/scripts/undefer.sh --project pgai-agent-kanban."
+        "Set \$PGAI_PROJECT_NAME to a project registered in projects.cfg, or pass --project directly, e.g. $(printf '%q' "${KANBAN_ROOT}/scripts/undefer.sh") --project pgai-agent-kanban."
     # CENSUS-ANCHOR: undefer-project-required-01
     exit 1
 fi

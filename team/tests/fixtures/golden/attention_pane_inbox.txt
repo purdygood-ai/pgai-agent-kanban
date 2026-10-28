@@ -1,0 +1,8 @@
+? OPERATOR INBOX
+--------------------------------------------------------------------
+
+  alpha: 2 open
+    INBOX-0002  2026-10-18T10:00:00+00:00  (WRITER-20261018-004-docs)  Requeue the docs task once the provider is back?
+    INBOX-0001  2026-10-17T09:00:00+00:00  (rc:v1.2.0)  Cancel the RC or keep it open for the late fix?
+    Answer: scripts/inbox.sh --project alpha list
+

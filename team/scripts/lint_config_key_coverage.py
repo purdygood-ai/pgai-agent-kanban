@@ -10,7 +10,9 @@ For kanban.cfg the three views are:
 
 * the keys the code READS from kanban.cfg -- every ``read_ini`` call against
   kanban.cfg and every ``config_get`` call in the shipped shell code, plus
-  every Python read call site whose path names kanban.cfg;
+  every Python read call site whose path names kanban.cfg, plus every call
+  of the shared tier resolver (``pp_resolve_tiered_cfg_value`` /
+  ``resolve_tiered_cfg_value``), which reads project.cfg then kanban.cfg;
 * the keys ``kanban.cfg_example`` SCAFFOLDS -- active ``key = value`` lines
   and documented commented examples (``# key = value``);
 * the keys the loader's Key Registry ACCEPTS -- ``_CONFIG_LOADER_KNOWN_KEYS``
@@ -67,8 +69,8 @@ Finding kinds:
     shows the value in force, so an example override there misleads.
 ``read_but_unconsumed``
     A key whose every read is ``export VAR="$(read_ini ...)"`` (or the same
-    with ``_pp_read_cfg_key``/``config_get``) where no scanned code mentions
-    VAR anywhere but the export line itself.
+    with ``_pp_read_cfg_key``/``config_get``/``pp_resolve_tiered_cfg_value``)
+    where no scanned code mentions VAR anywhere but the export line itself.
 ``project_cfg_render_failed``
     The ``create_project`` text could not be rendered, so the comparisons
     against it did not run.
@@ -97,6 +99,11 @@ Shell (``*.sh``; comment lines skipped, backslash continuations joined):
 * ``_pp_read_cfg_key FILE SECTION KEY [DEFAULT]`` -- project_paths.sh's
   project.cfg reader, never kanban.cfg.
 * ``config_get SECTION KEY [DEFAULT]`` -- always kanban.cfg.
+* ``pp_resolve_tiered_cfg_value [--OPTION ...] KANBAN_ROOT PROJECT_ROOT
+  SECTION KEY [DEFAULT]`` -- the shared tier resolver; leading ``--``
+  options (``--with-tier``, ``--no-legacy``) are skipped. It is a read of
+  both project.cfg and kanban.cfg, or of kanban.cfg alone when
+  PROJECT_ROOT is a literal empty string.
 
 A call whose SECTION and KEY are both literal is a LITERAL site. A
 project.cfg read in a section kanban.cfg also uses (the shared ``[release]``
@@ -128,7 +135,7 @@ level deep. Then:
   the reads.
 
 Python (``*.py``, parsed with ``ast``): a read is a call site, never a
-module-wide mention. Two call shapes count when SECTION and KEY resolve to
+module-wide mention. Three call shapes count when SECTION and KEY resolve to
 string literals (directly, or through a constant assigned in the same
 function or at module level):
 
@@ -137,7 +144,11 @@ function or at module level):
 * ``P.get(SECTION, KEY)`` (or ``getint``/``getfloat``/``getboolean``/
   ``has_option``) on a parser ``P`` assigned in the same function from
   ``load(PATH)``, or from ``ConfigParser()`` and then ``P.read(PATH)``; a
-  parser that is itself a parameter of the function stands for its PATH.
+  parser that is itself a parameter of the function stands for its PATH;
+* ``resolve_tiered_cfg_value(KANBAN_ROOT, PROJECT_ROOT, SECTION, KEY, ...)``
+  (positional or by keyword) -- the shared tier resolver, a read of both
+  project.cfg and kanban.cfg, or of kanban.cfg alone when PROJECT_ROOT is a
+  literal ``None`` or ``""``. The PATH rule below does not apply to it.
 
 PATH decides the file: it is kanban.cfg when the expression names
 ``kanban.cfg`` / ``kanban_cfg`` (a string, a variable, an attribute or a
@@ -147,6 +158,16 @@ same function or at module level. A PATH that is a parameter of the
 enclosing function and names neither file is a read of whichever file the
 caller passes: it marks the key read for the "not read" kinds of both files
 but is no literal site for either. Any other PATH is not a read.
+
+A SECTION or KEY that is a positional parameter of a module-level function
+(``def _tiered(root, project, key)``) is resolved through that function's
+calls by name in the same module, one level deep. Each call is a literal
+site at the call when it passes a value the rules above resolve, or
+``ROW.FIELD`` where ROW is a ``for`` target over a table of ``Class(...)``
+rows (``for spec in COUNTERS: _tiered(root, project, spec.cfg_key)``) and
+Class is a dataclass or NamedTuple in the same module declaring FIELD: each
+row's FIELD argument, positional by field order or by keyword, that is a
+literal or a module constant is a key read.
 
 Only literal sites (including caller-resolved ones) are checked for the
 read-not-scaffolded kinds and ``wrong_section``. This is a textual scan, not
@@ -221,6 +242,13 @@ if _SCRIPTS_DIR not in sys.path:
 
 import lint_doc_command_truth as _doc_truth  # noqa: E402
 
+# The temp root resolver lives in the team package one level above scripts/,
+# located from this file's own path (as lint_doc_command_truth.py does).
+_OWN_ROOT = str(Path(__file__).resolve().parent.parent)
+if _OWN_ROOT not in sys.path:
+    sys.path.insert(0, _OWN_ROOT)
+from pgai_agent_kanban.lib.temp_root import resolve_temp_root  # noqa: E402
+
 LINT_NAME = "config_key_coverage"
 SCAN_TOP = "team"
 ROOT_SCRIPTS = ("install.sh",)
@@ -272,6 +300,12 @@ _PROJECT_CFG_NAME_RE = re.compile(r"project[._]cfg", re.IGNORECASE)
 _READ_INI_RE = re.compile(r"(?<![\w-])(read_ini|_pp_read_cfg_key)\s+(?!\()")
 _PROJECT_CFG_READERS = frozenset({"_pp_read_cfg_key"})
 _CONFIG_GET_RE = re.compile(r"(?<![\w-])config_get\s+(?!\()")
+# The shared tier resolver (project_paths.sh): [--flags] KANBAN_ROOT
+# PROJECT_ROOT SECTION KEY [DEFAULT]; it reads project.cfg, then kanban.cfg.
+_TIERED_RESOLVER_RE = re.compile(r"(?<![\w-])pp_resolve_tiered_cfg_value\s+(?!\()")
+# Leading option words the resolver takes before its positional arguments
+# scanned for: --with-tier, --no-legacy, a closing "--".
+_TIERED_RESOLVER_MAX_WORDS = 12
 _VAR_RE = re.compile(r"\$(?:\{[^}]*\}|\([^)]*\)|[A-Za-z_][A-Za-z0-9_]*|[0-9@*#?$!-])")
 _BARE_VAR_RE = re.compile(r"^\$(?:\{([A-Za-z_][A-Za-z0-9_]*)\}|([A-Za-z_][A-Za-z0-9_]*))$")
 # A positional parameter, bare or braced, optionally with an expansion
@@ -297,6 +331,11 @@ _PY_PATH_READERS = frozenset({"read_line_value", "get_value", "read_cfg_key"})
 _PY_PARSER_GETTERS = frozenset({"get", "getint", "getfloat", "getboolean", "has_option"})
 _PY_PARSER_LOADERS = frozenset({"load"})
 _PY_PARSER_CLASSES = frozenset({"ConfigParser", "RawConfigParser", "SafeConfigParser"})
+# The shared tier resolver (lib/project_cfg.py): (KANBAN_ROOT, PROJECT_ROOT,
+# SECTION, KEY, ...) reads project.cfg, then kanban.cfg. Argument positions
+# and keyword names, for a call that passes any of them by keyword.
+_PY_TIERED_RESOLVERS = frozenset({"resolve_tiered_cfg_value"})
+_PY_TIERED_ARGS = ((1, "project_root"), (2, "section"), (3, "key"))
 
 # ``export VAR="$(read_ini ...)"``: the read's only use is the export.
 _EXPORT_RE = re.compile(r"^\s*export\s+([A-Za-z_][A-Za-z0-9_]*)=")
@@ -694,6 +733,28 @@ def _file_kind(
     return "other"
 
 
+def tiered_resolver_reads(text: str) -> list[tuple[str, str, str]]:
+    """Return ``(section_word, key_word, kind)`` for one ``pp_resolve_tiered_cfg_value`` call.
+
+    *text* is the command line after the function name. Leading ``--``
+    option words are skipped as the function itself skips them (a bare
+    ``--`` ends them); the next four words are KANBAN_ROOT, PROJECT_ROOT,
+    SECTION and KEY. The call reads both files -- ``kanban`` and
+    ``project`` -- unless PROJECT_ROOT is a literal empty string, which
+    skips the project tier. Fewer than four positional words is no read.
+    """
+    words = shell_words(text, _TIERED_RESOLVER_MAX_WORDS)
+    while words and unquote(words[0]).startswith("--"):
+        flag = unquote(words.pop(0))
+        if flag == "--":
+            break
+    if len(words) < 4:
+        return []
+    _kanban_root, project_root, section_word, key_word = words[:4]
+    kinds = ("kanban",) if unquote(project_root) == "" else ("kanban", "project")
+    return [(section_word, key_word, kind) for kind in kinds]
+
+
 class ShellScan(NamedTuple):
     """One shell file's reads: literal sites, dynamic sites, and its code lines."""
 
@@ -733,17 +794,25 @@ def scan_shell(
             function = None
         scope = "\n".join(c for _, c in lines[function_start:index + 1]) if function else code
         calls: list[tuple[str, str, str]] = []
+        call_count = 0
         for match in _READ_INI_RE.finditer(line):
             words = shell_words(line[match.end():], 3)
             if len(words) == 3:
                 kind = _file_kind(match.group(1), words[0], words[1], kanban_sections, project_sections)
                 calls.append((words[1], words[2], kind))
+                call_count += 1
         for match in _CONFIG_GET_RE.finditer(line):
             words = shell_words(line[match.end():], 2)
             if len(words) == 2:
                 calls.append((words[0], words[1], "kanban"))
+                call_count += 1
+        for match in _TIERED_RESOLVER_RE.finditer(line):
+            reads = tiered_resolver_reads(line[match.end():])
+            if reads:
+                calls.extend(reads)
+                call_count += 1
         export_match = _EXPORT_RE.match(line)
-        export = export_match.group(1) if export_match and len(calls) == 1 else ""
+        export = export_match.group(1) if export_match and call_count == 1 else ""
         for section_word, key_word, kind in calls:
             section, key = unquote(section_word), unquote(key_word)
             if "$" not in section and "$" not in key and "`" not in section + key:
@@ -922,6 +991,99 @@ def _parser_path(receiver: ast.expr, scope: _PyScope) -> "ast.expr | None":
     return None
 
 
+def _py_call_arg(call: ast.Call, index: int, keyword: str) -> "ast.expr | None":
+    """The argument *call* passes at position *index*, or as ``keyword=``; None when absent."""
+    if index < len(call.args) and not any(isinstance(a, ast.Starred) for a in call.args[:index + 1]):
+        return call.args[index]
+    for kw in call.keywords:
+        if kw.arg == keyword:
+            return kw.value
+    return None
+
+
+def _py_tiered_kinds(project_root: "ast.expr | None") -> set[str]:
+    """The files a ``resolve_tiered_cfg_value`` call reads: both, or kanban.cfg alone.
+
+    A literal ``None`` or ``""`` PROJECT_ROOT skips the project tier; any
+    other expression (or a missing one) reads project.cfg then kanban.cfg.
+    """
+    if isinstance(project_root, ast.Constant) and project_root.value in (None, ""):
+        return {"kanban"}
+    return {"kanban", "project"}
+
+
+def _class_fields(tree: ast.Module) -> dict[str, list[str]]:
+    """Each module-level class's annotated fields, in declaration order.
+
+    A dataclass or NamedTuple takes its constructor arguments in this order,
+    so a row ``Spec("a", "key_x")`` binds ``key_x`` to the second field.
+    """
+    fields: dict[str, list[str]] = {}
+    for node in tree.body:
+        if isinstance(node, ast.ClassDef):
+            fields[node.name] = [
+                stmt.target.id for stmt in node.body
+                if isinstance(stmt, ast.AnnAssign) and isinstance(stmt.target, ast.Name)
+            ]
+    return fields
+
+
+def _loop_rows(name: str, body: list[ast.AST], scope: _PyScope, module: _PyScope) -> list[ast.expr]:
+    """The elements a ``for NAME in ...`` loop in *body* binds NAME to.
+
+    Unlike :func:`_scope_names`, the iterable may be a module-level table
+    (``for spec in COUNTERS``) as well as a local one.
+    """
+    rows: list[ast.expr] = list(scope.assigns.get(name, []))
+    for top in body:
+        for node in ast.walk(top):
+            if isinstance(node, (ast.For, ast.AsyncFor)) and isinstance(node.target, ast.Name) \
+                    and node.target.id == name:
+                iterable = node.iter
+                local = isinstance(iterable, ast.Name) and iterable.id in scope.assigns
+                rows.extend(_iter_elements(iterable, scope.assigns if local else module.assigns, {}))
+    return rows
+
+
+def _py_arg_values(expr: ast.expr, scope: _PyScope, module: _PyScope, body: list[ast.AST],
+                   fields: dict[str, list[str]]) -> list[str]:
+    """The strings a call argument may be.
+
+    A literal or a constant (:func:`_py_literal`) is itself. ``ROW.FIELD``,
+    where ROW is a ``for`` target over a table of ``Class(...)`` rows and
+    Class is a module-level class declaring FIELD, is each row's FIELD
+    argument (positional by field order, or by keyword) that is itself a
+    literal or a module constant. Anything else is ``[]``.
+    """
+    literal = _py_literal(expr, scope, module)
+    if literal is not None:
+        return [literal]
+    if not (isinstance(expr, ast.Attribute) and isinstance(expr.value, ast.Name)):
+        return []
+    values: list[str] = []
+    for row in _loop_rows(expr.value.id, body, scope, module):
+        if not isinstance(row, ast.Call):
+            continue
+        cls = row.func.attr if isinstance(row.func, ast.Attribute) else getattr(row.func, "id", "")
+        names = fields.get(cls, [])
+        if expr.attr not in names:
+            continue
+        arg = _py_call_arg(row, names.index(expr.attr), expr.attr)
+        value = _py_literal(arg, module, module) if arg is not None else None
+        if value is not None:
+            values.append(value)
+    return values
+
+
+def _param_position(node: ast.expr, scope: _PyScope,
+                    func: "ast.FunctionDef | ast.AsyncFunctionDef | None") -> "int | None":
+    """*node*'s index among *func*'s positional parameters, when it is one the body never reassigns."""
+    if func is None or not isinstance(node, ast.Name) or node.id in scope.assigns:
+        return None
+    positional = [a.arg for a in func.args.posonlyargs + func.args.args]
+    return positional.index(node.id) if node.id in positional else None
+
+
 def scan_python(text: str, rel: str) -> list[ReadSite]:
     """Return the kanban.cfg / project.cfg read call sites in Python *text*.
 
@@ -936,14 +1098,26 @@ def scan_python(text: str, rel: str) -> list[ReadSite]:
         [n for n in tree.body if not isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))],
         frozenset(),
     )
-    scopes: list[tuple[_PyScope, list[ast.AST]]] = [(module, [
+    FuncNode = "ast.FunctionDef | ast.AsyncFunctionDef | None"
+    scopes: list[tuple[_PyScope, list[ast.AST], FuncNode]] = [(module, [
         n for n in tree.body if not isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
-    ])]
+    ], None)]
     for node in ast.walk(tree):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            scopes.append((_scope_names(node.body, _function_params(node)), node.body))
+            scopes.append((_scope_names(node.body, _function_params(node)), node.body, node))
+    # Module-level functions, and every call of one by plain name with the
+    # scope it is made in: a read whose section or key is a parameter of
+    # such a function is resolved through these calls.
+    module_funcs = {n for n in tree.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))}
+    calls: dict[str, list[tuple[ast.Call, _PyScope, list[ast.AST]]]] = {}
+    for scope, body, _func in scopes:
+        for top in body:
+            for node in ast.walk(top):
+                if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+                    calls.setdefault(node.func.id, []).append((node, scope, body))
+    fields = _class_fields(tree)
     sites: dict[tuple[str, str, int, str], ReadSite] = {}
-    for scope, body in scopes:
+    for scope, body, enclosing in scopes:
         for top in body:
             for node in ast.walk(top):
                 if not isinstance(node, ast.Call):
@@ -951,21 +1125,46 @@ def scan_python(text: str, rel: str) -> list[ReadSite]:
                 func = node.func
                 name = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", "")
                 path: "ast.expr | None" = None
+                kinds: "set[str] | None" = None
                 if name in _PY_PATH_READERS and len(node.args) >= 3:
                     path, section_node, key_node = node.args[0], node.args[1], node.args[2]
                 elif name in _PY_PARSER_GETTERS and isinstance(func, ast.Attribute) and len(node.args) >= 2:
                     path = _parser_path(func.value, scope)
                     section_node, key_node = node.args[0], node.args[1]
-                if path is None:
+                elif name in _PY_TIERED_RESOLVERS:
+                    project_node, section_node, key_node = (_py_call_arg(node, i, kw) for i, kw in _PY_TIERED_ARGS)
+                    if section_node is None or key_node is None:
+                        continue
+                    kinds = _py_tiered_kinds(project_node)
+                if path is None and kinds is None:
                     continue
                 section = _py_literal(section_node, scope, module)
                 key = _py_literal(key_node, scope, module)
-                if section is None or key is None:
+                if kinds is None:
+                    kinds = _py_cfg_kinds(path, scope, module)
+                if section is not None and key is not None:
+                    resolved = [(node.lineno, [section], [key])]
+                elif enclosing in module_funcs:
+                    # A parameter side: each call of the function supplies it.
+                    resolved = []
+                    for call, caller_scope, caller_body in calls.get(enclosing.name, []):
+                        sides = []
+                        for literal, side in ((section, section_node), (key, key_node)):
+                            position = None if literal is not None else _param_position(side, scope, enclosing)
+                            arg = None if position is None else _py_call_arg(call, position, side.id)
+                            sides.append(
+                                [literal] if literal is not None
+                                else [] if arg is None
+                                else _py_arg_values(arg, caller_scope, module, caller_body, fields)
+                            )
+                        resolved.append((call.lineno, sides[0], sides[1]))
+                else:
                     continue
-                for kind in _py_cfg_kinds(path, scope, module):
-                    sites.setdefault(
-                        (section, key, node.lineno, kind), ReadSite(section, key, rel, node.lineno, kind)
-                    )
+                for line, sections, keys in resolved:
+                    for sec in sections:
+                        for k in keys:
+                            for kind in kinds:
+                                sites.setdefault((sec, k, line, kind), ReadSite(sec, k, rel, line, kind))
     return sorted(sites.values(), key=lambda s: (s.line, s.section, s.key, s.cfg))
 
 
@@ -1302,6 +1501,26 @@ def _wrong_section_finding(view: TemplateView, site: ReadSite, entry: TemplateEn
 # ---------------------------------------------------------------------------
 
 
+def _render_scratch_parent() -> "str | None":
+    """The directory the render's temp dir is made in.
+
+    The framework temp root from
+    :func:`pgai_agent_kanban.lib.temp_root.resolve_temp_root`, created when
+    missing. When it cannot be created or written (read-only or unwritable
+    parent, a file in its place), ``None`` -- the system temp directory --
+    so the render still has a scratch dir that exists and the lint still
+    reports on the template.
+    """
+    parent = Path(resolve_temp_root())
+    try:
+        parent.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        return None
+    if not os.access(parent, os.W_OK | os.X_OK):
+        return None
+    return str(parent)
+
+
 def render_project_cfg_text(root: Path) -> tuple["str | None", str]:
     """Render the project.cfg ``create_project`` writes, in a child interpreter.
 
@@ -1309,11 +1528,12 @@ def render_project_cfg_text(root: Path) -> tuple["str | None", str]:
     temp dir as its working and temporary directory, and writes no bytecode,
     so the render touches nothing outside that temp dir. Returns ``(text,
     "")`` on success and ``(None, reason)`` on failure.
+
+    The temp dir is made under the framework temp root
+    (:func:`_render_scratch_parent`).
     """
     env = {k: v for k, v in os.environ.items() if k not in ("PYTHONPATH", "PYTHONSTARTUP")}
-    temp_parent = os.environ.get("PGAI_AGENT_KANBAN_TEMP_DIR") or None
-    if temp_parent and not Path(temp_parent).is_dir():
-        temp_parent = None
+    temp_parent = _render_scratch_parent()
     with tempfile.TemporaryDirectory(prefix="config-key-render-", dir=temp_parent) as scratch:
         env.update({"PYTHONDONTWRITEBYTECODE": "1", "TMPDIR": scratch, "HOME": scratch})
         try:

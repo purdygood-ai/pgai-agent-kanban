@@ -70,10 +70,12 @@
 #   run_project_chain <project_name> — process the agent queue for one
 #                        project (multi-project iteration, model preflight,
 #                        blocked-task guard -- held only for systemic
-#                        blocks, never for overwatch -- the process_one_task
-#                        loop, the WAITING/BLOCKED re-checks, and PM's
-#                        discovery branch with its post-discovery
-#                        iteration -- wake_driver_discovery.sh).
+#                        blocks -- the process_one_task loop, the
+#                        WAITING/BLOCKED re-checks, and PM's discovery
+#                        branch with its post-discovery iteration --
+#                        wake_driver_discovery.sh). For overwatch the chain
+#                        is block triage and the resolution stage only: no
+#                        queue, no dispatch.
 #                        Return-code contract: 0 = the project's chain ran to
 #                        completion for this pass (this covers every outcome
 #                        that is not repo-lock contention, including a HALT
@@ -84,10 +86,13 @@
 #                        only narrated in the log), 3 = this pass declined
 #                        the project outright because another agent still
 #                        held its repo lock once wake_lock_wait.sh's
-#                        wlw_acquire_chain_lock gave up -- after waiting up
-#                        to [wake] lock_wait_seconds for a wake-chain
-#                        holder, at once for any other holder or a refused
-#                        acquisition; the chain was never entered. 3
+#                        wlw_acquire_chain_lock gave up -- at once while
+#                        other projects remain in the batch's first pass
+#                        (WAKE_BATCH_PROJECTS_PENDING, wake_common.sh), for
+#                        any other holder, or for a refused acquisition;
+#                        otherwise after waiting up to [wake]
+#                        lock_wait_seconds for a wake-chain holder; the
+#                        chain was never entered. 3
 #                        is the one signal wake_common.sh's end-of-iteration
 #                        retry pass acts on (see lib/wake_common.sh,
 #                        wake_common_run) — every other outcome is 0 and is
@@ -104,12 +109,13 @@
 # the fd; an inherited fd holds the flock, it cannot drop it), the
 # post-agent merge check, and wd_finalize_task's queue-marker write -- up
 # to the end-of-chain release, so a sibling chain that wakes meanwhile
-# waits for it (up to lock_wait_seconds, wake_lock_wait.sh) and then
-# defers on flock contention. The one exception is the PM wake's discovery
-# branch (wake_driver_discovery.sh, wd_run_pm_discovery): it releases the
-# lock for discovery's read-only guards and scans, and re-takes it -- same
-# fd variable, same op -- only when discovery decides to write, holding it
-# again through the post-discovery dispatch to the end-of-chain release. A chain that finds at a phase boundary that
+# defers on flock contention -- at once while its batch still has other
+# projects to reach, else after waiting for it (up to lock_wait_seconds,
+# wake_lock_wait.sh). The PM wake's discovery branch
+# (wake_driver_discovery.sh, wd_run_pm_discovery) is no exception: it
+# keeps the lock through discovery's guards, scans and writes and through
+# the post-discovery dispatch, and discovery's write phase confirms that
+# hold instead of acquiring again. A chain that finds at a phase boundary that
 # it no longer holds the lock stops and must still reach that cleanup,
 # which ABANDONS its fd rather than releasing (the path now belongs to the
 # chain that took over); process_one_task's merge-boundary return clears
@@ -167,10 +173,13 @@ source "${SCRIPT_DIR}/../lib/lock_provenance.sh"
 # shellcheck source=scripts/lib/wake_lock_wait.sh
 source "${SCRIPT_DIR}/../lib/wake_lock_wait.sh"
 # wake_driver_discovery.sh defines wd_run_pm_discovery, the PM wake's
-# discovery branch run_project_chain calls after its task loop (discovery
-# without the repo lock, the lock re-taken to write and dispatch).
+# discovery branch run_project_chain calls after its task loop (discovery,
+# its writes and the post-discovery dispatch under the chain's repo lock).
 # shellcheck source=scripts/lib/wake_driver_discovery.sh
 source "${SCRIPT_DIR}/../lib/wake_driver_discovery.sh"
+# wake_driver_idle.sh: wd_run_idle_pass and _wd_release_chain_lock.
+# shellcheck source=scripts/lib/wake_driver_idle.sh
+source "${SCRIPT_DIR}/../lib/wake_driver_idle.sh"
 
 # ---------------------------------------------------------------------------
 # Process exactly one task.
@@ -216,16 +225,9 @@ process_one_task() {
   #   0  — task found and processed
   #   1  — queue is empty
   #   2  — HALT flag detected
-  if [[ "$AGENT" == "overwatch" ]]; then
-    if [[ -f "${TEAM_ROOT}/HALT_OVERWATCH" ]]; then
-      log "HALT_OVERWATCH flag detected at ${TEAM_ROOT}/HALT_OVERWATCH — stopping batch loop cleanly"
-      return 2
-    fi
-  else
-    if [[ -f "${TEAM_ROOT}/HALT" ]]; then
-      log "HALT flag detected at ${TEAM_ROOT}/HALT — stopping batch loop cleanly"
-      return 2
-    fi
+  if [[ -f "${TEAM_ROOT}/HALT" ]]; then
+    log "HALT flag detected at ${TEAM_ROOT}/HALT — stopping batch loop cleanly"
+    return 2
   fi
 
   task_id="$(get_first_pending_task || true)"
@@ -270,10 +272,11 @@ process_one_task() {
   # --- Stage 2: worktree/branch lifecycle ---
   # (the agent-dispatch mutating-phase-boundary reverification runs one
   # level up, at the top of run_project_chain's own per-iteration loop,
-  # BEFORE reconcile_stale_active/reconcile_terminal_worktrees/recheck_
-  # waiting_tasks/recheck_blocked_tasks/sweep_running_intake_census — see
-  # that loop's own comment. Those five housekeeping calls themselves write
-  # queue-adjacent state (or remove a worktree) for whichever task they
+  # BEFORE reconcile_stale_active/reconcile_terminal_worktrees/
+  # reconcile_terminal_liveness_records/recheck_waiting_tasks/
+  # recheck_blocked_tasks/sweep_running_intake_census — see that loop's own
+  # comment. Those six housekeeping calls themselves write queue-adjacent
+  # state (or remove a worktree or record) for whichever task they
   # touch next, so gating them at the loop's own top is what actually stops
   # a reaped chain before ANY further shared-state mutation, not merely
   # before this one task's own worktree setup.)
@@ -343,8 +346,9 @@ process_one_task() {
 # for the full rationale): 0 on every outcome except one — 3 when this pass
 # declines the project outright because another agent still held its repo
 # lock when the acquisition step below gave up (wlw_acquire_chain_lock waits
-# up to lock_wait_seconds for a wake-chain holder, never for another holder
-# or a refusal), before the chain does any work.
+# up to lock_wait_seconds for a wake-chain holder only when no other project
+# remains in the batch's first pass -- WAKE_BATCH_PROJECTS_PENDING is 0 --
+# and never for another holder or a refusal), before the chain does any work.
 # wake_common.sh's wake_common_run reads exactly this signal to decide which
 # projects get the end-of-iteration retry pass; every other early-return
 # path in this function (missing log dir, missing backlog file, halted
@@ -377,7 +381,10 @@ run_project_chain() {
   # resolves the same lock file via the same helper. wlw_acquire_chain_lock
   # (wake_lock_wait.sh) takes it through pgai_lock_acquire
   # (lock_provenance.sh), waiting up to lock_wait_seconds when a wake chain
-  # holds it; pgai_lock_acquire records holder/pid/op/task as part of taking
+  # holds it and WAKE_BATCH_PROJECTS_PENDING (set by wake_common_run: the
+  # projects its first pass still has to reach after this one; 0 in the
+  # retry pass and when unset) is 0, deferring after one attempt while it is
+  # above 0; pgai_lock_acquire records holder/pid/op/task as part of taking
   # the lock, so a contended caller can name who holds it instead of just
   # "somebody holds it" — see lock_provenance.sh for the read side
   # (pgai_lock_read_provenance) that a contention-message caller can use.
@@ -422,7 +429,8 @@ run_project_chain() {
   # restored on the line immediately after the `if`, so every later line in
   # this function still runs under strict mode as before.
   set +e
-  wlw_acquire_chain_lock "$project_name" "$_project_lock_file" _project_lock_fd
+  wlw_acquire_chain_lock "$project_name" "$_project_lock_file" _project_lock_fd \
+    "${WAKE_BATCH_PROJECTS_PENDING:-0}"
   _project_lock_rc=$?
 
   if [[ $_project_lock_rc -ne 0 ]]; then
@@ -438,32 +446,17 @@ run_project_chain() {
     return 3
   fi
   set -e
+  local _project_lock_held=true _project_lock_acquired_at="${EPOCHREALTIME:-}"
   # This role holds the lock: its lock-starvation count starts over.
   wlw_starvation_note_acquired "$project_name"
 
-  if [[ ! -f "$BACKLOG" ]]; then
-    if [[ "$AGENT" == "overwatch" ]]; then
-      # Self-heal: the resolution stage's trigger is the HALT
-      # file itself, never this queue file's presence -- create-project.sh
-      # and the upgrade migration both seed overwatch_backlog.md going
-      # forward (team/scripts/lib/overwatch_backlog_seed.sh is the single
-      # source of both paths' content), so reaching this branch means an
-      # existing project predates that scaffolding, or the file was
-      # deleted by hand. Either way, returning 0 here -- as every other
-      # agent's missing-backlog path still does, unchanged, below -- would
-      # silently swallow a HALT the overwatch carve-out in wake_common.sh
-      # just let through the per-project HALT fast-exit specifically so
-      # run_overwatch_resolution_stage below could classify it. Recreate
-      # the file (empty; no BACKLOG-marked entries) and keep going instead
-      # of skipping past the resolution stage call.
-      mkdir -p "$(dirname "$BACKLOG")"
-      overwatch_backlog_seed_content > "$BACKLOG"
-      log "project ${project_name}: overwatch backlog not found at ${BACKLOG}, self-healed (seeded empty queue file) -- continuing so the resolution stage can run"
-    else
-      log "project ${project_name}: ${AGENT} backlog not found at ${BACKLOG}, skipping"
-      pgai_lock_release "$_project_lock_file" "$_project_lock_fd"
-      return 0
-    fi
+  # OVERWATCH keeps no queue (get_first_pending_task serves it nothing), so
+  # a missing queue file is no reason to skip the project: the resolution
+  # stage below runs on the project's HALT, not on a queue.
+  if [[ ! -f "$BACKLOG" && "$AGENT" != "overwatch" ]]; then
+    log "project ${project_name}: ${AGENT} backlog not found at ${BACKLOG}, skipping"
+    pgai_lock_release "$_project_lock_file" "$_project_lock_fd"
+    return 0
   fi
 
   # --- Per-project clock ---
@@ -511,22 +504,28 @@ run_project_chain() {
   # overwatch; see team/scripts/lib/wake_common.sh for the full contract.
   run_overwatch_resolution_stage "$project_name"
 
-  # --- Per-project HALT gate, deferred for overwatch ---
+  # --- OVERWATCH's chain ends here ---
+  # The overwatch wake is block triage and the resolution stage, nothing
+  # more: it keeps no queue and dispatches no model, so it never reaches the
+  # reconciliation sweeps, the model preflight or the dispatch loop below.
   # wake_common_run's iteration loop lets an overwatch firing through its
   # per-project HALT fast-exit specifically so the call above could classify
-  # the HALT file and narrate its own decline. That classification has now
-  # happened (or the stage no-op'd for a non-ship-policy, non-operator
-  # absence — see resolution_stage.py). A halted project still gets no
-  # further task processing on this firing, exactly as the fast-exit already
-  # guarantees for every other agent.
-  if [[ "$AGENT" == "overwatch" ]] && pp_project_halted "$project_name" 2>/dev/null; then
-    log "project ${project_name}: per-project HALT present, resolution stage evaluated, skipping task processing"
+  # the HALT file and narrate its own decline; that has now happened (or the
+  # stage no-op'd for a non-ship-policy, non-operator absence — see
+  # resolution_stage.py).
+  if [[ "$AGENT" == "overwatch" ]]; then
+    if pp_project_halted "$project_name" 2>/dev/null; then
+      log "project ${project_name}: per-project HALT present, resolution stage evaluated, skipping task processing"
+    else
+      log "project ${project_name}: resolution stage evaluated; overwatch keeps no queue and dispatches no model -- chain done"
+    fi
     pgai_lock_release "$_project_lock_file" "$_project_lock_fd"
     return 0
   fi
 
   reconcile_stale_active
   reconcile_terminal_worktrees
+  reconcile_terminal_liveness_records
 
   # --- Model preflight ---
   # Validate the configured provider model once per project chain, before any
@@ -541,8 +540,9 @@ run_project_chain() {
   _agent_model_var="PGAI_${_agent_upper}_MODEL"
   _preflight_model="${!_agent_model_var:-}"   # env-var model; empty = provider CLI default
 
-  local _preflight_exit=0
+  local _preflight_exit=0 _no_dispatchable_task=false
   if [[ -z "$(get_first_pending_task || true)" ]]; then  # nothing to dispatch: the codex preflight is a real model request
+    _no_dispatchable_task=true
     log "project ${project_name}: no dispatchable task in the ${AGENT} queue; model-preflight skipped"
   else  # `||`, not set +e: the provider may re-enable errexit and end the wake before the release below
     provider_model_preflight "$_preflight_model" "$LOG_FILE" || _preflight_exit=$?
@@ -565,7 +565,8 @@ run_project_chain() {
   # task-local block holds only the tasks that name it as a prerequisite
   # (WAITING already does), so unrelated work keeps flowing. The decision is
   # pgai_agent_kanban.overwatch.block_storm's; this block narrates it.
-  # OVERWATCH is never held: its wake is what triages the blocks. While
+  # OVERWATCH never reaches it: its chain ends after the resolution stage
+  # above, and it dispatches nothing. While
   # held, the WAITING/BLOCKED re-checks after the loop still run, and
   # discovery / PM intake still runs (the AGENT==pm block below). The hold
   # clears once the operator resolves the blocks, and in any case lifts by
@@ -588,9 +589,7 @@ run_project_chain() {
              --hold-cap "${BLOCK_HOLD_CAP:-}" \
              --systemic-codes "${SYSTEMIC_BLOCK_REASONS:-}" || true)
 
-  if [[ "$_gate_verdict" == "systemic" && "$AGENT" == "overwatch" ]]; then
-    log "project ${project_name}: ${_gate_count} BLOCKED task(s) need human attention; systemic reason_code=${_gate_reason}: ${_gate_why} -- overwatch is never held, dispatching"
-  elif [[ "$_gate_verdict" == "systemic" ]]; then
+  if [[ "$_gate_verdict" == "systemic" ]]; then
     log "project ${project_name}: ${_gate_count} BLOCKED task(s) need human attention; systemic reason_code=${_gate_reason}: ${_gate_why} -- not dispatching new tasks until ${_gate_lifts_at:-the blocks are resolved}"
     # BLOCK-WORTHY: a systemic block is an operator stop by design -- every
     # task dispatched into it blocks the same way. Holds dispatch only; no
@@ -613,9 +612,14 @@ run_project_chain() {
     STOP_REASON="blocked tasks need human attention (not dispatching)"
   fi
 
+  # --- Idle pass (wake_driver_idle.sh): with no dispatchable task and no
+  # discovery scan to come, the repo lock is released before the re-checks.
+  local _idle_pass_done=false
+  wd_run_idle_pass "$project_name"
+
   if [[ "$_dispatch_gated" == "false" ]]; then
 
-  while true; do
+  while [[ "$_idle_pass_done" == "false" ]]; do
     if (( TASKS_COMPLETED >= MAX_TASKS_PER_WAKE )); then
       STOP_REASON="reached MAX_TASKS_PER_WAKE (${MAX_TASKS_PER_WAKE})"
       break
@@ -658,12 +662,13 @@ run_project_chain() {
     fi
 
     # --- Mutating phase boundary: agent dispatch ---
-    # Re-verify this chain still holds the project repo lock BEFORE the five
+    # Re-verify this chain still holds the project repo lock BEFORE the six
     # per-iteration housekeeping calls below (reconcile_stale_active,
-    # reconcile_terminal_worktrees, recheck_waiting_tasks,
-    # recheck_blocked_tasks, sweep_running_intake_census) — every one of them
-    # writes queue-adjacent state (a stale [A] marker reset, a terminal
-    # task's leftover worktree removed, a WAITING promotion, a BLOCKED
+    # reconcile_terminal_worktrees, reconcile_terminal_liveness_records,
+    # recheck_waiting_tasks, recheck_blocked_tasks,
+    # sweep_running_intake_census) — every one of them writes queue-adjacent
+    # state (a stale [A] marker reset, a terminal task's leftover worktree or
+    # liveness record removed, a WAITING promotion, a BLOCKED
     # re-check, an intake-census closure) for whatever task it finds next,
     # so checking only right before
     # process_one_task's own dispatch would already be too late: a reaped
@@ -674,7 +679,8 @@ run_project_chain() {
     # hold this project's lock at a time). See lock_provenance.sh's
     # "Chain-level ownership reverification" header. No task is selected
     # yet at this point, so "none" is the explicit task argument, mirroring
-    # this same lock's own acquisition call above.
+    # this same lock's own acquisition call above. (An idle pass that ran
+    # its re-checks unlocked, wd_run_idle_pass, never reaches this loop.)
     if ! pgai_lock_reverify_or_narrate "$_project_lock_file" "$$" "agent dispatch" "wake-chain:${project_name}" "none"; then
       _project_lock_lost=true
       STOP_REASON="chain lost repo lock ownership mid-run at a mutating phase boundary -- stopping cleanly (see narration above)"
@@ -683,6 +689,7 @@ run_project_chain() {
 
     reconcile_stale_active
     reconcile_terminal_worktrees
+    reconcile_terminal_liveness_records
     recheck_waiting_tasks
     recheck_blocked_tasks
     sweep_running_intake_census
@@ -701,11 +708,7 @@ run_project_chain() {
         break
         ;;
       2)
-        if [[ "$AGENT" == "overwatch" ]]; then
-          STOP_REASON="HALT_OVERWATCH flag detected at ${TEAM_ROOT}/HALT_OVERWATCH"
-        else
-          STOP_REASON="HALT flag detected at ${TEAM_ROOT}/HALT"
-        fi
+        STOP_REASON="HALT flag detected at ${TEAM_ROOT}/HALT"
         break
         ;;
       3)
@@ -732,9 +735,16 @@ run_project_chain() {
     if [[ "${LAST_TASK_DISPATCH_REFUSED:-false}" == "true" ]]; then
       STOP_REASON="provider CLI refused the dispatch before any work began (infrastructure condition; see the refusal narrated above) -- not dispatching further tasks this wake"
       break
-    elif [[ "$LAST_TASK_FINAL_STATE" == "BLOCKED" && "$STOP_ON_BLOCKED" == "true" ]]; then
+    elif [[ "$LAST_TASK_FINAL_STATE" == "BLOCKED" && "${STOP_ON_BLOCKED:-false}" == "true" ]]; then
+      # [wake] stop_on_blocked = true: the operator opted into ending this
+      # project's batch at the first BLOCKED task.
       STOP_REASON="task ended in BLOCKED state (STOP_ON_BLOCKED=true)"
       break
+    elif [[ "$LAST_TASK_FINAL_STATE" == "BLOCKED" ]]; then
+      # Default: a BLOCKED task parks only itself. Its dependants stay
+      # WAITING on its prerequisite (wd_prepare_task), so the next
+      # iteration dispatches the next independent BACKLOG task.
+      log "project ${project_name}: a task ended BLOCKED; stop_on_blocked=false -- continuing the batch with the next independent task (its dependants stay WAITING)"
     fi
 
     log "pausing ${PAUSE_BETWEEN_TASKS}s before next task"
@@ -746,6 +756,7 @@ run_project_chain() {
   # The WAITING promotion and BLOCKED auto-retry re-checks run on every
   # wake, held or not: a held project is the one whose blocks most need
   # re-checking, and a block cleared here must not wait for the hold to lift.
+  # After an idle pass released the repo lock, each write retakes it.
   recheck_waiting_tasks
   recheck_blocked_tasks
   if [[ "$_dispatch_gated" == "false" ]]; then
@@ -755,12 +766,12 @@ run_project_chain() {
   # Already excluded when this chain lost its repo lock above: that break's
   # STOP_REASON text ("chain lost repo lock ownership mid-run...") matches
   # neither disjunct below, so a lock-loss stop never reaches PM's
-  # discovery branch. That branch (wake_driver_discovery.sh) releases the
-  # repo lock for the read-only discovery scan and re-takes it only to
-  # write and to run the post-discovery dispatch.
+  # discovery branch. That branch (wake_driver_discovery.sh) keeps the
+  # chain's repo lock through the discovery scan, its writes and the
+  # post-discovery dispatch; the end-of-chain release below drops it once.
   # A role the starvation guard flagged (wake_lock_wait.sh) goes first:
-  # while its task is ready, PM runs no discovery and so stops taking the
-  # repo lock for it.
+  # while its task is ready, PM runs no discovery and so stops holding the
+  # repo lock through it.
   if [[ "$AGENT" == "pm" && ( "$STOP_REASON" == *"no more BACKLOG tasks"* || "$_dispatch_gated" == "true" ) && "${PGAI_KANBAN_PM_MODE:-automatic}" != "manual" ]]; then
     if wlw_starved_role_ready "$project_name"; then
       log "project ${project_name}: autonomous scan: skipping discovery -- ${WLW_STARVED_ROLE} task ${WLW_STARVED_TASK} is ready and ${WLW_STARVED_ROLE} has deferred on repo-lock contention for ${WLW_STARVED_DEFERRALS} consecutive firing(s)"
@@ -776,22 +787,9 @@ run_project_chain() {
 
   log "project ${project_name}: done: completed=${TASKS_COMPLETED} project_elapsed=$(( $(date +%s) - _project_start_epoch ))s batch_elapsed=$(( $(date +%s) - WAKE_START_EPOCH ))s reason=\"${STOP_REASON}\""
 
-  # End-of-chain lock release. A mid-chain reverification loss
-  # (_project_lock_lost, set by process_one_task/wd_finalize_task above) means
-  # the on-disk lock file no longer belongs to this process — some other
-  # chain reaped and reacquired it while this one kept running. Releasing it
-  # normally here would truncate/remove that new holder's own record
-  # (pgai_lock_release's documented contract assumes the caller still
-  # legitimately owns the path); pgai_lock_abandon is the release-shaped
-  # counterpart that only closes this process's own fd and drops its
-  # bookkeeping entry, never touching the file. The ordinary path (lock never
-  # lost) is unchanged.
-  if [[ "$_project_lock_lost" == "true" ]]; then
-    log "project ${project_name}: repo lock ownership was lost mid-chain; abandoning this process's own fd without touching the lock file (another chain owns it now)"
-    pgai_lock_abandon "$_project_lock_file" "$_project_lock_fd"
-  else
-    pgai_lock_release "$_project_lock_file" "$_project_lock_fd"
-  fi
+  # End-of-chain lock release: release, or abandon a lock lost mid-chain
+  # (_wd_release_chain_lock, wake_driver_idle.sh); a no-op after an idle pass.
+  _wd_release_chain_lock "$project_name"
 
   # On-BLOCK nudge, only once this chain no longer holds the repo lock.
   if [[ "$_chain_blocked_a_task" == "true" ]]; then

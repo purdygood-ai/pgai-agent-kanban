@@ -2,7 +2,7 @@
 test_pre_merge_checks.py
 ========================
 The pre-merge check run (``pgai_agent_kanban.testing.pre_merge``) runs the
-by-path module test, the five ratchet lints in fail-on-regression mode and
+by-path module test, the six ratchet lints in fail-on-regression mode and
 the tracked-files lint, the always-run whole-tree guards and the affected
 tests for
 ``git diff <base>...HEAD``. It prints one summary block and exits non-zero
@@ -12,7 +12,7 @@ The scenario tests build a small fixture repository under tmp_path, run the
 engine's command line on it by file path and assert on its exit code and
 output. The fixture repository is a git repository whose ``team/`` holds:
 
-* copies of the five real ratchet lints and the real tracked-files lint,
+* copies of the six real ratchet lints and the real tracked-files lint,
   the real env-bootstrap guard,
   the real by-path module test and the few package modules they import, so
   the checks that run are the tree's own checks;
@@ -24,7 +24,8 @@ output. The fixture repository is a git repository whose ``team/`` holds:
   one package-only module (the shape the by-path test's allow-list names)
   and a ``utils`` module holding ``add_tax``;
 * a bash script carrying one inline-Python heredoc, recorded in the
-  fixture's inline-Python allowlist at 1 block / 2 lines;
+  fixture's inline-Python allowlist at 1 block / 2 lines, and an empty
+  section-parser allowlist (the fixture carries no section parser);
 * ``tests/unit/test_pricing.py``, which asserts ``add_tax``'s behaviour.
 
 Base commits go on ``ai_rc/v1.0.0``, and each scenario's change is
@@ -68,18 +69,21 @@ _BASE_BRANCH = "ai_rc/v1.0.0"
 _CHANGE_BRANCH = "ai_feature/fixture-change"
 
 # Real files the fixture repository carries unchanged, relative to the repo
-# root: the six lints, the by-path test, and what they import.
+# root: the seven lints, the by-path test, and what they import.
 _COPIED_FROM_TREE = (
     "team/pyproject.toml",
     "team/pgai_agent_kanban/__init__.py",
     "team/pgai_agent_kanban/lib/__init__.py",
     "team/pgai_agent_kanban/lib/error_contract.py",
     "team/pgai_agent_kanban/lib/operator_verb_manifest.py",
+    "team/pgai_agent_kanban/lint/__init__.py",
+    "team/pgai_agent_kanban/lint/findings.py",
     "team/scripts/lint_inline_python.py",
     "team/scripts/lint_python_duplicates.py",
     "team/scripts/lint_engine_size_dupe.py",
     "team/scripts/lint_api_route_impl.py",
     "team/scripts/lint_echo_pipe_grep_q.py",
+    "team/scripts/lint_section_parsers.py",
     "team/scripts/lint_tracked_ignored.py",
     "team/config/echo-pipe-grep-q-allowlist.txt",
     "team/scripts/lint_env_bootstrap.py",
@@ -170,6 +174,7 @@ _AUTHORED = {
         "# fixture allowlist\nteam/scripts/greet.sh\t1\t2\n"
     ),
     "team/config/operator_verbs.manifest": "# fixture manifest: no verbs\n",
+    "team/config/section-parser-allowlist.txt": "# fixture allowlist: no sites\n",
     "team/config/api-route-impl-baseline.txt": "shell_rows\t0\n",
     "team/pm-agent/README.md": "fixture: the duplicates lint scans this directory\n",
     ".gitignore": "__pycache__/\n.pytest_cache/\n",
@@ -299,7 +304,8 @@ _GUARD_ROWS = [
 
 _UNIT_CHECKS = {
     "by-path", "lint: inline-python", "lint: python-duplicates",
-    "lint: engine-size", "lint: api-route-impl", "lint: echo-pipe-grep-q", "lint: tracked-ignored", *_GUARD_ROWS,
+    "lint: engine-size", "lint: api-route-impl", "lint: echo-pipe-grep-q", "lint: section-parsers",
+    "lint: tracked-ignored", *_GUARD_ROWS,
     "affected tests",
 }
 
@@ -436,7 +442,7 @@ def test_clean_change_passes_every_check_and_the_cap_runs_only_the_most_referenc
     )
     assert f"base:    {_BASE_BRANCH} (given with --base)" in result.stdout
     assert _BUDGET_LINE_RE.search(result.stdout), _diagnostic(result)
-    assert "pre-merge: PASS -- all 12 check(s) passed" in result.stdout
+    assert "pre-merge: PASS -- all 13 check(s) passed" in result.stdout
 
 
 def test_without_the_cap_the_beyond_cap_file_runs_and_fails(tmp_path: pathlib.Path) -> None:
@@ -485,11 +491,58 @@ def test_direct_kanban_root_read_in_a_package_module_fails_the_env_bootstrap_gua
     assert "    fix: read the kanban root through resolve_kanban_root()" in result.stdout, (
         _diagnostic(result)
     )
-    assert "pre-merge: FAIL -- 1 of 12 check(s) failed (guard: env-bootstrap)" in result.stdout, (
+    assert "pre-merge: FAIL -- 1 of 13 check(s) failed (guard: env-bootstrap)" in result.stdout, (
         _diagnostic(result)
     )
     assert "error:   pre_merge.checks_failed" in result.stderr
     assert "guard: env-bootstrap" in result.stderr, result.stderr
+
+
+def test_a_shell_function_collision_fails_the_engine_size_ratchet_through_its_findings(
+    fixture_repo: _FixtureRepo,
+) -> None:
+    # lint_engine_size_dupe.py exits 0 whatever it finds; the ratchet reads
+    # the collision from the lint's findings file, not from its exit code.
+    fixture_repo.commit({
+        "team/scripts/fixture_driver.sh": """\
+            #!/usr/bin/env bash
+            SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+            source "${SCRIPT_DIR}/lib/fixture_stage_a.sh"
+            source "${SCRIPT_DIR}/lib/fixture_stage_b.sh"
+            """,
+        "team/scripts/lib/fixture_stage_a.sh": "shadowed_fixture_helper() { :; }\n",
+        "team/scripts/lib/fixture_stage_b.sh": "shadowed_fixture_helper() { :; }\n",
+    }, "define one helper in two co-sourced stages")
+
+    result = fixture_repo.run_engine("--base", _BASE_BRANCH)
+
+    assert result.returncode == 1, _diagnostic(result)
+    rows = _summary_rows(result.stdout)
+    assert {name for name, (verdict, _) in rows.items() if verdict == "FAIL"} == {
+        "lint: engine-size"
+    }, _diagnostic(result)
+    assert "[duplicate-function] shadowed_fixture_helper()" in result.stdout, _diagnostic(result)
+
+
+def test_a_copied_python_def_is_narrated_by_the_engine_size_ratchet_without_failing(
+    fixture_repo: _FixtureRepo,
+) -> None:
+    # The engine-size lint reports a module-level def copied under the same
+    # name as a duplicate-python-def finding; the ratchet counts it in the
+    # row's note and the run still passes.
+    copied = "def fixture_flatten(value):\n    return ' '.join(str(value).split())\n"
+    fixture_repo.commit({
+        "team/pgai_agent_kanban/fixture_copy_a.py": copied,
+        "team/pgai_agent_kanban/fixture_copy_b.py": copied,
+    }, "copy one helper into two modules")
+
+    result = fixture_repo.run_engine("--base", _BASE_BRANCH)
+
+    assert result.returncode == 0, _diagnostic(result)
+    rows = _summary_rows(result.stdout)
+    assert rows["lint: engine-size"][0] == "PASS", _diagnostic(result)
+    row = next(line for line in result.stdout.splitlines() if line.startswith("lint: engine-size"))
+    assert row.endswith("1 narrated finding(s) (duplicate-python-def; not failing)"), _diagnostic(result)
 
 
 def test_a_guard_finding_fails_the_run_and_every_other_check_still_runs(
@@ -718,7 +771,7 @@ def test_the_by_path_test_and_runner_ignored_files_are_never_selected_twice() ->
 def test_each_ratchet_lint_names_a_script_in_the_tree() -> None:
     assert [lint.name for lint in pre_merge.RATCHET_LINTS] == [
         "inline-python", "python-duplicates", "engine-size", "api-route-impl", "echo-pipe-grep-q",
-        "tracked-ignored",
+        "section-parsers", "tracked-ignored",
     ]
     for lint in pre_merge.RATCHET_LINTS:
         assert (_TEAM_DIR / lint.script).is_file(), lint.script

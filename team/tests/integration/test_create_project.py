@@ -1324,68 +1324,26 @@ class TestCreateProjectOverwatchResolveScaffolding:
             f"at {intent_path}."
         )
 
-    def test_generated_project_has_overwatch_backlog_queue_file(
-        self, tmp_path: pathlib.Path
+    @pytest.mark.parametrize("workflow_type", ["release", "document"])
+    def test_generated_project_has_no_overwatch_queue_file(
+        self, tmp_path: pathlib.Path, workflow_type: str
     ) -> None:
-        """create-project.sh seeds tasks/queues/overwatch_backlog.md.
+        """create-project.sh seeds no tasks/queues/overwatch_backlog.md.
 
-        OVERWATCH is horizontal, not part of any workflow's agent roster, so
-        this file is not driven by queue-files.list -- it must exist
-        regardless, exactly like INTENT.md and the commented
-        overwatch_resolve key above.
+        OVERWATCH has no model queue: its firings are the hourly sweep and
+        the on-BLOCK nudge, neither of which reads a queue file.
         """
         root = _build_minimal_kanban_root(tmp_path)
-        result = _run_create_project(root, "overwatch-backlog-test", workflow_type="release")
+        result = _run_create_project(root, "overwatch-queue-test", workflow_type=workflow_type)
         assert result.returncode == 0, (
             f"create-project.sh failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
         )
 
         backlog_path = (
-            _project_dir(root, "overwatch-backlog-test") / "tasks" / "queues" / "overwatch_backlog.md"
+            _project_dir(root, "overwatch-queue-test") / "tasks" / "queues" / "overwatch_backlog.md"
         )
-        assert backlog_path.is_file(), (
-            f"Expected tasks/queues/overwatch_backlog.md to be seeded at {backlog_path}.\n"
+        assert not backlog_path.exists(), (
+            f"Expected no OVERWATCH queue file at {backlog_path}.\n"
             f"stdout: {result.stdout}\nstderr: {result.stderr}"
         )
-
-    def test_generated_overwatch_backlog_has_no_live_entries(
-        self, tmp_path: pathlib.Path
-    ) -> None:
-        """The freshly seeded overwatch_backlog.md carries a header/legend
-        only -- no bracket-marker line a wake firing could mistake for a
-        queued task."""
-        root = _build_minimal_kanban_root(tmp_path)
-        result = _run_create_project(root, "overwatch-backlog-empty-test", workflow_type="release")
-        assert result.returncode == 0, (
-            f"create-project.sh failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
-        )
-
-        backlog_text = (
-            _project_dir(root, "overwatch-backlog-empty-test")
-            / "tasks" / "queues" / "overwatch_backlog.md"
-        ).read_text(encoding="utf-8")
-
-        assert not re.search(r"^\s*-\s*\[[ WABx]\]\s+\S", backlog_text, re.MULTILINE), (
-            f"Expected zero bracket-marker entries in the freshly seeded "
-            f"overwatch_backlog.md, found some:\n{backlog_text}"
-        )
-
-    def test_document_workflow_project_also_gets_overwatch_backlog_queue_file(
-        self, tmp_path: pathlib.Path
-    ) -> None:
-        """A document-workflow project gets overwatch_backlog.md too -- same
-        reasoning as test_document_workflow_project_also_gets_overwatch_scaffolding
-        above: OVERWATCH's scaffolding is not release-workflow-specific."""
-        root = _build_minimal_kanban_root(tmp_path)
-        result = _run_create_project(root, "overwatch-backlog-doc-test", workflow_type="document")
-        assert result.returncode == 0, (
-            f"create-project.sh failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
-        )
-
-        backlog_path = (
-            _project_dir(root, "overwatch-backlog-doc-test") / "tasks" / "queues" / "overwatch_backlog.md"
-        )
-        assert backlog_path.is_file(), (
-            f"Expected tasks/queues/overwatch_backlog.md to be seeded for a "
-            f"document-workflow project too at {backlog_path}."
-        )
+        assert "overwatch_backlog" not in result.stdout, result.stdout

@@ -1,0 +1,123 @@
+{
+  "blocked_minutes": 0,
+  "bugs_filed_during_verification": [],
+  "closed_at": "2026-09-23T04:22:00Z",
+  "input_files": {},
+  "opened_at": "2026-09-23T00:25:27Z",
+  "operator_interventions": [],
+  "outcome": "shipped",
+  "project": "pgai-agent-kanban",
+  "rc": "v2.24.10",
+  "tasks": {
+    "by_agent": {
+      "cm": 1,
+      "coder": 6,
+      "pm": 1,
+      "tester": 1,
+      "writer": 1
+    },
+    "total": 10
+  },
+  "tokens": {
+    "by_agent": {
+      "cm": {
+        "cache_read": 755811,
+        "cache_write": 72103,
+        "input": 2095,
+        "invocations": 1,
+        "output": 8879
+      },
+      "coder": {
+        "cache_read": 269207744,
+        "cache_write": 1536711,
+        "input": 16324,
+        "invocations": 6,
+        "output": 632717
+      },
+      "pm": {
+        "cache_read": 1361940,
+        "cache_write": 106513,
+        "input": 2168,
+        "invocations": 1,
+        "output": 28227
+      },
+      "tester": {
+        "cache_read": 22853311,
+        "cache_write": 1059696,
+        "input": 2795,
+        "invocations": 1,
+        "output": 128780
+      },
+      "writer": {
+        "cache_read": 3031384,
+        "cache_write": 129258,
+        "input": 2323,
+        "invocations": 1,
+        "output": 28289
+      }
+    },
+    "by_model": {
+      "claude-fable-5-1": {
+        "cache_read": 615358,
+        "cache_write": 158838,
+        "input": 692,
+        "invocations": 10,
+        "output": 31349
+      },
+      "claude-haiku-4-5-20251001": {
+        "cache_read": 0,
+        "cache_write": 0,
+        "input": 22101,
+        "invocations": 10,
+        "output": 208
+      },
+      "claude-opus-5": {
+        "cache_read": 27111583,
+        "cache_write": 1234069,
+        "input": 388,
+        "invocations": 3,
+        "output": 176299
+      },
+      "claude-sonnet-5": {
+        "cache_read": 269483249,
+        "cache_write": 1511374,
+        "input": 2524,
+        "invocations": 7,
+        "output": 619036
+      }
+    },
+    "total": {
+      "cache_read": 297210190,
+      "cache_write": 2904281,
+      "input": 25705,
+      "invocations": 10,
+      "output": 826892
+    }
+  },
+  "wall": {
+    "by_agent": {
+      "cm": {
+        "seconds": 102,
+        "task_count": 1
+      },
+      "coder": {
+        "seconds": 9565,
+        "task_count": 6
+      },
+      "pm": {
+        "seconds": 319,
+        "task_count": 1
+      },
+      "tester": {
+        "seconds": 3830,
+        "task_count": 1
+      },
+      "writer": {
+        "seconds": 347,
+        "task_count": 1
+      }
+    }
+  },
+  "wall_time_minutes": 236.55,
+  "workflow_type": "release"
+}

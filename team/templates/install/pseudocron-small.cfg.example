@@ -143,14 +143,10 @@
 59 scripts/wake-batch.sh --agent=writer --sleep=0 >> logs/cron-writer.log 2>&1
 
 # =============================================================================
-# OVERWATCH JOBS — the same two jobs every crontab tier schedules
+# OVERWATCH SWEEP — the same job every crontab tier schedules
 # =============================================================================
-# The sweep runs hourly at minute 30, as in the crontab tiers. The daily
-# OVERWATCH wake runs at 03:30 local time: pseudocron has no hour field, so
-# the job carries its own hour guard (pseudocron runs every command through
-# bash -c, so the test is ordinary shell).
+# The sweep runs hourly at minute 30, as in the crontab tiers.
 30 scripts/overwatch-sweep.sh >> logs/cron-overwatch-sweep.log 2>&1
-30 [ "$(date +%H)" = "03" ] && scripts/wake-batch.sh --agent=overwatch --sleep=0 --max-tasks=1 >> logs/cron-overwatch.log 2>&1
 
 # =============================================================================
 # MAINTENANCE JOBS

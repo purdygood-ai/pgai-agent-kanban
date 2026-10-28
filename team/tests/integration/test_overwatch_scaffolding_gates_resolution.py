@@ -55,6 +55,7 @@ import pytest
 
 from pgai_agent_kanban.overwatch.resolution_stage import DECLINED, EXECUTED, run_resolution_stage
 from tests.fixtures.binary_guard import require_binary
+from tests.fixtures.section_reader_modules import copy_section_reader_modules
 
 _TEAM_DIR = pathlib.Path(__file__).parent.parent.parent  # team/
 _CREATE_PROJECT_SCRIPT = _TEAM_DIR / "scripts" / "create-project.sh"
@@ -126,6 +127,7 @@ def _install_operator_verb_scripts(kanban_root: pathlib.Path) -> None:
     cm_py_dir.mkdir(parents=True, exist_ok=True)
     for py_file in _KANBAN_PY_CM_DIR.glob("*.py"):
         (cm_py_dir / py_file.name).write_text(py_file.read_text(encoding="utf-8"), encoding="utf-8")
+    copy_section_reader_modules(cm_py_dir.parent)
     shutil.copytree(_TEAM_DIR / "scripts", kanban_root / "scripts")
 
 
@@ -419,7 +421,7 @@ class TestFreshCreateProjectGatesResolution:
         pgai_tests_temp_dir: pathlib.Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        project_name = "fresh_scaffold_project"
+        project_name = "fresh-scaffold-project"
         version = "v2.23.11"
 
         repo_path = tmp_path / "dev_repo"
@@ -510,7 +512,7 @@ class TestMigratedCfgGatesResolution:
         pgai_tests_temp_dir: pathlib.Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        project_name = "migrated_scaffold_project"
+        project_name = "migrated-scaffold-project"
         version = "v2.23.12"
 
         repo_path = tmp_path / "dev_repo"

@@ -33,6 +33,8 @@
 # Environment:
 #   NO_COLOR=1 — disables all ANSI codes
 #   TERM=dumb  — disables all ANSI codes
+#   PGAI_CRONTAB_CMD — command run as "<cmd> -l" to read the crontab;
+#                      unset or empty means 'crontab'
 
 # -h/--help prints the header comment above and exits 0. It is handled before
 # env_bootstrap.sh so help never resolves a kanban root, reads an argument as
@@ -67,6 +69,10 @@ source "${SCRIPT_DIR}/lib/version.sh"
 source "${SCRIPT_DIR}/../lib/dev_tree.sh"
 # shellcheck source=lib/script_common.sh
 source "${SCRIPT_DIR}/../lib/script_common.sh"
+# pp_run_ops: the cron-firing flattener and the ATTENTION renderer run from
+# this tree's own pgai_agent_kanban package.
+# shellcheck source=../lib/pp_run_ops.sh
+source "${SCRIPT_DIR}/../lib/pp_run_ops.sh"
 
 # --- Pass through args ---
 DATA_ARGS=("$@")
@@ -83,10 +89,13 @@ while [[ $_i -lt ${#_args[@]} ]]; do
   fi
   _i=$(( _i + 1 ))
 done
-# Source: kanban.cfg [chain/paths/dashboard] — INI format replaces legacy config.cfg
+# Operator user config, then [chain] pm_mode (config_loader.sh).
+# shellcheck source=../lib/config_loader.sh
+source "${SCRIPT_DIR}/../lib/config_loader.sh"
+config_startup_prelude "$KANBAN_ROOT"
+# Source: kanban.cfg [paths/dashboard] — INI format replaces legacy config.cfg
 # read_ini available via project_paths.sh (sourced above).
 if [[ -f "${KANBAN_ROOT}/kanban.cfg" ]]; then
-    export PGAI_KANBAN_PM_MODE="${PGAI_KANBAN_PM_MODE:-$(read_ini "${KANBAN_ROOT}/kanban.cfg" chain pm_mode automatic)}"
     DASHBOARD_ROWS_PER_COLUMN="${DASHBOARD_ROWS_PER_COLUMN:-$(read_ini "${KANBAN_ROOT}/kanban.cfg" dashboard rows_per_column 21)}"
     export DASHBOARD_ROWS_PER_COLUMN
 fi
@@ -188,7 +197,7 @@ for (( i=0; i<EMPTY; i++ ));  do BAR="${BAR}${EMPTY_CHAR}"; done
 # --- Cron firings (via cron_parser.py) ---
 declare -A CRON_FIRINGS
 CRON_FIRINGS_AVAILABLE=false
-CRONTAB_TEXT="$(crontab -l 2>/dev/null || true)"
+CRONTAB_TEXT="$("${PGAI_CRONTAB_CMD:-crontab}" -l 2>/dev/null || true)"
 if [[ -n "$CRONTAB_TEXT" ]]; then
   # cron_parser.py is resolved from the live-install anchor only.
   # The dev tree is DATA to the live runtime; executing python code under
@@ -200,15 +209,11 @@ if [[ -n "$CRONTAB_TEXT" ]]; then
     CRON_JSON="$(python3 "$CRON_FIRINGS_PY" "$CRONTAB_TEXT" "$CRON_PARSER" 2>/dev/null || true)"
     if [[ -n "$CRON_JSON" ]]; then
       CRON_FIRINGS_AVAILABLE=true
-      # Parse JSON into associative array using python
+      # Flatten the JSON object into the associative array: cron_firings
+      # --key-value prints one agent=label line per entry.
       while IFS='=' read -r key val; do
         [[ -n "$key" ]] && CRON_FIRINGS["$key"]="$val"
-      done < <(python3 -c "
-import json, sys
-d = json.loads(sys.argv[1])
-for k,v in d.items():
-    print(f'{k}={v}')
-" "$CRON_JSON" 2>/dev/null || true)
+      done < <(pp_run_ops pgai_agent_kanban.dashboard.cron_firings --key-value "$CRON_JSON" 2>/dev/null || true)
     fi
   fi
 fi
@@ -380,62 +385,10 @@ if [[ "$BLOCKED_COUNT" -gt 0 ]]; then
   if [[ -n "$RESOLVED_PROJECT" ]]; then
       _ssw_tasks_dir="$(KANBAN_ROOT="$KANBAN_ROOT" pp_tasks_dir "$RESOLVED_PROJECT" 2>/dev/null || true)"
   fi
-  python3 - "${_ssw_tasks_dir}" "$USE_COLOR" "$RESET" "$C_RED" "$C_DIM" "$C_BOLD" <<'PY' 2>/dev/null || true
-import os, re, sys, pathlib
-
-tasks_root = pathlib.Path(sys.argv[1])
-use_color  = sys.argv[2].lower() == "true"
-
-# RESET/C_RED/C_DIM/C_BOLD are already the single-sourced escapes (or ""
-# in NO_COLOR mode) computed by the bash caller via ansi_code()
-# (team/scripts/lib/script_common.sh) -- threaded through argv rather
-# than a second hand-transcribed copy of the same escape table.
-RESET, C_RED, C_DIM, C_BOLD = sys.argv[3:7]
-
-def read_field(text, heading):
-    pat = re.compile(r'^##\s+' + re.escape(heading) + r'\s*$', re.M | re.I)
-    m = pat.search(text)
-    if not m:
-        return ""
-    rest = text[m.end():]
-    for line in rest.splitlines():
-        stripped = line.strip()
-        if stripped.startswith("## "):
-            break
-        if stripped:
-            return stripped
-    return ""
-
-found_any = False
-if tasks_root.is_dir():
-    for task_dir in sorted(tasks_root.iterdir()):
-        if not task_dir.is_dir():
-            continue
-        task_id = task_dir.name
-        if task_id in {"archive", "queues", "plans"}:
-            continue
-        status_file = task_dir / "status.md"
-        if not status_file.is_file():
-            continue
-        try:
-            status_text = status_file.read_text(errors="replace")
-        except OSError:
-            continue
-        state = read_field(status_text, "State").upper()
-        if state != "BLOCKED":
-            continue
-        found_any = True
-        reason = read_field(status_text, "Blocked Reason") or read_field(status_text, "Blockers") or "(see status.md)"
-        # Truncate reason to 60 chars
-        if len(reason) > 60:
-            reason = reason[:57] + "..."
-        print(f"  {C_RED}{C_BOLD}{task_id}{RESET}")
-        print(f"  {C_DIM}Reason: {reason}{RESET}")
-        print("")
-
-if not found_any:
-    print(f"  {C_DIM}(none){RESET}")
-PY
+  # task_panes reads every ## section through pgai_agent_kanban.task_status
+  # in one interpreter for the whole tasks directory.
+  pp_run_ops pgai_agent_kanban.dashboard.task_panes status-window-blocked "${_ssw_tasks_dir}" \
+    --reset "$RESET" --red "$C_RED" --dim "$C_DIM" --bold "$C_BOLD" 2>/dev/null || true
 
   echo ""
 fi

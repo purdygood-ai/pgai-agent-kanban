@@ -85,6 +85,7 @@ _FUNCTIONS = (
     "reconcile_terminal_worktrees",
     "coder_writer_completion_gate",
     "get_role_from_readme",
+    "_wd_readme_field",
     "get_source_branch_from_readme",
 )
 

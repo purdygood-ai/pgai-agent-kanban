@@ -19,13 +19,28 @@ Where the bullets come from, in priority order:
    under Bug Fixes, whatever its Category names. Each bullet describes the
    item's substance (``get_item_title``), never its bare internal ledger ID.
 2. A bundle file with no bundled items is an operator-authored item in its
-   own right: its Category and H1 title make one bullet.
+   own right: its Category and H1 title make one bullet. A requirements
+   document (``## Category`` Requirement) is a feature, under Features.
 3. With no bundle file, the RC branch's commit subjects since the merge
    base, all under Other Changes.
 
+``## Documentation`` also lists every WRITER ticket that shipped in the
+release: each task folder under TASKS_DIR whose README names Role WRITER
+and the release's own ``## Release Version``, and whose status.md reads
+State DONE, adds one bullet -- the lead sentence of the task's ``## Goal``,
+scrubbed (``shipped_documentation``). A lead sentence that, scrubbed, names
+only the items it cites gives way to the task's own title, and failing that
+to a plain statement that documentation shipped, so no bullet is scrub
+placeholders alone. Task folders are read in name order.
+
 ``## Bugs Skipped`` and ``## Known Issues`` are rendered from blocks the
 ship-policy stage already built and scrubbed; this module places them as
-given and never recomputes them.
+given and never recomputes them. The one derived body is Known Issues
+under status KNOWN-BUGS: it lists the Bugs Skipped rows rated medium or
+higher (or carrying no recognised rating), or, when every row is rated
+low, says the table above lists them (``known_bugs_issues``). Under
+KNOWN-BUGS with no Bugs Skipped rows, and under FUNCTIONAL, it reads
+"None".
 
 Every rendered substance passes through the shared internal-ID scrub
 (``_strip_internal_ids`` in team/scripts/lib/cm/internal_id_scrub.py), so no
@@ -36,13 +51,13 @@ Usage (CLI, consumed by release_notes.sh's cm_release_generate_notes)::
 
     python3 -m pgai_agent_kanban.cm.release_notes_generator \\
         BUNDLE_FILE REPO_ROOT ACTIVE_RC STATUS RELEASE_DATE PROJECT_NAME \\
-        MERGE_BASE RC_BRANCH [KNOWN_ISSUE_BLOCK [BUGS_SKIPPED_BLOCK]]
+        MERGE_BASE RC_BRANCH [KNOWN_ISSUE_BLOCK [BUGS_SKIPPED_BLOCK [TASKS_DIR]]]
 
     BUNDLE_FILE        requirements bundle path, or "none"
     REPO_ROOT          repository root; the notes go to
                        REPO_ROOT/release-notes/ACTIVE_RC.md
     ACTIVE_RC          release version string, e.g. v1.2.3
-    STATUS             FUNCTIONAL, KNOWN-ISSUE or NON-FUNCTIONAL
+    STATUS             FUNCTIONAL, KNOWN-BUGS, KNOWN-ISSUE or NON-FUNCTIONAL
     RELEASE_DATE       date printed under the title, e.g. 2026-01-31
     PROJECT_NAME       project name printed in the title
     MERGE_BASE         commit the RC branch diverged from, or "none"
@@ -51,6 +66,9 @@ Usage (CLI, consumed by release_notes.sh's cm_release_generate_notes)::
                        ship (optional; empty when absent)
     BUGS_SKIPPED_BLOCK rendered Bugs Skipped table (optional; empty renders
                        "None")
+    TASKS_DIR          the project's task-folder directory, read for the
+                       WRITER tickets listed under Documentation (optional;
+                       "none", empty or absent lists none)
 
     Writes the notes file, prints one indented line naming it, and exits 0.
     Exits 2 with a usage line on stderr when fewer than eight arguments are
@@ -69,6 +87,23 @@ import re
 import subprocess
 import sys
 
+# Run by file path (``python3 .../release_notes_generator.py``) or loaded from
+# a file outside its package, this module has no parent package and the
+# interpreter puts only its own directory on sys.path, so the package import
+# below would not resolve. Put this file's own package root -- the directory
+# holding the pgai_agent_kanban/ this file sits in -- at the front of sys.path
+# so the import resolves from the same tree, never another. Imported as a
+# package member, sys.path is left untouched.
+if not __package__:
+    _OWN_PACKAGE_ROOT = str(pathlib.Path(__file__).resolve().parents[2])
+    if _OWN_PACKAGE_ROOT not in sys.path:
+        sys.path.insert(0, _OWN_PACKAGE_ROOT)
+
+from pgai_agent_kanban.cm.read_state_field import read_state_field  # noqa: E402
+from pgai_agent_kanban.cm.release_version import release_version_of  # noqa: E402
+from pgai_agent_kanban.lib.defer_posture import severity_rank  # noqa: E402
+from pgai_agent_kanban.task_status import read_section  # noqa: E402
+
 __all__ = [
     "CATEGORY_SECTION",
     "SECTION_ORDER",
@@ -76,6 +111,8 @@ __all__ = [
     "get_bug_substance",
     "get_priority_substance",
     "get_item_title",
+    "shipped_documentation",
+    "known_bugs_issues",
     "collect_sections",
     "render_notes",
     "generate_release_notes",
@@ -116,12 +153,15 @@ def _load_internal_id_scrub():
     return module
 
 
-_strip_internal_ids = _load_internal_id_scrub()._strip_internal_ids
+_INTERNAL_ID_SCRUB = _load_internal_id_scrub()
+_strip_internal_ids = _INTERNAL_ID_SCRUB._strip_internal_ids
+_strip_provenance_refs = _INTERNAL_ID_SCRUB._strip_provenance_refs
 
 # Category -> section mapping.
 CATEGORY_SECTION = {
     "breaking":    "Breaking Changes",
     "feature":     "Features",
+    "requirement": "Features",
     "bugfix":      "Bug Fixes",
     "deprecation": "Deprecations",
     "removal":     "Deprecations",
@@ -142,23 +182,23 @@ SECTION_ORDER = [
 
 
 def read_item_category(item_path):
-    """Read ## Category field from an item file. Default: 'misc'."""
+    """Read ## Category field from an item file. Default: 'misc'.
+
+    The section is read by task_status.read_section with end_at_subheading;
+    its first non-blank line is the value, lower-cased, and a '#' line
+    before any value means there is none.
+    """
     try:
         text = pathlib.Path(item_path).read_text(encoding="utf-8")
     except OSError:
         return "misc"
-    lines = text.splitlines()
-    in_category = False
-    for line in lines:
-        if re.match(r"^\s*##\s+Category\s*$", line, re.IGNORECASE):
-            in_category = True
-            continue
-        if in_category:
-            stripped = line.strip()
-            if stripped.startswith("#"):
-                break  # next section — no value found
-            if stripped:
-                return stripped.lower()
+    body = read_section(text, "Category", end_at_subheading=True) or ""
+    for line in body.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("#"):
+            break  # a comment line before any value — no value found
+        if stripped:
+            return stripped.lower()
     return "misc"
 
 
@@ -187,32 +227,31 @@ def _bullet(text):
 
 def _parse_section(text, heading):
     """Return the stripped body of a '## <heading>' section in *text*, or
-    '' when the section is absent or empty. Stops at the next '##' heading
-    or end of file. Same section-extraction convention
-    team/pgai_agent_kanban/cm/changelog_writer.py uses for bug files; kept
-    as this module's own copy so the release-notes output does not move
-    when that module's reader changes."""
-    pattern = re.compile(
-        r"^##\s+" + re.escape(heading) + r"\s*$", re.IGNORECASE | re.MULTILINE
-    )
-    match = pattern.search(text)
-    if not match:
-        return ""
-    start = match.end()
-    next_heading = re.search(r"^##\s+", text[start:], re.MULTILINE)
-    end = start + next_heading.start() if next_heading else len(text)
-    return text[start:end].strip()
+    '' when the section is absent or empty. The section is read by
+    task_status.read_section: it stops at the next '##' heading (a '###'
+    subheading stays in the body) or end of file."""
+    return read_section(text, heading) or ""
+
+
+# A Markdown code span, as the scrub defines it: punctuation inside one never
+# ends a sentence, and the scrub's tidy leaves its content as written.
+_CODE_SPAN_RE = _INTERNAL_ID_SCRUB._CODE_SPAN_RE
+_SENTENCE_END_RE = re.compile(r"[.!?](?:\s|$)")
 
 
 def _first_sentence(text):
     """Collapse whitespace (including newlines) to single spaces and return
     the first sentence, or the whole flattened string when no sentence-
-    ending punctuation is found."""
+    ending punctuation is found. Punctuation inside a backtick code span
+    (``pvg build . --scene 2``) never ends the sentence."""
     flat = " ".join(text.split())
     if not flat:
         return ""
-    match = re.search(r"[.!?](?:\s|$)", flat)
-    return flat[: match.start() + 1].strip() if match else flat
+    spans = [match.span() for match in _CODE_SPAN_RE.finditer(flat)]
+    for match in _SENTENCE_END_RE.finditer(flat):
+        if not any(start <= match.start() < end for start, end in spans):
+            return flat[: match.start() + 1].strip()
+    return flat
 
 
 def _substance_from_section(text, heading):
@@ -232,35 +271,16 @@ _NON_TERMINAL_ABBREVIATIONS = frozenset(
     {"e.g.", "i.e.", "etc.", "vs.", "cf.", "approx.", "incl."}
 )
 _TRAILING_WORD_RE = re.compile(r"[A-Za-z.]+$")
-_SECTION_HEADING_RE = re.compile(r"^##\s+")
 
 
 def _parse_section_outside_fences(text, heading):
     """Return the body of a '## <heading>' section in *text*, or '' when it
-    is absent. Like _parse_section, but a '##' line inside a fenced code
-    block is part of the body rather than the start of the next section,
-    so a quoted Markdown excerpt (a pasted '## Bug Fixes' block, say) does
-    not cut the section short."""
-    pattern = re.compile(
-        r"^##\s+" + re.escape(heading) + r"\s*$", re.IGNORECASE | re.MULTILINE
-    )
-    match = pattern.search(text)
-    if not match:
-        return ""
-    body = []
-    fence = None
-    for line in text[match.end():].splitlines():
-        if fence:
-            if line.strip().startswith(fence):
-                fence = None
-        else:
-            opener = _FENCE_OPEN_RE.match(line)
-            if opener:
-                fence = opener.group(1)
-            elif _SECTION_HEADING_RE.match(line):
-                break
-        body.append(line)
-    return "\n".join(body).strip()
+    is absent. Like _parse_section, but read with task_status.read_section's
+    fence reading: a '##' line inside a fenced code block is part of the
+    body rather than the start of the next section, so a quoted Markdown
+    excerpt (a pasted '## Bug Fixes' block, say) does not cut the section
+    short."""
+    return read_section(text, heading, fences=True) or ""
 
 
 def _lead_paragraph(text):
@@ -418,12 +438,209 @@ def get_item_title(item_path):
     return pathlib.Path(item_path).stem
 
 
-def collect_sections(bundle_file_arg, repo_root, merge_base, rc_branch):
+# An absolute path into one account's home directory or the scratch root
+# ("/home/<name>/...", "/tmp/..."), bare or backticked. A task Goal can cite
+# one; it means nothing on a reader's machine, so a Documentation line names
+# it generically instead.
+_LOCAL_PATH_RE = re.compile(r"`?(?<![\w.~/-])/(?:home|tmp)/[^\s`'\")\]]+`?")
+_LOCAL_PATH_REPLACEMENT_TEXT = "a local path"
+
+
+def _first_word_upper(value):
+    """The first run of letters in *value* (bold and backtick markers
+    ignored), upper-cased; '' when there is none."""
+    match = re.search(r"[A-Za-z]+", re.sub(r"[*`]", " ", value or ""))
+    return match.group(0).upper() if match else ""
+
+
+# The phrase the shared scrub puts where an internal ID stood.
+_ID_PLACEHOLDER_TEXT = _INTERNAL_ID_SCRUB._ID_REPLACEMENT_TEXT
+# A parenthesised or bracketed aside with no aside nested inside it.
+_ASIDE_RE = re.compile(r"\([^()]*\)|\[[^\[\]]*\]")
+# Where a sentence's main clause ends: a comma, semicolon, colon or dash.
+_MAIN_CLAUSE_END_RE = re.compile(r"[,;:]|\s*[–—]\s*|\s-+\s")
+_CLAUSE_WORD_RE = re.compile(r"[A-Za-z0-9][\w./'-]*")
+# Words that only say documentation exists or join the items it is for. A
+# main clause holding nothing else beside the placeholder names no subject.
+_EMPTY_CLAUSE_WORDS = frozenset({
+    "documentation", "document", "documents", "documented", "documenting",
+    "docs", "doc", "paired", "pair", "matching", "companion",
+    "a", "an", "the", "this", "these", "that", "those", "its", "their",
+    "each", "both", "all", "and", "or", "plus", "for", "of", "on", "about",
+    "covering", "to", "with", "per", "from", "in", "by",
+})
+# A task README's H1 line opens with this label ("# Task: <title>").
+_TASK_TITLE_LABEL_RE = re.compile(r"^task\s*:\s*", re.IGNORECASE)
+# The bullet for a shipped WRITER ticket neither of whose sources names
+# what it documents once scrubbed.
+_DOCUMENTATION_SHIPPED_TEXT = "Further documentation updates shipped in this release."
+
+
+def _is_placeholder_only(sentence):
+    """True when the scrubbed *sentence* names nothing but the items the
+    scrub replaced. Its main clause -- the text before the first comma,
+    semicolon, colon or dash, once parenthesised and bracketed asides are
+    removed -- holds only the scrub's placeholder, words naming
+    documentation itself and connecting words: "Paired documentation for
+    another item." is placeholder-only, "Document what another item changed
+    for operators." is not. A sentence without the placeholder never is."""
+    if _ID_PLACEHOLDER_TEXT not in sentence:
+        return False
+    clause, removed = sentence, 1
+    while removed:
+        clause, removed = _ASIDE_RE.subn(" ", clause)
+    clause = _MAIN_CLAUSE_END_RE.split(clause, maxsplit=1)[0]
+    words = _CLAUSE_WORD_RE.findall(clause.replace(_ID_PLACEHOLDER_TEXT, " "))
+    return all(word.lower().rstrip(".!?") in _EMPTY_CLAUSE_WORDS for word in words)
+
+
+def _task_title(readme_text):
+    """The task README's first H1 line without its ``Task:`` label, or ''."""
+    for line in readme_text.splitlines():
+        match = _H1_LINE_RE.match(line.strip())
+        if match:
+            return _TASK_TITLE_LABEL_RE.sub("", match.group(1).strip()).strip()
+    return ""
+
+
+def _documentation_sentence(goal_lead, readme_text):
+    """The Documentation line for one shipped WRITER ticket: the first of
+    the Goal's lead sentence and the README's task title that is not
+    placeholder-only once scrubbed (see _is_placeholder_only), each cut to
+    one sentence with internal IDs, requirements paths and local absolute
+    paths scrubbed; when neither names its subject, a plain statement that
+    documentation shipped."""
+    for source in (goal_lead, _task_title(readme_text)):
+        if not source:
+            continue
+        sentence = _strip_internal_ids(
+            _LOCAL_PATH_RE.sub(_LOCAL_PATH_REPLACEMENT_TEXT, _lead_sentence(source))
+        )
+        if sentence and not _is_placeholder_only(sentence):
+            return sentence
+    return _DOCUMENTATION_SHIPPED_TEXT
+
+
+def shipped_documentation(tasks_dir, active_rc):
+    """Return one Documentation bullet per WRITER ticket that shipped in
+    *active_rc*, in task-folder name order.
+
+    A folder under *tasks_dir* counts when its README.md names ``## Role``
+    WRITER and a ``## Release Version`` equal to *active_rc* (read through
+    release_version.release_version_of, so ``ai_v1.2.3`` and ``1.2.3`` match
+    ``v1.2.3``), and its status.md reads ``## State`` DONE. The bullet is the
+    lead sentence of the README's ``## Goal`` (see _lead_paragraph and
+    _lead_sentence), with internal IDs, requirements paths and local
+    absolute paths scrubbed. A lead sentence that, scrubbed, names only the
+    items it cites ("Paired documentation for another item.") gives way to
+    the README's task title, scrubbed the same way, and failing that to a
+    plain statement that documentation shipped (see
+    _documentation_sentence), so no bullet is scrub placeholders alone. A
+    ticket with no Goal prose adds nothing, and a sentence already listed is
+    not listed twice. *tasks_dir* "none", empty, or not a directory lists
+    nothing."""
+    wanted = release_version_of(active_rc or "")
+    if not tasks_dir or tasks_dir == "none" or not wanted:
+        return []
+    root = pathlib.Path(tasks_dir)
+    if not root.is_dir():
+        return []
+    bullets = []
+    for task_dir in sorted(root.iterdir()):
+        readme = task_dir / "README.md"
+        status = task_dir / "status.md"
+        if not (readme.is_file() and status.is_file()):
+            continue
+        if _first_word_upper(read_state_field(str(readme), "Role")) != "WRITER":
+            continue
+        if release_version_of(read_state_field(str(readme), "Release Version")) != wanted:
+            continue
+        if _first_word_upper(read_state_field(str(status), "State")) != "DONE":
+            continue
+        try:
+            text = readme.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        lead = _lead_paragraph(_HTML_COMMENT_RE.sub("", _parse_section_outside_fences(text, "Goal")))
+        if not lead:
+            continue
+        sentence = _documentation_sentence(lead, text)
+        bullet = _bullet(sentence)
+        if sentence and bullet not in bullets:
+            bullets.append(bullet)
+    return bullets
+
+
+# A Markdown table separator cell ("---", ":--:").
+_TABLE_SEPARATOR_CELL_RE = re.compile(r"^:?-+:?$")
+# A cell boundary: a '|' the Bugs Skipped renderer did not escape.
+_TABLE_CELL_SPLIT_RE = re.compile(r"(?<!\\)\|")
+# The lowest severity rank (defer_posture.severity_rank) Known Issues lists.
+_KNOWN_ISSUE_MIN_RANK = severity_rank("medium")
+
+
+def _table_rows(block):
+    """The data rows of the Markdown table in *block*, each a list of its
+    cells with '\\|' unescaped. Rows above the last separator line (the
+    header) are dropped; a block with no separator is all data rows."""
+    rows = []
+    for line in block.splitlines():
+        stripped = line.strip()
+        if not stripped.startswith("|"):
+            continue
+        cells = [cell.strip().replace("\\|", "|")
+                 for cell in _TABLE_CELL_SPLIT_RE.split(stripped.strip("|"))]
+        if all(_TABLE_SEPARATOR_CELL_RE.match(cell) for cell in cells if cell):
+            rows = []  # everything so far was the header
+            continue
+        rows.append(cells)
+    return rows
+
+
+def known_bugs_issues(bugs_skipped_block):
+    """Return the Known Issues lines for a KNOWN-BUGS release, built from
+    its rendered Bugs Skipped table, or [] when the table has no rows.
+
+    Every row rated medium or higher -- or carrying a severity that names no
+    recognised rung, which cannot be shown to be low -- becomes one bullet:
+    its substance, its public ID in bold ahead of it when one is disclosed,
+    and its severity. When every row is rated low, one sentence points at
+    the table instead. Cells come from the table as given; the Bugs Skipped
+    renderer already scrubbed them."""
+    rows = [row for row in _table_rows(bugs_skipped_block) if row and row[0]]
+    if not rows:
+        return []
+    bullets = []
+    for row in rows:
+        substance = row[0]
+        public_id = row[1] if len(row) > 1 else ""
+        severity = row[2] if len(row) > 2 else ""
+        rank = severity_rank(severity)
+        if rank is not None and rank < _KNOWN_ISSUE_MIN_RANK:
+            continue
+        rating = f"severity {severity.lower()}" if rank is not None else "severity not rated"
+        if public_id and public_id.lower() != "internal-only":
+            bullets.append(f"- **{public_id}** — {substance} ({rating})")
+        else:
+            bullets.append(f"- {substance} ({rating})")
+    if not bullets:
+        return ["This release ships with low-severity bugs unfixed; the Bugs "
+                "Skipped table above lists them."]
+    return ["This release ships with known bugs that did not block shipping. "
+            "Each is listed under Bugs Skipped above and tracked for a fix in "
+            "a later release:"] + bullets
+
+
+def collect_sections(bundle_file_arg, repo_root, merge_base, rc_branch,
+                     tasks_dir="none", active_rc=""):
     """Return ``{section name: [bullet, ...]}`` for every name in
     SECTION_ORDER, filled from the bundle file (a path, or "none") or, when
     no bundle supplied any item, from the RC branch's commit subjects since
     *merge_base* (a sha, or "none"). Commit subjects that only record RC
     bookkeeping ("Set Active RC...", "Sync release-state...") are left out.
+    Documentation then gains the WRITER tickets under *tasks_dir* that
+    shipped in *active_rc* (see shipped_documentation), whichever source
+    filled the rest.
     """
     sections = {s: [] for s in SECTION_ORDER}
 
@@ -433,20 +650,14 @@ def collect_sections(bundle_file_arg, repo_root, merge_base, rc_branch):
         bundle_path = pathlib.Path(bundle_file_arg)
         if bundle_path.exists():
             bundle_text = bundle_path.read_text(encoding="utf-8")
-            # Find ## Bundled Items section
-            b_lines = bundle_text.splitlines()
-            in_bundled = False
+            # The ## Bundled Items section, read the way lib/bundle_items
+            # parse_bundled_item_paths reads it (a '###' line ends the list).
+            bundled = read_section(bundle_text, "Bundled Items", end_at_subheading=True) or ""
             item_paths = []
-            for line in b_lines:
-                if re.match(r"^\s*##\s+Bundled Items\s*$", line, re.IGNORECASE):
-                    in_bundled = True
-                    continue
-                if in_bundled:
-                    if re.match(r"^\s*##", line):
-                        break
-                    m = re.search(r"\(\`([^`]+)\`\)", line)
-                    if m:
-                        item_paths.append(m.group(1).strip())
+            for line in bundled.splitlines():
+                m = re.search(r"\(\`([^`]+)\`\)", line)
+                if m:
+                    item_paths.append(m.group(1).strip())
             if item_paths:
                 bundle_used = True
                 for item_path in item_paths:
@@ -486,6 +697,10 @@ def collect_sections(bundle_file_arg, repo_root, merge_base, rc_branch):
             except OSError:
                 pass
 
+    for bullet in shipped_documentation(tasks_dir, active_rc):
+        if bullet not in sections["Documentation"]:
+            sections["Documentation"].append(bullet)
+
     return sections
 
 
@@ -493,7 +708,10 @@ def render_notes(project_name, active_rc, release_date, status, sections,
                  known_issue_block="", bugs_skipped_block=""):
     """Return the release-notes file text: title, date, Status, then every
     section in SECTION_ORDER, each followed by one blank line. A section
-    with no bullets reads "None"; Upgrade Notes always reads "None"."""
+    with no bullets reads "None"; Upgrade Notes always reads "None". Known
+    Issues follows *status*: the warning and *known_issue_block* for
+    NON-FUNCTIONAL and KNOWN-ISSUE, the open rows of *bugs_skipped_block*
+    for KNOWN-BUGS (see known_bugs_issues), "None" otherwise."""
     lines_out = []
     lines_out.append(f"# Release Notes: {project_name} {active_rc}")
     lines_out.append("")
@@ -540,6 +758,8 @@ def render_notes(project_name, active_rc, release_date, status, sections,
                         "- An unresolved defect (internal-only, not yet "
                         "disclosed) — No workaround available."
                     )
+            elif status == "KNOWN-BUGS" and known_bugs_issues(bugs_skipped_block):
+                lines_out.extend(known_bugs_issues(bugs_skipped_block))
             else:
                 lines_out.append("None")
         else:
@@ -555,7 +775,8 @@ def render_notes(project_name, active_rc, release_date, status, sections,
 
 def generate_release_notes(bundle_file_arg, repo_root, active_rc, status,
                            release_date, project_name, merge_base, rc_branch,
-                           known_issue_block="", bugs_skipped_block=""):
+                           known_issue_block="", bugs_skipped_block="",
+                           tasks_dir="none"):
     """Write REPO_ROOT/release-notes/ACTIVE_RC.md (creating release-notes/
     first) and return its path. Arguments are the CLI's positional
     arguments, in the same order (see the module docstring)."""
@@ -563,7 +784,8 @@ def generate_release_notes(bundle_file_arg, repo_root, active_rc, status,
     out_dir.mkdir(parents=True, exist_ok=True)
     out_file = out_dir / f"{active_rc}.md"
 
-    sections = collect_sections(bundle_file_arg, repo_root, merge_base, rc_branch)
+    sections = collect_sections(bundle_file_arg, repo_root, merge_base, rc_branch,
+                                tasks_dir=tasks_dir, active_rc=active_rc)
     out_file.write_text(
         render_notes(project_name, active_rc, release_date, status, sections,
                      known_issue_block, bugs_skipped_block),
@@ -576,7 +798,7 @@ _REQUIRED_ARGS = 8
 _USAGE = (
     "usage: python3 -m pgai_agent_kanban.cm.release_notes_generator "
     "BUNDLE_FILE REPO_ROOT ACTIVE_RC STATUS RELEASE_DATE PROJECT_NAME "
-    "MERGE_BASE RC_BRANCH [KNOWN_ISSUE_BLOCK [BUGS_SKIPPED_BLOCK]]"
+    "MERGE_BASE RC_BRANCH [KNOWN_ISSUE_BLOCK [BUGS_SKIPPED_BLOCK [TASKS_DIR]]]"
 )
 
 
@@ -597,8 +819,9 @@ def main(argv=None):
         return 2
     known_issue_block = args[8] if len(args) > 8 else ""
     bugs_skipped_block = args[9] if len(args) > 9 else ""
+    tasks_dir = args[10] if len(args) > 10 else "none"
     active_rc = args[2]
-    generate_release_notes(*args[:8], known_issue_block, bugs_skipped_block)
+    generate_release_notes(*args[:8], known_issue_block, bugs_skipped_block, tasks_dir)
     print(f"  Release notes written to: release-notes/{active_rc}.md", flush=True)
     return 0
 

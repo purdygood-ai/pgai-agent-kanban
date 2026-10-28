@@ -27,6 +27,14 @@ team/scripts/lib/overwatch-checks/) for Anti-pattern 2 violations including bare
 mktemp and bare mktemp -d calls that bypass the framework temp-dir helpers.  This
 prevents regressions of the bare-/tmp and hardcoded-temp-path anti-pattern class.
 
+  AP3 — Literal temp root outside the resolver
+      Any occurrence of the framework's default temp root spelled out as a
+      literal, outside the files that define it (the bash wrapper temp.sh,
+      the Python resolver temp_root.py, conftest.py, and this lint).  AP3
+      runs on every scanned file: the test tree, the runtime script
+      directories, and the Python package directories (team/pgai_agent_kanban/
+      by default, walked recursively and checked for AP3 alone).
+
   Anti-pattern 6 — Bug-provenance test names
       A test function is named with a bug-ID suffix (e.g.
       ``test_foo_bug0248``, ``test_bar_BUG_0009``, or ``test_baz_Bug123``).
@@ -77,11 +85,24 @@ Scope: Anti-patterns 3, 4, 5 (order-dependent state, production-coupling, and
 side-effect-leaking tests) require semantic judgment that static analysis cannot
 reliably provide and are explicitly out of scope for this linter.
 
+Findings
+--------
+CONVERT (quality class, team/SOP-core.md "Gates and Refusals"): an
+anti-pattern is a test-authoring defect with zero runtime-failure risk, so
+it is reported and the run continues.  Each finding prints in full and,
+with --findings-file, is written as one object of a JSON array (the shape
+pgai_agent_kanban.lint.findings defines: lint, severity, summary, cause,
+remedy, file, line, plus ``code`` -- AP1, AP2, AP3, AP6, AP7 or AP8, or
+``read-error`` for a file that could not be read).  The gated runners merge
+that array per instance with gated_runner_merge_findings_file; a targeted
+``--files`` run fails on any entry in it.
+
 Exit codes
 ----------
-  0   No findings; all checks passed.
-  1   One or more findings; see stdout for per-finding messages.
-  2   Usage error or internal failure.
+  0   The lint ran, whatever it found (each finding is printed and, with
+      --findings-file, recorded).
+  2   Usage error: a malformed --files request, or a tests directory that
+      does not exist.
 
 Opt-out
 -------
@@ -107,27 +128,40 @@ Usage
 -----
   python3 scripts/lint_test_anti_patterns.py [--tests-dir PATH]
                                               [--scripts-dirs PATH [PATH ...]]
+                                              [--package-dirs PATH [PATH ...]]
+                                              [--findings-file PATH]
                                               [--verbose]
-  python3 scripts/lint_test_anti_patterns.py --files PATH [PATH ...] [--verbose]
+  python3 scripts/lint_test_anti_patterns.py --files PATH [PATH ...]
+                                              [--findings-file PATH] [--verbose]
 
   --tests-dir    PATH       Directory to scan for test anti-patterns (default:
                             team/tests/ relative to repo root inferred from
                             this script's location).
-  --scripts-dirs PATH ...   Runtime script directories to scan for AP2 only
-                            (default: team/scripts/, team/scripts/lib/,
-                            team/scripts/lib/overwatch-checks/ relative to repo
-                            root).  Pass an empty string to disable runtime
-                            scanning.
+  --scripts-dirs PATH ...   Runtime script directories to scan for AP2 and
+                            AP3 (default: team/scripts/, team/scripts/lib/,
+                            team/scripts/lib/overwatch-checks/ and
+                            team/verification/ relative to repo root).  Pass
+                            an empty string to disable runtime scanning.
+  --package-dirs PATH ...   Python package directories to scan, recursively,
+                            for AP3 only (default: team/pgai_agent_kanban/
+                            beside this script's directory).  Pass no paths
+                            to disable package scanning.
   --files PATH ...          Named-file mode: scan exactly these test files
                             with every test-file check (AP1, AP2, AP3, AP6,
                             AP7, AP8) and nothing else -- no tests-directory
-                            walk and no runtime-script scan.  A named file is
+                            walk, no runtime-script scan and no package
+                            scan.  A named file is
                             scanned even if it sits under a fixtures/
                             directory, because naming it is explicit.  Each
                             path must be an existing file; a missing path is a
                             usage error (exit 2).  Cannot be combined with
-                            --tests-dir or --scripts-dirs.  Without --files
+                            --tests-dir, --scripts-dirs or --package-dirs.
+                            Without --files
                             the whole-tree default above is unchanged.
+  --findings-file PATH      Write the findings as a JSON array to PATH
+                            (parent directories created; written even when
+                            empty, so a reader can tell "ran clean" from
+                            "did not run").  Findings print either way.
   --verbose                 Emit each scanned file name before processing.
 
 Examples
@@ -144,34 +178,51 @@ Examples
   # Scan only the named test files (e.g. for a targeted test run):
   python3 team/scripts/lint_test_anti_patterns.py \\
       --files team/tests/unit/test_semver.py team/tests/unit/test_skip_bug_citation_scan.py
+
+  # Record findings for a downstream merge:
+  python3 team/scripts/lint_test_anti_patterns.py \\
+      --findings-file "${PGAI_AGENT_KANBAN_TEMP_DIR}/lint/test_anti_patterns.json"
 """
 
 from __future__ import annotations
 
 import argparse
-import os
 import re
 import shlex
 import sys
 from pathlib import Path
 
 # ---------------------------------------------------------------------------
-# Temp-root basename — resolved from PGAI_AGENT_KANBAN_TEMP_DIR at import time.
+# Temp-root basename — taken from the temp root resolver at import time.
 #
 # The linter self-exempts lines that define the temp-root constant itself
 # (e.g. in temp.sh or the conftest resolver) from the bare-/tmp AP2 checks.
 # That exemption uses a negative lookahead on the basename of the configured
 # temp root so the exclusion follows an operator-configured rename automatically.
 #
-# Resolution order:
-#   1. PGAI_AGENT_KANBAN_TEMP_DIR env var (if set and non-empty): use its basename.
-#   2. Fallback: "pgai_kanban_tmp" — the default root baked into temp.sh.
+# The root comes from pgai_agent_kanban.lib.temp_root.resolve_temp_root
+# (PGAI_AGENT_KANBAN_TEMP_DIR, then kanban.cfg [paths], then the resolver's
+# own fallback); only its last path component is used here.  The resolver,
+# the finding shape and the error-contract emitter live in the team package
+# beside scripts/; this script is run directly as well as imported, so the
+# package root is put on sys.path from this file's own location before the
+# import.
 # ---------------------------------------------------------------------------
 
-_env_temp_dir = os.environ.get("PGAI_AGENT_KANBAN_TEMP_DIR", "").strip()
-_TEMP_ROOT_BASENAME: str = (
-    Path(_env_temp_dir).name if _env_temp_dir else "pgai_kanban_tmp"
+_TEAM_DIR = Path(__file__).resolve().parent.parent  # team/ (install root when installed)
+if str(_TEAM_DIR) not in sys.path:
+    sys.path.insert(0, str(_TEAM_DIR))
+from pgai_agent_kanban.lib.error_contract import emit_error_contract  # noqa: E402
+from pgai_agent_kanban.lib.temp_root import resolve_temp_root  # noqa: E402
+from pgai_agent_kanban.lint.findings import (  # noqa: E402
+    display_path,
+    quality_finding,
+    write_findings_file,
 )
+
+_LINT_NAME = "test_anti_patterns"
+
+_TEMP_ROOT_BASENAME: str = Path(resolve_temp_root()).name
 
 # ---------------------------------------------------------------------------
 # Opt-out marker patterns (searched in the N lines BEFORE a flagged line)
@@ -250,7 +301,7 @@ _AP2_PY_MAKEDIRS: re.Pattern[str] = re.compile(
 #   test_dir = "/tmp/some_framework_dir"
 #
 # The ONLY exclusion is the self-reference to the configured temp-root basename
-# (resolved from PGAI_AGENT_KANBAN_TEMP_DIR, defaulting to pgai_kanban_tmp) so
+# (_TEMP_ROOT_BASENAME, from the temp root resolver; pgai_kanban_tmp by default) so
 # the linter does not flag the temp-root constant definition itself (e.g. in
 # temp.sh or the conftest resolver).  All other bare-/tmp names — including
 # "fake*", "stub*", "test*", "mock*", "placeholder*", "example*", and "dummy*"
@@ -295,8 +346,8 @@ _AP2_SH_REDIRECT: re.Pattern[str] = re.compile(
 # open('/tmp/err', 'a') that create files directly in /tmp without routing
 # through PGAI_AGENT_KANBAN_TEMP_DIR.
 #
-# The negative lookahead excludes the configured temp-root basename (resolved
-# from PGAI_AGENT_KANBAN_TEMP_DIR, defaulting to pgai_kanban_tmp) for
+# The negative lookahead excludes the configured temp-root basename
+# (_TEMP_ROOT_BASENAME, pgai_kanban_tmp by default) for
 # consistency with the other patterns.
 #
 # Flagged:
@@ -509,21 +560,29 @@ _AP2_SH_BARE_MKTEMP_D: re.Pattern[str] = re.compile(
 # ---------------------------------------------------------------------------
 #
 # AP3 flags any occurrence of the literal "/tmp/pgai_kanban_tmp" in source
-# files, indicating a caller that bypasses the temp.sh resolver rather than
-# routing through PGAI_AGENT_KANBAN_TEMP_DIR.  It keeps every caller on the
-# resolver: no literal may appear in scripts or tests outside the permitted
-# locations below.
+# files, indicating a caller that bypasses the temp root resolver rather than
+# calling it.  It keeps every caller on the resolver: no literal may appear in
+# scripts, package modules or tests outside the permitted locations below.
 #
-# The ONLY permitted locations are:
-#   1. team/scripts/lib/temp.sh          — the resolver's own hard fallback
-#   2. team/scripts/lint_test_anti_patterns.py  — this file's regex patterns
+# AP3 runs on every file the lint scans: the test tree, the runtime script
+# directories, and the Python package directories (team/pgai_agent_kanban/
+# by default, walked recursively and checked for AP3 alone).
 #
-# Those two files are whitelisted by filename.  All other files that contain
-# the literal (except when an opt-out marker is present) produce an AP3 finding.
+# The permitted locations, whitelisted by filename:
+#   1. team/scripts/lib/temp.sh                — the bash wrapper's hard fallback
+#   2. team/pgai_agent_kanban/lib/temp_root.py — the Python resolver's
+#                                                FALLBACK_TEMP_ROOT
+#   3. team/scripts/lint_test_anti_patterns.py — this file's regex patterns
+#   4. team/tests/conftest.py                  — the test suite's own fallback
 #
-# Flagged (any file except the two whitelisted names):
+# All other files that contain the literal (except when an opt-out marker is
+# present) produce an AP3 finding.
+#
+# Flagged (any file except the whitelisted names):
 #   dir="/tmp/pgai_kanban_tmp"                  # variable assignment
-#   TEMP="${PGAI_AGENT_KANBAN_TEMP_DIR:-/tmp/pgai_kanban_tmp}"  # fallback in caller
+#   TEMP="${PGAI_AGENT_KANBAN_TEMP_DIR:-/tmp/pgai_kanban_tmp}"  # hand-read fallback in a caller
+#                                               # (use pgai_temp_dir / pgai_mktemp_d, or
+#                                               # resolve_temp_root() in Python, instead)
 #   # fallback /tmp/pgai_kanban_tmp             # even in a comment
 #
 # NOT flagged:
@@ -537,23 +596,19 @@ _AP3_LITERAL_PATTERN: re.Pattern[str] = re.compile(
     r"/tmp/pgai_kanban_tmp"
 )
 
-# Files whitelisted from AP3 — they ARE the resolver, the lint rule itself,
-# or the unit test that exercises the AP3 rule (which must contain the literal
-# as test data / documentation; analogous to how conftest.py is whitelisted
-# from AP2's un-rooted mkdtemp check).
+# Files whitelisted from AP3 — they ARE a resolver or the lint rule itself.
+# A test that needs the literal as data assembles it from fragments instead
+# ("/tmp/" + "pgai_kanban_tmp"), so no test file is named here.
 _AP3_FILE_WHITELIST: frozenset[str] = frozenset({
+    # The bash temp root wrapper; its last-resort fallback is the literal.
     "temp.sh",
+    # The Python temp root resolver; FALLBACK_TEMP_ROOT is the literal, and
+    # every other Python caller imports it from there.
+    "temp_root.py",
     "lint_test_anti_patterns.py",
-    "test_lint_hardcoded_tmp_guard.py",
-    # test_lint_tempdir_env_resolution.py exercises the temp-dir basename
-    # resolution logic.  Its docstrings and test data necessarily reference the
-    # default basename as documentation; it is whitelisted for the same reason
-    # as test_lint_hardcoded_tmp_guard.py.
-    "test_lint_tempdir_env_resolution.py",
-    # conftest.py defines _PGAI_DEFAULT_TEMP_ROOT — the Python-side resolver
-    # fallback that mirrors temp.sh's shell-layer hard fallback.  Both serve
-    # the identical purpose (ensuring the no-env-var branch never lands in
-    # bare /tmp) and are equally legitimate.
+    # conftest.py defines _PGAI_DEFAULT_TEMP_ROOT — the test suite's own
+    # fallback that mirrors the resolver's.  Both serve the identical purpose
+    # (ensuring the no-env-var branch never lands in bare /tmp).
     "conftest.py",
 })
 
@@ -956,20 +1011,20 @@ def _check_ap2_sh(filepath: Path, lines: list[str]) -> list[str]:
         (
             _AP2_SH_MKDIR,
             "Hardcoded /tmp path in mkdir. "
-            "Use mktemp -d -p \"${PGAI_AGENT_KANBAN_TEMP_DIR:-/tmp}\" test.XXXXXX "
-            "plus a trap EXIT for cleanup. "
+            "Source scripts/lib/temp.sh and use d=\"$(pgai_mktemp_d test)\" (a directory "
+            "under the framework temp root) plus a trap EXIT for cleanup. "
             "Opt out with: '# anti-pattern-allowlist: 2 (justification: ...)'",
         ),
         (
             _AP2_SH_VAR_ASSIGN,
             "Hardcoded /tmp path in variable assignment. "
-            "Use TMPDIR=$(mktemp -d -p \"${PGAI_AGENT_KANBAN_TEMP_DIR:-/tmp}\" test.XXXXXX). "
+            "Source scripts/lib/temp.sh and use TMPDIR=\"$(pgai_mktemp_d test)\". "
             "Opt out with: '# anti-pattern-allowlist: 2 (justification: ...)'",
         ),
         (
             _AP2_SH_HOME_MKDIR,
             "Hardcoded $HOME or /home/user path in mkdir. "
-            "Use mktemp -d or PGAI_AGENT_KANBAN_TEMP_DIR. "
+            "Source scripts/lib/temp.sh and use \"$(pgai_mktemp_d test)\". "
             "Opt out with: '# anti-pattern-allowlist: 2 (justification: ...)'",
         ),
         (
@@ -1018,22 +1073,23 @@ def _check_ap3(filepath: Path, lines: list[str]) -> list[str]:
     """Detect anti-pattern 3: hardcoded /tmp/pgai_kanban_tmp literal.
 
     Flags any line that contains the literal string ``/tmp/pgai_kanban_tmp``
-    in files that are not the resolver (temp.sh) or the lint script itself
-    (lint_test_anti_patterns.py).  It keeps every caller on the temp.sh
-    resolver: no literal may appear anywhere outside those two files.
+    in files that are not named in ``_AP3_FILE_WHITELIST``.  It keeps every
+    caller on the temp root resolver: no literal may appear anywhere else.
 
     Applies to both Python (.py) and shell (.sh) files.  Also flags comments
     and string data — any occurrence of the literal is a potential regression.
 
     Whitelisted filenames (skipped entirely):
-      - temp.sh                     — the resolver's own hard fallback
+      - temp.sh                     — the bash wrapper's hard fallback
+      - temp_root.py                — the Python resolver's FALLBACK_TEMP_ROOT
       - lint_test_anti_patterns.py  — this file's regex pattern definitions
+      - conftest.py                 — the test suite's own fallback
 
     Per-instance opt-out: place an allowed opt-out marker comment within 5
     lines BEFORE the flagged line.
     """
-    # Whitelist: the resolver and this lint script are the only permitted
-    # locations for the literal.
+    # Whitelist: the resolvers, the test suite's fallback and this lint
+    # script are the only permitted locations for the literal.
     if filepath.name in _AP3_FILE_WHITELIST:
         return []
 
@@ -1047,11 +1103,13 @@ def _check_ap3(filepath: Path, lines: list[str]) -> list[str]:
             continue
         detail = (
             "Hardcoded /tmp/pgai_kanban_tmp literal detected. "
-            "This literal must not appear outside team/scripts/lib/temp.sh "
-            "(the resolver's documented fallback). "
-            "All other callers must route through the resolver: "
-            "source team/scripts/lib/temp.sh and call $(pgai_temp_dir) or "
-            "use PGAI_AGENT_KANBAN_TEMP_DIR. "
+            "This literal must not appear outside the temp root resolvers "
+            "(team/scripts/lib/temp.sh and "
+            "team/pgai_agent_kanban/lib/temp_root.py). "
+            "All other callers must route through a resolver: in bash, "
+            "source team/scripts/lib/temp.sh and call $(pgai_temp_dir); in "
+            "Python, call pgai_agent_kanban.lib.temp_root.resolve_temp_root() "
+            "or import its FALLBACK_TEMP_ROOT. "
             "Opt out with: '# anti-pattern-allowlist: 2 (justification: ...)'"
         )
         findings.append(_finding(filepath, lineno, "AP3", detail))
@@ -1272,6 +1330,45 @@ def _scan_file(
     return findings
 
 
+def _scan_package_file(filepath: Path, verbose: bool = False) -> list[str]:
+    """Scan one Python package module for AP3 alone and return its findings.
+
+    Package modules are runtime code, not tests, and the test-file checks do
+    not apply to them; AP3 is the one check whose subject (a literal temp
+    root outside the resolver) is the same in a package module as anywhere
+    else.
+    """
+    if verbose:
+        print(f"  scanning: {filepath}", flush=True)
+
+    try:
+        text = filepath.read_text(encoding="utf-8", errors="replace")
+    except OSError as exc:
+        return [f"{filepath}: ERROR reading file: {exc}"]
+
+    return _check_ap3(filepath, text.splitlines(keepends=True))
+
+
+def _collect_package_files(package_dirs: list[Path]) -> list[Path]:
+    """Every ``*.py`` file under *package_dirs*, recursively, sorted and unique.
+
+    ``__pycache__`` and ``fixtures`` directories are skipped, as in the
+    test-tree walk.
+    """
+    found: set[Path] = set()
+    for package_dir in package_dirs:
+        if not package_dir.is_dir():
+            continue
+        found.update(
+            p
+            for p in package_dir.rglob("*.py")
+            if p.is_file()
+            and "__pycache__" not in p.parts
+            and "fixtures" not in p.parts
+        )
+    return sorted(found)
+
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -1283,11 +1380,16 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         description=(
             "Lint team/tests/ for anti-pattern 1 (pattern-scan assertion loops), "
             "anti-pattern 2 (hardcoded /tmp or $HOME paths / bare mktemp calls), "
+            "AP3 (literal temp root outside the resolver), "
             "anti-pattern 6 (bug-provenance test names), anti-pattern 7 "
             "(golden comparison + inherited subprocess environment), and "
             "anti-pattern 8 (uncontrolled absolute-path substring assertion). "
-            "Also scans runtime script directories for AP2 violations. "
+            "Also scans runtime script directories for AP2 and AP3 violations "
+            "and the Python package directories for AP3. "
             "With --files, scans only the named test files instead. "
+            "Quality class: each finding is printed (and written with "
+            "--findings-file) and the lint exits 0 whatever it finds; a usage "
+            "error exits 2. "
             "See roles/TESTER.md 'Test Authoring Guidelines' for full definitions."
         ),
     )
@@ -1305,11 +1407,25 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         nargs="*",
         default=None,
         help=(
-            "Runtime script directories to scan for AP2 violations only. "
-            "Default: team/scripts/, team/scripts/lib/, and "
-            "team/scripts/lib/overwatch-checks/ relative to the repo root. "
+            "Runtime script directories to scan for AP2 and AP3 violations. "
+            "Default: team/scripts/, team/scripts/lib/, "
+            "team/scripts/lib/overwatch-checks/ and team/verification/ "
+            "relative to the repo root. "
             "Pass no paths (--scripts-dirs with no arguments) to disable "
             "runtime script scanning."
+        ),
+    )
+    parser.add_argument(
+        "--package-dirs",
+        metavar="PATH",
+        nargs="*",
+        default=None,
+        help=(
+            "Python package directories to scan, recursively, for AP3 "
+            "(literal temp root outside the resolver) only. "
+            "Default: team/pgai_agent_kanban/ beside this script's "
+            "directory. Pass no paths (--package-dirs with no arguments) to "
+            "disable package scanning."
         ),
     )
     parser.add_argument(
@@ -1323,7 +1439,16 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "-- no tests-directory walk and no runtime-script scan. A named "
             "file is scanned even under a fixtures/ directory. Each path must "
             "be an existing file (a missing one exits 2). Cannot be combined "
-            "with --tests-dir or --scripts-dirs."
+            "with --tests-dir, --scripts-dirs or --package-dirs."
+        ),
+    )
+    parser.add_argument(
+        "--findings-file",
+        metavar="PATH",
+        default=None,
+        help=(
+            "Write the findings as a JSON array to PATH (parent directories "
+            "created; written even when empty). Findings are printed either way."
         ),
     )
     parser.add_argument(
@@ -1359,8 +1484,72 @@ def _resolve_named_files(raw_paths: list[str]) -> tuple[list[Path], list[str]]:
     return files, missing
 
 
-def _report(all_findings: list[str], test_count: int, runtime_count: int) -> int:
-    """Print the findings block or the OK line; return the process exit code."""
+# The first line of every finding string _finding() formats:
+# "<path>:<line>: [<code>] <detail>". A file that could not be read is
+# "<path>: ERROR reading file: <reason>" and carries no line or code.
+_FINDING_HEAD_RE = re.compile(r"^(?P<path>.+?):(?P<line>\d+):\s*\[(?P<code>[A-Za-z0-9]+)\]\s*(?P<detail>.*)$")
+_READ_ERROR_RE = re.compile(r"^(?P<path>.+?):\s*ERROR reading file:\s*(?P<detail>.*)$")
+
+
+def _finding_record(text: str, recheck: str) -> dict:
+    """The per-instance finding object for one finding string.
+
+    *text* is a string this module formatted (``_finding`` or a read
+    error); *recheck* is the command that re-runs the check that produced
+    it. The remedy names the file and line to edit and that command.
+    """
+    head = text.splitlines()[0] if text else ""
+    repo_root = _TEAM_DIR.parent
+    match = _FINDING_HEAD_RE.match(head)
+    if match:
+        path = match.group("path")
+        line = int(match.group("line"))
+        code = match.group("code")
+        return quality_finding(
+            _LINT_NAME,
+            head.strip(),
+            f"edit {path} at line {line} as the finding describes, or add the "
+            f"per-instance opt-out marker with a justification within "
+            f"{_OPT_OUT_WINDOW} lines above it, then re-check: {recheck}",
+            file=display_path(path, repo_root),
+            line=line,
+            code=code,
+        )
+    match = _READ_ERROR_RE.match(head)
+    path = match.group("path") if match else head
+    return quality_finding(
+        _LINT_NAME,
+        head.strip() or "unreadable file",
+        f"ls -l -- {shlex.quote(path)} && {recheck}",
+        file=display_path(path, repo_root) if match else None,
+        code="read-error",
+    )
+
+
+def _recheck_command(*args: str) -> str:
+    """This lint re-run with *args*, as a pasteable shell command."""
+    return shlex.join(["python3", str(Path(__file__).resolve()), *args])
+
+
+def _report(
+    all_findings: list[str],
+    records: list[dict],
+    test_count: int,
+    runtime_count: int,
+    package_count: int | None = None,
+    *,
+    findings_file: str | None = None,
+) -> int:
+    """Print the findings block or the OK line, write *records* to
+    *findings_file*, and return the process exit code -- 0 whatever was
+    found.
+
+    *records* holds one finding object per string in *all_findings*, in
+    the same order. *package_count* is the number of package modules
+    scanned for AP3; when None (named-file mode, which scans no package)
+    the OK line names only the test and runtime counts.
+    """
+    write_findings_file(findings_file, records, lint="lint_test_anti_patterns")
     if all_findings:
         print(
             f"\nlint_test_anti_patterns: {len(all_findings)} finding(s):\n",
@@ -1370,17 +1559,29 @@ def _report(all_findings: list[str], test_count: int, runtime_count: int) -> int
             print(finding, flush=True)
             print()  # blank line between findings
         print(
-            f"lint_test_anti_patterns: FAIL — {len(all_findings)} finding(s). "
+            f"lint_test_anti_patterns: {len(all_findings)} finding(s). "
             "Fix the issues above or add per-instance opt-out marker comments.\n"
             f"{SOP_CITATION}",
             flush=True,
         )
-        return 1
+        # CENSUS-ANCHOR: lint-test-anti-patterns-01
+        # CONVERT: a test anti-pattern is a test-authoring defect with zero
+        # runtime-failure risk -- reported per instance; returns 0.
+        emit_error_contract(
+            "lint.test-anti-patterns",
+            f"{len(all_findings)} test anti-pattern finding(s); each is listed "
+            "above with its file and line.",
+            records[0]["remedy"],
+        )
+        return 0
 
+    total = test_count + runtime_count + (package_count or 0)
+    breakdown = f"{test_count} test, {runtime_count} runtime"
+    if package_count is not None:
+        breakdown += f", {package_count} package"
     print(
         f"lint_test_anti_patterns: OK — 0 findings across "
-        f"{test_count + runtime_count} file(s) "
-        f"({test_count} test, {runtime_count} runtime).",
+        f"{total} file(s) ({breakdown}).",
         flush=True,
     )
     return 0
@@ -1389,17 +1590,22 @@ def _report(all_findings: list[str], test_count: int, runtime_count: int) -> int
 def _main_named_files(args: argparse.Namespace) -> int:
     """Named-file mode: scan exactly the --files paths as test files.
 
-    No directory is walked and no runtime script is scanned, so the cost of
+    No directory is walked and no runtime script or package module is
+    scanned, so the cost of
     a run is proportional to the files named, not to the size of the tree.
     The fixtures/ exclusion the whole-tree walk applies does not apply here:
     a caller that names a file wants that file checked.
     """
     script = str(Path(__file__).resolve())
-    if args.tests_dir or args.scripts_dirs is not None:
+    if (
+        args.tests_dir
+        or args.scripts_dirs is not None
+        or args.package_dirs is not None
+    ):
         print(
-            "ERROR: --files cannot be combined with --tests-dir or "
-            "--scripts-dirs: named-file mode scans exactly the named files "
-            "and never walks a directory.\n"
+            "ERROR: --files cannot be combined with --tests-dir, "
+            "--scripts-dirs or --package-dirs: named-file mode scans exactly "
+            "the named files and never walks a directory.\n"
             f"Run with --files alone: python3 {shlex.quote(script)} --files "
             + shlex.join(args.files),
             file=sys.stderr,
@@ -1423,17 +1629,24 @@ def _main_named_files(args: argparse.Namespace) -> int:
         flush=True,
     )
     all_findings: list[str] = []
+    records: list[dict] = []
     for filepath in named_files:
-        all_findings.extend(_scan_file(filepath, verbose=args.verbose))
+        found = _scan_file(filepath, verbose=args.verbose)
+        recheck = _recheck_command("--files", str(filepath))
+        all_findings.extend(found)
+        records.extend(_finding_record(text, recheck) for text in found)
 
-    return _report(all_findings, len(named_files), 0)
+    return _report(
+        all_findings, records, len(named_files), 0, findings_file=args.findings_file
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
     """Run the test anti-pattern lint over the test tree, or exactly ``--files``.
 
-    Exit codes: 0 no findings; 1 one or more findings (printed per finding);
-    2 usage error or internal failure, such as a missing ``--files`` path.
+    Exit codes: 0 whatever was found (each finding is printed and, with
+    ``--findings-file``, written per instance); 2 usage error, such as a
+    missing ``--files`` path or tests directory.
     """
     args = _parse_args(argv)
 
@@ -1473,10 +1686,24 @@ def main(argv: list[str] | None = None) -> int:
             script_dir,                              # team/scripts/
             script_dir / "lib",                      # team/scripts/lib/
             script_dir / "lib" / "overwatch-checks",  # team/scripts/lib/overwatch-checks/
+            script_dir.parent / "verification",      # team/verification/
         ]
         scripts_dirs: list[Path] = [d for d in _default_scripts_dirs if d.is_dir()]
     else:
         scripts_dirs = [Path(d).resolve() for d in args.scripts_dirs if d]
+
+    # -----------------------------------------------------------------------
+    # Resolve Python package directories (AP3-only, recursive scan).
+    # --package-dirs with no arguments → empty list → disable package scan.
+    # --package-dirs absent → None → the team package beside scripts/.
+    # -----------------------------------------------------------------------
+    if args.package_dirs is None:
+        _default_package_dir = script_dir.parent / "pgai_agent_kanban"
+        package_dirs: list[Path] = (
+            [_default_package_dir] if _default_package_dir.is_dir() else []
+        )
+    else:
+        package_dirs = [Path(d).resolve() for d in args.package_dirs if d]
 
     # -----------------------------------------------------------------------
     # Scan test files (AP1 + AP2).
@@ -1498,6 +1725,17 @@ def main(argv: list[str] | None = None) -> int:
         )
     test_files.sort()
 
+    # A finding's re-check command is this lint's whole-tree run over the
+    # same scope (the runtime and package scans apply checks --files does
+    # not), without --findings-file.
+    scope: list[str] = []
+    if args.tests_dir:
+        scope += ["--tests-dir", args.tests_dir]
+    if args.scripts_dirs is not None:
+        scope += ["--scripts-dirs", *args.scripts_dirs]
+    if args.package_dirs is not None:
+        scope += ["--package-dirs", *args.package_dirs]
+    recheck = _recheck_command(*scope)
     all_findings: list[str] = []
     for filepath in test_files:
         all_findings.extend(_scan_file(filepath, verbose=args.verbose))
@@ -1538,7 +1776,32 @@ def main(argv: list[str] | None = None) -> int:
             _scan_file(filepath, verbose=args.verbose, runtime_only=True)
         )
 
-    return _report(all_findings, len(test_files), len(runtime_files))
+    # -----------------------------------------------------------------------
+    # Scan Python package directories (AP3 only), recursively.  A module the
+    # test or runtime scan already covered is not scanned twice.
+    # -----------------------------------------------------------------------
+    already_scanned = test_file_set | set(runtime_files)
+    package_files = [
+        f for f in _collect_package_files(package_dirs) if f not in already_scanned
+    ]
+    if package_dirs:
+        dirs_str = ", ".join(str(d) for d in package_dirs)
+        print(
+            f"lint_test_anti_patterns: scanning package modules (AP3) in {dirs_str}",
+            flush=True,
+        )
+    for filepath in package_files:
+        all_findings.extend(_scan_package_file(filepath, verbose=args.verbose))
+
+    records = [_finding_record(text, recheck) for text in all_findings]
+    return _report(
+        all_findings,
+        records,
+        len(test_files),
+        len(runtime_files),
+        len(package_files),
+        findings_file=args.findings_file,
+    )
 
 
 if __name__ == "__main__":

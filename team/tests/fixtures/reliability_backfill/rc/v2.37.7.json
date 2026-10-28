@@ -1,0 +1,102 @@
+{
+  "blocked_minutes": 0.13,
+  "bugs_filed_during_verification": [],
+  "closed_at": "2026-10-12T05:36:40Z",
+  "input_files": {},
+  "opened_at": "2026-10-11T21:54:34Z",
+  "operator_interventions": [],
+  "outcome": "shipped",
+  "project": "pgai-agent-kanban",
+  "rc": "v2.37.7",
+  "tasks": {
+    "by_agent": {
+      "cm": 2,
+      "coder": 11,
+      "pm": 1,
+      "tester": 1,
+      "writer": 1
+    },
+    "total": 16
+  },
+  "tokens": {
+    "by_agent": {
+      "cm": {
+        "cache_read": 1881382,
+        "cache_write": 187658,
+        "input": 80,
+        "invocations": 2,
+        "output": 29993
+      },
+      "coder": {
+        "cache_read": 192487968,
+        "cache_write": 5146790,
+        "input": 2184,
+        "invocations": 12,
+        "output": 1015708
+      },
+      "pm": {
+        "cache_read": 3858042,
+        "cache_write": 177332,
+        "input": 88,
+        "invocations": 1,
+        "output": 69607
+      },
+      "tester": {
+        "cache_read": 25487366,
+        "cache_write": 595519,
+        "input": 284,
+        "invocations": 1,
+        "output": 109688
+      },
+      "writer": {
+        "cache_read": 4304676,
+        "cache_write": 160212,
+        "input": 94,
+        "invocations": 1,
+        "output": 41324
+      }
+    },
+    "by_model": {
+      "claude-opus-5-5": {
+        "cache_read": 228019434,
+        "cache_write": 6267511,
+        "input": 2730,
+        "invocations": 17,
+        "output": 1266320
+      }
+    },
+    "total": {
+      "cache_read": 228019434,
+      "cache_write": 6267511,
+      "input": 2730,
+      "invocations": 17,
+      "output": 1266320
+    }
+  },
+  "wall": {
+    "by_agent": {
+      "cm": {
+        "seconds": 275,
+        "task_count": 2
+      },
+      "coder": {
+        "seconds": 23944,
+        "task_count": 11
+      },
+      "pm": {
+        "seconds": 673,
+        "task_count": 1
+      },
+      "tester": {
+        "seconds": 2663,
+        "task_count": 1
+      },
+      "writer": {
+        "seconds": 587,
+        "task_count": 1
+      }
+    }
+  },
+  "wall_time_minutes": 462.1,
+  "workflow_type": "release"
+}

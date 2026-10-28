@@ -39,6 +39,7 @@ from typing import Optional
 
 import pytest
 from tests.fixtures.binary_guard import require_binary
+from tests.fixtures.section_reader_modules import copy_section_reader_modules
 
 
 @pytest.fixture(autouse=True)
@@ -166,6 +167,7 @@ def _build_kanban_root_for_rc(
     src_cm_dir = _KANBAN_PY_DIR / "cm"
     for py_file in src_cm_dir.glob("*.py"):
         (cm_py_dir / py_file.name).write_text(py_file.read_text(encoding="utf-8"), encoding="utf-8")
+    copy_section_reader_modules(cm_py_dir.parent)
 
     return root
 

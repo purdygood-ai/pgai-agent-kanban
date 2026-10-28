@@ -15,6 +15,9 @@ Key behaviors verified:
     outside team/templates/ and outside projects/<name>/priority/) IS flagged.
   - Correctly-placed priority files (projects/<name>/priority/PRIORITY-*.md)
     pass silently.
+  - Strict mode (CM_SQUASH_STRICT_POLLUTION_GUARD=true) HALTs on trigger 10
+    through the real cm_halt, and the HALT's error key, reason and remedy
+    also reach the project's operator inbox; warn mode writes neither.
 
 The guard logic is extracted into a standalone bash function (run_guard) that
 accepts a newline-separated list of paths on stdin and echoes each flagged
@@ -294,3 +297,79 @@ def test_mixed_path_list_flags_only_strays(tmp_path: pathlib.Path) -> None:
         f"Expected exactly {len(stray_paths)} flagged path(s), "
         f"got {len(flagged_lines)}; guard output:\n{output}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Strict mode: the trigger 10 HALT also writes the operator inbox
+# ---------------------------------------------------------------------------
+
+_SHIP_POLICY_SH = pathlib.Path("scripts/lib/cm/release_ship_policy.sh")
+_STRICT_GUARD_LINE = 'if [[ "${CM_SQUASH_STRICT_POLLUTION_GUARD:-false}" == "true" ]]; then'
+_CM_LIBS = (
+    "scripts/lib/error_contract.sh",
+    "scripts/lib/pp_run_ops.sh",
+    "scripts/lib/project_paths.sh",
+    "scripts/lib/cm/release_preflight.sh",
+)
+
+
+def _extract_strict_block() -> str:
+    """The strict-mode ``if ... fi`` block, verbatim from the live file."""
+    lines = _SHIP_POLICY_SH.read_text(encoding="utf-8").splitlines()
+    start = next(i for i, line in enumerate(lines) if line.strip() == _STRICT_GUARD_LINE)
+    indent = lines[start][: len(lines[start]) - len(lines[start].lstrip())]
+    end = next(i for i in range(start + 1, len(lines)) if lines[i] == f"{indent}fi")
+    return "\n".join(lines[start : end + 1])
+
+
+def _run_strict_block(tmp_path: pathlib.Path, strict: str) -> tuple:
+    root = tmp_path / "kanban"
+    project = root / "projects" / "demo"
+    project.mkdir(parents=True)
+    (root / "tmp").mkdir()
+    (project / "release-state.md").write_text("# Release State\n\n## Active RC\nv1.2.3\n", encoding="utf-8")
+    sources = "\n".join(f"source {lib}" for lib in _CM_LIBS)
+    script = (
+        "set -uo pipefail\n"
+        f"{sources}\n"
+        "PROJECT_NAME=demo\nACTIVE_RC=v1.2.3\nRC_BRANCH=ai_rc/v1.2.3\n"
+        f"PROJECT_HALT_FILE={str(project / 'HALT')!r}\n"
+        f"RELEASE_STATE={str(project / 'release-state.md')!r}\n"
+        "_guard_flagged=('artifacts/stray.md  [stray: repo-root artifacts/]')\n"
+        f"{_extract_strict_block()}\n"
+        "echo 'guard: continued'\n"
+    )
+    env = {
+        "KANBAN_ROOT": str(root),
+        "PGAI_AGENT_KANBAN_ROOT_PATH": str(root),
+        "PGAI_AGENT_KANBAN_TEMP_DIR": str(root / "tmp"),
+        "PGAI_PROJECT_ROOT": "",
+        "PGAI_TASKS_DIR": "",
+        "CM_SQUASH_STRICT_POLLUTION_GUARD": strict,
+    }
+    return run_bash(tmp_path, script, extra_env=env, timeout=60), project
+
+
+def test_strict_mode_halt_writes_one_inbox_entry_with_the_halt_triple(tmp_path: pathlib.Path) -> None:
+    result, project = _run_strict_block(tmp_path, "true")
+
+    assert result.returncode == 1, result.stderr
+    halt = (project / "HALT").read_text(encoding="utf-8")
+    key = "cm-release.trigger-10.pollution-guard-strict"
+    assert f"# halt-reason: {key}" in halt, halt
+    message = next(l for l in halt.splitlines() if l.startswith("# message: ")).removeprefix("# message: ")
+    remedy = next(l for l in halt.splitlines() if l.startswith("# remedy:  ")).removeprefix("# remedy:  ")
+    text = (project / "operator-inbox.md").read_text(encoding="utf-8")
+    assert text.count("### INBOX-") == 1, text
+    entry = text.replace("\n  ", "\n")
+    assert key in entry and message in entry and f"Remedy: {remedy}" in entry, entry
+    assert "guard: continued" not in result.stdout
+
+
+def test_warn_mode_writes_no_halt_and_no_inbox_entry(tmp_path: pathlib.Path) -> None:
+    result, project = _run_strict_block(tmp_path, "false")
+
+    assert result.returncode == 0, result.stderr
+    assert "guard: continued" in result.stdout
+    assert not (project / "HALT").exists()
+    assert not (project / "operator-inbox.md").exists()

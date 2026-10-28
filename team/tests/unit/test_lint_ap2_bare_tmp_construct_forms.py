@@ -185,3 +185,20 @@ def test_real_litter_check_module_has_zero_ap2_findings() -> None:
         "Unexpected AP2 findings in the shipped litter-check test module:\n"
         + "\n".join(findings)
     )
+
+
+def test_shell_remedies_recommend_the_temp_helpers_not_a_hand_read_idiom() -> None:
+    """Each bash AP2 remedy points at pgai_mktemp_d, never at a hand-read
+    ${PGAI_AGENT_KANBAN_TEMP_DIR:-...} or a bare mktemp -d -- forms the
+    lint's own AP3 and AP2 checks flag."""
+    lines = [
+        f"mkdir -p {_TMP}fixture-dir\n",
+        f"SCRATCH={_TMP}fixture-dir\n",
+        "mkdir -p $HOME/fixture-dir\n",
+    ]
+    findings = _lint._check_ap2_sh(Path("seeded.sh"), lines)
+    assert len(findings) == 3, findings
+    for finding in findings:
+        assert "pgai_mktemp_d" in finding, finding
+        assert "PGAI_AGENT_KANBAN_TEMP_DIR:-" not in finding, finding
+        assert "mktemp -d -p" not in finding and "Use mktemp -d or" not in finding, finding

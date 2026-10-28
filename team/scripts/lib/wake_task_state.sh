@@ -33,7 +33,7 @@
 # _read_status_section, get_first_pending_task, get_state,
 # normalize_status_file, set_block, set_state_or_insert, set_block_or_append,
 # block_task_with_record, block_task_with_unreadable_state,
-# stamp_model_field, mark_backlog, _promote_mark_pending,
+# stamp_model_field, mark_backlog, _promote_mark_pending, wake_queue_write,
 # promote_waiting_to_backlog, promote_blocked_to_backlog,
 # _blocked_check_active_rc, recheck_waiting_tasks,
 # recheck_blocked_tasks, task_liveness_record_path, task_liveness_record,
@@ -61,7 +61,9 @@
 # Python: this file carries no inline Python. Every status.md and queue
 # read or rewrite is a call into the shared modules through pp_run_ops
 # (pp_run_ops.sh, self-sourced below unless the caller already defines it):
-#   pgai_agent_kanban.task_status  read --raw (section bodies), render
+#   pgai_agent_kanban.task_status  read (section bodies, through
+#                                  read_md_field — md_field.sh, loaded by
+#                                  wake_task_id_gate.sh below), render
 #                                  (section rewrites, blank-line collapse,
 #                                  ## Model upsert)
 #   pgai_agent_kanban.ops          render_marker / get_markers (queue
@@ -144,24 +146,26 @@ EOF
 }
 
 # _status_section_re <heading_re> — print the section regex (re.M only)
-# whose body boundary the bash libs' remaining inline status.md readers
-# share — heading line, then body lines none starting with "##" — so an
-# empty body reads empty, never as the next section. Group 2 is the body.
-# <heading_re> is a regex ('## State', or '##[^\S\n]+State' for any inner
-# spacing); trailing "\r" is accepted so CRLF files read. The readers and
-# writers in this file go through pgai_agent_kanban.task_status instead;
-# this stays as the reference boundary those other readers are checked
-# against.
+# whose body boundary is heading line, then body lines none starting with
+# "##" — so an empty body reads empty, never as the next section. Group 2
+# is the body. <heading_re> is a regex ('## State', or '##[^\S\n]+State'
+# for any inner spacing); trailing "\r" is accepted so CRLF files read.
+# No reader here uses it: every section read goes through read_md_field
+# (md_field.sh) and every write through pgai_agent_kanban.task_status. It
+# stays as the reference boundary the parity tests' heredoc fixture
+# (tests/fixtures/wake_task_state_heredoc_reference.sh) builds its readers
+# from.
 _status_section_re() {
   printf '%s' "(^${1}"'[^\S\n]*)((?:\n(?!##)[^\n]*)*?)(\n+##|\n*\Z)'
 }
 
 # _read_status_section <status_file> <heading> — print the ## <heading>
 # section body, stripped (empty for an empty body); return non-zero, printing
-# nothing, when the heading is absent. <heading> is the bare name ('State',
-# 'Needs Human'); the shared reader matches it with any spacing or case.
+# nothing, when the heading is absent (3) or the file cannot be read (1).
+# <heading> is the bare name ('State', 'Needs Human'); read_md_field matches
+# it with the status.md reading (any spacing or case).
 _read_status_section() {
-  pp_run_ops pgai_agent_kanban.task_status read "$1" --section="$2" --raw
+  read_md_field "$1" "$2"
 }
 
 # Serves the first [ ]/[B] entry whose ## State reads BACKLOG. A task with no
@@ -169,7 +173,11 @@ _read_status_section() {
 # stage's own state check blocks it (block_task_with_unreadable_state)
 # instead of the scan skipping it. Returns 1 when nothing is pending, and
 # also -- logging the scan's exit code -- when the scan itself fails.
+# OVERWATCH is served nothing: it keeps no queue and never dispatches a
+# model (its decisions are code -- pgai_agent_kanban.overwatch.decide, run by
+# overwatch-sweep.sh), so a leftover OVERWATCH queue file is never read.
 get_first_pending_task() {
+  [[ "${AGENT:-}" != "overwatch" ]] || return 1
   _narrate_malformed_queue_task_ids "$BACKLOG" ' B' "pending-task scan"
   local task_id scan_exit=0
   task_id="$(pp_run_ops pgai_agent_kanban.ops scan_queue \
@@ -335,6 +343,21 @@ _promote_mark_pending() {
   return 0
 }
 
+# --- wake_queue_write <task|none> <description> <command> [args...] ---
+# Run one re-check or intake-census write. In a wake chain the idle-pass
+# stage (wake_driver_idle.sh) decides the lock: wd_queue_write_under_lock
+# retakes the repo lock for the write when the chain has released it, and
+# returns 75, the write not made, when it cannot. Where that stage is not
+# loaded (a harness, a unit test) <command> runs as-is. Returns its status.
+wake_queue_write() {
+  if declare -F wd_queue_write_under_lock >/dev/null 2>&1; then
+    wd_queue_write_under_lock "$@"
+    return
+  fi
+  shift 2
+  "$@"
+}
+
 # promote_waiting_to_backlog <task_id> <status_file> — requires a [W] or
 # [ ] $BACKLOG line for <task_id> (refusing "Could not find [W] or [ ] queue
 # entry for <task_id>", writing nothing, otherwise); sets ## State BACKLOG,
@@ -447,9 +470,11 @@ recheck_waiting_tasks() {
       log "WAITING task ${task_id}: prerequisites satisfied, promoting to BACKLOG"
       local promote_exit=0
       set +e
-      promote_waiting_to_backlog "$task_id" "$task_status"
+      wake_queue_write "$task_id" "WAITING promotion of ${task_id}" \
+        promote_waiting_to_backlog "$task_id" "$task_status"
       promote_exit=$?
       set -e
+      [[ $promote_exit -ne 75 ]] || continue  # not written: the repo lock was unavailable
       if [[ $promote_exit -ne 0 ]]; then
         log "WARNING: atomic promotion failed for ${task_id}; skipping (no partial update)"
         continue
@@ -566,9 +591,11 @@ recheck_blocked_tasks() {
       log "BLOCKED task ${task_id}: blocker cleared (${cleared_desc}), promoting to BACKLOG"
       local promote_exit=0
       set +e
-      promote_blocked_to_backlog "$task_id" "$task_status" "$cleared_desc"
+      wake_queue_write "$task_id" "BLOCKED promotion of ${task_id}" \
+        promote_blocked_to_backlog "$task_id" "$task_status" "$cleared_desc"
       promote_exit=$?
       set -e
+      [[ $promote_exit -ne 75 ]] || continue  # not written: the repo lock was unavailable
       if [[ $promote_exit -ne 0 ]]; then
         log "WARNING: atomic promotion failed for ${task_id}; skipping (no partial update)"
         continue

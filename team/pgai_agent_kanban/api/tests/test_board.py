@@ -20,13 +20,25 @@ Two suites:
    - This is the load-bearing artifact: it ensures a future edit to either the
      board handler or the classifier module does not silently diverge.
 
+3. **HALT state** (``TestBoardHaltState``):
+   - ``projects[].halt`` / ``halt_text`` equal
+     ``dashboard.halt_state.halt_flag_and_text`` for a kanban-wide HALT, a
+     project HALT-AFTER, and no sentinel.
+   - A kanban-wide HALT-AFTER drains every project with no sentinel of its
+     own and no kanban-wide HALT (``effective_halt_flag_and_text``), under
+     the HALT precedence.
+   - On the golden board, ``projects[]`` reports what GET /dashboard/header
+     draws on its ``chain=`` line (``tests.fixtures.halt_header``).
+
 Design notes
 ------------
 - All tests use FastAPI's TestClient (ASGI transport, no real port).
 - Fixtures are materialised under pytest's tmp_path (routed through the
   framework temp root by conftest.py).
 - No bare /tmp paths.
-- Tests are hermetic: no live kanban state, no shell-outs.
+- Tests are hermetic: no live kanban state, and no shell-outs except the
+  dashboard-header comparison, which runs show-header.sh on a throwaway
+  golden board.
 """
 
 from __future__ import annotations
@@ -51,6 +63,14 @@ from pgai_agent_kanban.board import (
     read_task_state_from_status_md,
     COLUMN_ORDER,
 )
+from tests.fixtures.golden_board import PROJECT_NAME as GOLDEN_PROJECT
+from tests.fixtures.halt_header import (
+    HEADER_HALT_CASES,
+    build_halt_board,
+    header_halt_pair,
+    write_sentinels,
+)
+from tests.fixtures.route_cli_parity import build_api_client
 
 # ---------------------------------------------------------------------------
 # Fixture constants
@@ -763,3 +783,135 @@ class TestBoardClassifierParity:
             f"Fixture does not exercise all required status classes. "
             f"Missing: {missing}. Found: {statuses_found}"
         )
+
+
+# ---------------------------------------------------------------------------
+# TestBoardHaltState -- projects[].halt / halt_text are the dashboard's pair
+# ---------------------------------------------------------------------------
+
+# (sentinel files to create, relative to the fixture kanban root;
+#  expected (halt, halt_text) per project)
+_HALT_CASES = [
+    pytest.param(
+        {"HALT": "halted\n"},
+        {_PROJECT_ALPHA: (True, "HALT"), _PROJECT_BETA: (True, "HALT")},
+        id="kanban-wide-halt-halts-every-project",
+    ),
+    pytest.param(
+        {f"projects/{_PROJECT_ALPHA}/HALT-AFTER": "rc\n"},
+        {_PROJECT_ALPHA: (False, "HALT-AFTER rc"), _PROJECT_BETA: (False, "")},
+        id="project-halt-after-drains-without-halting",
+    ),
+    pytest.param(
+        {},
+        {_PROJECT_ALPHA: (False, ""), _PROJECT_BETA: (False, "")},
+        id="no-sentinel-is-not-halted",
+    ),
+]
+
+
+#: Layouts that set sentinels at both scopes; the project's own wins, and a
+#: kanban-wide HALT-AFTER shows only where nothing outranks it.
+_HALT_PRECEDENCE_CASES = [
+    pytest.param(
+        {"HALT-AFTER": "rc\n"},
+        {_PROJECT_ALPHA: (False, "HALT-AFTER rc"), _PROJECT_BETA: (False, "HALT-AFTER rc")},
+        id="kanban-wide-halt-after-drains-every-project",
+    ),
+    pytest.param(
+        {"HALT-AFTER": "rc\n", f"projects/{_PROJECT_ALPHA}/HALT-AFTER": "pm\n"},
+        {_PROJECT_ALPHA: (False, "HALT-AFTER pm"), _PROJECT_BETA: (False, "HALT-AFTER rc")},
+        id="project-halt-after-beats-kanban-wide-halt-after",
+    ),
+    pytest.param(
+        {"HALT": "halted\n", f"projects/{_PROJECT_ALPHA}/HALT-AFTER": "rc\n"},
+        {_PROJECT_ALPHA: (False, "HALT-AFTER rc"), _PROJECT_BETA: (True, "HALT")},
+        id="project-halt-after-beats-kanban-wide-halt",
+    ),
+    pytest.param(
+        {"HALT-AFTER": "rc\n", f"projects/{_PROJECT_ALPHA}/HALT": "halted\n"},
+        {_PROJECT_ALPHA: (True, "HALT"), _PROJECT_BETA: (False, "HALT-AFTER rc")},
+        id="project-halt-beats-kanban-wide-halt-after",
+    ),
+    pytest.param(
+        {"HALT": "halted\n", "HALT-AFTER": "rc\n"},
+        {_PROJECT_ALPHA: (True, "HALT"), _PROJECT_BETA: (True, "HALT")},
+        id="kanban-wide-halt-beats-kanban-wide-halt-after",
+    ),
+    pytest.param(
+        {"HALT-AFTER": "not a token\n"},
+        {_PROJECT_ALPHA: (False, ""), _PROJECT_BETA: (False, "")},
+        id="invalid-kanban-wide-halt-after-reads-as-absent",
+    ),
+]
+
+
+class TestBoardHaltState:
+    """GET /board projects[] halt and halt_text: the dashboard's HALT pair, and the header's."""
+
+    @pytest.mark.parametrize("sentinels, expected", _HALT_CASES)
+    def test_projects_halt_matches_the_dashboard_halt_pair(
+        self,
+        board_client: TestClient,
+        two_project_root: pathlib.Path,
+        sentinels: dict[str, str],
+        expected: dict[str, tuple[bool, str]],
+    ) -> None:
+        from pgai_agent_kanban.dashboard.halt_state import halt_flag_and_text
+
+        for rel_path, body in sentinels.items():
+            _write(two_project_root / rel_path, body)
+
+        resp = board_client.get("/board")
+        assert resp.status_code == 200
+        by_name = {p["name"]: p for p in resp.json()["projects"]}
+
+        assert set(by_name) == set(expected)
+        for name, (halt, halt_text) in expected.items():
+            flag, text = halt_flag_and_text(two_project_root / "projects" / name, two_project_root)
+            assert (by_name[name]["halt"], by_name[name]["halt_text"]) == (halt, halt_text), name
+            assert (by_name[name]["halt"], by_name[name]["halt_text"]) == (flag == "yes", text), name
+
+    @pytest.mark.parametrize("sentinels, expected", _HALT_PRECEDENCE_CASES)
+    def test_projects_halt_follows_the_halt_precedence(
+        self,
+        board_client: TestClient,
+        two_project_root: pathlib.Path,
+        sentinels: dict[str, str],
+        expected: dict[str, tuple[bool, str]],
+    ) -> None:
+        """A kanban-wide HALT-AFTER reaches projects[] below every other sentinel."""
+        from pgai_agent_kanban.dashboard.halt_state import effective_halt_flag_and_text
+
+        write_sentinels(two_project_root, sentinels)
+
+        resp = board_client.get("/board")
+        assert resp.status_code == 200
+        by_name = {p["name"]: p for p in resp.json()["projects"]}
+
+        assert set(by_name) == set(expected)
+        for name, (halt, halt_text) in expected.items():
+            flag, text = effective_halt_flag_and_text(two_project_root / "projects" / name, two_project_root)
+            assert (by_name[name]["halt"], by_name[name]["halt_text"]) == (halt, halt_text), name
+            assert (by_name[name]["halt"], by_name[name]["halt_text"]) == (flag == "yes", text), name
+
+    @pytest.mark.parametrize("sentinels, expected", HEADER_HALT_CASES)
+    def test_projects_halt_matches_the_dashboard_header(
+        self,
+        tmp_path: pathlib.Path,
+        monkeypatch: pytest.MonkeyPatch,
+        sentinels: dict[str, str],
+        expected: tuple[bool, str],
+    ) -> None:
+        """On the golden board, projects[] reports the HALT the dashboard header draws."""
+        root = build_halt_board(tmp_path, monkeypatch)
+        write_sentinels(root, sentinels)
+
+        with build_api_client(root) as client:
+            resp = client.get("/board")
+            header = header_halt_pair(client, GOLDEN_PROJECT)
+
+        assert resp.status_code == 200
+        (project,) = [p for p in resp.json()["projects"] if p["name"] == GOLDEN_PROJECT]
+        assert (project["halt"], project["halt_text"]) == expected
+        assert (project["halt"], project["halt_text"]) == header

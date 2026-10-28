@@ -31,6 +31,9 @@ Test coverage:
   7. ops/write's close and wontdo writers reset State/Blockers/Needs Human
      through the shared writer and keep the other sections intact; the
      intake close writer creates ## Close Note after ## Status.
+  8. section_span gives the writers' bounds; section_regex compiles the
+     pattern read_section reads with, under the same flags, so its body
+     group is read_section's body for each reading.
 """
 
 from __future__ import annotations
@@ -419,3 +422,82 @@ def test_ops_intake_close_creates_close_note_after_status(tmp_path: Path) -> Non
     assert path.read_text(encoding="utf-8") == (
         "# Bug\n\n## Status\nwont-do\n\n## Close Note\nduplicate\n\n## Severity\nlow\n"
     )
+
+
+# ---------------------------------------------------------------------------
+# section_span: the public bounds a writer edits around
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("## Queue\n- a\n- b\n\n## Next\nx\n", ("## Queue", "## Queue\n- a\n- b", "## Next\nx\n")),
+        ("# T\n\n## queue: first\n- a\n", ("## queue: first", "## queue: first\n- a", None)),
+        ("## Queue\n\n## Next\n", ("## Queue", "## Queue", "## Next\n")),
+        ("## Queue\n### sub\n- a\n\n\n## Next\n", ("## Queue", "## Queue\n### sub\n- a", "## Next\n")),
+    ],
+    ids=["followed", "inline-value-at-end", "empty-body", "subheading-kept"],
+)
+def test_section_span_gives_the_writers_bounds(text: str, expected: tuple) -> None:
+    from pgai_agent_kanban.task_status import section_span
+
+    span = section_span(text, "Queue")
+    heading, through_body, rest = expected
+    assert text[span.start:].startswith(heading)
+    assert text[span.start:span.body_end] == through_body
+    if rest is None:
+        assert span.next_heading is None
+    else:
+        assert text[span.next_heading:] == rest
+
+
+def test_section_span_is_none_for_an_absent_or_longer_heading() -> None:
+    from pgai_agent_kanban.task_status import section_span
+
+    assert section_span("## Queued\n- a\n", "Queue") is None
+    assert section_span("no sections here\n", "Queue") is None
+
+
+# ---------------------------------------------------------------------------
+# section_regex: read_section's section pattern, compiled
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("text", "readings"),
+    [
+        ("## Target Version\nv1.5.0\n\n## Goal\nx\n", {"free_spacing": True, "end_at_subheading": True}),
+        ("##target   version\n\n  v1.7.0  \n", {"free_spacing": True, "end_at_subheading": True}),
+        ("## Target Version\n\n## Previous Version\nv1.5.0\n", {"free_spacing": True, "end_at_subheading": True}),
+        ("## Target Version\nv2\n### sub\nkept\n## Next\n", {}),
+        ("## Target Version\nv3\n---\nafter\n", {"end_at_rule": True}),
+        ("## Target Version\nv4\n\n## Next\n", {"exact_heading": True}),
+    ],
+    ids=["free-spacing", "free-spacing-any-case", "empty-body", "subheading-kept", "end-at-rule", "exact-heading"],
+)
+def test_section_regex_body_is_what_read_section_reads(text: str, readings: dict) -> None:
+    from pgai_agent_kanban.task_status import section_regex
+
+    match = section_regex("Target Version", **readings).search(text)
+    assert match is not None
+    assert match.group(2).strip() == read_section(text, "Target Version", **readings)
+
+
+def test_section_regex_flags_follow_the_heading_reading() -> None:
+    import re
+
+    from pgai_agent_kanban.task_status import section_regex
+
+    assert section_regex("State").flags & re.I and section_regex("State").flags & re.M
+    exact = section_regex("State", exact_heading=True)
+    assert exact.flags & re.M and not exact.flags & re.I
+    assert exact.search("## state\nDONE\n") is None
+
+
+def test_section_regex_does_not_match_a_longer_heading_or_mixed_readings() -> None:
+    from pgai_agent_kanban.task_status import section_regex
+
+    assert section_regex("State").search("## State Notes\nx\n") is None
+    with pytest.raises(ValueError):
+        section_regex("State", exact_heading=True, free_spacing=True)

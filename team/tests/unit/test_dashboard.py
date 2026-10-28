@@ -837,7 +837,7 @@ def test_scan_quarantine_prints_nothing_quarantined_line_when_empty(tmp_path: pa
 def test_scan_quarantine_recover_hint_runs_as_printed(two_project_root: pathlib.Path, capsys, tmp_path) -> None:
     """Each terminal block's Recover: command, with the file named, restores that file and exits 0."""
     root = two_project_root
-    project = root / "projects" / "project_a"
+    project = root / "projects" / "project-a"
     for directory in ("bugs", "priority", "rejected", "priority/.rejected"):
         (project / directory).mkdir(parents=True, exist_ok=True)
     (project / "rejected" / "BUG-12-bad.md").write_text("new\n", encoding="utf-8")
@@ -854,8 +854,8 @@ def test_scan_quarantine_recover_hint_runs_as_printed(two_project_root: pathlib.
         "TERM": "dumb",
     })
     for label, filename, intake in (
-        ("project_a [bugs]", "BUG-12-bad.md", "bugs"),
-        ("project_a [priority]", "PRIORITY-3-old.md", "priority"),
+        ("project-a [bugs]", "BUG-12-bad.md", "bugs"),
+        ("project-a [priority]", "PRIORITY-3-old.md", "priority"),
     ):
         assert blocks[label][0] == filename
         printed = blocks[label][-1]

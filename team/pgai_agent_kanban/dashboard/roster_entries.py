@@ -43,10 +43,23 @@ Exit codes:
 
 from __future__ import annotations
 
-import importlib.util
 import pathlib
 import sys
 from datetime import datetime, timedelta
+
+# Run by file path (``python3 .../roster_entries.py``) or loaded from a file
+# outside its package, this module has no parent package and the interpreter
+# puts only its own directory on sys.path, so the package import below would
+# not resolve. Put this file's own package root -- the directory holding the
+# pgai_agent_kanban/ this file sits in -- at the front of sys.path so the
+# import resolves from the same tree, never another. Imported as a package
+# member, sys.path is left untouched.
+if not __package__:
+    _OWN_PACKAGE_ROOT = str(pathlib.Path(__file__).resolve().parents[2])
+    if _OWN_PACKAGE_ROOT not in sys.path:
+        sys.path.insert(0, _OWN_PACKAGE_ROOT)
+
+from pgai_agent_kanban.lib.cron_parser_loader import load_cron_parser as _load_cron_parser  # noqa: E402
 
 # Entries with at least this many seconds remaining render as a day+time
 # hint instead of a MM:SS countdown. Mirrors the pre-existing threshold in
@@ -54,14 +67,6 @@ from datetime import datetime, timedelta
 FAR_FUTURE_THRESHOLD = 3600  # 1 hour
 
 _DOW_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
-
-
-def _load_cron_parser(parser_path: pathlib.Path):
-    """Load cron_parser module from an absolute file path via importlib."""
-    spec = importlib.util.spec_from_file_location("cron_parser", parser_path)
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
 
 
 def _day_time_hint(now: datetime, secs_remaining: int) -> str:

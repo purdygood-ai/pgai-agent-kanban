@@ -2,7 +2,7 @@
 test_wake_skips_disabled_project.py
 ===================================
 A project projects.cfg sets ``enabled=false`` for is skipped by the wake
-loop -- every agent's wake and the daily OVERWATCH wake -- with exactly one
+loop -- every agent's wake and the overwatch wake -- with exactly one
 "disabled in projects.cfg (enabled=false) — skipped" line per firing, and
 nothing is dispatched, locked or begun for it. Its sibling keeps running.
 

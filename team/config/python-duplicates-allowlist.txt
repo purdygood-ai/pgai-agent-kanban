@@ -13,11 +13,7 @@
 # import, and is never raised or added. The lint reports an entry above what
 # it measures so the entry is tightened in the same change; its
 # --emit-allowlist mode prints the measured keys in this format.
-duplicate-body	team/pgai_agent_kanban/dashboard/cron_firings.py	_load_cron_parser	1
-duplicate-body	team/pgai_agent_kanban/dashboard/roster_entries.py	_load_cron_parser	1
-duplicate-body	team/pgai_agent_kanban/deep_verify/freshness.py	_format_elapsed	1
 duplicate-body	team/pgai_agent_kanban/deep_verify/ledger.py	DeepVerifyRecord.from_dict	1
-duplicate-body	team/pgai_agent_kanban/deep_verify/schedule.py	_format_elapsed	1
 duplicate-body	team/pgai_agent_kanban/lib/refusal_ledger.py	RefusalRecord.from_dict	1
 duplicate-body	team/pgai_agent_kanban/overwatch/ledger.py	LedgerEntry.from_dict	1
 duplicate-body	team/pgai_agent_kanban/overwatch/resolution_matrix.py	BlockEvidence.from_dict	1

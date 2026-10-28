@@ -2,7 +2,9 @@
 #
 # Exempt list for team/scripts/lint_api_parity.py's census-walk gate
 # (check_app_routes_have_census_row / class 2, and
-# check_scripts_have_census_row / class 4). team/config/operator_verbs.manifest
+# check_scripts_have_census_row / class 4) and for
+# team/scripts/lint_operator_verb_manifest.py's route-coverage check (check
+# 6). team/config/operator_verbs.manifest
 # is the single source of truth for the operator VERB estate the REST-parity
 # contract scopes -- it is deliberately narrower
 # than "every script under team/scripts/ that declares OPERATOR_VALID_FLAGS"
@@ -13,12 +15,28 @@
 # is how that narrower scope stays a documented, checked-in fact instead of
 # an unwritten exception a filesystem scan would otherwise flag as drift.
 #
-# Format: one script BASENAME per line (e.g. "show-readme.sh" -- never the
-# "scripts/..." relative form, since class 2's fronted-script detection and
-# the manifest's own check_operations_reverse precedent both key on
-# basename, and every script this list names has a unique basename across
-# the tree). Blank lines and `#` comments are ignored. Every entry must
-# carry a reason as a comment on the line(s) immediately above it.
+# Format: one entry per line, in either of two forms. Blank lines and `#`
+# comments are ignored. Every entry must carry a reason as a comment on the
+# line(s) immediately above it.
+#
+#   Script entry -- a script BASENAME (e.g. "show-readme.sh" -- never the
+#   "scripts/..." relative form, since class 2's fronted-script detection and
+#   the manifest's own check_operations_reverse precedent both key on
+#   basename, and every script this list names has a unique basename across
+#   the tree). lint_api_parity.py's classes 2 and 4 read these.
+#
+#   Route entry -- an HTTP method, whitespace, and the route path exactly as
+#   the API registers it, router prefix included and path parameters as
+#   declared (e.g. "GET /board", "GET /traces/{trace_id}"). Check 6 of
+#   lint_operator_verb_manifest.py requires every registered route to be
+#   either the REST twin of a manifest row or named by a route entry, and
+#   reports a route entry whose route the API does not register, that a
+#   manifest row already twins, that is repeated, or whose line directly
+#   above is not a reason comment. A script entry never covers a route,
+#   even the route that reads what the script prints: each such route
+#   carries its own route entry beside the script's. A route entry exempts
+#   no script -- it can never equal a basename, so lint_api_parity.py's
+#   classes read it as a no-op.
 #
 # What this list does NOT do: it never removes a script from the operator
 # verb estate the REST-parity contract itself names (why, show,
@@ -39,9 +57,13 @@
 # of the "much wider set of read-only convenience endpoints" reads.py
 # serves outside the curated operator-verb estate.
 kanban-status.sh
+# The route of kanban-status.sh's summary, outside the verb estate for the reason above.
+GET /status
 # ---------------------------------------------------------------------------
 # reads.py convenience read: fronts GET /costs (cost report).
 cost-report.sh
+# The route of cost-report.sh's report, outside the verb estate for the reason above.
+GET /costs
 # ---------------------------------------------------------------------------
 # The machine-readable sibling of why.sh: both reach resolve_verdicts in
 # team/pgai_agent_kanban/ops/verdict.py, the function GET /verdicts calls --
@@ -61,16 +83,32 @@ verdict-report.sh
 # lint_operator_verb_manifest.py's forward check (declared twin resolves to
 # a real route) and its /operations/* reverse check.
 release-locks.sh
+# The verb's read-only listing mode, the second route the entry above
+# describes; the manifest row twins only POST /operations/release-locks.
+GET /release-locks
+# ---------------------------------------------------------------------------
+# Second route of an already-censused verb, not a gap: inbox's census row
+# names its action twin, POST /operations/inbox-answer. The verb's read --
+# inbox.sh list -- is GET /projects/{name}/inbox in routers/projects.py,
+# which reads through the same function (overwatch.inbox.read_inbox); the
+# manifest carries one REST twin per row.
+GET /projects/{name}/inbox
 # ---------------------------------------------------------------------------
 # reads.py convenience read: fronts GET /test-report.
 show-test-report.sh
+# The route of show-test-report.sh's report, outside the verb estate for the reason above.
+GET /test-report
 # ---------------------------------------------------------------------------
 # reads.py convenience read: fronts GET /rejected (quarantined intake
 # inventory listing).
 list-rejected.sh
+# The route of list-rejected.sh's listing, outside the verb estate for the reason above.
+GET /rejected
 # ---------------------------------------------------------------------------
 # reads.py convenience read: fronts GET /projects/{project}/tasks/{key}/readme.
 show-readme.sh
+# The route of show-readme.sh's output, outside the verb estate for the reason above.
+GET /projects/{project}/tasks/{key}/readme
 # ---------------------------------------------------------------------------
 # CLI-only operator tool, no REST twin at all today: recovers a
 # quarantined intake item back into the active queue. Not yet backfilled
@@ -115,6 +153,12 @@ deep-verify-freshness-check.sh
 # value already set.
 restamp-fixed-in.sh
 # ---------------------------------------------------------------------------
+# CLI-only operator tool with no REST twin: rebuilds a project's block-ledger
+# records from existing evidence into a sidecar for review, and with --apply
+# appends the records the ledger lacks. A one-off operator back-fill of the
+# ledger, outside the operator verb estate.
+reliability-backfill.sh
+# ---------------------------------------------------------------------------
 # operator-only container lifecycle; deliberately CLI-only, never exposed over the API
 container-up.sh
 # ---------------------------------------------------------------------------
@@ -123,4 +167,48 @@ container-down.sh
 # ---------------------------------------------------------------------------
 # operator-only container lifecycle; deliberately CLI-only, never exposed over the API
 container-status.sh
+# ---------------------------------------------------------------------------
+# ===========================================================================
+# Route entries for routes with no operator script behind them. Each is a
+# read the API serves in process for an HTTP caller (the dashboard's own
+# data, the API's own health); with no script there is no verb to twin, and
+# an active manifest row requires its script to exist.
+# ---------------------------------------------------------------------------
+# The API server's own liveness probe, declared on the app in create_app();
+# it describes the server process, not the kanban.
+GET /health
+# ---------------------------------------------------------------------------
+# The board aggregation view: the dashboard's input and queue columns read
+# through the dashboard's own modules, for an HTTP caller.
+GET /board
+# ---------------------------------------------------------------------------
+# The registered-project list, read from projects.cfg.
+GET /projects
+# ---------------------------------------------------------------------------
+# One registered project's metadata card.
+GET /projects/{name}
+# ---------------------------------------------------------------------------
+# One registered project's reliability streaks: its metrics/reliability.json
+# as stored, read through the reader the rc-metrics pane uses.
+GET /projects/{name}/reliability
+# ---------------------------------------------------------------------------
+# One rendered dashboard pane by name, a view of the tmux dashboard rather
+# than an operator verb.
+GET /dashboard/{pane}
+# ---------------------------------------------------------------------------
+# The tail of a named kanban log file.
+GET /logs/{kind}
+# ---------------------------------------------------------------------------
+# The training-trace index, newest first.
+GET /traces
+# ---------------------------------------------------------------------------
+# One training trace's markdown body by its id.
+GET /traces/{trace_id}
+# ---------------------------------------------------------------------------
+# Pending HUMAN-APPROVE gate tasks as JSON, from the function the dashboard's
+# approvals window also renders.
+GET /approvals
+# ---------------------------------------------------------------------------
+# OVERWATCH auto-resolution ledger entries as JSON.
+GET /auto-resolutions
 # ---------------------------------------------------------------------------

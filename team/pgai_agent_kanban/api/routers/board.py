@@ -9,7 +9,7 @@ Response shape:
   {
     "generated_at": "<ISO-8601 UTC>",
     "projects": [
-      {"name": str, "color": str, "halt": bool},
+      {"name": str, "color": str, "halt": bool, "halt_text": str},
       ...
     ],
     "columns": [
@@ -22,7 +22,8 @@ Response shape:
             "kind": str,          # bug | priority | requirement | task | quarantine
             "key": str,
             "title": str,
-            "status": str,        # open | working | done | wont-do | blocked | label
+            "status": str,        # open | working | carried | needs-operator | done
+                                  # | wont-do | duplicate | blocked | label
             "version_label": str,
             "active_rc": bool,
             "color": str
@@ -35,15 +36,28 @@ Response shape:
     ]
   }
 
-Classification contract:
-  Status classification is delegated entirely to pgai_agent_kanban.board,
-  which mirrors the classification logic of the tmux dashboard renderer
-  (team/scripts/dashboard/column-render.sh) and records where the board
-  deliberately differs: a WONT-DO task is "wont-do", never "done".
-
-  This is the house-sibling rule: /board and the tmux renderer must produce
-  the same status for any given item.  The parity-pin test in test_board.py
-  enforces this invariant.
+Column items:
+  Every column is read through the dashboard's own column code,
+  pgai_agent_kanban.dashboard.column_render, so /board and the tmux
+  renderer list the same items from the same code:
+    - input columns: single.input_files (the *.md listing, README*
+      excluded, newest modification time first) and
+      single.classify_input_file (the item's status);
+    - queue columns: single.queue_items (newest (date, sequence) first,
+      state from the task's status.md, else the queue marker);
+    - display keys: cells.compact_id.
+  Statuses come from pgai_agent_kanban.board, the classifier both share;
+  a WONT-DO task is "wont-do", never "done".  A requirement is classified
+  against the project's active RC (release-state.md) and the last release
+  the requirements pane reads (board_gather.requirements_last_released:
+  the highest release tag in the project's git dev tree, or
+  release-state.md's ## Last Released when the project has no git dev
+  tree -- no dev_tree_path, or one that is not a git repository; a git
+  dev tree with no release tag has no last release), so it has the
+  pane's status.  The
+  row windowing the panes apply is display-only: the per-project cap and
+  the truncated count below are this endpoint's own.  test_board.py and
+  tests/unit/test_board_column_render_parity.py pin the parity.
 
 Constraints:
   - GET only; no mutations.
@@ -58,16 +72,23 @@ Constraints:
     directory they came from (the .reason sidecar's original_dir /
     original_type, else the BUG-/PRIORITY- name prefix). A file whose origin
     cannot be told belongs to no column and is not shown.
-  - `color` is the registry's hex color string verbatim (#RRGGBB); the server
-    never emits CSS.
+  - `color` (#RRGGBB) comes from ops.projects.dashboard_registry_rows: the
+    rule projects_cfg_color applies and GET /projects/{name} shares: the
+    registry's dashboard_color verbatim, else the default-palette entry at
+    the project's ordinal in priority order. The server never emits CSS.
+  - `halt` / `halt_text` are every HALT the dashboard header shows for the
+    project, from
+    pgai_agent_kanban.dashboard.halt_state.effective_halt_flag_and_text:
+    `halt` is true for a project HALT or, with no project sentinel, the
+    kanban-wide HALT; `halt_text` is "", "HALT" or "HALT-AFTER <event>" (a
+    draining project, or with no project sentinel and no kanban-wide HALT,
+    a kanban-wide HALT-AFTER; `halt` false).
   - Loopback trust boundary: dev_tree_path and git_repo fields are not redacted.
 """
 
 from __future__ import annotations
 
-import os
 import pathlib
-import re
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -75,21 +96,23 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 
 from pgai_agent_kanban.dashboard._rejected import quarantined_files
-from pgai_agent_kanban.lib import ini
-from pgai_agent_kanban.lib.palette import load_default_palette
+from pgai_agent_kanban.dashboard.column_render.board_gather import requirements_last_released
+from pgai_agent_kanban.dashboard.column_render.cells import compact_id
+from pgai_agent_kanban.dashboard.column_render.single import (
+    classify_input_file,
+    input_files,
+    queue_items,
+)
+from pgai_agent_kanban.dashboard.halt_state import effective_halt_flag_and_text
 from pgai_agent_kanban.board import (
     COLUMN_ORDER,
     COLUMN_KINDS,
-    classify_input_item,
-    classify_queue_item,
     get_active_rc_for_project,
-    get_last_released_for_project,
     get_target_version_for_item,
-    marker_to_state,
-    parse_queue_line,
-    read_task_state_from_status_md,
+    intake_carried_names,
 )
 from ...ops.context import OpsContext
+from ...ops.projects import DEFAULT_DASHBOARD_MAX_ROWS, dashboard_registry_rows
 from ..adapter import HTTP_UNPROCESSABLE_ENTITY
 from ..dependencies import warn_unknown_query_params
 
@@ -98,139 +121,57 @@ __all__ = ["router"]
 router = APIRouter(tags=["board"])
 
 # ---------------------------------------------------------------------------
-# Default per-project item cap (mirrors tmux renderer default)
-# (Source: column-render.sh DASHBOARD_MAX_ROWS default ~line 179)
-# ---------------------------------------------------------------------------
-_DEFAULT_MAX_ROWS = 20
-#: The clamp the tmux renderer applies to a per-project dashboard_max_rows
-#: (scripts/lib/projects.sh projects_cfg_max_rows).
-_MIN_PROJECT_ROWS = 5
-_MAX_PROJECT_ROWS = 100
-
-# ---------------------------------------------------------------------------
 # projects.cfg helpers
 # ---------------------------------------------------------------------------
+
+#: The cap a project gets when its resolved row cap is not a positive whole
+#: number (a malformed DASHBOARD_MAX_ROWS); the resolver's own default.
+_DEFAULT_MAX_ROWS = int(DEFAULT_DASHBOARD_MAX_ROWS)
 
 
 def _read_projects_registry(
     kanban_root: pathlib.Path,
 ) -> list[dict]:
-    """Read all registered projects from projects.cfg.
+    """Read all registered projects as the tmux board draws them.
 
     Returns a list of project dicts with keys:
       - name: str
-      - priority: int
-      - color: str        (hex color string, palette fallback when absent)
-      - max_rows: int     (dashboard_max_rows clamped to 5-100, else the
-                           fallback :func:`_fallback_max_rows` gives)
+      - color: str        (hex color string, ``projects_cfg_color``'s answer)
+      - max_rows: int     (the per-project row cap)
 
-    Projects are sorted by (priority, registration_index) ascending, as
-    ``pgai_agent_kanban.lib.ini.projects_registry`` returns them.
+    Rows come from ``ops.projects.dashboard_registry_rows`` -- the reader
+    the tmux board pane uses -- so both apply one row-cap chain: the
+    project's ``dashboard_max_rows`` clamped to 5..100, else
+    ``DASHBOARD_MAX_ROWS``, else ``kanban.cfg [dashboard] max_rows``, else
+    20. Projects are in ``projects_cfg_list`` order (priority, then
+    registration). An absent or colon-legacy projects.cfg reads as no
+    projects.
     """
-    fallback = _fallback_max_rows(kanban_root)
+    rows = dashboard_registry_rows(kanban_root) or []
     return [
-        {
-            "name": entry.name,
-            "priority": entry.priority,
-            # dashboard_color from registry; empty → palette fallback at render time.
-            "color": entry.color,
-            "max_rows": _max_rows(entry.options.get("dashboard_max_rows"), fallback),
-        }
-        for entry in ini.projects_registry(kanban_root)
+        {"name": name, "color": color or "", "max_rows": _row_cap(max_rows)}
+        for name, color, max_rows in rows
     ]
 
 
-def _positive_int(raw: Optional[str]) -> Optional[int]:
-    """*raw* as a positive int (digits only, surrounding spaces ignored), else None."""
-    text = (raw or "").strip()
-    if not text.isdigit():
-        return None
-    value = int(text)
-    return value if value >= 1 else None
-
-
-def _fallback_max_rows(kanban_root: pathlib.Path) -> int:
-    """The row cap for a project with no usable dashboard_max_rows.
-
-    The tmux renderer's chain (scripts/lib/dashboard/column_render_config.sh):
-    DASHBOARD_MAX_ROWS from the environment, else kanban.cfg [dashboard]
-    max_rows, else 20.
-    """
-    env_value = _positive_int(os.environ.get("DASHBOARD_MAX_ROWS"))
-    if env_value is not None:
-        return env_value
-    cfg = pathlib.Path(kanban_root) / "kanban.cfg"
-    if cfg.is_file():
-        cfg_value = _positive_int(ini.read_line_value(cfg, "dashboard", "max_rows"))
-        if cfg_value is not None:
-            return cfg_value
+def _row_cap(raw: str) -> int:
+    """*raw* (the resolver's string) as an item cap: a positive whole number, else 20."""
+    text = raw.strip()
+    if text.isdigit() and int(text) >= 1:
+        return int(text)
     return _DEFAULT_MAX_ROWS
 
 
-def _max_rows(raw: Optional[str], fallback: int = _DEFAULT_MAX_ROWS) -> int:
-    """Return the project's row cap, as the tmux renderer computes it.
-
-    ``dashboard_max_rows`` clamped to 5-100 when it is a whole number;
-    *fallback* when it is absent or not a whole number.
-    """
-    text = (raw or "").strip()
-    if not text.isdigit():
-        return fallback
-    return min(max(int(text), _MIN_PROJECT_ROWS), _MAX_PROJECT_ROWS)
-
-
-def _assign_palette_colors(projects: list[dict]) -> None:
-    """Assign palette colors in-place to projects missing a color.
-
-    Mirrors the palette-fallback logic in projects_cfg_color() in
-    team/scripts/lib/projects_cfg.sh: projects without an explicit
-    dashboard_color get a deterministic palette color based on registration
-    order.  The palette itself is loaded via the shared, cached
-    pgai_agent_kanban.lib.palette helper -- see that module for the single
-    source of truth this mirrors.
-    """
-    palette = load_default_palette()
-    palette_idx = 0
-    for proj in projects:
-        if not proj["color"]:
-            proj["color"] = palette[palette_idx % len(palette)]
-            palette_idx += 1
-        else:
-            # Explicit color set; still advance palette index to keep
-            # deterministic assignment for projects without colors.
-            palette_idx += 1
-
-
-def _project_is_halted(project_dir: pathlib.Path) -> bool:
-    """Return True when the per-project HALT file is present."""
-    return (project_dir / "HALT").is_file()
-
-
 # ---------------------------------------------------------------------------
-# Column data readers
+# Column items -- read through the dashboard's column code
 # ---------------------------------------------------------------------------
 
-# Compact ID extractors matching column-render.sh patterns
-_BUG_ID_RE = re.compile(r"^(BUG-\d+)", re.IGNORECASE)
-_PRIORITY_ID_RE = re.compile(r"^(PRIORITY-\d+)", re.IGNORECASE)
-_REQ_ID_RE = re.compile(r"^(v\d+\.\d+\.\d+)(?:-.+)?$", re.IGNORECASE)
-
-
-def _compact_id_for_input(stem: str, column: str) -> str:
-    """Return the compact display key for an input item's filename stem.
-
-    Mirrors compact_id() in column-render.sh (~lines 671-682 and ~lines 1499-1511).
-    """
-    if column == "REQUIREMENTS":
-        m = _REQ_ID_RE.match(stem)
-        return m.group(1) if m else stem
-    m = _BUG_ID_RE.match(stem)
-    if m:
-        return m.group(1)
-    m = _PRIORITY_ID_RE.match(stem)
-    if m:
-        return m.group(1)
-    return stem
+#: The intake directory each input column lists, under the project directory.
+_INPUT_DIRS = {
+    "BUGS": "bugs",
+    "PRIORITIES": "priority",
+    "REQUIREMENTS": "requirements",
+}
 
 
 def _kind_for_column(column: str) -> str:
@@ -244,7 +185,12 @@ def _kind_for_column(column: str) -> str:
     return "task"
 
 
-def _read_input_column(
+def _cap(items: list[dict], max_rows: int) -> tuple[list[dict], int]:
+    """Return ``(items[:max_rows], number of items beyond max_rows)``."""
+    return items[:max_rows], max(0, len(items) - max_rows)
+
+
+def _input_column_items(
     project_name: str,
     project_color: str,
     project_dir: pathlib.Path,
@@ -254,159 +200,103 @@ def _read_input_column(
     last_released: str,
     max_rows: int,
 ) -> tuple[list[dict], int]:
-    """Read items from an input directory column (BUGS, PRIORITIES, or REQUIREMENTS).
+    """Return one project's items for an input column (BUGS, PRIORITIES, REQUIREMENTS).
 
-    Returns ``(items, truncated)`` where items is capped at max_rows and
-    truncated is the count of items beyond that cap.
+    Returns ``(items, truncated)``: items capped at *max_rows*, and the count
+    of items beyond that cap.
 
     The column's quarantined ``.md`` files -- those
     ``dashboard._rejected.quarantined_files`` finds in *rejected_dir* or the
     legacy ``.rejected/`` directories whose origin is this column's intake
-    directory -- come first, as kind=quarantine items.
-
-    Items are sorted newest-first by mtime (matching the tmux renderer's
-    default sort for non-requirements columns).  Requirements items are also
-    sorted newest-first for simplicity; the active-window scrolling the
-    renderer applies for visual centering is not needed in the API response.
+    directory -- come first, as kind=quarantine items, and count against
+    the cap.  The intake files follow in the input pane's own listing
+    (``column_render.single.input_files``: newest modification time first),
+    each classified by ``single.classify_input_file`` and keyed by
+    ``cells.compact_id``.
     """
-    column_dir_map = {
-        "BUGS": project_dir / "bugs",
-        "PRIORITIES": project_dir / "priority",
-        "REQUIREMENTS": project_dir / "requirements",
-    }
-    input_dir = column_dir_map[column]
-    kind = _kind_for_column(column)
-
+    input_dir = project_dir / _INPUT_DIRS[column]
     if not input_dir.is_dir():
         return [], 0
+    kind = _kind_for_column(column)
+    is_requirements = column == "REQUIREMENTS"
 
-    candidates = []
-    for entry in input_dir.iterdir():
-        if not entry.is_file():
-            continue
-        if not entry.name.endswith(".md"):
-            continue
-        if entry.name.upper().startswith("README"):
-            continue
-        candidates.append(entry)
-
-    # Sort newest-first by mtime (mirrors renderer default).
-    candidates.sort(key=lambda p: p.stat().st_mtime, reverse=True)
-
-    # Also collect the files quarantined from this column's intake directory.
-    quarantine_items = []
+    items = []
     for quarantined in quarantined_files(project_dir, rejected_dir):
         entry = quarantined.path
-        if quarantined.origin != input_dir.name:
+        if quarantined.origin != input_dir.name or not entry.name.endswith(".md"):
             continue
-        if not entry.name.endswith(".md"):
-            continue
-        stem = entry.stem
-        key = _compact_id_for_input(stem, column)
-        quarantine_items.append({
+        key = compact_id(entry.stem, is_requirements)
+        items.append({
             "id": f"{project_name}/quarantine/{key}",
             "project": project_name,
             "kind": "quarantine",
             "key": key,
-            "title": stem,
+            "title": entry.stem,
             "status": "blocked",
             "version_label": "",
             "active_rc": False,
             "color": project_color,
         })
 
-    all_items = []
-    for path in candidates:
-        stem = path.stem
-        key = _compact_id_for_input(stem, column)
-        status = classify_input_item(path, column, active_rc, last_released)
-        is_active_rc = (status == "label")
-
-        # version_label: for requirements, use the target version string.
-        version_label = ""
-        if column == "REQUIREMENTS":
-            version_label = get_target_version_for_item(path)
-
-        all_items.append({
+    carried = frozenset() if is_requirements else intake_carried_names(input_dir)
+    for path in input_files(input_dir):
+        key = compact_id(path.stem, is_requirements)
+        status, _raw_status = classify_input_file(
+            path, is_requirements=is_requirements, active_rc=active_rc, last_released=last_released,
+            carried=carried,
+        )
+        items.append({
             "id": f"{project_name}/{kind}/{key}",
             "project": project_name,
             "kind": kind,
             "key": key,
-            "title": stem,
+            "title": path.stem,
             "status": status,
-            "version_label": version_label,
-            "active_rc": is_active_rc,
+            # A requirement carries its target version; other intake items none.
+            "version_label": get_target_version_for_item(path) if is_requirements else "",
+            "active_rc": status == "label",
             "color": project_color,
         })
 
-    # Quarantine items count against the cap.
-    combined = quarantine_items + all_items
-    total = len(combined)
-    truncated = max(0, total - max_rows)
-    return combined[:max_rows], truncated
+    return _cap(items, max_rows)
 
 
-def _read_queue_column(
+def _queue_column_items(
     project_name: str,
     project_color: str,
     project_dir: pathlib.Path,
     agent: str,
     max_rows: int,
 ) -> tuple[list[dict], int]:
-    """Read items from an agent queue backlog file.
+    """Return one project's items for an agent queue column.
 
-    Returns ``(items, truncated)`` where items is capped at max_rows and
-    truncated is the count beyond the cap.
+    Returns ``(items, truncated)``: items capped at *max_rows*, and the count
+    beyond the cap.
 
-    Items are read from `tasks/queues/<agent>_backlog.md`.
-    State is read from the task's status.md; falls back to the queue marker.
+    The items are ``column_render.single.queue_items`` over
+    ``tasks/queues/<agent>_backlog.md``: newest (date, sequence) first, each
+    task's state from its status.md, else the queue marker.
     """
-    backlog_path = project_dir / "tasks" / "queues" / f"{agent.lower()}_backlog.md"
     tasks_dir = project_dir / "tasks"
-
+    backlog_path = tasks_dir / "queues" / f"{agent.lower()}_backlog.md"
     if not backlog_path.is_file():
         return [], 0
 
-    content = backlog_path.read_text(encoding="utf-8", errors="replace")
-    items = []
-
-    for line in content.splitlines():
-        parsed = parse_queue_line(line)
-        if not parsed:
-            continue
-        marker, task_id, date_str, seq_int = parsed
-
-        # Read state from status.md; fall back to marker.
-        state = read_task_state_from_status_md(tasks_dir, task_id)
-        if not state:
-            state = marker_to_state(marker)
-
-        status = classify_queue_item(state)
-        key = f"{date_str}-{seq_int:03d}"
-
-        items.append({
-            "id": f"{project_name}/task/{task_id}",
+    items = [
+        {
+            "id": f"{project_name}/task/{item['task_id']}",
             "project": project_name,
             "kind": "task",
-            "key": task_id,
-            "title": task_id,
-            "status": status,
+            "key": item["task_id"],
+            "title": item["task_id"],
+            "status": item["status"],
             "version_label": "",
-            "active_rc": (state == "WORKING"),
+            "active_rc": item["state"] == "WORKING",
             "color": project_color,
-            "_sort_key": (date_str, seq_int),
-        })
-
-    # Sort newest-first by (date_str, seq).
-    items.sort(key=lambda e: e["_sort_key"], reverse=True)
-
-    # Strip the internal sort key before returning.
-    for item in items:
-        del item["_sort_key"]
-
-    total = len(items)
-    truncated = max(0, total - max_rows)
-    return items[:max_rows], truncated
+        }
+        for item in queue_items(backlog_path, tasks_dir)
+    ]
+    return _cap(items, max_rows)
 
 
 # ---------------------------------------------------------------------------
@@ -445,12 +335,18 @@ def get_board(
 
     Item composite id format: ``<project>/<kind>/<key>``
 
-    Item status vocabulary: ``open | working | done | wont-do | blocked | label``
+    Item status vocabulary: ``open | working | carried | needs-operator |
+    done | wont-do | duplicate | blocked | label``
     - ``label``   — requirements item targeting the currently active RC
-    - ``working`` — task in WORKING state (renderer calls this "running")
+    - ``working`` — task in WORKING state (renderer calls this "running"),
+      or a running bug/priority a live bundle (or none) still lists
+    - ``carried`` — running bug/priority whose every listing bundle is
+      closed: the release shipped without fixing it
+    - ``needs-operator`` — bug/priority waiting on an operator-inbox answer
     - ``blocked`` — task in BLOCKED state, or a quarantined intake file
     - ``done``    — task in DONE state, or a shipped requirements item
     - ``wont-do`` — task in WONT-DO state
+    - ``duplicate`` — bug/priority closed as a duplicate of another item
     - ``open``    — all other items
 
     Per-column per-project item caps mirror the tmux renderer's
@@ -469,7 +365,8 @@ def get_board(
     Response fields:
 
     - ``generated_at``  — ISO-8601 UTC timestamp of this response.
-    - ``projects``      — list of registered projects with name, color, halt.
+    - ``projects``      — list of registered projects with name, color, halt,
+                          halt_text (the dashboard's HALT flag and text).
     - ``columns``       — list of eight column objects (name, items, truncated).
 
     HTTP status: 200 on success, 422 when ``?project=`` is supplied.
@@ -490,16 +387,17 @@ def get_board(
 
     # Read all registered projects.
     projects_meta = _read_projects_registry(kanban_root)
-    _assign_palette_colors(projects_meta)
 
     # Build projects list for response.
     projects_out = []
     for proj in projects_meta:
         project_dir = kanban_root / "projects" / proj["name"]
+        halt_flag, halt_text = effective_halt_flag_and_text(project_dir, kanban_root)
         projects_out.append({
             "name": proj["name"],
             "color": proj["color"],
-            "halt": _project_is_halted(project_dir),
+            "halt": halt_flag == "yes",
+            "halt_text": halt_text,
         })
 
     # Build columns.
@@ -522,11 +420,16 @@ def get_board(
             max_rows = proj["max_rows"]
 
             if col_kind == "input":
-                # Read release state for this project.
+                # Only a requirement is classified against the release
+                # state; the last release is the requirements pane's own
+                # read (git tags first), so the two agree.
                 active_rc = get_active_rc_for_project(project_dir)
-                last_released = get_last_released_for_project(project_dir)
+                last_released = (
+                    requirements_last_released(kanban_root, proj["name"])
+                    if col_name == "REQUIREMENTS" else ""
+                )
 
-                items, truncated = _read_input_column(
+                items, truncated = _input_column_items(
                     project_name=proj["name"],
                     project_color=proj["color"],
                     project_dir=project_dir,
@@ -539,7 +442,7 @@ def get_board(
             else:
                 # Queue column.
                 agent = agent_queue_map[col_name]
-                items, truncated = _read_queue_column(
+                items, truncated = _queue_column_items(
                     project_name=proj["name"],
                     project_color=proj["color"],
                     project_dir=project_dir,

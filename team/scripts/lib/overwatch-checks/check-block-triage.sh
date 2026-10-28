@@ -1,11 +1,38 @@
 #!/usr/bin/env bash
 # team/scripts/lib/overwatch-checks/check-block-triage.sh
 #
-# OVERWATCH detection module: block triage. For every BLOCKED task carrying
-# a ## Block Record — whatever its ## Needs Human value — classify the
-# record and carry out the decision through one executor,
-# pgai_agent_kanban.overwatch.block_triage (plan, then apply), inside the
-# full safety envelope this module owns.
+# OVERWATCH detection module: block triage and the decision wake.
+#
+# Decision wake (the sweep's path). When overwatch-sweep.sh runs this check
+# -- the hourly sweep and the on-BLOCK nudge's "--only block-triage" alike;
+# the sweep sets OVERWATCH_DECISION_WAKE=1 for its checks -- and the
+# project has a release-state.md, every stop in the project is decided once
+# and carried out by pgai_agent_kanban.overwatch.decision_wake (python3 -m,
+# through pp_run_ops), and the block-triage loop below does not run:
+#   - the project's HALT: an operator's is decided none and never touched;
+#     a chain HALT is cleared once a cause check passes, else it goes to the
+#     resolution stage; a HALT CM's release wrote on a trigger is the
+#     project's RC-level failure, decided the same way, keyed on the trigger;
+#   - every BLOCKED task, and every BACKLOG or WAITING task whose Needs
+#     Human reads yes: an existing operator verb, an operator-inbox question
+#     (Needs Human cleared; the task stays as it is), a runaway stop, or
+#     none (pgai_agent_kanban.overwatch.decide);
+#   - the project itself, when a runaway counter trips with nothing stopped.
+# Every write runs under the Python HALT-first protocol and the project's
+# repo lock (pgai_agent_kanban.overwatch.halt_first), with backups, a
+# Decision event in release-state.md and an action-log row; block triage's
+# handlers still carry out its verbs. A present HALT defers every task write;
+# HALT_OVERWATCH or a repo lock held past --lock-wait stops the run. One
+# stderr line is printed per stop: "decision-wake <item>: <outcome> ->
+# <result> (<detail>)". A project with no release-state.md has nowhere to
+# record and count its decisions, so block triage runs there as before.
+#
+# Block triage (every other caller: the overwatch wake, a direct run). For
+# every BLOCKED task carrying a ## Block Record — whatever its ## Needs
+# Human value — classify the record and carry out the decision through one
+# executor, pgai_agent_kanban.overwatch.block_triage (plan, then apply),
+# inside the full safety envelope this module owns. The scope, envelope and
+# outcomes below describe this path.
 #
 # Scope (what it may change):
 #   - The task's status.md: the ## Block Record triage fields (attempts,
@@ -125,15 +152,23 @@
 #
 # Callers:
 #   - team/scripts/overwatch-sweep.sh sources this file (filename discovery)
-#     and calls overwatch_check_block_triage with KANBAN_ROOT and
-#     OVERWATCH_PROJECT set.
+#     and calls overwatch_check_block_triage with KANBAN_ROOT,
+#     OVERWATCH_PROJECT and OVERWATCH_DECISION_WAKE=1 set: the decision wake.
 #   - The overwatch wake (run_overwatch_block_triage in wake_project.sh)
-#     runs the same function before the wake takes the project's repo lock.
-#   - Directly: bash check-block-triage.sh [--dry-run]
+#     runs the same function, with OVERWATCH_DECISION_WAKE unset, before the
+#     wake takes the project's repo lock: block triage.
+#   - Directly: bash check-block-triage.sh [--dry-run] (block triage), or
+#     OVERWATCH_DECISION_WAKE=1 bash check-block-triage.sh [--dry-run]
+#     (the decision wake).
 #
 # Required environment variables (when sourced):
 #   KANBAN_ROOT       — absolute path to the kanban root
 #   OVERWATCH_PROJECT — project name (e.g. "pgai-agent-kanban")
+# Optional:
+#   OVERWATCH_DECISION_WAKE     — 1 runs the decision wake for a project with
+#                                 a release-state.md (see above)
+#   OVERWATCH_LOCK_WAIT_SECONDS — whole seconds a held repo lock is retried
+#                                 before a write is declined (default 0)
 # Invoked directly, KANBAN_ROOT defaults to
 # ${PGAI_AGENT_KANBAN_ROOT_PATH:-$HOME/pgai_agent_kanban} and
 # OVERWATCH_PROJECT to the single registered project (an error when several
@@ -144,13 +179,15 @@
 #
 #   --dry-run  plan and narrate what would be done, logging one
 #              "block-triage-dry-run" action-log row per task that would be
-#              written; no task file, backup or evidence file is written.
+#              written (the decision wake: one "decision-wake-dry-run" row per
+#              stop); no task file, backup or evidence file is written.
 #   --help     print this usage and exit 0.
 #
 # Exit codes:
 #   0 — completed (including safety refusals, which leave tasks unchanged)
 #   1 — internal error (missing library, unreadable project), or one or more
-#       tasks whose triage writes failed partway (each narrated on stderr)
+#       tasks whose triage writes failed partway, or stops the decision wake
+#       could not decide or carry out (each narrated on stderr)
 
 # ---------------------------------------------------------------------------
 # _cbtr_resolve_env
@@ -336,6 +373,45 @@ _cbtr_apply_one() {
 }
 
 # ---------------------------------------------------------------------------
+# _cbtr_decision_wake <dry_run 0|1> <triage_enabled> <worktree_base>
+# Run the decision wake for OVERWATCH_PROJECT (python3 -m
+# pgai_agent_kanban.overwatch.decision_wake, through pp_run_ops) and narrate
+# one stderr line per stop it decided. The module takes the repo lock and
+# makes every write itself, under its own HALT-first protocol.
+# Returns 0 when every stop was decided, 1 when one or more could not be
+# decided or carried out (the module printed each, dual-channel).
+# ---------------------------------------------------------------------------
+_cbtr_decision_wake() {
+    local dry_run="$1" triage_enabled="$2" worktree_base="$3"
+    local lock_wait="${OVERWATCH_LOCK_WAIT_SECONDS:-0}"
+    [[ "${lock_wait}" =~ ^[0-9]+$ ]] || lock_wait=0
+    local -a args=(
+        --kanban-root "${KANBAN_ROOT}" --project "${OVERWATCH_PROJECT}"
+        --triage-enabled "${triage_enabled}" --lock-wait "${lock_wait}"
+    )
+    [[ -n "${worktree_base}" ]] && args+=(--worktree-base "${worktree_base}")
+    (( dry_run == 1 )) && args+=(--dry-run)
+
+    local output rc=0
+    output="$(pp_run_ops pgai_agent_kanban.overwatch.decision_wake "${args[@]}")" || rc=$?
+
+    local decided=0 item subject outcome verb result detail
+    while IFS=$'\t' read -r item subject outcome verb result detail; do
+        [[ -n "${item}" ]] || continue
+        decided=$(( decided + 1 ))
+        [[ "${verb}" == "-" ]] && verb="" || verb=" ${verb}"
+        echo "check-block-triage: ${subject}: decision-wake ${item}: ${outcome}${verb} -> ${result} (${detail})" >&2
+    done <<< "${output}"
+
+    echo "check-block-triage: ${OVERWATCH_PROJECT}: decision wake complete; ${decided} stop(s) decided" >&2
+    if (( rc != 0 )); then
+        echo "check-block-triage: ${OVERWATCH_PROJECT}: the decision wake exited ${rc} (see the lines above)" >&2
+        return 1
+    fi
+    return 0
+}
+
+# ---------------------------------------------------------------------------
 # overwatch_check_block_triage [--dry-run]
 # Main function. Returns 0 on success (safety refusals included), 1 on an
 # internal error or a task whose writes failed partway.
@@ -390,6 +466,17 @@ overwatch_check_block_triage() {
     worktree_base="$(_cbtr_worktree_base)"
     local -a base_args=()
     [[ -n "${worktree_base}" ]] && base_args=(--worktree-base "${worktree_base}")
+
+    # The decision wake (see the header): the sweep's path, for a project
+    # whose release-state.md can record the decisions and count each task's
+    # verbs against their budgets. Without one, block triage runs as before.
+    if [[ "${OVERWATCH_DECISION_WAKE:-}" == "1" ]]; then
+        if [[ -f "${project_root}/release-state.md" ]]; then
+            _cbtr_decision_wake "${dry_run}" "${triage_enabled}" "${worktree_base}"
+            return $?
+        fi
+        echo "check-block-triage: ${project}: no release-state.md to record and count decisions in; block triage runs instead of the decision wake" >&2
+    fi
 
     local plan
     plan="$(pp_run_ops pgai_agent_kanban.overwatch.block_triage plan \

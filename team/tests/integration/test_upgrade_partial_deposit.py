@@ -29,18 +29,32 @@ from __future__ import annotations
 import pathlib
 import re
 
+from pgai_agent_kanban.lib import semver
 from tests.fixtures.upgrade_sandbox import REPO_ROOT, UpgradeSandbox, diagnostic
 
 _OLD_VERSION = "v2.22.5"
-# Every migration shipped next to this tree's runner whose destination falls
-# after _OLD_VERSION -- the set an upgrade from _OLD_VERSION must apply.
 _MIGRATIONS_DIR = REPO_ROOT / "team" / "scripts" / "migrations"
-_SHIPPED_MIGRATIONS = sorted(p.name for p in _MIGRATIONS_DIR.glob("migrate_v*_to_v*.sh"))
+_DESTINATION = re.compile(r"_to_(v\d+\.\d+\.\d+)\.sh$")
 _SEEDED_KEY = re.compile(r"^\s*#?\s*overwatch_resolve\s*=", re.MULTILINE)
 
 
 def _tree_version() -> str:
     return (REPO_ROOT / "VERSION").read_text(encoding="utf-8").strip()
+
+
+def _migrations_in_range() -> list[str]:
+    """Every migration shipped next to this tree's runner whose destination
+    falls in (_OLD_VERSION, this tree's VERSION] -- the set an upgrade from
+    _OLD_VERSION must apply (team/scripts/migrations/README.md, "Selection
+    rule"). A migration whose destination is above the tree's VERSION is
+    not selected until VERSION reaches it."""
+    target = _tree_version()
+    names = []
+    for path in _MIGRATIONS_DIR.glob("migrate_v*_to_v*.sh"):
+        match = _DESTINATION.search(path.name)
+        if match and semver.gt(match.group(1), _OLD_VERSION) and semver.le(match.group(1), target):
+            names.append(path.name)
+    return sorted(names)
 
 
 def _migrations_reported(stdout: str) -> list[str]:
@@ -58,9 +72,6 @@ def _deposited_sandbox(tmp_path: pathlib.Path) -> UpgradeSandbox:
 
     sandbox.version_file.write_text(f"{_OLD_VERSION}\n", encoding="utf-8")
     sandbox.project_cfg.write_bytes(original_cfg)
-    backlog = _overwatch_backlog(sandbox)
-    if backlog.exists():
-        backlog.unlink()
     return sandbox
 
 
@@ -73,20 +84,18 @@ def _assert_no_migration_ran(sandbox: UpgradeSandbox, cfg_before: bytes, result)
         "project.cfg changed although the run stopped before the migrations\n"
         + diagnostic(result)
     )
-    assert not _overwatch_backlog(sandbox).exists(), (
-        "a migration created overwatch_backlog.md although the run stopped "
-        "before the migrations\n" + diagnostic(result)
-    )
     assert _migrations_reported(result.stdout) == [], diagnostic(result)
 
 
 def _assert_every_migration_ran(sandbox: UpgradeSandbox, result) -> None:
-    assert _migrations_reported(result.stdout) == _SHIPPED_MIGRATIONS, (
-        f"expected every migration after {_OLD_VERSION} to run: {_SHIPPED_MIGRATIONS}\n"
+    expected = _migrations_in_range()
+    assert _migrations_reported(result.stdout) == expected, (
+        f"expected every migration in ({_OLD_VERSION}, {_tree_version()}] to run: {expected}\n"
         + diagnostic(result)
     )
     assert _SEEDED_KEY.search(sandbox.project_cfg.read_text(encoding="utf-8")), diagnostic(result)
-    assert _overwatch_backlog(sandbox).is_file(), diagnostic(result)
+    # OVERWATCH keeps no queue file: its migration step is a narrated no-op.
+    assert not _overwatch_backlog(sandbox).exists(), diagnostic(result)
 
 
 class TestSkippedItemStopsBeforeStampAndMigrations:

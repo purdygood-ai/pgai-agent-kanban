@@ -168,12 +168,22 @@ from pgai_agent_kanban.cm import write_rc_state
 from pgai_agent_kanban.cm.read_state_field import read_state_field
 from pgai_agent_kanban.lib import ini, md_fields
 from pgai_agent_kanban.lib import push_decision as _push_decision
+from pgai_agent_kanban.lib import temp_root as _temp_root_resolver
 from pgai_agent_kanban.lib.atomic_write import atomic_write
 from pgai_agent_kanban.lib.error_contract import format_error_contract
+from pgai_agent_kanban.lib.stdio import write_stderr as _write_stderr
+from pgai_agent_kanban.lib.stdio import write_stdout as _write_stdout
 from pgai_agent_kanban.ops import resolve as ops_resolve
 from pgai_agent_kanban.ops import write as ops_write
 from pgai_agent_kanban.ops.context import OpsContext
 from pgai_agent_kanban.ops.errors import Ambiguous, CliRefusal, NotFound, OpsError
+from pgai_agent_kanban.overwatch.halt_provenance import (
+    halt_command,
+    halt_global_command,
+    installed_script_command,
+    unhalt_command,
+    unhalt_global_command,
+)
 
 __all__ = [
     "CLI_VERBS",
@@ -189,7 +199,9 @@ CLI_VERBS: tuple[str, ...] = ("unwind_rc",)
 EXIT_REFUSED = 1
 EXIT_PARTIAL = 2
 
-_SCRIPT = "team/scripts/unwind-rc.sh"
+# The operator script, relative to the installed root's scripts/ directory;
+# remedies name it through installed_script_command.
+_SCRIPT = "unwind-rc.sh"
 # Prefix of the push-policy and skipped-unresolved-project lines, the way
 # cancel-rc tags its own.
 _SITE_TAG = "[unwind-rc]"
@@ -203,15 +215,13 @@ _VERSION_RE = re.compile(r"^v[0-9]+\.[0-9]+\.[0-9]+$")
 _FINISHED_STATES = ("DONE", "WONT-DO")
 _RULE = "=" * 60
 _THIN_RULE = "-" * 60
-# Last-resort temp root, the same one team/scripts/lib/temp.sh falls back to.
-_FALLBACK_TEMP_ROOT = "/tmp/pgai_kanban_tmp"
 _QUEUE_NAMES = ("coder", "cm", "pm", "tester", "writer", "bug", "priority")
 # A queue line the plan lists as open: one starting "[ ]", or one carrying a
 # [W], [A] or [B] marker anywhere.
 _OPEN_QUEUE_LINE_RE = re.compile(r"^\[ \]|\[W\]|\[A\]|\[B\]")
 _CANCELLATION_NOTE_RE = re.compile(r"^## Cancellation Note", re.M)
 _ORPHAN_BRANCH_PREFIX = "feature/CLAUDE-"
-_BUNDLED_ITEMS_HEADING = "## Bundled Items"
+_BUNDLED_ITEMS_HEADING = "Bundled Items"
 # The ## Status a superseded requirements file is closed to.
 _SUPERSEDED_STATUS = "wont-do"
 
@@ -255,16 +265,6 @@ class UnwindRcError(CliRefusal):
 def unwind_exit_code(exc: OpsError) -> int:
     """Return the exit code ``unwind-rc.sh`` exits with for *exc* (1 when it names none)."""
     return getattr(exc, "exit_code", EXIT_REFUSED)
-
-
-def _write_stdout(text: str) -> None:
-    sys.stdout.write(text)
-    sys.stdout.flush()
-
-
-def _write_stderr(text: str) -> None:
-    sys.stderr.write(text)
-    sys.stderr.flush()
 
 
 def _local_now() -> str:
@@ -391,22 +391,14 @@ def _origin_skip_reason(ctx: OpsContext, project: str, say: Callable[..., None],
 
 
 def _temp_root(ctx: OpsContext) -> str:
-    """The framework temp root, resolved as ``pgai_temp_dir`` resolves it, created if missing.
+    """The framework temp root for *ctx*'s kanban root, created if missing.
 
-    ``PGAI_AGENT_KANBAN_TEMP_DIR``, else ``kanban.cfg [paths] tmp_root`` /
-    ``tmp_subdir`` under the kanban root, else the documented last-resort
-    root. A value naming the filesystem root falls back to the last resort.
+    Resolved by :func:`pgai_agent_kanban.lib.temp_root.resolve_temp_root`
+    against ``ctx.kanban_root``'s kanban.cfg, so the precedence and the
+    last-resort root are the shared resolver's; this function only adds the
+    ``mkdir -p`` the backup step needs.
     """
-    value = os.environ.get("PGAI_AGENT_KANBAN_TEMP_DIR", "")
-    if not value:
-        kanban_cfg = ctx.kanban_root / "kanban.cfg"
-        tmp_root = tmp_subdir = ""
-        if kanban_cfg.is_file():
-            tmp_root = ini.read_line_value(kanban_cfg, "paths", "tmp_root") or ""
-            tmp_subdir = ini.read_line_value(kanban_cfg, "paths", "tmp_subdir") or ""
-        value = f"{tmp_root}/{tmp_subdir}" if tmp_root and tmp_subdir else _FALLBACK_TEMP_ROOT
-    if os.path.realpath(value) == os.sep:
-        value = _FALLBACK_TEMP_ROOT
+    value = _temp_root_resolver.resolve_temp_root(ctx.kanban_root)
     os.makedirs(value, exist_ok=True)
     return value
 
@@ -694,7 +686,9 @@ def unwind_rc(
                 "unwind_rc.confirmation_required",
                 f"unwind-rc would unwind RC {version} of project {project} across every state "
                 "store, and the call carried no confirmation.",
-                f"{_SCRIPT} --project {project} --key {version} --confirm",
+                installed_script_command(
+                    ctx.kanban_root, _SCRIPT, "--project", project, "--key", version, "--confirm"
+                ),
             ) + "\n",
         )
 
@@ -817,11 +811,11 @@ def _preflight(
             "  unwind-rc.sh requires the system to be halted before it will run.\n"
             "  This prevents the wake scripts from scheduling new work while the\n"
             "  unwind is in progress.\n\n"
-            "  To halt the entire kanban, run: team/scripts/halt-global.sh\n\n"
-            f"  To halt only this project, run: team/scripts/halt.sh --project {name}\n\n"
+            f"  To halt the entire kanban, run: {halt_global_command(ctx.kanban_root)}\n\n"
+            f"  To halt only this project, run: {halt_command(ctx.kanban_root, name)}\n\n"
             "  After the unwind completes, resume with the matching unhalt verb:\n"
-            "    team/scripts/unhalt-global.sh (if you halted globally), or\n"
-            f"    team/scripts/unhalt.sh --project {name} (if you halted this project only).\n",
+            f"    {unhalt_global_command(ctx.kanban_root)} (if you halted globally), or\n"
+            f"    {unhalt_command(ctx.kanban_root, name)} (if you halted this project only).\n",
         )
     if not project_root.is_dir():
         # BLOCK-WORTHY (docs/blocking-site-census.md): no project directory,
@@ -1309,20 +1303,14 @@ def bundled_items(requirements_text: str, kind: str) -> list[str]:
     """IDs of *kind* (``PRIORITY`` / ``BUG``) under ``## Bundled Items``, in order, repeats kept.
 
     Each line of the section contributes its first ``<KIND>-NNNN...`` token,
-    with a trailing ``.md`` removed; the section ends at the next ``## ``
-    heading.
+    with a trailing ``.md`` removed. The section is read by
+    :func:`task_status.read_section`: it ends at the next level-2 heading,
+    and a ``###`` subheading stays inside it.
     """
     ids: list[str] = []
     token = re.compile(r"\b(" + kind + r"-\d+[^\s`)\"]*)")
-    in_section = False
-    for line in requirements_text.splitlines():
-        if line.strip() == _BUNDLED_ITEMS_HEADING:
-            in_section = True
-            continue
-        if not in_section:
-            continue
-        if line.startswith("## "):
-            break
+    body = task_status.read_section(requirements_text, _BUNDLED_ITEMS_HEADING) or ""
+    for line in body.splitlines():
         match = token.search(line)
         if match:
             ident = match.group(1)
@@ -1407,7 +1395,7 @@ def _set_status_line(path: str, value: str) -> bool:
     """
     try:
         text = pathlib.Path(path).read_text(encoding="utf-8")
-        if md_fields.section_body(text, "Status") is None:
+        if task_status.read_section(text, "Status", end_at_subheading=True) is None:
             return False
         atomic_write(path, md_fields.set_value_line(text, "Status", value),
                      prefix=".unwind_rc_tmp_", preserve_mode=True)
@@ -1417,9 +1405,13 @@ def _set_status_line(path: str, value: str) -> bool:
 
 
 def _field_as_written(path: pathlib.Path, heading: str) -> str:
-    """A release-state field's value, or ``""`` when the file has no such heading."""
-    lines = _read_text(path).splitlines()
-    if not any(line.strip() == f"## {heading}" for line in lines):
+    """A release-state field's value, or ``""`` when the file has no such heading.
+
+    The heading's presence is read by :func:`task_status.read_section` with
+    the release-state heading reading (``exact_heading``): a line reading
+    exactly ``## <heading>`` once stripped.
+    """
+    if task_status.read_section(_read_text(path), heading, exact_heading=True) is None:
         return ""
     return read_state_field(str(path), heading)
 

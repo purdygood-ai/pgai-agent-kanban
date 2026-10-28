@@ -53,6 +53,8 @@ import pytest
 # Paths (relative to team/, which is the CWD when run via run-unit-tests.sh)
 # ---------------------------------------------------------------------------
 _WAKE_README_META_LIB = pathlib.Path("scripts/lib/wake_readme_meta.sh")
+# The section reader the README-metadata readers call (read_md_field).
+_MD_FIELD_LIB = pathlib.Path("scripts/lib/md_field.sh")
 # This model-selection block now lives once in the shared wake driver's
 # prep stage, sourced by both wake/claude.sh and wake/codex.sh --
 # process_one_task's inline body was lifted out of wake/claude.sh, and
@@ -160,6 +162,7 @@ def _run_model_selection(
     script = textwrap.dedent(f"""\
         #!/usr/bin/env bash
         set -euo pipefail
+        source {_MD_FIELD_LIB}
         {_awk_extract_function("get_model_override_from_readme", _WAKE_README_META_LIB)}
 
         log() {{ :; }}

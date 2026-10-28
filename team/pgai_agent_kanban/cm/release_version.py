@@ -6,7 +6,8 @@ Three readers tie a task to a release by its README's
 agree on what a written value means:
 
   - the CM ship-policy stage's TESTER-task lookup
-    (team/scripts/lib/cm/release_ship_policy_report.sh), which picks the
+    (pgai_agent_kanban.cm.ship_policy_report_inputs, run by
+    team/scripts/lib/cm/release_ship_policy_report.sh), which picks the
     TESTER task for the RC being decided; and
   - the bundled-item promotion at release time
     (team/scripts/cm/promote_bundled_items.py), which counts a DONE task as

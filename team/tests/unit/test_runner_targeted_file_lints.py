@@ -9,12 +9,16 @@ WHAT A TARGETED RUN PROMISES ABOUT THE PER-FILE LINTS
 -----------------------------------------------------
 - the test anti-pattern lint (lint_test_anti_patterns.py) and the
   skip-cites-a-real-bug gate (lint_skip_bug_gate.sh) run over exactly the
-  validated ``--files`` paths, each invoked with ``--files <path>...`` and
-  nothing else -- never a tests directory, never the runtime scripts;
+  validated ``--files`` paths, each invoked with ``--files <path>...`` and a
+  scratch ``--findings-file`` and nothing else -- never a tests directory,
+  never the runtime scripts;
 - a finding in a named file prints in full, naming the file and line, and
-  makes the targeted run exit 1 through the dual-channel
+  -- read from the lint's findings file, since both lints exit 0 on
+  findings -- makes the targeted run exit 1 through the dual-channel
   ``<runner>.targeted-file-lint-findings`` contract even though every named
   test passed; the targeted exit file records that 1;
+- a lint that exits non-zero has not checked the named files, so it fails
+  the targeted run too;
 - a run over clean files prints an OK line per lint and exits 0, even when
   an unnamed sibling in the same directory carries a finding;
 - the certification files TESTER reads (``lint/findings-<suite>.json``, its
@@ -129,10 +133,29 @@ def _rel(runner_name: str, name: str) -> str:
     return f"{_RUNNER_CONFIG[runner_name]['test_dir']}/{name}"
 
 
+# The package modules the real anti-pattern lint imports (the temp root
+# resolver and what it imports, the error-contract emitter and the finding
+# shape), relative to team/. The lint finds them in
+# the pgai_agent_kanban/ directory beside its own scripts/, so the fixture
+# tree carries them there too.
+_AP_LINT_PACKAGE_MODULES = (
+    "pgai_agent_kanban/env.py",
+    "pgai_agent_kanban/lib/__init__.py",
+    "pgai_agent_kanban/lib/error_contract.py",
+    "pgai_agent_kanban/lib/ini.py",
+    "pgai_agent_kanban/lib/temp_root.py",
+    "pgai_agent_kanban/lint/__init__.py",
+    "pgai_agent_kanban/lint/findings.py",
+)
+
+
 def _install_real_lints(team: pathlib.Path) -> None:
     """Replace the two lint stand-ins with the real, shipped lint scripts."""
     for name in (_AP_LINT, _SKIP_GATE):
         shutil.copy2(_SCRIPTS_DIR / name, team / "scripts" / name)
+    for rel in _AP_LINT_PACKAGE_MODULES:
+        (team / rel).parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(_TEAM_DIR / rel, team / rel)
 
 
 def _install_argv_stubs(team: pathlib.Path) -> None:
@@ -144,12 +167,33 @@ def _install_argv_stubs(team: pathlib.Path) -> None:
 
 
 def _lint_argv(sandbox: _Sandbox) -> dict[str, list[str]]:
-    """The argv each argv-recording lint stand-in received, keyed by script name."""
-    recorded: dict[str, list[str]] = {}
+    """The argv each argv-recording lint stand-in received, keyed by script
+    name, with its ``--findings-file PATH`` pair removed (see
+    _findings_file_args for that half)."""
+    return {name: argv for name, (argv, _) in _split_findings_file(sandbox).items()}
+
+
+def _findings_file_args(sandbox: _Sandbox) -> dict[str, list[str]]:
+    """The ``--findings-file`` value(s) each argv-recording lint stand-in received."""
+    return {name: paths for name, (_, paths) in _split_findings_file(sandbox).items()}
+
+
+def _split_findings_file(sandbox: _Sandbox) -> dict[str, tuple[list[str], list[str]]]:
+    recorded: dict[str, tuple[list[str], list[str]]] = {}
     for line in sandbox.gates_run():
         if line.startswith("["):
             name, *argv = json.loads(line)
-            recorded[name] = argv
+            rest: list[str] = []
+            paths: list[str] = []
+            i = 0
+            while i < len(argv):
+                if argv[i] == "--findings-file" and i + 1 < len(argv):
+                    paths.append(argv[i + 1])
+                    i += 2
+                    continue
+                rest.append(argv[i])
+                i += 1
+            recorded[name] = (rest, paths)
     return recorded
 
 
@@ -204,7 +248,9 @@ def test_ap7_in_a_named_file_prints_file_and_line_and_fails_the_run(
         + _describe(result)
     )
     assert "1 passed" in result.stdout, "the named test itself passes; the lint alone fails the run"
-    assert "[targeted-lint] test_anti_patterns: finding(s)" in result.stdout, _describe(result)
+    assert "[targeted-lint] test_anti_patterns: finding(s) in the named files (1)" in result.stdout, (
+        _describe(result)
+    )
     assert "[targeted-lint] skip_cites_real_bug: OK" in result.stdout, _describe(result)
     expected_key = f"{runner_name.removesuffix('.sh')}.targeted-file-lint-findings"
     assert f"error:   {expected_key}" in result.stderr.splitlines(), _describe(result)
@@ -276,6 +322,28 @@ def test_pytest_failure_keeps_its_own_verdict_when_a_lint_also_reports(
     assert "tests FAILED" in result.stderr, _describe(result)
 
 
+@pytest.mark.parametrize("runner_name", _RUNNER_NAMES)
+def test_a_lint_that_exits_non_zero_fails_the_run_as_unchecked(
+    runner_name: str, tmp_path: pathlib.Path
+) -> None:
+    """Both lints exit 0 on findings, so a non-zero exit means the named
+    files were never checked -- the targeted run fails rather than passing
+    them unchecked."""
+    team = _build_fixture(tmp_path, runner_name)
+    _install_real_lints(team)
+    (team / "scripts" / _SKIP_GATE).write_text("#!/usr/bin/env bash\nexit 3\n", encoding="utf-8")
+    named = _write_test(team, runner_name, "test_named_clean.py", _CLEAN_SOURCE)
+    sandbox = _Sandbox(tmp_path)
+
+    result = sandbox.run(team, runner_name, "--files", _rel(runner_name, named.name))
+
+    assert result.returncode == 1, _describe(result)
+    assert "[targeted-lint] skip_cites_real_bug: could not check the named files (exit 3)" in (
+        result.stdout
+    ), _describe(result)
+    assert "[targeted-lint] test_anti_patterns: OK" in result.stdout, _describe(result)
+
+
 # ---------------------------------------------------------------------------
 # The lints receive the named paths and nothing else
 # ---------------------------------------------------------------------------
@@ -300,6 +368,14 @@ def test_targeted_run_hands_each_lint_exactly_the_named_paths(
         "each lint must receive --files and the validated named paths only -- no "
         "--tests-dir, no runtime-script directory\n" + _describe(result)
     )
+    findings_paths = _findings_file_args(sandbox)
+    certification = {str(p) for p in _certification_files(sandbox, runner_name)}
+    for name in (_AP_LINT, _SKIP_GATE):
+        assert len(findings_paths[name]) == 1, findings_paths
+        scratch = pathlib.Path(findings_paths[name][0])
+        assert str(scratch) not in certification, "a targeted run must not write a certification file"
+        assert sandbox.temp_dir in scratch.parents, scratch
+        assert not scratch.parent.exists(), "the scratch findings directory is removed afterwards"
 
 
 @pytest.mark.parametrize("runner_name", _RUNNER_NAMES)
@@ -319,6 +395,10 @@ def test_certification_run_still_invokes_both_lints_in_whole_tree_form(
         _AP_LINT: [],
         _SKIP_GATE: ["--tests-dir", str(team / "tests")],
     }, _describe(result)
+    findings_paths = _findings_file_args(sandbox)
+    for name in (_AP_LINT, _SKIP_GATE):
+        assert len(findings_paths[name]) == 1, findings_paths
+        assert pathlib.Path(findings_paths[name][0]).parent == sandbox.temp_dir / "lint", findings_paths
 
 
 # ---------------------------------------------------------------------------

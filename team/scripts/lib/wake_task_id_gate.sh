@@ -13,7 +13,7 @@
 #
 # The shape every id is validated against is the one task_ids.sh's
 # kanban_task_id_pattern prints — a single source the bash callers and the
-# python3 heredocs read identically. An id outside it ('..', '../x', 'a.b',
+# Python modules they call read identically. An id outside it ('..', '../x', 'a.b',
 # anything with a separator or a dot) is refused dual-channel here, naming
 # the file and line, and the caller skips it: a refused id never becomes a
 # path. Both refusals are CONVERT (docs/blocking-site-census.md): a
@@ -22,6 +22,7 @@
 #
 # Functions
 # ---------
+#   _malformed_queue_entries <queue_file> <marker_class> <canonical_pattern>
 #   _narrate_malformed_queue_task_ids <queue_file> <marker_class> <scan_name>
 #   _narrate_malformed_prerequisite_ids <readme> <check_output>
 #   _drop_archived_prerequisites <check_output>
@@ -30,9 +31,11 @@
 #       unsatisfied prerequisite and exits 1; exits 0 with no output when
 #       every prerequisite is DONE or WONT-DO (or there are none). Called
 #       by wake_driver_prep.sh at dispatch and by recheck_waiting_tasks.
-#       A section body stops at the next "##" line, so an empty
+#       Both sections are read with read_md_field (md_field.sh): a body
+#       stops at the next "##" line, "###" included, so an empty
 #       ## Prerequisites means none and an empty prerequisite ## State
 #       prints as `<id>:` (unsatisfied), never as the next section's text.
+#       A README that cannot be read prints nothing and exits 1.
 #       A prerequisite is read from its live TASKS_ROOT/<id>/status.md
 #       first; only one with no live folder at all is looked up in the
 #       project's archive (<kanban_root>/archive/<project>/tasks/<id>/,
@@ -41,12 +44,17 @@
 #       nor archived still prints as `<id>:MISSING`.
 #
 # Dependencies: TASKS_ROOT (wake_bootstrap.sh), task_ids.sh
-# (kanban_task_id_pattern), error_contract.sh (pgai_emit_error_contract)
-# and pp_run_ops.sh (pp_run_ops, which reaches the archive lookup as the
-# archive module's `archived_tasks` verb) — all three function-only and
-# self-sourced below; python3 on PATH. pp_run_ops.sh is loaded only when
-# no pp_run_ops is defined yet, so a caller's own definition (a wrapper,
-# or a test stub) stays the active one.
+# (kanban_task_id_pattern), error_contract.sh (pgai_emit_error_contract),
+# pp_run_ops.sh (pp_run_ops, which reaches the archive lookup as the
+# archive module's `archived_tasks` verb, and the queue scan as
+# pgai_agent_kanban.lib.queue_task_id_scan) and md_field.sh (read_md_field,
+# the section reader) — all function-only and self-sourced below; python3
+# on PATH. pp_run_ops.sh is loaded only when no pp_run_ops is defined yet,
+# and loading md_field.sh puts the caller's pp_run_ops back afterwards, so
+# a caller's own definition (a wrapper, or a test stub) stays the active
+# one for the archive lookup. The section reads and the queue scan always run
+# this tree's own pp_run_ops (_prerequisite_section_body,
+# _malformed_queue_entries), so such a definition never stands in for them.
 
 _WAKE_TASK_ID_GATE_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=task_ids.sh
@@ -56,6 +64,32 @@ source "${_WAKE_TASK_ID_GATE_LIB_DIR}/error_contract.sh"
 # A caller's own pp_run_ops (wake_bootstrap.sh's, or a test stub) wins.
 # shellcheck source=pp_run_ops.sh
 declare -F pp_run_ops >/dev/null || source "${_WAKE_TASK_ID_GATE_LIB_DIR}/pp_run_ops.sh"
+# md_field.sh leaves a defined pp_run_ops in place; the definition active
+# before it is also saved and restored around the load.
+if ! declare -F read_md_field >/dev/null; then
+  _wake_task_id_gate_runner="$(declare -f pp_run_ops)"
+  # shellcheck source=md_field.sh
+  source "${_WAKE_TASK_ID_GATE_LIB_DIR}/md_field.sh"
+  eval "$_wake_task_id_gate_runner"
+  unset _wake_task_id_gate_runner
+fi
+
+# ---------------------------------------------------------------------------
+# _malformed_queue_entries <queue_file> <marker_class> <canonical_pattern>
+#
+# Print one `<line number>\t<line>` per entry of <queue_file> whose marker
+# is in <marker_class> and whose task id <canonical_pattern> does not match
+# (pgai_agent_kanban.lib.queue_task_id_scan; its docstring has the entry
+# shape and the '[]' alias rule). An unreadable queue file prints nothing.
+# Runs in a subshell that loads this tree's own pp_run_ops first: a
+# caller's pp_run_ops is aimed at the archive lookup and never answers for
+# a queue file. Exits as the module does: 0.
+# ---------------------------------------------------------------------------
+_malformed_queue_entries() (
+  # shellcheck source=pp_run_ops.sh
+  source "${_WAKE_TASK_ID_GATE_LIB_DIR}/pp_run_ops.sh"
+  pp_run_ops pgai_agent_kanban.lib.queue_task_id_scan -- "$1" "$2" "$3"
+)
 
 # ---------------------------------------------------------------------------
 # _narrate_malformed_queue_task_ids <queue_file> <marker_class> <scan_name>
@@ -83,27 +117,7 @@ _narrate_malformed_queue_task_ids() {
   local marker_class="$2"
   local scan_name="$3"
   local malformed
-  malformed="$(python3 - "$queue_file" "$marker_class" "$(kanban_task_id_pattern)" <<'PY'
-import pathlib, re, sys
-queue_path = pathlib.Path(sys.argv[1])
-marker_class = sys.argv[2]
-canonical = re.compile(sys.argv[3])
-# The BACKLOG marker is a space, so only a class that names it also admits
-# the empty '[]' alias; any other class must see its marker character.
-if " " in marker_class:
-    entry = re.compile(r'^\s*-?\s*\[\s*(?:[' + marker_class + r'])?\s*\]\s+(\S+)(\s+.*)?$')
-else:
-    entry = re.compile(r'^\s*-?\s*\[\s*[' + marker_class + r']\s*\]\s+(\S+)(\s+.*)?$')
-try:
-    lines = queue_path.read_text().splitlines()
-except OSError:
-    raise SystemExit(0)
-for number, line in enumerate(lines, start=1):
-    m = entry.match(line)
-    if m and not canonical.match(m.group(1)):
-        print(f"{number}\t{line.strip()}")
-PY
-)"
+  malformed="$(_malformed_queue_entries "$queue_file" "$marker_class" "$(kanban_task_id_pattern)")"
   [[ -z "$malformed" ]] && return 0
   local pattern number line
   pattern="$(kanban_task_id_pattern)"
@@ -207,70 +221,99 @@ _drop_archived_prerequisites() {
   return 0
 }
 
+# ---------------------------------------------------------------------------
+# _prerequisite_section_body <file> <heading>
+#
+# read_md_field over <file>'s ## <heading> (the next "##" line, "###"
+# included, ends the body), run in a subshell that loads this tree's own
+# pp_run_ops first: a caller's pp_run_ops is aimed at the archive lookup
+# and never answers for a README or status.md. Prints and exits as
+# read_md_field: 0 present (empty line for an empty body), 3 absent, 1
+# unreadable.
+# ---------------------------------------------------------------------------
+_prerequisite_section_body() (
+  # shellcheck source=pp_run_ops.sh
+  source "${_WAKE_TASK_ID_GATE_LIB_DIR}/pp_run_ops.sh"
+  read_md_field --end-at-subheading "$1" "$2"
+)
+
+# ---------------------------------------------------------------------------
+# _unsatisfied_prerequisites <readme>
+#
+# Prints one `<id>:<STATE|MISSING|UNPARSEABLE|MALFORMED>` line per
+# unsatisfied entry of <readme>'s ## Prerequisites and returns 1; returns 0
+# printing nothing when every entry is DONE or WONT-DO, or there are none.
+# The body has its <!-- --> comments removed; each line drops one leading
+# "-", and holds comma-separated ids; an empty token or "none" (any case)
+# is skipped. Every MALFORMED line comes first, then the rest in order. A
+# README that cannot be read returns 1 printing nothing.
+# ---------------------------------------------------------------------------
+_unsatisfied_prerequisites() {
+  local readme="$1"
+  local body rc=0
+  body="$(_prerequisite_section_body "$readme" Prerequisites)" || rc=$?
+  [[ $rc -eq 3 ]] && return 0
+  [[ $rc -eq 0 ]] || return 1
+
+  local head rest
+  while [[ "$body" == *"<!--"*"-->"* ]]; do
+    head="${body%%<!--*}"
+    rest="${body#*<!--}"
+    [[ "$rest" == *"-->"* ]] || break
+    body="${head}${rest#*-->}"
+  done
+
+  local pattern line token state
+  local -a tokens=() prereqs=() unsatisfied=()
+  pattern="$(kanban_task_id_pattern)"
+  while IFS= read -r line; do
+    line="${line#"${line%%[![:space:]]*}"}"
+    line="${line%"${line##*[![:space:]]}"}"
+    if [[ "$line" == -* ]]; then
+      line="${line:1}"
+      line="${line#"${line%%[![:space:]]*}"}"
+    fi
+    [[ -z "$line" || "${line,,}" == "none" ]] && continue
+    IFS=',' read -ra tokens <<< "$line"
+    for token in "${tokens[@]}"; do
+      token="${token#"${token%%[![:space:]]*}"}"
+      token="${token%"${token##*[![:space:]]}"}"
+      [[ -z "$token" || "${token,,}" == "none" ]] && continue
+      if [[ "$token" =~ $pattern ]]; then
+        prereqs+=("$token")
+      else
+        unsatisfied+=("${token}:MALFORMED")
+      fi
+    done
+  done <<< "$body"
+
+  local prereq_id status_file
+  for prereq_id in "${prereqs[@]}"; do
+    status_file="${TASKS_ROOT}/${prereq_id}/status.md"
+    if [[ ! -f "$status_file" ]]; then
+      unsatisfied+=("${prereq_id}:MISSING")
+      continue
+    fi
+    rc=0
+    state="$(_prerequisite_section_body "$status_file" State)" || rc=$?
+    if [[ $rc -ne 0 ]]; then
+      unsatisfied+=("${prereq_id}:UNPARSEABLE")
+      continue
+    fi
+    state="${state^^}"
+    [[ "$state" == "DONE" || "$state" == "WONT-DO" ]] || unsatisfied+=("${prereq_id}:${state}")
+  done
+
+  [[ ${#unsatisfied[@]} -eq 0 ]] && return 0
+  printf '%s\n' "${unsatisfied[@]}"
+  return 1
+}
+
 check_prerequisites() {
   local readme="$1"
   local check_output
   local check_exit=0
-  check_output="$(python3 - "$readme" "$TASKS_ROOT" "$(kanban_task_id_pattern)" <<'PY'
-import pathlib, re, sys
-readme = pathlib.Path(sys.argv[1])
-tasks_root = pathlib.Path(sys.argv[2])
-canonical = re.compile(sys.argv[3])
-
-text = readme.read_text()
-m = re.search(r'(^## Prerequisites[^\S\n]*)((?:\n(?!##)[^\n]*)*?)(\n+##|\n*\Z)', text, flags=re.M)
-if not m:
-    raise SystemExit(0)
-
-body = m.group(2).strip()
-body = re.sub(r'<!--.*?-->', '', body, flags=re.S).strip()
-if not body or body.lower() == "none":
-    raise SystemExit(0)
-
-prereqs = []
-malformed = []
-for line in body.splitlines():
-    line = line.strip()
-    if line.startswith("-"):
-        line = line[1:].strip()
-    if not line or line.lower() == "none":
-        continue
-    for token in line.split(","):
-        token = token.strip()
-        if not token or token.lower() == "none":
-            continue
-        if canonical.match(token):
-            prereqs.append(token)
-        else:
-            malformed.append(token)
-
-if not prereqs and not malformed:
-    raise SystemExit(0)
-
-SATISFIED = {"DONE", "WONT-DO"}
-
-unsatisfied = [f"{token}:MALFORMED" for token in malformed]
-for prereq_id in prereqs:
-    status_file = tasks_root / prereq_id / "status.md"
-    if not status_file.is_file():
-        unsatisfied.append(f"{prereq_id}:MISSING")
-        continue
-    status_text = status_file.read_text()
-    sm = re.search(r'(^## State[^\S\n]*)((?:\n(?!##)[^\n]*)*?)(\n+##|\n*\Z)', status_text, flags=re.M)
-    if not sm:
-        unsatisfied.append(f"{prereq_id}:UNPARSEABLE")
-        continue
-    state = sm.group(2).strip().upper()
-    if state not in SATISFIED:
-        unsatisfied.append(f"{prereq_id}:{state}")
-
-if unsatisfied:
-    for u in unsatisfied:
-        print(u)
-    raise SystemExit(1)
-raise SystemExit(0)
-PY
-)" || check_exit=$?
+  check_output="$(_unsatisfied_prerequisites "$readme")" || check_exit=$?
   # A prerequisite with no live folder may have been archived; an archived
   # task is finished, so it no longer holds this task. The check is
   # satisfied only when every unsatisfied line was an archived MISSING one

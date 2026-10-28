@@ -21,9 +21,10 @@ Commands (``python3 -m pgai_agent_kanban.cm.release_notes_blocks <command> ...``
       Print one ``| substance | public ID | SEVERITY | rationale |`` table row
       per readable bug file. Every cell is flattened to one line with ``|``
       escaped; the public ID reads ``internal-only`` when absent, the
-      severity is the first word of ``## Severity`` upper-cased
-      (``UNSPECIFIED`` when absent), and the rationale is scrubbed. An odd
-      argument count is refused with exit 1.
+      severity is the first word of ``## Severity``, else of the
+      ``**Severity:**`` header field, upper-cased (``UNSPECIFIED`` when
+      neither is present), and the rationale is scrubbed. An odd argument
+      count is refused with exit 1.
 
   stamp-status NOTES_FILE TARGET_STATUS [KNOWN_ISSUE_BLOCK] [BUGS_SKIPPED_BLOCK]
       Replace the ``## Status`` PENDING-RELEASE placeholder with
@@ -85,6 +86,9 @@ _NO_SYMPTOM = "An unresolved defect (no Symptom text recorded in the bug report)
 _COMMENT_RE = re.compile(r"<!--.*?-->", re.DOTALL)
 _BLOCK_STATUSES = ("KNOWN-ISSUE", "NON-FUNCTIONAL")
 _CARRY_FORWARD_RE = re.compile(r"(^##\s+Known Issue Carry Forward\s*$)([\s\S]*?)(?=^##\s+|\Z)", re.MULTILINE)
+# The ``**Severity:** medium`` header line a filed bug carries, read as
+# discovery reads it: the first such line in the file.
+_SEVERITY_FIELD_RE = re.compile(r"^[ \t]*\*\*Severity:\*\*[ \t]*(.*)$", re.IGNORECASE | re.MULTILINE)
 
 
 def _substance(text: str) -> str:
@@ -102,6 +106,17 @@ def _first_token(text: str) -> str:
     """The first whitespace-delimited word of *text*, or ``""``."""
     stripped = text.strip()
     return stripped.split()[0] if stripped else ""
+
+
+def _severity(text: str) -> str:
+    """A bug's severity word: ``## Severity``'s first word, else the
+    ``**Severity:**`` header field's (one trailing period dropped), else
+    ``unspecified``; IDs scrubbed."""
+    word = _first_token(_parse_section(text, "Severity"))
+    if not word:
+        field = _SEVERITY_FIELD_RE.search(text)
+        word = _first_token(field.group(1)).rstrip(".") if field else ""
+    return _strip_internal_ids(word) or "unspecified"
 
 
 def _table_cell(value: str) -> str:
@@ -146,7 +161,7 @@ def bugs_skipped_rows(pairs: Sequence[str]) -> str:
         if text is None:
             continue
         public_id = _public_id(text)
-        severity = _strip_internal_ids(_first_token(_parse_section(text, "Severity"))) or "unspecified"
+        severity = _severity(text)
         rows.append(
             f"| {_table_cell(_substance(text))} | {_table_cell(public_id or 'internal-only')} | "
             f"{_table_cell(severity.upper())} | {_table_cell(_strip_internal_ids(pairs[index + 1]))} |"

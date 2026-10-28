@@ -437,21 +437,26 @@ template.
 ### 1.8 Runtime bounds
 
 The wake layer caps how long work runs at three nested levels —
-**task ≤ project ≤ batch** — so a single stuck agent cannot consume an
-entire wake batch or starve the projects queued behind it. All three are
+**task ≤ project ≤ batch** — so a single stuck agent cannot hold its batch
+open indefinitely. Each `wake-batch.sh` firing starts one batch per project
+(`docs/OPERATIONS.md`, "Cron and Wake Cadence"), so these caps, like
+`max_tasks_per_wake`, apply per (project, agent) batch. The three caps are
 `[wake]` keys in `kanban.cfg`, each with a safe default:
 
 | Key | Default | Bounds |
 |---|---|---|
 | `max_task_seconds` | `5400` (90 min) | A single agent run. `0` disables. |
 | `max_project_seconds` | `14400` | One project's task loop; each project gets its own clock. `0` disables. |
-| `max_runtime_seconds` | `14400` | The whole multi-project batch (the outermost bound). |
+| `max_runtime_seconds` | `14400` | One (project, agent) batch (the outermost bound). |
 
 `max_task_seconds` is a hard wall-clock timeout on the provider invocation.
 When an agent exceeds it the wake sends SIGTERM, waits `kill_grace_seconds`
-(default 30), then SIGKILL. `max_project_seconds` resets per project, so a
-long or stalled project 1 cannot starve projects 2..N — each gets a fresh
-clock. `max_runtime_seconds` caps the entire iteration. The wake log names
+(default 30), then SIGKILL. A `wake-batch.sh` batch works one project, so
+`max_project_seconds` and `max_runtime_seconds` both bound it and the lower
+one trips first; one project's long queue never delays another project's
+batch. A provider wake script run directly works every project in turn as
+one batch: there `max_project_seconds` gives each project a fresh clock and
+`max_runtime_seconds` caps the whole run. The wake log names
 which bound tripped — `(task)`, `(project)`, or `(batch)` — and warns
 (non-fatally) at startup if the configured values violate the
 task ≤ project ≤ batch ordering. Each key honors environment-variable
@@ -483,9 +488,9 @@ project's own history rather than from the configured ceiling:
      generate_measured_pace_docs.py' (from the repo root) and
      commit the result instead. -->
 
-**Per-task wall time (measured):** 5.4–142.7 min, median 17.3 min. Sample: 112 RC(s), 864 task(s), window = every rollup available at render time (v1.27.1 .. v2.21.2). This is an RC's own wall-clock duration spread evenly across its tasks (clock-to-clock, including wake-cadence idle time), not an isolated per-task stopwatch reading -- see this generator's module docstring for why.
+**Per-task wall time (measured):** 5.4–272.3 min, median 16.7 min. Sample: 296 RC(s), 2498 task(s), window = every rollup available at render time (v1.27.1 .. v2.53.10). This is an RC's own wall-clock duration spread evenly across its tasks (clock-to-clock, including wake-cadence idle time), not an isolated per-task stopwatch reading -- see this generator's module docstring for why.
 
-**Composed RC cost (measured):** ~162 min = 1.1×pm bookend + 3.7×coder + 1.4×writer + 1.1×tester + 1.1×cm bookend, each term the average tasks per RC for that role times the median per-task minutes above.
+**Composed RC cost (measured):** ~166 min = 1.0×pm bookend + 4.1×coder + 1.3×writer + 1.0×tester + 1.5×cm bookend, each term the average tasks per RC for that role times the median per-task minutes above.
 
 <!-- MEASURED-PACE-GENERATED:END -->
 
@@ -571,13 +576,13 @@ configured limits, not measurements.
 
 | Key | Default | What it controls |
 |---|---|---|
-| `max_tasks_per_wake` | `5` | Tasks the wake loop processes in one firing before exiting. |
-| `max_runtime_seconds` | `14400` | Wall-clock cap on the whole multi-project batch. |
+| `max_tasks_per_wake` | `5` | Tasks one (project, agent) batch processes before exiting. |
+| `max_runtime_seconds` | `14400` | Wall-clock cap on one (project, agent) batch. |
 | `max_project_seconds` | `14400` | Wall-clock cap per project; each project gets a fresh clock. `0` disables. |
 | `max_task_seconds` | `5400` | Hard wall-clock cap on one agent run. `0` disables. |
 | `kill_grace_seconds` | `30` | Seconds between SIGTERM and SIGKILL when the per-task cap fires. |
 | `pause_between_tasks` | `5` | Sleep between consecutive tasks in one firing, so a SIGTERM lands between tasks rather than mid-task. |
-| `stop_on_blocked` | `true` | Halt the wake loop when a task finishes BLOCKED. |
+| `stop_on_blocked` | `false` | `false`: a task that finishes `BLOCKED` parks only itself — its dependants wait and the batch continues with the next independent task. `true` restores the stop-the-batch behaviour: the project's batch ends at that task. |
 | `stop_file` | `${PGAI_AGENT_KANBAN_TEMP_DIR}/wakeup/stop` | Touch this path to stop every running wake batch (all agents, all projects) at its next task boundary; the in-flight task finishes. Persists until you remove it; no batch dispatches while it exists. |
 | `pm_max_tasks` | `15` | Ceiling on tasks PM generates from one requirements doc. |
 | `transient_retry_cap` | `3` | Ceiling on the durable transient-retry record before a task is blocked needing a human. |
@@ -605,6 +610,10 @@ aliases for `weekly`/`off`.
 | `deferred_bugs` | `false` | Master switch. `false` means every bug opens its own RC. |
 | `deferred_bug_level` | `low` | The highest severity that waits. A bug above it still triggers an RC. Accepts `low`, `medium`, `high`; `critical` is not settable, so at `high` a critical bug still triggers. |
 | `defer_piggyback` | `true` | Whether deferred bugs ride along when a bug above the level triggers an RC. |
+| `deferred_max_age_days` |  | A whole number of days; unset means no bound. When every open bug is deferred and the oldest is older than this, discovery bundles the deferred bugs whatever the requirements queue holds. |
+| `deferred_max_count` |  | A whole number; unset means no bound. When every open bug is deferred and more than this many are, discovery bundles them the same way. |
+| `bundle_mixing` | `separate` | `separate` keeps deferred bugs out of requirement RCs; `ride-along` lets PM add up to `ride_along_max` of them to one. |
+| `ride_along_max` | `3` | A whole number: the most deferred bugs one requirement RC may carry under `bundle_mixing = ride-along`. |
 | `deep_verify` | `weekly` | The scheduled cadence for the DEEP-VERIFY tier. `off` turns the scheduled trigger off: set here, for every project that does not set its own value; set in a project's `project.cfg`, for that project. |
 | `deep_verify_offhours_window` | `03:00-03:59` | The daily UTC window (`HH:MM-HH:MM`) in which a scheduled DEEP-VERIFY run may fire. Ships commented out. A malformed value is skipped with one warning, never refused. |
 | `overwatch_resolve` | `false` | Whether OVERWATCH may resolve a halted release itself instead of only observing it. Ships commented out everywhere; absent means `false`, and `false` leaves OVERWATCH a pure observer. See Section 7. |
@@ -851,17 +860,19 @@ scripts/add-project.sh --project my-app
 Registers a `projects/<name>/` directory that already exists (e.g. restored
 from backup) into projects.cfg without recreating its contents.
 
-Inside the project directory it writes at most two files, each only when it
-is missing, and never touches one that exists. If the directory has no
+Inside the project directory it writes at most three files, and never
+touches a `project.cfg` or `README.md` that exists. If the directory has no
 `project.cfg` (nor a legacy `PROJECT.cfg`), add-project writes one from
 `project.cfg_example` with the template's defaults and says so in one line;
 set its `dev_tree_path` and `git_repo_url` before the first release. If it
 has no `projects/<name>/README.md`, add-project seeds one from
-`templates/project/README-TEMPLATE.md` and tells you to fill it in. Either
-way, check the README before the first
-wake: fill in or update the test runners and targeted-test command, lints
-and checks, coding standard, contracts, and git and push settings, exactly
-as in the create-project step in 2.2, and keep generic rules out of it.
+`templates/project/README-TEMPLATE.md`, tells you to fill it in, and stores
+a copy of that template beside it as the snapshot `.readme-template.md`, so
+upgrade can report a later template change (see "Project README template
+notice"). Either way, check the README before the first wake: fill in or
+update the test runners and targeted-test command, lints and checks, coding
+standard, contracts, and git and push settings, exactly as in the
+create-project step in 2.2, and keep generic rules out of it.
 
 ### 2.4 remove-project
 
@@ -1012,14 +1023,17 @@ scripts/intake.sh --project <name> /tmp/BUG-0400-widget-crash.md   # example fil
 
 It routes by filename prefix — `BUG-*` → `bugs/`, `PRIORITY-*` → `priority/`,
 `vX.Y.Z-*.md` → `requirements/` — copies the file (the source is left in
-place), and sets 644. It refuses, copying nothing, if the name matches no
-known prefix or if a file of that name already exists in the destination.
+place), and sets 644. A `BUG-*` draft whose number is already taken, by a live
+or an archived bug, is deposited under the next free number, with its title and
+`**Bug ID:**` lines rewritten to match; the printed path names the new file. A
+`PRIORITY-*` or requirements file whose name already exists in the destination
+is refused, as is a name intake cannot route or that breaks the filename rules.
+A refusal copies nothing.
 
-`intake.sh` is deliberately dumb: it routes, copies, and chmods only — it does
-**NOT** validate the file's contents. A malformed file still lands here, then
-the discovery pipeline rejects it to `.rejected/` exactly as before. See
-[docs/operator-commands.md](docs/operator-commands.md) for the full command
-reference.
+`intake.sh` does **NOT** validate the file's contents: a malformed file still
+lands, and the discovery pipeline checks it afterwards. The full rules,
+refusals and exit codes are in the
+[intake section of docs/operator-commands.md](docs/operator-commands.md#intake--drop-an-intake-file-into-a-project-routed-by-filename).
 
 ### 5.1 Bugs
 
@@ -1033,10 +1047,11 @@ critically — **acceptance criteria as testable commands** (`grep -q`,
 `test -f`, geometry assertions). The intake file is where the human
 encodes the design decision: file allowlists, "MUST NOT modify" guards,
 and acceptance tripwires are how you steer the chain without sitting in
-the loop. Before numbering a new bug, confirm the high-water mark:
+the loop. Before numbering a new bug, confirm the high-water mark; an
+archived bug's number counts as taken:
 
 ```bash
-ls projects/<name>/bugs/ | grep -oE 'BUG-[0-9]+' | sort -V | tail -1
+ls projects/<name>/bugs/ archive/<name>/bugs/ 2>/dev/null | grep -oE 'BUG-[0-9]+' | sort -V | tail -1
 ```
 
 Discovery bundles ALL open bugs into one requirements doc at the next
@@ -1562,6 +1577,18 @@ directories under `workflows/<name>/` or `templates/project/<name>/` when the
 deposited tree ships no `<name>` there. Any other file you added inside a
 deposited directory, such as a custom script in `scripts/`, is an orphan, and
 `--force` moves it to the graveyard.
+
+**Project README template notice.** When a release changes
+`templates/project/README-TEMPLATE.md`, upgrade prints one `Seeded templates:`
+line per project whose snapshot of that template,
+`projects/<name>/.readme-template.md`, differs from the installed one. The
+line names the project, says the template changed and `README.md` was not,
+and ends with a `diff -u` command that runs as printed. The diff shows the
+change from the old snapshot, kept as `.readme-template.<UTC timestamp>.md`,
+to the installed template. The project `README.md` is never edited; applying
+any of the change to it is your choice. The installed template then becomes
+the snapshot, so the notice appears once per template change. A project with
+no snapshot yet gets one silently, with no notice.
 
 **Phase 1 fail-loud: "Manual bootstrap: cp … scripts/ then retry".**
 The phase-1 bootstrap refuses to hand off when the dev-tree

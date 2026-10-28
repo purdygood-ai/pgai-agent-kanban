@@ -97,6 +97,7 @@ from __future__ import annotations
 
 import os
 import pathlib
+import shlex
 import subprocess
 import sys
 import time
@@ -123,6 +124,7 @@ if _team_str not in sys.path:
 
 from pgai_agent_kanban.lib.error_contract import parse_error_contract  # noqa: E402
 from pgai_agent_kanban.ops import projects as _ops_projects  # noqa: E402
+from pgai_agent_kanban.overwatch.halt_provenance import installed_script_command  # noqa: E402
 from tests.fixtures.binary_guard import require_binary  # noqa: E402
 
 
@@ -948,9 +950,13 @@ class TestEveryActionRouteRefusesDualChannel:
         assert payload["error"] == "add_project.refused"
         assert payload["message"] == cli.stderr.strip()
         assert "project directory does not exist" in payload["message"]
-        assert payload["remedy"].endswith("team/scripts/add-project.sh --project nobody"), (
+        # The fallback names the installed script under the root this API
+        # serves, shell-quoted, so the command runs as printed.
+        _, _, command = payload["remedy"].partition("re-run the CLI form: ")
+        assert command == installed_script_command(sandbox_root, "add-project.sh", "--project", "nobody"), (
             payload["remedy"]
         )
+        assert shlex.split(command) == [str(sandbox_root / "scripts" / "add-project.sh"), "--project", "nobody"]
         assert "<" not in payload["remedy"]
 
     def test_success_body_is_the_plain_four_key_envelope(

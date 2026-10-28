@@ -364,3 +364,96 @@ def test_cli_prints_sample_size_as_rcs_and_tasks(tmp_path: pathlib.Path):
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert "n=2 RC(s)/8 task(s)" in result.stdout
+
+
+# ---------------------------------------------------------------------------
+# --freshness: a block behind the newest shipped rollup is narrated, exit 0
+# ---------------------------------------------------------------------------
+
+
+def _render_into(tmp_path: pathlib.Path, rc_dir: pathlib.Path) -> tuple[pathlib.Path, pathlib.Path]:
+    readme = _copy_real_doc(tmp_path, "README.md")
+    how_to = _copy_real_doc(tmp_path, "HOW_TO.md")
+    render = _run(["--rc-dir", str(rc_dir), "--readme", str(readme), "--how-to", str(how_to)])
+    assert render.returncode == 0, render.stdout + render.stderr
+    return readme, how_to
+
+
+def test_freshness_narrates_stale_blocks_after_a_new_release_and_exits_zero(tmp_path: pathlib.Path):
+    rc_dir = _write_rc_dir(tmp_path, [
+        _rc_rollup("v1.0.1", 60.0, {"pm": 1, "coder": 2, "tester": 1}),
+        _rc_rollup("v1.0.0", 40.0, {"pm": 1, "coder": 2, "cm": 1}),
+    ])
+    readme, how_to = _render_into(tmp_path, rc_dir)
+    before = (readme.read_text(encoding="utf-8"), how_to.read_text(encoding="utf-8"))
+
+    # A release ships; nobody re-renders.
+    (rc_dir / "v1.0.2.json").write_text(
+        json.dumps(_rc_rollup("v1.0.2", 100.0, {"pm": 1, "coder": 2, "tester": 1, "cm": 1})),
+        encoding="utf-8",
+    )
+    findings_file = tmp_path / "lint" / "pace.json"
+    fresh = _run([
+        "--freshness", "--rc-dir", str(rc_dir),
+        "--readme", str(readme), "--how-to", str(how_to),
+        "--findings-file", str(findings_file),
+    ])
+
+    assert fresh.returncode == 0, fresh.stdout + fresh.stderr
+    stale_lines = [l for l in fresh.stdout.splitlines() if "STALE" in l]
+    assert len(stale_lines) == 2, fresh.stdout
+    assert all("ends at v1.0.1" in l and "v1.0.2" in l for l in stale_lines), stale_lines
+    assert all("python3 team/scripts/generate_measured_pace_docs.py" in l for l in stale_lines)
+    assert (readme.read_text(encoding="utf-8"), how_to.read_text(encoding="utf-8")) == before
+
+    findings = json.loads(findings_file.read_text(encoding="utf-8"))
+    assert [f["kind"] for f in findings] == ["stale_block", "stale_block"]
+    assert {pathlib.Path(f["file"]).name for f in findings} == {"README.md", "HOW_TO.md"}
+    assert all(f["severity"] == "quality" and "<" not in f["remedy"] for f in findings)
+
+
+def test_freshness_is_quiet_when_blocks_end_at_the_newest_rollup(tmp_path: pathlib.Path):
+    rc_dir = _write_rc_dir(tmp_path, [_rc_rollup("v1.0.0", 40.0, {"pm": 1, "coder": 2, "cm": 1})])
+    readme, how_to = _render_into(tmp_path, rc_dir)
+    findings_file = tmp_path / "pace.json"
+    fresh = _run([
+        "--freshness", "--rc-dir", str(rc_dir),
+        "--readme", str(readme), "--how-to", str(how_to),
+        "--findings-file", str(findings_file),
+    ])
+    assert fresh.returncode == 0
+    assert "STALE" not in fresh.stdout
+    assert "OK" in fresh.stdout
+    assert json.loads(findings_file.read_text(encoding="utf-8")) == []
+
+
+def test_freshness_with_no_rollups_skips_and_exits_zero(tmp_path: pathlib.Path):
+    readme = _copy_real_doc(tmp_path, "README.md")
+    how_to = _copy_real_doc(tmp_path, "HOW_TO.md")
+    fresh = _run([
+        "--freshness", "--rc-dir", str(tmp_path / "no-such-rc-dir"),
+        "--readme", str(readme), "--how-to", str(how_to),
+    ])
+    assert fresh.returncode == 0
+    assert "skipped" in fresh.stdout
+
+
+def test_freshness_reports_a_not_available_block_as_stale_once_rollups_exist(tmp_path: pathlib.Path):
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    readme, how_to = _render_into(tmp_path, empty)
+    assert _gen.block_window_newest(readme.read_text(encoding="utf-8")) is None
+
+    rc_dir = _write_rc_dir(tmp_path, [_rc_rollup("v1.0.0", 40.0, {"pm": 1, "coder": 2, "cm": 1})])
+    stats = _gen.compute_pace_stats(_gen.load_rc_window(rc_dir, window=1), window_requested=1)
+    findings = _gen.freshness_findings(stats, [readme, how_to])
+    assert [f["kind"] for f in findings] == ["stale_block", "stale_block"]
+    assert "no measured window" in findings[0]["summary"]
+
+
+def test_checked_in_blocks_name_a_window():
+    """The committed README/HOW_TO blocks carry a rendered window, so the
+    freshness check has an RC to compare against."""
+    for name in ("README.md", "HOW_TO.md"):
+        text = (_DEV_TREE_ROOT / name).read_text(encoding="utf-8")
+        assert _gen.block_window_newest(text), f"{name} block names no window"

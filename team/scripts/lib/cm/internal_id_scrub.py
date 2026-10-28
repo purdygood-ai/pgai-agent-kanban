@@ -34,10 +34,11 @@ so each tree loads the copy shipped beside it, in the dev-tree layout
 (team/scripts/lib/cm/) and the flattened installed layout
 (scripts/lib/cm/) alike.
 
-Deliberately excluded: team/pgai_agent_kanban/cm/changelog_writer.py
-carries its own, independent implementation of the same idea. Folding it
-into this shared definition is a larger change than the scrub's own
-callers need.
+team/pgai_agent_kanban/cm/changelog_writer.py keeps its own BUG-NNNN
+removal (the CHANGELOG deletes those ids rather than substituting, and its
+PRIORITY citations render as written), and runs _strip_provenance_refs from
+this file for commit ids, RC branch names and task ids, loaded through the
+release-notes generator's loader.
 """
 
 import re
@@ -65,12 +66,48 @@ import re
 # write in prose ("raised by ROLE-NNN's status Summary"), with the same
 # 1-4 digit bound and (?!-\d) guard the lint's task-ID pattern uses, so the
 # short branch never claims the first segment of a longer identifier.
-_INTERNAL_ID_RE = re.compile(
-    r"\b(?:BUG|PRIORITY)-\d+\b"
-    r"|\b(?:CODER|WRITER|TESTER|CM|PM|PO)-"
-    r"(?:\d{8}-\d+(?:-[A-Za-z0-9]+)*|\d{1,4}(?!-\d))\b",
-    re.IGNORECASE,
+_LEDGER_ID_PATTERN = r"\b(?:BUG|PRIORITY)-\d+\b"
+_TASK_ID_PATTERN = (
+    r"\b(?:CODER|WRITER|TESTER|CM|PM|PO)-"
+    r"(?:\d{8}-\d+(?:-[A-Za-z0-9]+)*|\d{1,4}(?!-\d))\b"
 )
+_INTERNAL_ID_RE = re.compile(f"{_LEDGER_ID_PATTERN}|{_TASK_ID_PATTERN}", re.IGNORECASE)
+_TASK_ID_RE = re.compile(_TASK_ID_PATTERN, re.IGNORECASE)
+
+# A git commit id: 7 to 40 lowercase hexadecimal characters, optionally a
+# ".." or "..." range of two, bare, backticked, or after the word "commit"
+# (which is removed with it). A bare id must mix digits and letters, so an
+# all-letter word ("defaced") and an all-digit number (a date, a count)
+# both survive; after "commit" any id holding a digit is taken. The
+# surrounding guards keep the match off hex runs inside paths, versions,
+# UUIDs, URLs and longer digests.
+_HEX_RUN = r"[0-9a-f]{7,40}(?:\.{2,3}[0-9a-f]{7,40})?"
+_HAS_DIGIT = r"(?=[0-9a-f]*\d)"
+_HAS_LETTER = r"(?=[0-9a-f]*[a-f])"
+_HEX_LEFT = r"(?<![\w./:#@-])"
+_HEX_RIGHT = r"(?![\w/@-]|\.\w)"
+_COMMIT_ID_RE = re.compile(
+    rf"\b(?i:commit)\s+(?:`{_HAS_DIGIT}{_HEX_RUN}`|{_HEX_LEFT}{_HAS_DIGIT}{_HEX_RUN}{_HEX_RIGHT})"
+    rf"|`{_HAS_DIGIT}{_HAS_LETTER}{_HEX_RUN}`"
+    rf"|{_HEX_LEFT}{_HAS_DIGIT}{_HAS_LETTER}{_HEX_RUN}{_HEX_RIGHT}"
+)
+
+# A release-candidate branch name: rc/vX.Y.Z with or without a branch prefix
+# ("ai_rc/v2.53.5", "rc/v1.2.3"), bare or backticked, plus any "-suffix".
+# A version on its own ("v2.53.5") is not a branch name and survives.
+_RC_BRANCH_CORE = r"(?:[A-Za-z0-9][\w-]*?[_-])?rc/v\d+\.\d+\.\d+(?:[-_][\w.-]*\w)?"
+_RC_BRANCH_RE = re.compile(
+    rf"`{_RC_BRANCH_CORE}`|(?<![\w./-]){_RC_BRANCH_CORE}(?![\w/-]|\.\d)"
+)
+# A Markdown code span: a run of backticks closed by a run of the same
+# length. An unmatched backtick opens nothing and stays literal text. The
+# release-notes generator's first-sentence split reads this same pattern.
+_CODE_SPAN_RE = re.compile(r"(`+)(?!`).*?(?<!`)\1(?!`)")
+
+# What replaces a branch name. A branch name in prose is nearly always the
+# object of "on"/"at" ("fails on ai_rc/vX.Y.Z"), so a noun phrase keeps the
+# sentence whole where deletion would strand the preposition.
+_RC_BRANCH_REPLACEMENT_TEXT = "the release candidate"
 
 # A kanban-internal requirements-document path ("requirements/vX.Y.Z-slug.md"),
 # with or without enclosing backticks. The document does not ship with the
@@ -110,8 +147,10 @@ _ID_REPLACEMENT_TEXT = "another item"
 def _strip_internal_ids(text):
     """Replace any bare internal ledger/task identifier in *text* with the
     neutral stand-in _ID_REPLACEMENT_TEXT (and any internal requirements-
-    document path with _REQUIREMENTS_PATH_REPLACEMENT_TEXT), then collapse
-    the whitespace the substitution can still leave behind. Defense-in-depth: callers that
+    document path with _REQUIREMENTS_PATH_REPLACEMENT_TEXT, and any RC
+    branch name with _RC_BRANCH_REPLACEMENT_TEXT), delete any git commit id,
+    then collapse the whitespace and empty parentheses the substitution can
+    still leave behind. Defense-in-depth: callers that
     dispatch by filename (a bug or priority item's own H1 line IS its
     ledger ID) already avoid quoting a file's own ID; this scrub catches
     another ticket mentioned inline in free-text prose -- a Symptom, a Fix,
@@ -124,14 +163,51 @@ def _strip_internal_ids(text):
     replaced."""
     cleaned = _REQUIREMENTS_PATH_RE.sub(_REQUIREMENTS_PATH_REPLACEMENT_TEXT, text)
     cleaned = _INTERNAL_ID_RE.sub(_ID_REPLACEMENT_TEXT, cleaned)
-    # Retained as defense-in-depth, not as the primary emptied-parenthetical
-    # handler it used to be: _ID_REPLACEMENT_TEXT is non-empty, so a scrubbed
-    # identifier no longer empties its enclosing parenthetical by itself --
-    # e.g. "(BUG-NNNN)" now renders "(another item)", which is already
-    # readable. This still guards a bare "()" reaching rendered prose from
-    # any other empty-content path a caller sends through this same cleanup
-    # pipeline.
-    cleaned = re.sub(r"\(\s*\)", "", cleaned)
+    cleaned = _substitute_branches_and_commits(cleaned)
+    return _tidy(cleaned)
+
+
+def _substitute_branches_and_commits(text):
+    """*text* with each RC branch name replaced by
+    _RC_BRANCH_REPLACEMENT_TEXT and each commit id (with a leading
+    "commit") deleted; no whitespace cleanup."""
+    cleaned = _RC_BRANCH_RE.sub(_RC_BRANCH_REPLACEMENT_TEXT, text)
+    return _COMMIT_ID_RE.sub("", cleaned)
+
+
+def _tidy(text):
+    """Collapse what a substitution or deletion can leave behind, outside
+    code spans, then strip. A code span is kept byte for byte: the space in
+    `pvg build . --scene 2` is part of the command."""
+    pieces = []
+    last = 0
+    for span in _CODE_SPAN_RE.finditer(text):
+        pieces.append(_tidy_prose(text[last:span.start()]))
+        pieces.append(span.group(0))
+        last = span.end()
+    pieces.append(_tidy_prose(text[last:]))
+    return "".join(pieces).strip()
+
+
+def _tidy_prose(text):
+    """*text* without an empty "()", a separator stranded against a
+    parenthesis ("(, x)", "(x, )"), doubled whitespace, or whitespace
+    before punctuation."""
+    # A deleted commit id is the usual way a parenthetical empties --
+    # "(commit abc1234)" or "(abc1234)" -- so the empty pair goes with it.
+    cleaned = re.sub(r"\(\s*[,;]?\s*\)", "", text)
+    cleaned = re.sub(r"\(\s*[,;]\s*", "(", cleaned)
+    cleaned = re.sub(r"\s*[,;]\s*\)", ")", cleaned)
     cleaned = re.sub(r"\s{2,}", " ", cleaned)
-    cleaned = re.sub(r"\s+([,.;:])", r"\1", cleaned)
-    return cleaned.strip()
+    return re.sub(r"\s+([,.;:)])", r"\1", cleaned)
+
+
+def _strip_provenance_refs(text):
+    """Remove commit ids, replace RC branch names, and replace task ids
+    with _ID_REPLACEMENT_TEXT in *text*; BUG-/PRIORITY- citations are left
+    as they are. Text holding none of the three is returned unchanged,
+    byte for byte, so a caller with its own formatting keeps it; otherwise
+    the result is tidied like _strip_internal_ids's."""
+    cleaned = _TASK_ID_RE.sub(_ID_REPLACEMENT_TEXT, text)
+    cleaned = _substitute_branches_and_commits(cleaned)
+    return text if cleaned == text else _tidy(cleaned)

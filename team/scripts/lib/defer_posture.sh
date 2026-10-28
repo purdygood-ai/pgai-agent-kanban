@@ -16,7 +16,7 @@
 # Public API
 # ----------
 #   resolve_defer_posture [project_name]
-#     Prints five lines to stdout, one per resolved field, each shaped
+#     Prints nine lines to stdout, one per resolved field, each shaped
 #     "<field>=<value>|<tier>":
 #
 #       deferred_bugs=<true|false>|<tier>
@@ -24,6 +24,14 @@
 #       defer_piggyback=<true|false>|<tier>
 #       until=<vX.Y.Z or empty>|<tier>
 #       campaign_file=<absolute path or empty>|<tier>
+#       deferred_max_age_days=<whole number or empty>|<tier>
+#       deferred_max_count=<whole number or empty>|<tier>
+#       bundle_mixing=<separate|ride-along>|<tier>
+#       ride_along_max=<whole number>|<tier>
+#
+#     The last four always resolve through the cfg chain. An empty
+#     deferred_max_age_days or deferred_max_count (tier "default") means no
+#     bound; bundle_mixing defaults to separate and ride_along_max to 3.
 #
 #     <tier> is one of "campaign file", "project.cfg", "kanban.cfg",
 #     "default" (the value came from the built-in default), or — for
@@ -80,14 +88,14 @@
 # deferred_bug_level=low (only low-severity bugs wait — the same meaning
 # deferred_bug_level=low already carries outside a campaign), both
 # reported with tier "campaign file", regardless of what project.cfg or
-# kanban.cfg say for either key. defer_piggyback governs consolidation
-# behavior, not which bugs are deferred, so it is untouched by the
-# campaign and always resolves through the project.cfg / kanban.cfg /
-# default chain on its own.
+# kanban.cfg say for either key. defer_piggyback, the two deferral bounds
+# and the bundle-mixing pair govern how deferred bugs are carried, not
+# which bugs are deferred, so they are untouched by the campaign and always
+# resolve through the project.cfg / kanban.cfg / default chain on their own.
 #
 # Key Registry cross-reference
 # -----------------------------
-# The three keys' accepted values, defaults, and boolean-strictness
+# The keys' accepted values, defaults, and boolean-strictness
 # doctrine are documented once in team/scripts/lib/config_loader.sh's
 # "[release]" Key Registry — this file does not repeat that registry, but
 # its own refusals (below) echo the same accepted-set wording so an
@@ -217,17 +225,74 @@ _defer_posture_validate_level() {
 }
 
 # ---------------------------------------------------------------------------
-# _defer_posture_validate <key> <value> <cfg>
-# Dispatches to the boolean or level validator by key name.
+# _defer_posture_validate_whole_number <key> <value> <cfg> <default>
+#
+# Validates a key that takes a non-negative whole number of ASCII digits
+# (deferred_max_age_days, deferred_max_count, ride_along_max). A negative,
+# fractional or worded value is refused; the remedy says what deleting the
+# line falls back to (<default>, or no bound when <default> is empty).
+#
+# BLOCK-WORTHY (docs/blocking-site-census.md): a bound or cap that is not a
+# whole number cannot be compared against a count or an age; refused rather
+# than read as unset or guessed.
+# ---------------------------------------------------------------------------
+_defer_posture_validate_whole_number() {
+    local key="$1" value="$2" cfg="$3" default_value="$4"
+    if [[ "$value" =~ ^[0-9]+$ ]]; then
+        return 0
+    fi
+    local unset="for no bound"
+    [[ -n "$default_value" ]] && unset="for the default ${default_value}"
+    DEFER_POSTURE_LAST_ERROR_FILE="$cfg"
+    pgai_emit_error_contract \
+        "defer_posture.invalid_${key}" \
+        "defer_posture: resolve_defer_posture: [release] ${key}='${value}' in ${cfg} is not an accepted value." \
+        "Set [release] ${key} to a non-negative whole number in ${cfg}, or delete the line ${unset} (accepted: 0, 1, 2, ...)."
+    # CENSUS-ANCHOR: defer-posture-invalid-whole-number-01
+    return 1
+}
+
+# ---------------------------------------------------------------------------
+# _defer_posture_validate_bundle_mixing <value> <cfg>
+#
+# Validates bundle_mixing (separate|ride-along). Like the booleans, an
+# 'on'/'off' style value is refused naming the accepted set, never guessed.
+#
+# BLOCK-WORTHY (docs/blocking-site-census.md): an unrecognised mixing mode
+# is refused rather than resolved into a mode nobody asked for.
+# ---------------------------------------------------------------------------
+_defer_posture_validate_bundle_mixing() {
+    local value="$1" cfg="$2"
+    case "$value" in
+        separate|ride-along) return 0 ;;
+    esac
+    DEFER_POSTURE_LAST_ERROR_FILE="$cfg"
+    pgai_emit_error_contract \
+        "defer_posture.invalid_bundle_mixing" \
+        "defer_posture: resolve_defer_posture: [release] bundle_mixing='${value}' in ${cfg} is not an accepted value." \
+        "Set [release] bundle_mixing to one of separate|ride-along in ${cfg}."
+    # CENSUS-ANCHOR: defer-posture-invalid-bundle-mixing-01
+    return 1
+}
+
+# ---------------------------------------------------------------------------
+# _defer_posture_validate <key> <value> <cfg> [default]
+# Dispatches to the validator for the key's value shape.
 # ---------------------------------------------------------------------------
 _defer_posture_validate() {
-    local key="$1" value="$2" cfg="$3"
+    local key="$1" value="$2" cfg="$3" default_value="${4:-}"
     case "$key" in
         deferred_bugs|defer_piggyback)
             _defer_posture_validate_boolean "$key" "$value" "$cfg"
             ;;
         deferred_bug_level)
             _defer_posture_validate_level "$value" "$cfg"
+            ;;
+        deferred_max_age_days|deferred_max_count|ride_along_max)
+            _defer_posture_validate_whole_number "$key" "$value" "$cfg" "$default_value"
+            ;;
+        bundle_mixing)
+            _defer_posture_validate_bundle_mixing "$value" "$cfg"
             ;;
         *)
             echo "defer_posture: _defer_posture_validate: unknown key '${key}'" >&2
@@ -256,14 +321,14 @@ _defer_posture_resolve_tiered_value() {
 
     value="$(read_ini "$project_cfg" release "$key" "")"
     if [[ -n "$value" ]]; then
-        _defer_posture_validate "$key" "$value" "$project_cfg" || return 1
+        _defer_posture_validate "$key" "$value" "$project_cfg" "$default_value" || return 1
         printf '%s|project.cfg' "$value"
         return 0
     fi
 
     value="$(read_ini "$kanban_cfg" release "$key" "")"
     if [[ -n "$value" ]]; then
-        _defer_posture_validate "$key" "$value" "$kanban_cfg" || return 1
+        _defer_posture_validate "$key" "$value" "$kanban_cfg" "$default_value" || return 1
         printf '%s|kanban.cfg' "$value"
         return 0
     fi
@@ -389,10 +454,22 @@ resolve_defer_posture() {
     local defer_piggyback="${resolved%%|*}"
     local defer_piggyback_tier="${resolved#*|}"
 
+    # The deferral bounds and the bundle-mixing pair: like defer_piggyback,
+    # never touched by a campaign file. Empty bound defaults mean no bound.
+    local max_age_days max_count bundle_mixing ride_along_max
+    _defer_posture_capture max_age_days _defer_posture_resolve_tiered_value deferred_max_age_days "$project_cfg" "$kanban_cfg" "" || return 1
+    _defer_posture_capture max_count _defer_posture_resolve_tiered_value deferred_max_count "$project_cfg" "$kanban_cfg" "" || return 1
+    _defer_posture_capture bundle_mixing _defer_posture_resolve_tiered_value bundle_mixing "$project_cfg" "$kanban_cfg" "separate" || return 1
+    _defer_posture_capture ride_along_max _defer_posture_resolve_tiered_value ride_along_max "$project_cfg" "$kanban_cfg" "3" || return 1
+
     printf 'deferred_bugs=%s|%s\n' "$deferred_bugs" "$deferred_bugs_tier"
     printf 'deferred_bug_level=%s|%s\n' "$deferred_bug_level" "$deferred_bug_level_tier"
     printf 'defer_piggyback=%s|%s\n' "$defer_piggyback" "$defer_piggyback_tier"
     printf 'until=%s|%s\n' "$until_value" "$until_tier"
     printf 'campaign_file=%s|%s\n' "$campaign_file" "$until_tier"
+    printf 'deferred_max_age_days=%s\n' "$max_age_days"
+    printf 'deferred_max_count=%s\n' "$max_count"
+    printf 'bundle_mixing=%s\n' "$bundle_mixing"
+    printf 'ride_along_max=%s\n' "$ride_along_max"
     return 0
 }

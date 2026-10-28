@@ -70,10 +70,10 @@ Usage (import):
         DeepVerifyRecord, append_record, latest_record, ledger_path_for_project,
     )
     record = DeepVerifyRecord(
-        timestamp="2026-09-03T09:15:22+00:00",
+        timestamp="2026-01-03T09:15:00+00:00",
         project="pgai-agent-kanban",
-        version="v2.9.12",
-        commit="e240ee1",
+        version="v1.2.3",
+        commit="0123abc",
         verdict="built",
         detail="docker/claude-code: built; podman/claude-code: built",
     )
@@ -104,6 +104,8 @@ if not __package__:
         sys.path.insert(0, _OWN_PACKAGE_ROOT)
 
 from pgai_agent_kanban.lib.atomic_write import atomic_write  # noqa: E402
+from pgai_agent_kanban.lib.text import lf_to_spaces  # noqa: E402
+from pgai_agent_kanban.lib.timeutil import utc_now_iso  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Errors
@@ -168,12 +170,6 @@ class DeepVerifyRecord:
         return {f.name: getattr(self, f.name) for f in fields(self)}
 
 
-def _single_line(value: str) -> str:
-    """Collapse any stray newline -- this ledger's field-parse format is
-    one value per line; a multi-line value would corrupt the record shape."""
-    return " ".join(str(value).split("\n"))
-
-
 def format_record(record: DeepVerifyRecord) -> str:
     """Render *record* as a self-contained markdown block (no leading/
     trailing blank lines -- the caller controls spacing between records)."""
@@ -181,9 +177,9 @@ def format_record(record: DeepVerifyRecord) -> str:
         [
             f"## Deep-Verify Run: {record.timestamp} — {record.project} — "
             f"{record.version}",
-            f"- Commit: {_single_line(record.commit)}",
-            f"- Verdict: {_single_line(record.verdict)}",
-            f"- Detail: {_single_line(record.detail)}",
+            f"- Commit: {lf_to_spaces(record.commit)}",
+            f"- Verdict: {lf_to_spaces(record.verdict)}",
+            f"- Detail: {lf_to_spaces(record.detail)}",
         ]
     )
 
@@ -437,7 +433,7 @@ def main() -> int:
         help="path to the project's deep-verify-ledger.md (created on first write)",
     )
     p_append.add_argument("project", help="the project name the run verified")
-    p_append.add_argument("version", help="the release version exercised, e.g. v2.24.0")
+    p_append.add_argument("version", help="the release version exercised, e.g. v1.2.3")
     p_append.add_argument("commit", help="the commit SHA exercised")
     p_append.add_argument(
         "verdict",
@@ -470,7 +466,7 @@ def main() -> int:
     try:
         if args.command == "append":
             record = DeepVerifyRecord(
-                timestamp=_now_iso8601(),
+                timestamp=utc_now_iso(),
                 project=args.project,
                 version=args.version,
                 commit=args.commit,
@@ -495,12 +491,6 @@ def main() -> int:
         return 1
 
     return 0
-
-
-def _now_iso8601() -> str:
-    import datetime
-
-    return datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S+00:00")
 
 
 if __name__ == "__main__":

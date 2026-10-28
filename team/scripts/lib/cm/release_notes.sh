@@ -29,7 +29,8 @@
 #       order:
 #         8.  Generate release-notes/$ACTIVE_RC.md from a bundled requirements
 #             file's categorized items (preferred; every bug report goes under
-#             Bug Fixes) or else RC commit subjects, add any ship-posture
+#             Bug Fixes) or else RC commit subjects, list the release's DONE
+#             WRITER tickets under ## Documentation, add any ship-posture
 #             auto-ship line under ## Known Issues, and commit on
 #             $MAIN_BRANCH. Idempotency-guarded: skipped entirely when the
 #             file is already committed to HEAD.
@@ -103,6 +104,27 @@ fi
 # shellcheck source=release_version_file.sh
 source "$(dirname "${BASH_SOURCE[0]}")/release_version_file.sh"
 
+# Step 11b's scratch render goes under the framework temp root, resolved by
+# the shared wrapper one directory up (scripts/lib/temp.sh in the repo and
+# the installed layout alike). A missing copy exits here, at source time --
+# release.sh sources this file before strict mode and before any step runs,
+# so a return status would be ignored and the release would fail mid-way.
+_cm_release_notes_temp_sh="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/temp.sh"
+if [[ ! -f "$_cm_release_notes_temp_sh" ]]; then
+  # shellcheck source=../error_contract.sh
+  source "$(dirname "${BASH_SOURCE[0]}")/../error_contract.sh"
+  # BLOCK-WORTHY: the release cannot render CHANGELOG.md without a temp root,
+  # and nothing has been squashed, committed or tagged yet.
+  pgai_emit_error_contract "cm-release-notes.temp-sh-missing" \
+    "release_notes.sh needs the temp-root wrapper at ${_cm_release_notes_temp_sh} and it does not exist; the release stopped before any step ran." \
+    "ls -l '${_cm_release_notes_temp_sh}'"
+  # CENSUS-ANCHOR: release-notes-temp-sh-missing-01
+  exit 1
+fi
+# shellcheck source=../temp.sh
+source "$_cm_release_notes_temp_sh"
+unset _cm_release_notes_temp_sh
+
 # -----------------------------------------------------------------------
 # cm_release_generate_notes — entry point (see header doc above).
 # -----------------------------------------------------------------------
@@ -118,6 +140,9 @@ cm_release_generate_notes() {
   #      A bug report (BUG-NNNN-*.md) always lands under Bug Fixes, whatever its Category.
   #   2. Fallback: collect git commit subjects from the RC branch and place all
   #      of them in the "Other Changes" section.
+  #   Either way, every DONE WRITER task in the project's tasks/ whose
+  #   ## Release Version is $ACTIVE_RC adds its Goal's lead sentence under
+  #   "Documentation".
   #
   # Output structure (9 sections, all present even when empty):
   #   ## Breaking Changes
@@ -203,7 +228,12 @@ cm_release_generate_notes() {
   #      when no TESTER finding qualifies. Already carries the table's
   #      header/separator and every rendered cell already passed through the
   #      internal-ID scrub — the generator renders it as-is under
-  #      "## Bugs Skipped", it does not rebuild it.)
+  #      "## Bugs Skipped", it does not rebuild it. Under status KNOWN-BUGS
+  #      the generator also lists its medium-and-higher rows under
+  #      "## Known Issues".)
+  #   11: the project's tasks/ directory (empty when the project root
+  #      cannot be resolved), where the generator finds the DONE WRITER
+  #      tickets of $ACTIVE_RC for "## Documentation".
   PGAI_CM_INTERNAL_ID_SCRUB_DIR="$_cm_release_notes_lib_dir" \
     pp_run_ops pgai_agent_kanban.cm.release_notes_generator \
     "${_cm_bundle_file_for_notes:-none}" \
@@ -215,7 +245,8 @@ cm_release_generate_notes() {
     "${RC_MERGE_BASE:-none}" \
     "$RC_BRANCH" \
     "${_KNOWN_ISSUE_NOTES_BLOCK:-}" \
-    "${_BUGS_SKIPPED_NOTES_BLOCK:-}"
+    "${_BUGS_SKIPPED_NOTES_BLOCK:-}" \
+    "${_cm_notes_project_root:+${_cm_notes_project_root}/tasks}"
   # One auto-ship line per stop the ship posture shipped through, under
   # "## Known Issues"; nothing under matrix (release_ship_posture.sh).
   cm_ship_posture_stamp_notes "$RELEASE_NOTES_FILE"
@@ -309,8 +340,7 @@ cm_release_generate_notes() {
   # reordered bullets, or retained internal BUG-NNNN identifiers that the writer
   # strips.
   _cl_bugs_dir="${_CM_PROJECT_ROOT}/bugs"
-  _cl_temp_dir="${PGAI_AGENT_KANBAN_TEMP_DIR:-/tmp/pgai_kanban_tmp}"
-  mkdir -p "$_cl_temp_dir"
+  _cl_temp_dir="$(pgai_temp_dir)"
   _cl_buf="$(mktemp "${_cl_temp_dir}/cl_buf_XXXXXXXX")"
   # Cleaned up by cm_release_cleanup_on_exit (the script's single EXIT trap) on every exit
   # path — do not add a second `trap ... EXIT` here; it would silently replace

@@ -39,6 +39,11 @@ Coverage (one class per acceptance fixture):
     identical tree passes it and writes both permanent records: the
     Operator Override event in the project's release-state.md, and the
     release-notes ## Status stamped SHIPPED-BY-OPERATOR-OVERRIDE.
+  - TestUnrecognisedTesterStateShipsKnownBugsAndFilesABug — a TESTER task
+    reading WORKING, WONT-DO or a typo ships KNOWN-BUGS, files one bug
+    quoting the state, and writes no HALT file. The requeue-then-ship
+    sequence for verification that did not run is
+    test_verification_retry_ship.py.
 
 Fixture shape: each test builds its own real git repository (a local
 non-bare working tree plus a local bare "origin", exactly the pattern
@@ -84,6 +89,7 @@ from tests.integration.test_discovery_pipeline import (
 )
 import pytest
 from tests.fixtures.binary_guard import require_binary
+from tests.fixtures.section_reader_modules import copy_section_reader_modules
 
 
 @pytest.fixture(autouse=True)
@@ -124,8 +130,13 @@ _WORKFLOW_PLUGIN_DIRS = ["release"]
 
 def _build_kanban_root(parent: pathlib.Path) -> pathlib.Path:
     """Build an empty (no projects yet) kanban root with the shared
-    pgai_agent_kanban.cm python package copied in, exactly as cm-*.sh's
-    read_md_field and the changelog writer expect to find it."""
+    pgai_agent_kanban.cm python package copied in, exactly as the cm-*.sh
+    field readers and the changelog writer expect to find it.
+
+    Its kanban.cfg sets ship_posture = matrix: this module checks the
+    ship-policy matrix as written, and a local-only fixture lane would
+    otherwise take the default posture, always, and ship through the
+    trigger-2/3/8 stops these tests assert."""
     root = parent / "kanban_root"
     root.mkdir(parents=True, exist_ok=True)
 
@@ -137,7 +148,10 @@ def _build_kanban_root(parent: pathlib.Path) -> pathlib.Path:
         "\n"
         "[wake]\n"
         "max_tasks_per_wake = 1\n"
-        "max_runtime_seconds = 600\n",
+        "max_runtime_seconds = 600\n"
+        "\n"
+        "[release]\n"
+        "ship_posture = matrix\n",
         encoding="utf-8",
     )
     (root / "projects.cfg").write_text("", encoding="utf-8")
@@ -170,6 +184,7 @@ def _build_kanban_root(parent: pathlib.Path) -> pathlib.Path:
         (cm_py_dir / py_file.name).write_text(
             py_file.read_text(encoding="utf-8"), encoding="utf-8"
         )
+    copy_section_reader_modules(cm_py_dir.parent)
     return root
 
 
@@ -427,38 +442,38 @@ class TestRegressionHighStopsOnlyItsOwnProject:
     ) -> None:
         """Two registered projects, one release run each.
 
-        project_a carries a TESTER report with systemic_risk=high and
+        project-a carries a TESTER report with systemic_risk=high and
         Regression: yes on its one finding — the matrix's Trigger 2 refuses
-        to ship it, and the refusal must create projects/project_a/HALT,
+        to ship it, and the refusal must create projects/project-a/HALT,
         never the root-level HALT (which would freeze every project's
-        chain, not just project_a's).
+        chain, not just project-a's).
 
-        project_b has no TESTER task at all for its release version (the
+        project-b has no TESTER task at all for its release version (the
         "no report, Test Required: false" row), so it ships as an ordinary
-        SHIP-FUNCTIONAL release in the same test run — proving project_a's
+        SHIP-FUNCTIONAL release in the same test run — proving project-a's
         stop did not reach it.
         """
         version = "v0.9.0"
         kanban_root = _build_kanban_root(tmp_path)
 
-        # --- project_a: regression-high finding, must HALT at project scope ---
+        # --- project-a: regression-high finding, must HALT at project scope ---
         repo_a = tmp_path / "repo_a"
         _init_git_repo_with_remote(repo_a, tmp_path / "bare_a.git")
-        _build_release_project(kanban_root, "project_a", repo_a, priority=1)
+        _build_release_project(kanban_root, "project-a", repo_a, priority=1)
 
         result_open_a = _run_cm_script(
-            _OPEN_RC_SCRIPT, [version], kanban_root, "project_a", repo_root=repo_a,
+            _OPEN_RC_SCRIPT, [version], kanban_root, "project-a", repo_root=repo_a,
         )
         assert result_open_a.returncode == 0, (
-            f"cm-open-rc.sh failed for project_a.\nstdout: {result_open_a.stdout}\n"
+            f"cm-open-rc.sh failed for project-a.\nstdout: {result_open_a.stdout}\n"
             f"stderr: {result_open_a.stderr}"
         )
         _commit_on_branch(
-            repo_a, f"rc/{version}", "feature_a.txt", "project_a work\n",
-            "feat: project_a RC work", return_branch="main",
+            repo_a, f"rc/{version}", "feature_a.txt", "project-a work\n",
+            "feat: project-a RC work", return_branch="main",
         )
         _add_tester_task(
-            kanban_root, "project_a", version,
+            kanban_root, "project-a", version,
             systemic_risk="high",
             findings=[{
                 "title": "a live regression introduced by this RC",
@@ -471,7 +486,7 @@ class TestRegressionHighStopsOnlyItsOwnProject:
         )
 
         result_release_a = _run_cm_script(
-            _RELEASE_SCRIPT, [], kanban_root, "project_a", repo_root=repo_a,
+            _RELEASE_SCRIPT, [], kanban_root, "project-a", repo_root=repo_a,
         )
 
         assert result_release_a.returncode != 0, (
@@ -483,7 +498,7 @@ class TestRegressionHighStopsOnlyItsOwnProject:
             f"Expected the Trigger 2 (systemic_risk=high) HALT.\noutput: {combined_a}"
         )
 
-        project_a_halt = kanban_root / "projects" / "project_a" / "HALT"
+        project_a_halt = kanban_root / "projects" / "project-a" / "HALT"
         root_halt = kanban_root / "HALT"
         assert project_a_halt.is_file(), (
             f"Expected the project-scoped HALT file at {project_a_halt}.\n"
@@ -492,45 +507,45 @@ class TestRegressionHighStopsOnlyItsOwnProject:
         assert not root_halt.exists(), (
             "The regression-high stop must land at PROJECT scope only — a root-level "
             f"HALT file at {root_halt} would freeze every project's chain, not just "
-            "project_a's, and this fixture must fail if that ever happens."
+            "project-a's, and this fixture must fail if that ever happens."
         )
         assert not _git_tag_exists(repo_a, version), (
-            f"No tag may exist for project_a's {version} after a HALT.\n"
+            f"No tag may exist for project-a's {version} after a HALT.\n"
             f"stdout: {result_release_a.stdout}"
         )
 
-        # --- project_b: no TESTER task for this version — ships normally ---
+        # --- project-b: no TESTER task for this version — ships normally ---
         repo_b = tmp_path / "repo_b"
         _init_git_repo_with_remote(repo_b, tmp_path / "bare_b.git")
-        _build_release_project(kanban_root, "project_b", repo_b, priority=2)
+        _build_release_project(kanban_root, "project-b", repo_b, priority=2)
 
         result_open_b = _run_cm_script(
-            _OPEN_RC_SCRIPT, [version], kanban_root, "project_b", repo_root=repo_b,
+            _OPEN_RC_SCRIPT, [version], kanban_root, "project-b", repo_root=repo_b,
         )
         assert result_open_b.returncode == 0, (
-            f"cm-open-rc.sh failed for project_b.\nstdout: {result_open_b.stdout}\n"
+            f"cm-open-rc.sh failed for project-b.\nstdout: {result_open_b.stdout}\n"
             f"stderr: {result_open_b.stderr}"
         )
         _commit_on_branch(
-            repo_b, f"rc/{version}", "feature_b.txt", "project_b work\n",
-            "feat: project_b RC work", return_branch="main",
+            repo_b, f"rc/{version}", "feature_b.txt", "project-b work\n",
+            "feat: project-b RC work", return_branch="main",
         )
 
         result_release_b = _run_cm_script(
-            _RELEASE_SCRIPT, [], kanban_root, "project_b", repo_root=repo_b,
+            _RELEASE_SCRIPT, [], kanban_root, "project-b", repo_root=repo_b,
         )
 
         assert result_release_b.returncode == 0, (
-            "project_b must ship normally in the same run that halted project_a — "
+            "project-b must ship normally in the same run that halted project-a — "
             "a fleet-scoped stop would break this.\n"
             f"stdout: {result_release_b.stdout}\nstderr: {result_release_b.stderr}"
         )
         assert _git_tag_exists(repo_b, version), (
-            f"Expected project_b's release tag {version} after a successful ship.\n"
+            f"Expected project-b's release tag {version} after a successful ship.\n"
             f"stdout: {result_release_b.stdout}"
         )
-        assert not (kanban_root / "projects" / "project_b" / "HALT").exists(), (
-            "project_b must carry no HALT file of its own."
+        assert not (kanban_root / "projects" / "project-b" / "HALT").exists(), (
+            "project-b must carry no HALT file of its own."
         )
 
 
@@ -1174,3 +1189,38 @@ class TestUnreadableInputsShipWithConcernsAndFileABug:
             content = bug.read_text(encoding="utf-8")
             assert str(readme) in content
             assert "**TESTER**" in content or f"`{version}` (bugfix)" in content
+
+
+class TestUnrecognisedTesterStateShipsKnownBugsAndFilesABug:
+    """A TESTER task found for the RC whose state is neither DONE nor BLOCKED
+    takes the SHIP-WITH-CONCERNS row: the release ships KNOWN-BUGS and files
+    one bug quoting the state, and no HALT file is written."""
+
+    @pytest.mark.parametrize("state", ["WORKING", "WONT-DO", "DOEN"])
+    def test_unrecognised_state_ships_known_bugs_and_files_one_bug_quoting_it(
+        self, tmp_path: pathlib.Path, state: str
+    ) -> None:
+        version = "v0.2.3"
+        project_name = "unrecognised_state_project"
+        kanban_root, repo_path = _open_rc_with_one_commit(tmp_path, project_name, version)
+        report_path = _add_tester_task(
+            kanban_root, project_name, version, state=state, recommendation="PASS", systemic_risk="low",
+        )
+        status_path = report_path.parent.parent / "status.md"
+
+        result_release = _run_cm_script(
+            _RELEASE_SCRIPT, [], kanban_root, project_name, repo_root=repo_path,
+        )
+        out = f"stdout: {result_release.stdout}\nstderr: {result_release.stderr}"
+        assert result_release.returncode == 0, f"an unrecognised TESTER state ships, never HALTs\n{out}"
+        assert not (kanban_root / "projects" / project_name / "HALT").exists(), out
+        assert "Ship decision:       SHIP-KNOWN-BUGS" in result_release.stdout, out
+        notes_text = _release_notes_text(repo_path, version)
+        assert "KNOWN-BUGS" in notes_text, notes_text
+
+        filed = _filed_ship_policy_bugs(kanban_root, project_name)
+        assert len(filed) == 1, f"expected exactly one ship-policy bug; got {filed}\n{out}"
+        assert filed[0].name.endswith("-unrecognized-tester-state.md"), filed[0].name
+        content = filed[0].read_text(encoding="utf-8")
+        assert f"`{state}`" in content, content
+        assert str(status_path) in content, content

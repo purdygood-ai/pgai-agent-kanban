@@ -41,6 +41,7 @@ from pgai_agent_kanban.overwatch.resolution_matrix import (
 )
 from tests.fixtures.binary_guard import require_binary
 from tests.fixtures.scrubbed_subprocess_env import build_scrubbed_env
+from tests.fixtures.section_reader_modules import copy_section_reader_modules
 from tests.unit.shell_harness import run_bash
 from tests.unit.test_resolution_matrix import _git, _golden_evidence
 
@@ -160,6 +161,7 @@ class _Sandbox:
         cm_py_dir.mkdir(parents=True)
         for py_file in (_TEAM_DIR / "pgai_agent_kanban" / "cm").glob("*.py"):
             (cm_py_dir / py_file.name).write_text(py_file.read_text(encoding="utf-8"), encoding="utf-8")
+        copy_section_reader_modules(cm_py_dir.parent)
 
     def env(self) -> dict:
         return build_scrubbed_env(

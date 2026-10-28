@@ -18,10 +18,25 @@
 # filers use).  The name must follow the ledger filename contract,
 # BUG-NNNN-<slug>.md (lower-case kebab slug, optional -YYYYMMDD- after the
 # number), or it is refused (exit 2) before anything is written.  A free
-# number is deposited as named; a taken one is deposited as the next free
-# number, with the file's "# BUG-NNNN-<slug>" title line and "**Bug ID:**"
-# line rewritten to match, and the new name is what the one stdout line
-# prints.
+# number is deposited as named; a taken one -- held by a live bug or by one
+# in archive/<name>/bugs/ -- is deposited as the next free number, with the
+# file's "# BUG-NNNN-<slug>" title line and "**Bug ID:**" line rewritten to
+# match, and the new name is what the one stdout line prints.
+#
+# A BUG-* draft that reports the same defect as a live bug (status open,
+# running or needs-operator) is refused (exit 5) before anything is written,
+# its message naming that bug's ID: the draft's body cites the bug as the
+# defect it reports ("same defect as BUG-NNNN", "duplicate of BUG-NNNN",
+# "recurrence of BUG-NNNN"), or its slug differs from the bug's slug only by
+# re-file markers at its start or end.  The markers: a re-file word (again,
+# redux, recurring, repeat, repeats, repeated, repeating, refile, refiles,
+# refiled, refiling), an ordinal of two or more (second through tenth, 2nd,
+# 3rd, ...), or one trailing counter (the -3 in lock-leak-3).  Every other
+# word or number names the defect, so pane-shows-3-columns and
+# pane-shows-4-columns are distinct, and so are slugs differing by first,
+# once or another.  An ID mentioned in passing, or a remark on another bug's
+# status, is not a citation.  The rule is
+# pgai_agent_kanban.lib.bug_filing.find_same_defect.
 #
 # Thin delegator: all mutation logic lives in deposit_intake() in
 # pgai_agent_kanban.ops.write (Python).  This script does only argument
@@ -35,6 +50,8 @@
 #       file name, or is a BUG-* name off the ledger filename contract.
 #   3   PRIORITY-* or requirements target already exists (no clobber).
 #   4   Filesystem error during copy.
+#   5   Refused: the BUG-* draft reports the same defect as a live bug; the
+#       message names the live bug's ID.  Nothing is written.
 
 set -euo pipefail
 # shellcheck source=lib/env_bootstrap.sh
@@ -91,12 +108,29 @@ _intake_usage() {
         "  - The name must be BUG-NNNN-<slug>.md (lower-case kebab slug, optional" \
         "    -YYYYMMDD- after the number); any other BUG-* name is REFUSED (exit 2)" \
         "    before anything is written." \
-        "  - The number is claimed atomically. Free: deposited as named. Taken:" \
-        "    deposited as the next free number, with the '# BUG-NNNN-<slug>' title" \
-        "    line and '**Bug ID:**' line rewritten to match; the printed path" \
-        "    names the new file." \
+        "  - The number is claimed atomically. Free: deposited as named. Taken" \
+        "    (a live bug or one in archive/<name>/bugs/ holds it): deposited as" \
+        "    the next free number, with the '# BUG-NNNN-<slug>' title line and" \
+        "    '**Bug ID:**' line rewritten to match; the printed path names the" \
+        "    new file." \
+        "  - A draft reporting the same defect as a live bug (open, running or" \
+        "    needs-operator) is REFUSED (exit 5) before anything is written; the" \
+        "    message names that bug's ID. Same defect: the body cites the bug as" \
+        "    the defect it reports ('same defect as BUG-NNNN', 'duplicate of" \
+        "    BUG-NNNN', 'recurrence of BUG-NNNN'), or the slug differs from its" \
+        "    slug only by re-file markers at its start or end:" \
+        "      re-file words: again, redux, recurring, repeat, repeats," \
+        "                     repeated, repeating, refile, refiles, refiled," \
+        "                     refiling" \
+        "      ordinals:      second, third, ... tenth, 2nd, 3rd, ..." \
+        "      a counter:     one trailing number (the -3 in lock-leak-3)" \
+        "    Every other word or number names the defect: pane-shows-3-columns" \
+        "    and pane-shows-4-columns are distinct, and so are slugs differing" \
+        "    by first, once or another. An ID mentioned in passing, or a remark" \
+        "    on another bug's status, is not a citation." \
         "" \
-        "NOTE: intake.sh does NOT validate file contents or check headings." \
+        "NOTE: intake.sh does NOT validate file contents or check headings" \
+        "(a BUG-* draft's body is read only for the same-defect check above)." \
         "The discovery pipeline checks names afterwards and quarantines a file" \
         "it keeps rejecting into" \
         "projects/<name>/rejected/ (legacy fallback: <intake>/.rejected/);" \
@@ -112,7 +146,9 @@ _intake_usage() {
         "  2  Refused: unknown intake prefix, not a bare file name, or a BUG-*" \
         "     name off the ledger filename contract" \
         "  3  PRIORITY-* or requirements target already exists (no clobber)" \
-        "  4  Filesystem error during copy"
+        "  4  Filesystem error during copy" \
+        "  5  Refused: the BUG-* draft reports the same defect as a live bug" \
+        "     (the message names its ID); nothing is written"
 }
 
 # ---------------------------------------------------------------------------
@@ -240,6 +276,11 @@ case "${_intake_rc}" in
     4)
         # Filesystem error — stderr already printed by the Python module.
         exit 4
+        ;;
+    5)
+        # Same defect as a live bug — the dual-channel block naming it is
+        # already on stderr.
+        exit 5
         ;;
     *)
         printf 'intake.sh: unexpected return code from deposit_intake: %d\n' \

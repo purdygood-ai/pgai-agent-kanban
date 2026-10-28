@@ -7,6 +7,15 @@
 # This check is REPORT-ONLY. It never modifies any file, never auto-fixes.
 # Deploys are operator verbs.
 #
+# OVERWATCH-CHECK-SCOPE: kanban-only
+# Scope: the kanban's own project only. $KANBAN_ROOT/VERSION is the kanban's
+# version, comparable only with the kanban's own source tree, so
+# overwatch-sweep.sh runs this check only for the project whose dev tree is
+# the kanban source (install.sh and team/pgai_agent_kanban/ at its root).
+# Every other project gets one check-not-applicable row from the sweep and
+# no version-divergence record. Called directly, the check compares with
+# whichever project OVERWATCH_PROJECT names.
+#
 # Detection:
 #   - Read $KANBAN_ROOT/VERSION (written by install.sh; identifies the deployed
 #     version of the kanban framework).  When the dev tree commits a VERSION
@@ -68,6 +77,10 @@
 # Exit codes:
 #   0 — always (REPORT-ONLY check)
 
+# overwatch_registered_projects: the shared projects.cfg reader.
+# shellcheck source=../overwatch_config.sh
+source "$(dirname "${BASH_SOURCE[0]}")/../overwatch_config.sh"
+
 # ---------------------------------------------------------------------------
 # _cvd_resolve_env
 # Resolve KANBAN_ROOT, OVERWATCH_PROJECT, and dev tree path.
@@ -85,14 +98,9 @@ _cvd_resolve_env() {
 
     if [[ -z "${OVERWATCH_PROJECT:-}" ]]; then
         local _all_projects=""
-        if declare -f projects_cfg_list >/dev/null 2>&1; then
-            _all_projects="$(projects_cfg_list 2>/dev/null)"
-        else
-            local _cfg="${KANBAN_ROOT}/projects.cfg"
-            _all_projects="$(awk '/^\[project:[a-zA-Z0-9_-]+\]/{match($0,/\[project:([a-zA-Z0-9_-]+)\]/,a);print a[1]}' "${_cfg}" 2>/dev/null)"
-        fi
+        _all_projects="$(overwatch_registered_projects)"
         local _project_count
-        _project_count="$(echo "${_all_projects}" | grep -c '[^[:space:]]' 2>/dev/null || echo 0)"
+        _project_count="$(echo "${_all_projects}" | grep -c '[^[:space:]]' 2>/dev/null)" || _project_count=0
         if [[ "${_project_count}" -gt 1 ]]; then
             echo "check-version-divergence: ERROR: OVERWATCH_PROJECT not set and multiple projects registered." >&2
             return 1

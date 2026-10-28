@@ -48,6 +48,10 @@
 #
 # --dry-run: scans and logs findings but does NOT modify cache files.
 
+# overwatch_registered_projects: the shared projects.cfg reader.
+# shellcheck source=../overwatch_config.sh
+source "$(dirname "${BASH_SOURCE[0]}")/../overwatch_config.sh"
+
 # ---------------------------------------------------------------------------
 # _ccmd_resolve_env
 # Resolve KANBAN_ROOT and OVERWATCH_PROJECT from the environment.
@@ -67,14 +71,9 @@ _ccmd_resolve_env() {
         # On a multi-project install the caller MUST set OVERWATCH_PROJECT; this
         # path is only safe for single-project installs.
         local _all_projects=""
-        if declare -f projects_cfg_list >/dev/null 2>&1; then
-            _all_projects="$(projects_cfg_list 2>/dev/null)"
-        else
-            local _cfg="${KANBAN_ROOT}/projects.cfg"
-            _all_projects="$(awk '/^\[project:[a-zA-Z0-9_-]+\]/{match($0,/\[project:([a-zA-Z0-9_-]+)\]/,a);print a[1]}' "$_cfg" 2>/dev/null)"
-        fi
+        _all_projects="$(overwatch_registered_projects)"
         local _project_count
-        _project_count="$(echo "${_all_projects}" | grep -c '[^[:space:]]' 2>/dev/null || echo 0)"
+        _project_count="$(echo "${_all_projects}" | grep -c '[^[:space:]]' 2>/dev/null)" || _project_count=0
         if [[ "${_project_count}" -gt 1 ]]; then
             echo "check-cache-marker-drift: ERROR: OVERWATCH_PROJECT is not set and multiple projects are registered." >&2
             echo "  Set OVERWATCH_PROJECT to the target project name before running this check." >&2
@@ -92,11 +91,32 @@ _ccmd_resolve_env() {
 }
 
 # ---------------------------------------------------------------------------
+# _ccmd_load_md_field
+# Make read_md_field (../md_field.sh, the one bash section reader) available,
+# sourcing it from this file's own lib directory on first use unless the
+# caller already defines it. A pp_run_ops the caller defined before the
+# load (its own copy, or a test wrapper) stays the active one: md_field.sh
+# leaves it in place, and it is also saved and put back here. Returns 0
+# when read_md_field is defined.
+# ---------------------------------------------------------------------------
+_ccmd_load_md_field() {
+    declare -F read_md_field >/dev/null 2>&1 && return 0
+    local runner=""
+    runner="$(declare -f pp_run_ops 2>/dev/null)" || runner=""
+    # shellcheck source=../md_field.sh
+    source "$(dirname "${BASH_SOURCE[0]}")/../md_field.sh" || return 1
+    [[ -n "${runner}" ]] && eval "${runner}"
+    declare -F read_md_field >/dev/null 2>&1
+}
+
+# ---------------------------------------------------------------------------
 # _ccmd_read_file_status <file>
 # Echo the ## Status field value from a bug or priority file.
 # Echoes "open", "running", "done", or the raw value found.
 # Echoes "none" if the field is absent or the file does not exist.
-# Case-insensitive match on the heading; value is lowercased.
+# The section is read by read_md_field with --end-at-subheading: any letter
+# case on the heading, and the next "##" line ("###" included) ends it. The
+# value is its first non-blank line, lowercased, whitespace removed.
 # ---------------------------------------------------------------------------
 _ccmd_read_file_status() {
     local file="$1"
@@ -106,12 +126,12 @@ _ccmd_read_file_status() {
         return 0
     fi
 
-    local val
-    val="$(awk '
-        /^##[[:space:]]+Status[[:space:]]*$/ { found=1; next }
-        found && /^##/ { exit }
-        found && /[^[:space:]]/ { print; exit }
-    ' "${file}" 2>/dev/null | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"
+    local val=""
+    if _ccmd_load_md_field; then
+        val="$(read_md_field --end-at-subheading "${file}" Status 2>/dev/null)" || val=""
+    fi
+    val="${val%%$'\n'*}"
+    val="$(printf '%s' "${val}" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"
 
     if [[ -z "${val}" ]]; then
         echo "none"
@@ -135,6 +155,22 @@ _ccmd_is_marked_processed() {
 
     grep -qE "^\s*-\s+\[x\]\s+${item_id}(\s|$)" "${cache_file}" 2>/dev/null
 }
+
+# ---------------------------------------------------------------------------
+# _ccmd_reset_marker <cache_file> <item_id>
+# Reset every "- [x] <item_id>" line of <cache_file> to "- [ ]" in place
+# (pgai_agent_kanban.overwatch.cache_marker_reset; its docstring has the
+# exact line shape). Prints one line on stderr either way and exits 0 when
+# at least one line was reset; exits 1, the file unchanged, when the file
+# cannot be read or written or holds no [x] line for <item_id>. Runs in a
+# subshell that loads this file's own lib directory's pp_run_ops, so a
+# caller's definition never answers for the cache file.
+# ---------------------------------------------------------------------------
+_ccmd_reset_marker() (
+    # shellcheck source=../pp_run_ops.sh
+    source "$(dirname "${BASH_SOURCE[0]}")/../pp_run_ops.sh" || exit 1
+    pp_run_ops pgai_agent_kanban.overwatch.cache_marker_reset -- "$1" "$2"
+)
 
 # ---------------------------------------------------------------------------
 # _ccmd_do_reset_cache_entry
@@ -161,43 +197,9 @@ _ccmd_do_reset_cache_entry() {
         return 1
     }
 
-    # Reset [x] -> [ ] for this specific item_id using Python for safe in-place edit
+    # Reset [x] -> [ ] for this specific item_id
     local reset_exit=0
-    python3 - "${cache_file}" "${item_id}" <<'PY' || reset_exit=$?
-import pathlib, re, sys
-
-cache_path = pathlib.Path(sys.argv[1])
-item_id    = sys.argv[2]
-
-try:
-    text = cache_path.read_text(encoding="utf-8", errors="replace")
-except OSError as e:
-    raise SystemExit(f"Cannot read cache file: {e}")
-
-# Replace "- [x] <item_id>" with "- [ ] <item_id>"
-# Only match exact item_id (word boundary after id, or end of line)
-entry_re = re.compile(
-    rf'^(\s*-\s+\[)x(\]\s+{re.escape(item_id)})(\s.*)?$',
-    re.M,
-)
-
-new_text, n = entry_re.subn(
-    lambda m: m.group(1) + ' ' + m.group(2) + (m.group(3) if m.group(3) else ''),
-    text,
-)
-
-if n == 0:
-    raise SystemExit(
-        f"Could not find [x] entry for {item_id} in {cache_path}; no change made."
-    )
-
-try:
-    cache_path.write_text(new_text, encoding="utf-8")
-except OSError as e:
-    raise SystemExit(f"Failed to write cache file: {e}")
-
-print(f"Reset {n} entry(ies) for {item_id} from [x] to [ ] in {cache_path}", file=__import__('sys').stderr)
-PY
+    _ccmd_reset_marker "${cache_file}" "${item_id}" || reset_exit=$?
 
     if (( reset_exit != 0 )); then
         echo "check-cache-marker-drift: reset failed for ${item_id} in ${cache_file}" >&2

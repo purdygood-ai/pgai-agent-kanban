@@ -13,19 +13,35 @@ Display status
 The panes colour, pin and anchor rows by a *display status*, derived from
 the board status in exactly one place (:func:`display_status`):
 
-    board status          display status   colour
-    "working"             "running"        yellow
-    "label" (active RC)   "running"        yellow (plus an "[active]" suffix)
-    "done"                "done"           green
-    "wont-do"             "wont-do"        green
-    "blocked"             "blocked"        red
-    "open"                "open"           white
+    board status          display status     colour
+    "working"             "running"          yellow
+    "label" (active RC)   "running"          yellow (plus an "[active]" suffix)
+    "done"                "done"             green
+    "wont-do"             "wont-do"          green
+    "duplicate"           "duplicate"        green
+    "blocked"             "blocked"          red
+    "needs-operator"      "needs-operator"   palette ``status_needs_operator``
+    "carried"             "carried"          white (plus the carried marker)
+    "open"                "open"             white
 
 ``"running"`` is the word the row-selection helpers key on
 (``pgai_agent_kanban.dashboard.status_priority_cap`` never evicts a
 ``"running"`` row; the requirements window centres on the first one).
-``"done"`` and ``"wont-do"`` share one colour because both are settled and
-need no action; they stay distinct statuses, as on the board.
+``"done"``, ``"wont-do"`` and ``"duplicate"`` share one colour because all
+three are settled and need no action; they stay distinct statuses, as on the
+board.
+
+Status markers
+--------------
+Two statuses carry a marker after the row's ID, outside its colour, so every
+ID still starts in the same column (:func:`status_marker`):
+
+    display status     colour on            colour off
+    "carried"          " ↻"                 " [carried]"
+    "needs-operator"   (its colour only)    " [needs-op]"
+
+With colour off a needs-operator row cannot be told from an open one by
+colour, so it takes a text marker; a carried row is marked in both modes.
 """
 
 from __future__ import annotations
@@ -48,16 +64,25 @@ if not __package__:
     if _OWN_PACKAGE_ROOT not in sys.path:
         sys.path.insert(0, _OWN_PACKAGE_ROOT)
 
-from pgai_agent_kanban.board import WONT_DO_STATUS  # noqa: E402
+from pgai_agent_kanban.board import (  # noqa: E402
+    CARRIED_STATUS,
+    DUPLICATE_STATUS,
+    NEEDS_OPERATOR_STATUS,
+    WONT_DO_STATUS,
+)
 from pgai_agent_kanban.dashboard.defer_card_glyph import defer_card_glyph_suffix  # noqa: E402
 from pgai_agent_kanban.lib.version_ceiling import exceeded_ceiling  # noqa: E402
 
 __all__ = [
     "ANSI_ESC_RE",
+    "CARRIED_GLYPH_MARKER",
+    "CARRIED_TEXT_MARKER",
     "CEILING_BLOCKED_SUFFIX",
     "CEILING_UNREADABLE_SUFFIX",
     "CeilingCards",
     "DeferCards",
+    "NEEDS_OPERATOR_PALETTE_KEY",
+    "NEEDS_OPERATOR_TEXT_MARKER",
     "Palette",
     "active_window",
     "compact_id",
@@ -65,6 +90,7 @@ __all__ = [
     "middle_position_window",
     "queue_window_bucket",
     "status_color",
+    "status_marker",
     "truncate_ansi",
     "visible_len",
 ]
@@ -85,9 +111,25 @@ _DISPLAY_STATUS = {
     "label": "running",
     "done": "done",
     WONT_DO_STATUS: WONT_DO_STATUS,
+    DUPLICATE_STATUS: DUPLICATE_STATUS,
     "blocked": "blocked",
+    NEEDS_OPERATOR_STATUS: NEEDS_OPERATOR_STATUS,
+    CARRIED_STATUS: CARRIED_STATUS,
     "open": "open",
 }
+
+#: Display statuses drawn in the settled (done) colour.
+_SETTLED_STATUSES = ("done", WONT_DO_STATUS, DUPLICATE_STATUS)
+
+#: The semantic palette key (config/default_palette.txt) needs-operator draws in.
+NEEDS_OPERATOR_PALETTE_KEY = "status_needs_operator"
+
+#: The marker a carried row carries after its ID with colour on.
+CARRIED_GLYPH_MARKER = " ↻"
+#: The marker a carried row carries after its ID with colour off.
+CARRIED_TEXT_MARKER = " [carried]"
+#: The marker a needs-operator row carries after its ID with colour off.
+NEEDS_OPERATOR_TEXT_MARKER = " [needs-op]"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -95,7 +137,9 @@ class Palette:
     """The ANSI escapes a pane draws with, as the bash driver resolved them.
 
     ``use_color`` is False under ``NO_COLOR`` / ``TERM=dumb``; the escapes
-    are then empty strings and no row is coloured.
+    are then empty strings and no row is coloured.  ``needs_operator`` is
+    the semantic palette's ``NEEDS_OPERATOR_PALETTE_KEY`` escape
+    (``pgai_agent_kanban.lib.palette.resolve_semantic_color``).
     """
 
     use_color: bool
@@ -105,6 +149,7 @@ class Palette:
     white: str = ""
     dim: str = ""
     reset: str = ""
+    needs_operator: str = ""
 
 
 @dataclasses.dataclass(frozen=True)
@@ -185,11 +230,26 @@ def status_color(status: str, palette: Palette) -> str:
     s = (status or "").strip().lower()
     if s == "running":
         return palette.yellow
-    if s in ("done", WONT_DO_STATUS):
+    if s in _SETTLED_STATUSES:
         return palette.green
     if s == "blocked":
         return palette.red
+    if s == NEEDS_OPERATOR_STATUS:
+        return palette.needs_operator
     return palette.white
+
+
+def status_marker(status: str, use_color: bool) -> str:
+    """Return the marker a display status carries after its row's ID ("" for none).
+
+    See "Status markers" in the module docstring.
+    """
+    s = (status or "").strip().lower()
+    if s == CARRIED_STATUS:
+        return CARRIED_GLYPH_MARKER if use_color else CARRIED_TEXT_MARKER
+    if s == NEEDS_OPERATOR_STATUS and not use_color:
+        return NEEDS_OPERATOR_TEXT_MARKER
+    return ""
 
 
 def visible_len(text: str) -> int:

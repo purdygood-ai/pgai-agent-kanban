@@ -26,6 +26,8 @@ Write / resolve facade:
     resolve_verdicts, VerdictReport
     deposit_intake
     close_item, wontdo_item, delete_item
+    set_needs_operator, reopen_needs_operator_item, check_needs_operator
+    ride_along_item
     reset_item
     set_marker, remove_marker, CANONICAL_MARKERS
     queue_entries, append_queue_lines
@@ -98,6 +100,10 @@ from pgai_agent_kanban.ops.write import (
     close_item,
     wontdo_item,
     delete_item,
+    set_needs_operator,
+    reopen_needs_operator_item,
+    check_needs_operator,
+    ride_along_item,
     reset_item,
     set_marker,
     remove_marker,
@@ -179,6 +185,12 @@ __all__ = [
     "close_item",
     "wontdo_item",
     "delete_item",
+    # needs-operator: park an intake item on an inbox question, and reopen it
+    "set_needs_operator",
+    "reopen_needs_operator_item",
+    "check_needs_operator",
+    # ride-along: list a bug in a requirement RC and set it running
+    "ride_along_item",
     # Reset write operation
     "reset_item",
     # Queue-marker write operations

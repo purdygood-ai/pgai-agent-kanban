@@ -20,17 +20,17 @@
 #       Runs Steps 12b through 16c, plus the closing "Local
 #       release preparation complete" summary, in this order:
 #       12b token aggregator; the pre-tag hook (via callback #1); 13/13a tag
-#       creation (remote tag check push_to_remote-gated, pre-tag VERSION
-#       gate just before the cut) and its "not pushed yet" log line; the post-tag hook (via
+#       creation (remote tag check push_to_remote-gated -- a tag already on the remote is an
+#       inbox entry and exit 6, no HALT; pre-tag VERSION gate just before the cut) and its push narration line; the post-tag hook (via
 #       callback #2, logged-warning-only); the "verification complete"
-#       narration (sets _CM_VERIFICATION_COMPLETE=1); 9 "main not pushed"
-#       log line; 10 delete RC branch on the remote (push_to_remote-gated);
+#       narration (sets _CM_VERIFICATION_COMPLETE=1); 9 "main staged locally"
+#       log line; 10 delete RC branch on the remote (push_to_remote-gated, best-effort);
 #       10.5 force-remove any worktree still pinned to RC_BRANCH; 11 delete
 #       the local RC branch; 12 update release-state.md fields (a failed
 #       write HALTs with the write as its remedy) plus its auto-resolve
 #       audit trail; 13c promote bundled items to done (a failure warns); 13d
-#       per-RC shipped-state JSON; 14 best-effort auto-push; 15 metrics
-#       aggregation + history.csv append; 16 RC temp cleanup (worktree
+#       per-RC shipped-state JSON; 14 best-effort auto-push (a refused push is push lag); 15 metrics
+#       aggregation + history.csv append + reliability.json refresh; 16 RC temp cleanup (worktree
 #       prune only); 16b stamp ## Fixed In on the bugs this release
 #       closed (those 'running' in a snapshot taken just before 13c and
 #       'done' after it; earlier done bugs are never stamped), then name
@@ -82,7 +82,8 @@
 # Dependencies (must already be sourced/defined by the caller before this
 # file's entry point is called)
 # -----------------------------------------------------------------------
-#   team/scripts/lib/cm/release_preflight.sh — cm_halt, and
+#   team/scripts/lib/cm/release_preflight.sh — cm_halt (and, through it,
+#     release_stop_inbox.sh's two inbox helpers), and
 #     cm_release_preflight must already have run so PROJECT_NAME,
 #     REPO_ROOT, MAIN_BRANCH, RC_BRANCH, ACTIVE_RC, RELEASE_STATE,
 #     PROJECT_HOOKS_DIR, _CM_PROJECT_ROOT, _CM_PUSH_TO_REMOTE,
@@ -92,9 +93,8 @@
 #   team/scripts/lib/cm_release_hooks.sh — cm_resolve_and_enforce_hook
 #     (called by the caller-supplied hook-step callbacks, not directly here).
 #   team/scripts/lib/pp_run_ops.sh / lib/project_paths.sh — pp_run_ops
-#     (Step 16b's writeback, Step 16c's archive), pp_pythonpath (Step 13c's
-#     bundled-item promotion), pp_prefix_tag, pp_strip_prefix_from_tag,
-#     pp_project_root.
+#     (Step 15c's reliability refresh, Step 16b's writeback, Step 16c's archive), pp_pythonpath
+#     (Step 13c's bundled-item promotion), pp_prefix_tag, pp_strip_prefix_from_tag, pp_project_root.
 #   team/scripts/lib/error_contract.sh — pgai_emit_error_contract (the
 #     blocking-hook failure refusal in _run_release_hook).
 #   team/scripts/lib/cm/release_ship_posture.sh —
@@ -123,16 +123,20 @@ fi
 # guard.
 # shellcheck source=release_fixed_in.sh
 source "$(dirname "${BASH_SOURCE[0]}")/release_fixed_in.sh"
-# Step 16c's helper, likewise (release_archive.sh).
+# Step 16c's helper (release_archive.sh) and triggers 6-7's (release_resolve.sh), likewise.
 # shellcheck source=release_archive.sh
 source "$(dirname "${BASH_SOURCE[0]}")/release_archive.sh"
+# shellcheck source=release_resolve.sh
+source "$(dirname "${BASH_SOURCE[0]}")/release_resolve.sh"
 
 # Helper: run a lifecycle hook for this release.
-# Usage: _run_release_hook <hook-name> <hook-path> [--no-block]
+# Usage: _run_release_hook <hook-name> <hook-path> [--no-block|--inbox]
 #
 # hook-name  : identifier used in log prefixes (e.g. "cm-release-pre-squash")
 # hook-path  : absolute path to the hook script
 # --no-block : if set, hook failure is a logged warning; release continues
+# --inbox    : a blocking failure also writes its triple to the operator inbox
+#              (pre-tag; pre-squash's trigger 4 HALT writes its own entry)
 #
 # Hook runs with cwd=$REPO_ROOT and six required PGAI_* env vars plus the
 # ambient environment. stdout/stderr are captured and prefixed with
@@ -189,10 +193,13 @@ _run_release_hook() {
     # addition to the Cause(s)/Next-diagnostic-step/Rule block above: the
     # error key below is the hook's own phase name, the documented id an
     # operator or tool would grep for.
-    pgai_emit_error_contract \
-      "cm-release.hook-failure.${hook_name}" \
-      "The ${hook_name} release hook exited non-zero (rc=${_hook_rc}); a blocking release hook must exit 0 for the release to proceed past this phase." \
-      "Read the \"[hook ${hook_name}]\"-prefixed lines printed above for the hook's own stdout/stderr, fix the underlying cause inside ${hook_path}, then re-run scripts/cm/release.sh."
+    local _hook_err_key="cm-release.hook-failure.${hook_name}"
+    local _hook_err_msg="The ${hook_name} release hook exited non-zero (rc=${_hook_rc}); a blocking release hook must exit 0 for the release to proceed past this phase."
+    local _hook_err_remedy="Read the \"[hook ${hook_name}]\"-prefixed lines printed above for the hook's own stdout/stderr, fix the underlying cause inside ${hook_path}, then re-run scripts/cm/release.sh."
+    pgai_emit_error_contract "$_hook_err_key" "$_hook_err_msg" "$_hook_err_remedy"
+    [[ "$no_block" == "--inbox" ]] && cm_release_stop_inbox_entry "$_hook_err_key" "$_hook_err_msg" "$_hook_err_remedy" no
+    # BLOCK-WORTHY: a blocking release hook is an integrity invariant the
+    # project declared; the release stops before the phase it guards.
     # CENSUS-ANCHOR: release-finalize-hook-failure-01
     exit 1
   fi
@@ -282,7 +289,7 @@ cm_release_finalize() {
 
   # Origin/branch outcomes, recorded by the step that performs each action
   # and read by the closing summary so it reports what actually ran:
-  #   _CM_RC_ORIGIN_DELETE_OUTCOME  Step 10: deleted | already-absent | skipped
+  #   _CM_RC_ORIGIN_DELETE_OUTCOME  Step 10: deleted | already-absent | FAILED | skipped
   #   _CM_RC_LOCAL_DELETE_OUTCOME   Step 11: deleted | already-absent
   #   _CM_PUSH_MAIN_OUTCOME         Step 14: PUSHED | UP-TO-DATE | FAILED | skipped
   #   _CM_PUSH_TAGS_OUTCOME         Step 14: PUSHED | UP-TO-DATE | FAILED | skipped
@@ -332,6 +339,10 @@ cm_release_finalize() {
   # RELEASE_TAG is the prefixed tag name (e.g. ai_v0.31.0 in hybrid mode,
   # or v0.31.0 in pure-AI mode where prefix is empty).
   RELEASE_TAG="$(pp_prefix_tag "$PROJECT_NAME" "$ACTIVE_RC")"
+  # Steps 13a and 9 say who pushes the tag and main, by the flag that gates Step 14; a
+  # local-only lane names the manual push (finalize-release.sh contacts no remote there).
+  local _fin_push_note="NOT pushing to ${_fin_remote} (push_to_remote = false): the tag and ${MAIN_BRANCH} stay local until pushed by hand with 'git push ${_fin_remote} ${MAIN_BRANCH} ${RELEASE_TAG}'"
+  [[ "$_CM_PUSH_TO_REMOTE" == "true" ]] && _fin_push_note="this run pushes it to ${_fin_remote} in Step 14"
   echo "[Step 13] Tagging $RELEASE_TAG on the final commit on main..."
 
   # Idempotency: check local tag first.
@@ -350,12 +361,9 @@ cm_release_finalize() {
         "Inspect the local tag with 'git show ${RELEASE_TAG}' in ${REPO_ROOT}; delete it with 'git tag -d ${RELEASE_TAG}' if it is stale, then re-run scripts/cm/release.sh."
     fi
   else
-    # Local tag absent: check the remote (Trigger 7) before creating; local-only runs never ask it.
+    # Local tag absent: check the remote (Trigger 7: inbox entry, exit 6) before creating; local-only runs never ask it.
     if [[ "$_CM_PUSH_TO_REMOTE" == "true" ]] && git -C "$REPO_ROOT" ls-remote --exit-code --tags "$_fin_remote" "refs/tags/${RELEASE_TAG}" >/dev/null 2>&1; then
-      cm_halt \
-        "cm-release.trigger-7.tag-exists-on-origin" \
-        "Trigger 7: tag ${RELEASE_TAG} already exists on ${_fin_remote} — creating it again would be a duplicate, indicating a race condition or a repeated invocation against an already-shipped version." \
-        "Run 'git ls-remote --tags ${_fin_remote} ${RELEASE_TAG}' to confirm, verify whether ${ACTIVE_RC} already shipped, then either cancel this RC (scripts/cm/cancel-rc.sh) or investigate the race."
+      cm_release_resolve_tag_on_remote "$_fin_remote"
     fi
 
     # --- Pre-tag VERSION gate ---
@@ -373,18 +381,9 @@ cm_release_finalize() {
     # re-entry paths where Step 11d was skipped (VERSION already correct).
     _pretag_expected="${_CLEAN_RELEASE_VERSION:-$(pp_strip_prefix_from_tag "$PROJECT_NAME" "$ACTIVE_RC" 2>/dev/null || echo "$ACTIVE_RC")}"
     if [[ "$_pretag_version_trimmed" != "$_pretag_expected" ]]; then
-      echo "" >&2
-      echo "[Pre-tag VERSION gate] FAIL — on-disk VERSION does not match the tag about to be created. No tag has been created." >&2
-      echo "" >&2
-      echo "Cause(s):" >&2
-      echo "  - ${REPO_ROOT}/VERSION contains '${_pretag_version_trimmed}', expected '${_pretag_expected}' (release tag ${RELEASE_TAG})" >&2
-      echo "" >&2
-      echo "To fix:" >&2
-      echo "  1. printf '%s\n' '${_pretag_expected}' > '${REPO_ROOT}/VERSION'" >&2
-      echo "  2. git -C '${REPO_ROOT}' add VERSION && git -C '${REPO_ROOT}' commit -m 'Fix VERSION for ${_pretag_expected}'" >&2
-      echo "  3. Re-run scripts/cm/release.sh." >&2
-      echo "" >&2
-      echo "Rule: the committed VERSION file must equal the release tag being cut, or the shipped tag would misreport the version." >&2
+      cm_release_version_gate_report "$_pretag_version_trimmed" "$_pretag_expected"
+      # BLOCK-WORTHY: a tag whose committed VERSION disagrees with it would
+      # publish a release that misreports its own version.
       # CENSUS-ANCHOR: release-finalize-pretag-version-mismatch-01
       exit 1
     fi
@@ -401,10 +400,8 @@ cm_release_finalize() {
     fi
   fi
 
-  # --- Step 13a: tag is NOT pushed here ---
-  # The tag was created locally in Step 13. The operator pushes it via
-  # cm/finalize-release.sh (or manually: git push <remote> <VERSION>).
-  echo "[Step 13a] Tag $RELEASE_TAG created locally — NOT pushing to ${_fin_remote} (operator will push via scripts/cm/finalize-release.sh)."
+  # --- Step 13a: tag is NOT pushed here (Step 14 or the operator pushes it) ---
+  echo "[Step 13a] Tag $RELEASE_TAG created locally — ${_fin_push_note}."
 
   "$post_tag_hook_step_fn"
 
@@ -418,20 +415,20 @@ cm_release_finalize() {
   echo ""
   _CM_VERIFICATION_COMPLETE=1
 
-  # --- Step 9: main is NOT pushed here ---
-  # Release commits on main stay local; operator pushes via cm/finalize-release.sh.
-  echo "[Step 9] main is staged locally — NOT pushing to ${_fin_remote} (operator will push via scripts/cm/finalize-release.sh)."
+  # --- Step 9: main is NOT pushed here (Step 14 or the operator pushes it) ---
+  echo "[Step 9] main is staged locally — ${_fin_push_note}."
 
   # --- Step 10: git push <remote> --delete rc/<ACTIVE_RC> ---
-  # Gated by push_to_remote; idempotent when the RC branch is already absent on the remote.
+  # Gated by push_to_remote; idempotent when already absent; a refused delete is push lag (FAILED).
   echo "[Step 10] Deleting $RC_BRANCH on ${_fin_remote}..."
   if [[ "$_CM_PUSH_TO_REMOTE" == "true" ]]; then
     if ! git -C "$REPO_ROOT" ls-remote --exit-code --heads "$_fin_remote" "$RC_BRANCH" >/dev/null 2>&1; then
       echo "[Step 10] step 10: already complete, continuing — $RC_BRANCH is already absent on ${_fin_remote} (deleted in prior run or never pushed)."
       _CM_RC_ORIGIN_DELETE_OUTCOME="already-absent"
     else
-      git_step "git push ${_fin_remote} --delete $RC_BRANCH" git -C "$REPO_ROOT" push "$_fin_remote" --delete "$RC_BRANCH"
       _CM_RC_ORIGIN_DELETE_OUTCOME="deleted"
+      git -C "$REPO_ROOT" push "$_fin_remote" --delete "$RC_BRANCH" || { _CM_RC_ORIGIN_DELETE_OUTCOME="FAILED"
+        echo "[Step 10] WARNING: ${_fin_remote} refused deleting $RC_BRANCH; the release continues (recorded as push lag after Step 14)." >&2; }
     fi
   else
     echo "[push_to_remote=false] skipping ${_fin_remote} push for ${PROJECT_NAME}: git push ${_fin_remote} --delete $RC_BRANCH (Step 10)"
@@ -477,7 +474,7 @@ cm_release_finalize() {
     # CENSUS-ANCHOR: release-finalize-release-state-write-failure-01
     cm_halt "cm-release.release-state-write-failed" \
       "Step 12: ${ACTIVE_RC} is tagged (${RELEASE_TAG}) and its RC branch deleted, but writing release-state.md failed (rc=${_cm_release_state_rc}); it still names ${ACTIVE_RC} as the active RC. Steps 13c-16c (bundle promotion, shipped-state JSON, Fixed In stamp, archive) did not run." \
-      "${_cm_release_state_cmd} && team/scripts/unhalt.sh --project ${PROJECT_NAME}"
+      "${_cm_release_state_cmd} && $(printf '%q' "${KANBAN_ROOT}/scripts/unhalt.sh") --project $(printf '%q' "${PROJECT_NAME}")"
   fi
 
   echo "  release-state.md updated: Active RC -> none, Last Released -> ${ACTIVE_RC}"
@@ -511,6 +508,9 @@ EOF
   # and — when a ## Bundled Items section exists — promotes each referenced
   # item too. This is the discovery pipeline's idempotency complement: once
   # the bundle file is 'done', discovery_step_requirements skips it forever.
+  # A requirement RC's ride-along bugs are listed in that requirement's own
+  # ## Bundled Items, so they are promoted (or carried) exactly as bundle
+  # items; an item at needs-operator is never promoted or carried.
   echo "[Step 13c] Promoting bundled items and bundle file from 'running' to 'done'..."
 
   # Locate the project root for the active project (where requirements/ lives).
@@ -645,7 +645,7 @@ EOF
 
     if [[ $_push_main_rc -ne 0 || $_push_tags_rc -ne 0 ]]; then
       echo "[cm-release auto-push] WARNING: one or more push attempts failed after retry (main rc=$_push_main_rc, tags rc=$_push_tags_rc)."
-      echo "[cm-release auto-push] The release is complete locally. The watchdog should catch the remaining work."
+      echo "[cm-release auto-push] The release is complete locally; the push-lag check pushes the rest once ${_fin_remote} accepts."
     else
       echo "[cm-release auto-push] main and tags pushed successfully."
 
@@ -661,15 +661,16 @@ EOF
     fi
   }
   if [[ $_cm_errexit_was_on -eq 1 ]]; then set -e; fi
+  cm_release_record_push_lag "$_fin_remote"
   else
     echo "[push_to_remote=false] skipping ${_fin_remote} push for ${PROJECT_NAME}: auto-push of $MAIN_BRANCH and tags (Step 14)"
     _CM_PUSH_MAIN_OUTCOME="skipped"
     _CM_PUSH_TAGS_OUTCOME="skipped"
   fi
 
-  # --- Step 15: Metrics aggregation and CSV append ---
+  # --- Step 15: Metrics aggregation, CSV append, reliability refresh ---
   # 15a writes the per-RC JSON rollup (metrics/rc/<ACTIVE_RC>.json); 15b
-  # appends one row to the cumulative metrics/history.csv. Both are
+  # appends one row to the cumulative metrics/history.csv; 15c refreshes metrics/reliability.json. All are
   # NON-BLOCKING (failures log a [metrics] WARNING and the script still
   # exits 0). Idempotent: aggregate_rc() recomputes deterministically;
   # append_rc_row() dedupes under an exclusive flock. --project/--rc are
@@ -734,6 +735,7 @@ EOF
   else
     echo "[Step 15b] WARNING: metrics_csv_writer.py not found at $_metrics_csv_script — skipping history.csv append." >&2
   fi
+  pp_run_ops pgai_agent_kanban.metrics.reliability refresh --project "$PROJECT_NAME" --kanban-root "$KANBAN_ROOT" 2>&1 | sed 's/^/[reliability] /' || echo "[Step 15c] WARNING: metrics/reliability.json was not refreshed; release continues. Re-run: KANBAN_ROOT=$KANBAN_ROOT $KANBAN_ROOT/scripts/lib/pp_run_ops.sh pgai_agent_kanban.metrics.reliability refresh --project $PROJECT_NAME --kanban-root $KANBAN_ROOT" >&2  # 15c: reliability streaks; CENSUS CLASS: CONVERT (docs/blocking-site-census.md) -- best-effort, never stops the release
 
   # --- Step 16: Success-gated RC temp cleanup (non-blocking) ---
   # Runs only on the explicit success path (must never live in the EXIT
@@ -789,11 +791,8 @@ EOF
   elif [[ "$_CM_PUSH_MAIN_OUTCOME" != "FAILED" && "$_CM_PUSH_TAGS_OUTCOME" != "FAILED" ]]; then
     echo "The auto-push succeeded; the release is complete on ${_fin_remote}."
   else
-    echo "The auto-push failed; push manually from a shell where the PreToolUse hook does not apply:"
-    echo "    git push ${_fin_remote} $MAIN_BRANCH"
-    echo "    git push ${_fin_remote} ${RELEASE_TAG}"
-    echo "Or run the convenience script:"
-    echo "    $([[ "$_fin_remote" == origin ]] || echo "GIT_REMOTE_NAME=${_fin_remote} ")bash ${KANBAN_ROOT}/scripts/cm/finalize-release.sh"
+    echo "The auto-push failed (push lag, recorded in release-state.md): the push-lag check pushes $MAIN_BRANCH and ${RELEASE_TAG} once ${_fin_remote} accepts. To push now:"
+    echo "    $(printf '%q' "${KANBAN_ROOT}/scripts/cm/push-watchdog.sh") --project $(printf '%q' "$PROJECT_NAME")"
   fi
   echo "The release is complete locally."
   exit 0

@@ -27,6 +27,13 @@ Fixtures exercised:
       is skipped rather than risk attributing another task's commits; the
       skip is narrated via log(), and the gate still accepts the
       (otherwise clean) DONE-claim on the merge/cleanliness checks alone.
+  (D) The lint exits 0 on findings (quality class), so the refusal in (A)
+      is keyed on the lint's stable "lint.rc-empty-commits" error key: the
+      real lint run over (A)'s range exits 0 and prints the key.
+  (E) Could not run: a lint that exits non-zero -- 2 for its own
+      pre-flight refusal, 1 for a crash -- passes the DONE-claim
+      best-effort with a narrated WARNING, even on (A)'s empty-commit
+      branch; a lint that exits 0 without the key passes too.
 
 Naming: function names describe behavior under test, never bug IDs or task
 IDs (roles/TESTER.md "Test Authoring Guidelines", Anti-pattern 6).
@@ -88,13 +95,17 @@ def _extract_functions_snippet(func_names: list[str]) -> str:
     """)
 
 
-def _script_header(log_file: pathlib.Path) -> str:
+def _script_header(
+    log_file: pathlib.Path, lint_dir: pathlib.Path = _REAL_REPO_TEAM_SCRIPTS_DIR
+) -> str:
+    """Bash preamble defining the real gate; *lint_dir* is where it finds
+    lint_rc_empty_commits.py (REPO_TEAM_DIR), the real scripts/ by default."""
     funcs = ["normalize_status_file", "set_state", "set_block", "coder_writer_completion_gate"]
     return textwrap.dedent(f"""\
         #!/usr/bin/env bash
         set -euo pipefail
         {make_log_stub_fragment(log_file)}
-        REPO_TEAM_DIR="{_REAL_REPO_TEAM_SCRIPTS_DIR}"
+        REPO_TEAM_DIR="{lint_dir}"
         source "{_REAL_REPO_TEAM_SCRIPTS_DIR}/lib/error_contract.sh"
         source "{_REAL_REPO_TEAM_SCRIPTS_DIR}/lib/atomic_write.sh"
         {_extract_functions_snippet(funcs)}
@@ -341,3 +352,84 @@ def test_empty_commit_check_skips_when_source_branch_advanced_since(
     assert "empty-commit check skipped" in log_text, (
         f"the skip must be narrated via log(), not silent\nlog:\n{log_text}"
     )
+
+
+# ---------------------------------------------------------------------------
+# (D) The refusal is keyed on the lint's error key, not on its exit status.
+# ---------------------------------------------------------------------------
+
+
+def test_lint_exits_0_and_prints_the_key_the_gate_refuses_on(tmp_path: pathlib.Path) -> None:
+    task_id = "CODER-20260101-204-fixture-key"
+    source_branch = "ai_rc/v9.9.9"
+    _dev_tree, feature_branch, worktree_path = _build_repo(
+        tmp_path, task_id, source_branch, plant_empty_commit=True
+    )
+
+    result = subprocess.run(
+        [
+            "python3",
+            str(_REAL_REPO_TEAM_SCRIPTS_DIR / "lint_rc_empty_commits.py"),
+            "--repo", str(worktree_path),
+            "--range", f"{source_branch}^..{feature_branch}",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+
+    assert result.returncode == 0, f"stdout={result.stdout}\nstderr={result.stderr}"
+    assert "error:   lint.rc-empty-commits" in result.stderr, result.stderr
+
+
+# ---------------------------------------------------------------------------
+# (E) A lint that could not run passes best-effort, narrated.
+# ---------------------------------------------------------------------------
+
+
+def _stub_lint_dir(tmp_path: pathlib.Path, body: str) -> pathlib.Path:
+    """A scripts/ stand-in whose lint_rc_empty_commits.py runs *body*."""
+    stub_dir = tmp_path / "stub-scripts"
+    stub_dir.mkdir()
+    (stub_dir / "lint_rc_empty_commits.py").write_text(
+        "import sys\n" + body + "\n", encoding="utf-8"
+    )
+    return stub_dir
+
+
+@pytest.mark.parametrize(
+    ("label", "body", "narrated"),
+    [
+        ("preflight-refusal", "print('not a git repository', file=sys.stderr)\nsys.exit(2)", True),
+        ("crash", "raise RuntimeError('fixture crash')", True),
+        ("clean-exit-without-key", "print('lint_rc_empty_commits: OK')\nsys.exit(0)", False),
+    ],
+)
+def test_lint_that_could_not_run_or_found_nothing_passes(
+    tmp_path: pathlib.Path, label: str, body: str, narrated: bool
+) -> None:
+    task_id = f"CODER-20260101-205-fixture-{label}"
+    source_branch = "ai_rc/v9.9.9"
+    _dev_tree, feature_branch, worktree_path = _build_repo(
+        tmp_path, task_id, source_branch, plant_empty_commit=True
+    )
+    status_file = _build_status_file(tmp_path, task_id)
+    log_file = tmp_path / "wake.log"
+    stub_dir = _stub_lint_dir(tmp_path, body)
+
+    script = _script_header(log_file, stub_dir) + textwrap.dedent(f"""\
+        result="$(coder_writer_completion_gate \\
+            "{task_id}" "{status_file}" "coder" \\
+            "{feature_branch}" "{source_branch}" "{worktree_path}")"
+        printf 'RESULT=[%s]\\n' "$result"
+    """)
+
+    result = _run(script)
+    assert result.returncode == 0, f"gate call should not error\nstdout={result.stdout}\nstderr={result.stderr}"
+    assert "RESULT=[DONE]" in result.stdout, (
+        f"a lint that could not run, or exited 0 with no found-commit key, must not refuse ({label})\n"
+        f"stdout={result.stdout}\nstderr={result.stderr}"
+    )
+    assert _field(_read(status_file), "State") == "DONE"
+    log_text = log_file.read_text(encoding="utf-8") if log_file.exists() else ""
+    assert ("empty-commit check could not run" in log_text) is narrated, log_text

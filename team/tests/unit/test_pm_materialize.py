@@ -14,19 +14,34 @@ Covers the assembly logic of the materializer:
   - Feature-workflow assembly (CODER create-shared-branch, no CM bookends).
   - Utility functions: format_list, format_checklist, normalize_workspace_value,
     validate_model_override, compute_plan_hash.
+  - Bundled-item coverage: a plan leaving a ## Bundled Items entry named by
+    no ticket and not under needs_operator is refused dual-channel and
+    writes nothing; needs_operator, ride-along and a requirement without
+    the section pass. These cases run the real CLI as a subprocess against
+    a throwaway kanban root with all five root variables set or cleared.
 
 All filesystem writes target tmp_path (never bare /tmp).
-No subprocess / git calls are exercised — functions that read a git dev
-tree are not invoked here.
+No git calls are exercised — functions that read a git dev tree are not
+invoked here.
 """
 
 from __future__ import annotations
 
+import json
 import pathlib
+import subprocess
+import sys
 import textwrap
 from unittest.mock import patch
 
 import pytest
+
+from pgai_agent_kanban.lib.error_contract import parse_error_contract
+from pgai_agent_kanban.ops.context import OpsContext
+from pgai_agent_kanban.overwatch import inbox
+from pgai_agent_kanban.task_status import read_section
+from tests.fixtures.scrubbed_subprocess_env import build_scrubbed_env
+from tests.fixtures.two_project import add_registered_project, build_two_project_root
 
 # ---------------------------------------------------------------------------
 # Import with installed-package / direct-checkout fallback
@@ -1091,3 +1106,229 @@ def test_release_plan_assembly_git_repo_override_applied_before_bookends(
     # not have been affected by the earlier override
     cm_open = tasks[0]
     assert cm_open.get("cm_operation") == "open-rc"
+
+
+# ---------------------------------------------------------------------------
+# Bundled-item coverage: every ## Bundled Items entry is ticketed or asked about
+# ---------------------------------------------------------------------------
+
+_MATERIALIZE_SCRIPT = pathlib.Path(__file__).resolve().parents[2] / "pm-agent" / "pm_materialize.py"
+_COVERAGE_PROJECT = "bundle-coverage"
+_COVERAGE_QUESTION = "Which retry limit should the uploader use?"
+
+
+def _coverage_sandbox(tmp_path: pathlib.Path) -> tuple:
+    """``(kanban_root, project_root)``: a throwaway kanban root with one registered project."""
+    root = build_two_project_root(tmp_path)
+    project_root = add_registered_project(root, _COVERAGE_PROJECT)
+    for sub in ("bugs", "requirements", "priority"):
+        (project_root / sub).mkdir(exist_ok=True)
+    (root / "tmp").mkdir(exist_ok=True)
+    return root, project_root
+
+
+def _coverage_bug(project_root: pathlib.Path, stem: str, status: str = "open") -> pathlib.Path:
+    path = project_root / "bugs" / f"{stem}.md"
+    path.write_text(f"# {stem}\n\n**Severity:** low\n\n## Status\n{status}\n\n## Symptom\nsynthetic\n",
+                    encoding="utf-8")
+    return path
+
+
+def _coverage_requirement(project_root: pathlib.Path, items: list) -> pathlib.Path:
+    """A requirement for v9.9.6; with *items* it is a bundle listing them under ## Bundled Items."""
+    path = project_root / "requirements" / "v9.9.6-bugfix-bundle-20990101.md"
+    bundled = "## Bundled Items\n\n" + "".join(f"- {b.name} (`{b}`)\n" for b in items) if items else ""
+    path.write_text(
+        "# v9.9.6-bugfix-bundle-20990101\n\n## Status\nrunning\n\n## Target Version\nv9.9.6\n\n"
+        f"## Workflow Type\nrelease\n\n{bundled}\n## Acceptance Criteria\n\n- It works.\n",
+        encoding="utf-8",
+    )
+    return path
+
+
+def _coverage_plan(requirement: pathlib.Path, goal: str, **fields) -> dict:
+    task = {
+        "sequence": 1, "slug": "uploader-fixes", "title": "Fix the uploader", "role": "CODER",
+        "working_directory": "/dev/null", "git_repo": "none", "source_branch": "rc/v9.9.6",
+        "goal": goal, "inputs": [], "context_paths": [], "required_output": "The fix.",
+        "constraints": [], "acceptance_criteria": ["It works."], "depends_on": [], "notes": "",
+    }
+    plan = {
+        "project_name": _COVERAGE_PROJECT, "workflow_type": "release", "target_version": "v9.9.6",
+        "test_required": "false", "human_approval_required": "auto",
+        "requirements_path": str(requirement), "tasks": [task],
+    }
+    plan.update(fields)
+    return plan
+
+
+def _coverage_materialize(root: pathlib.Path, project_root: pathlib.Path, tmp_path: pathlib.Path,
+                          plan: dict):
+    """Run the real materializer CLI on *plan* with all five kanban-root variables set or cleared."""
+    plan_dir = tmp_path / "plan"
+    plan_dir.mkdir()
+    plan_file = plan_dir / "plan.json"
+    plan_file.write_text(json.dumps(plan, indent=2), encoding="utf-8")
+    env = build_scrubbed_env(
+        home_dir=tmp_path / "home",
+        extra_env={
+            "KANBAN_ROOT": str(root),
+            "TEAM_ROOT": str(root),
+            "PGAI_AGENT_KANBAN_ROOT_PATH": str(root),
+            "PGAI_AGENT_KANBAN_TEMP_DIR": str(root / "tmp"),
+            "PGAI_DEFERRED_BUGS": "false",
+        },
+    )
+    return subprocess.run(
+        [sys.executable, str(_MATERIALIZE_SCRIPT), str(plan_file), "--team-root", str(project_root),
+         "--requirements-path", plan["requirements_path"]],
+        capture_output=True, text=True, env=env, cwd=str(root), timeout=120,
+    )
+
+
+def _coverage_snapshot(project_root: pathlib.Path) -> dict:
+    """Every byte the materializer could write: tasks, queues, intake, requirements, inbox."""
+    paths = [project_root / sub for sub in ("tasks", "bugs", "requirements", "priority")]
+    paths.append(project_root / "operator-inbox.md")
+    files = [f for p in paths for f in ([p] if p.is_file() else sorted(p.rglob("*")) if p.is_dir() else [])]
+    return {str(f): f.read_bytes() for f in files if f.is_file()}
+
+
+def _coverage_task_dirs(project_root: pathlib.Path) -> list:
+    tasks = project_root / "tasks"
+    return sorted(d.name for d in tasks.iterdir() if d.is_dir() and d.name != "queues") if tasks.is_dir() else []
+
+
+def _coverage_status(path: pathlib.Path) -> str:
+    return (read_section(path.read_text(encoding="utf-8"), "Status") or "").strip()
+
+
+def test_a_bundled_item_no_ticket_names_is_refused_and_nothing_is_written(tmp_path) -> None:
+    root, project_root = _coverage_sandbox(tmp_path)
+    named = _coverage_bug(project_root, "BUG-9961-uploader-timeout")
+    omitted = _coverage_bug(project_root, "BUG-9962-uploader-retry")
+    requirement = _coverage_requirement(project_root, [named, omitted])
+    before = _coverage_snapshot(project_root)
+
+    result = _coverage_materialize(root, project_root, tmp_path,
+                                   _coverage_plan(requirement, "Fix BUG-9961: the uploader times out."))
+
+    assert result.returncode != 0, result.stdout + result.stderr
+    refusal = parse_error_contract(result.stderr[result.stderr.find("error:"):])
+    assert refusal is not None, result.stderr
+    assert refusal["error"] == "materialize.bundled_item_unassigned"
+    assert omitted.name in refusal["message"]
+    assert named.name not in refusal["message"]
+    assert "BUG-9962" in refusal["remedy"] and "<" not in refusal["remedy"]
+    assert _coverage_snapshot(project_root) == before
+    assert not list((tmp_path / "plan").glob(".materialized.*"))
+
+
+def test_the_omitted_item_listed_under_needs_operator_materializes_and_asks(tmp_path) -> None:
+    root, project_root = _coverage_sandbox(tmp_path)
+    named = _coverage_bug(project_root, "BUG-9961-uploader-timeout")
+    omitted = _coverage_bug(project_root, "BUG-9962-uploader-retry")
+    requirement = _coverage_requirement(project_root, [named, omitted])
+    plan = _coverage_plan(requirement, "Fix BUG-9961: the uploader times out.",
+                          needs_operator=[{"item": "BUG-9962", "question": _COVERAGE_QUESTION}])
+
+    result = _coverage_materialize(root, project_root, tmp_path, plan)
+
+    assert result.returncode == 0, result.stderr
+    assert "bundled_item_unassigned" not in result.stderr
+    assert any("uploader-fixes" in name for name in _coverage_task_dirs(project_root))
+    assert _coverage_status(omitted) == "needs-operator"
+    [entry] = inbox.list_open(OpsContext(kanban_root=root), _COVERAGE_PROJECT)
+    assert entry.source == omitted.stem
+    assert entry.question == _COVERAGE_QUESTION
+
+
+@pytest.mark.parametrize(
+    ("bundled", "goal"),
+    [
+        (False, "Fix the uploader."),
+        (True, "Fix BUG-9961 and bug_9962 in the uploader."),
+    ],
+    ids=["no-bundled-items-section", "every-item-named"],
+)
+def test_a_plan_with_nothing_unassigned_materializes_as_before(tmp_path, bundled, goal) -> None:
+    root, project_root = _coverage_sandbox(tmp_path)
+    bugs = [_coverage_bug(project_root, "BUG-9961-uploader-timeout"),
+            _coverage_bug(project_root, "BUG-9962-uploader-retry")]
+    requirement = _coverage_requirement(project_root, bugs if bundled else [])
+    intake_before = {k: v for k, v in _coverage_snapshot(project_root).items() if "/tasks/" not in k}
+
+    result = _coverage_materialize(root, project_root, tmp_path, _coverage_plan(requirement, goal))
+
+    assert result.returncode == 0, result.stderr
+    assert "bundled_item_unassigned" not in result.stderr
+    assert any("uploader-fixes" in name for name in _coverage_task_dirs(project_root))
+    assert {k: v for k, v in _coverage_snapshot(project_root).items() if "/tasks/" not in k} == intake_before
+
+
+def test_an_empty_plan_against_a_bundle_is_still_a_no_op(tmp_path) -> None:
+    root, project_root = _coverage_sandbox(tmp_path)
+    bug = _coverage_bug(project_root, "BUG-9961-uploader-timeout")
+    requirement = _coverage_requirement(project_root, [bug])
+    plan = _coverage_plan(requirement, "unused")
+    plan["tasks"] = []
+    before = _coverage_snapshot(project_root)
+
+    result = _coverage_materialize(root, project_root, tmp_path, plan)
+
+    assert result.returncode == 0, result.stderr
+    assert "Nothing to do" in result.stderr
+    assert _coverage_snapshot(project_root) == before
+
+
+def _plan_naming(*texts: str) -> dict:
+    return {"tasks": [{"sequence": 1, "goal": texts[0], "inputs": list(texts[1:]), "depends_on": [2]}]}
+
+
+def _bundle_file(tmp_path: pathlib.Path, *names: str) -> pathlib.Path:
+    path = tmp_path / "bundle.md"
+    path.write_text("# bundle\n\n## Bundled Items\n\n"
+                    + "".join(f"- {n} (`/elsewhere/bugs/{n}`)\n" for n in names)
+                    + "\n## Notes\n\n- BUG-9969-not-an-item.md (`/elsewhere/bugs/BUG-9969-not-an-item.md`)\n",
+                    encoding="utf-8")
+    return path
+
+
+@pytest.mark.parametrize(
+    "spelling",
+    ["BUG-9961", "bug-9961", "BUG_9961", "BUG 9961", "BUG-09961", "see /x/bugs/BUG-9961-uploader-timeout.md"],
+)
+def test_a_ticket_names_an_item_by_its_id_in_any_spelling(tmp_path, spelling) -> None:
+    bundle = _bundle_file(tmp_path, "BUG-9961-uploader-timeout.md")
+    assert pm.uncovered_bundled_items(_plan_naming("Fix it.", spelling), str(bundle)) == []
+
+
+@pytest.mark.parametrize("text", ["BUG-99610", "BUG-996", "XBUG-9961", "PRIORITY-9961"])
+def test_a_longer_shorter_or_other_kind_of_id_does_not_name_the_item(tmp_path, text) -> None:
+    bundle = _bundle_file(tmp_path, "BUG-9961-uploader-timeout.md")
+    assert pm.uncovered_bundled_items(_plan_naming(text), str(bundle)) == ["BUG-9961-uploader-timeout.md"]
+
+
+def test_only_the_bundled_items_section_is_read_and_repeats_are_dropped(tmp_path) -> None:
+    bundle = _bundle_file(tmp_path, "BUG-9961-a.md", "PRIORITY-9962-b.md", "BUG-9961-a.md", "NOTE-c.md")
+    assert pm.uncovered_bundled_items(_plan_naming("nothing"), str(bundle)) == [
+        "BUG-9961-a.md", "PRIORITY-9962-b.md", "NOTE-c.md",
+    ]
+    assert pm.uncovered_bundled_items(_plan_naming("PRIORITY-9962 and NOTE-c"), str(bundle)) == ["BUG-9961-a.md"]
+
+
+def test_parked_and_ride_along_items_are_covered_by_file_name(tmp_path) -> None:
+    from types import SimpleNamespace
+
+    bundle = _bundle_file(tmp_path, "BUG-9961-a.md", "BUG-9962-b.md", "BUG-9963-c.md")
+    intake = SimpleNamespace(
+        parked=(tmp_path / "bugs" / "BUG-9961-a.md",),
+        ride_along=(SimpleNamespace(path=tmp_path / "bugs" / "BUG-9962-b.md"),),
+    )
+    assert pm.uncovered_bundled_items(_plan_naming("nothing"), str(bundle), intake) == ["BUG-9963-c.md"]
+
+
+@pytest.mark.parametrize("requirement", ["none", "", "MISSING"])
+def test_no_requirement_or_an_unreadable_one_has_nothing_to_cover(tmp_path, requirement) -> None:
+    path = str(tmp_path / "missing.md") if requirement == "MISSING" else requirement
+    assert pm.uncovered_bundled_items(_plan_naming("nothing"), path) == []

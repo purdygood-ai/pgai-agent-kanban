@@ -3,14 +3,16 @@
 lint_inline_python.py
 =====================
 A ratchet lint that keeps new inline Python out of the bash scripts under
-``team/scripts``.
+``team/scripts`` and out of ``install.sh``.
 
 The coding standard is that a bash script is a thin wrapper which calls a
 Python module (``pp_run_ops`` / ``python3 -m`` / ``python3 <file>.py``);
 Python logic embedded in a bash file cannot be imported, reused, or unit
-tested on its own. The tree already carries inline Python, so this lint does
-not demand zero: it compares every file against a per-file allowlist
-recorded from the tree as it stood, and reports any file that grew.
+tested on its own. This lint compares every file against a per-file
+allowlist and reports any file that carries more inline Python than its
+entry allows. The checked-in allowlist is empty, which holds every scanned
+script to zero; the allowlist format and ratchet rule below remain for any
+entry ever needed.
 
 ENFORCEMENT CLASS
 -----------------
@@ -23,8 +25,10 @@ exits 0. It never fails a runner or a release.
 WHAT IS COUNTED
 ---------------
 Every non-test ``*.sh`` file under the scan directory (default
-``team/scripts``). A file is a test file, and is skipped, when any directory
-between the scan directory and the file is named ``tests`` or ``test``.
+``team/scripts``), plus each scan file (default ``install.sh`` at the
+repository root; a default scan file that does not exist is skipped). A
+file is a test file, and is skipped, when any directory between the scan
+directory and the file is named ``tests`` or ``test``.
 
 Two shapes count as one inline-Python BLOCK each:
 
@@ -94,6 +98,9 @@ USAGE
                          script's directory).
   --scan-dir PATH        Directory to scan, relative to --root or absolute
                          (default: team/scripts).
+  --scan-file PATH       A single bash file to scan as well, relative to
+                         --root or absolute; repeatable. Given at least once,
+                         it replaces the default (install.sh).
   --allowlist PATH       Allowlist file, relative to --root or absolute
                          (default: team/config/inline-python-allowlist.txt).
   --findings-file PATH   Write findings as a JSON array to PATH.
@@ -122,6 +129,8 @@ if str(_TEAM_DIR) not in sys.path:
 
 LINT_NAME = "inline_python"
 DEFAULT_SCAN_DIR = "team/scripts"
+#: Bash files outside the scan directory scanned by default (repository-relative).
+DEFAULT_SCAN_FILES = ("install.sh",)
 DEFAULT_ALLOWLIST = "team/config/inline-python-allowlist.txt"
 TEST_DIR_NAMES = frozenset({"tests", "test"})
 RUN_COMMAND = "python3 team/scripts/lint_inline_python.py"
@@ -386,10 +395,19 @@ def _rel(path: Path, root: Path) -> str:
         return path.as_posix()
 
 
-def measure(root: Path, scan_dir: Path, *, verbose: bool = False) -> list[FileCounts]:
-    """Count inline Python in every scanned file."""
+def measure(
+    root: Path, scan_dir: Path, *, verbose: bool = False, scan_files: "list[Path] | None" = None,
+) -> list[FileCounts]:
+    """Count inline Python in every scanned file: those under *scan_dir*, then
+    each of *scan_files* that exists and is not already among them."""
     results = []
-    for p in iter_scan_files(scan_dir):
+    paths = iter_scan_files(scan_dir) if scan_dir.is_dir() else []
+    seen = {p.resolve() for p in paths}
+    for extra in scan_files or []:
+        if extra.is_file() and extra.resolve() not in seen:
+            paths.append(extra)
+            seen.add(extra.resolve())
+    for p in paths:
         rel = _rel(p, root)
         counts = FileCounts(rel_path=rel, blocks=scan_file(p))
         if verbose:
@@ -575,8 +593,9 @@ def _build_parser() -> argparse.ArgumentParser:
         prog="lint_inline_python",
         description=(
             "Ratchet lint: count inline Python (python3 heredocs and python3 -c) "
-            "in non-test bash under team/scripts and compare each file against "
-            "the per-file allowlist. Quality class: always exits 0."
+            f"in non-test bash under {DEFAULT_SCAN_DIR} plus each scan file "
+            f"(default {', '.join(DEFAULT_SCAN_FILES)}) and compare each file "
+            "against the per-file allowlist. Quality class: always exits 0."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
@@ -590,6 +609,9 @@ def _build_parser() -> argparse.ArgumentParser:
                         help="Repository root (default: two levels above this script's directory).")
     parser.add_argument("--scan-dir", metavar="PATH", default=DEFAULT_SCAN_DIR,
                         help=f"Directory to scan, relative to --root or absolute (default: {DEFAULT_SCAN_DIR}).")
+    parser.add_argument("--scan-file", metavar="PATH", action="append", default=None,
+                        help=("A bash file to scan as well; repeatable. Given at least once, it replaces "
+                              f"the default ({', '.join(DEFAULT_SCAN_FILES)})."))
     parser.add_argument("--allowlist", metavar="PATH", default=DEFAULT_ALLOWLIST,
                         help=f"Allowlist file, relative to --root or absolute (default: {DEFAULT_ALLOWLIST}).")
     parser.add_argument("--findings-file", metavar="PATH", default=None,
@@ -625,6 +647,7 @@ def main(argv: list[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
     root = Path(args.root).resolve() if args.root else Path(__file__).resolve().parent.parent.parent
     scan_dir = _resolve(root, args.scan_dir)
+    scan_files = [_resolve(root, f) for f in (args.scan_file if args.scan_file is not None else DEFAULT_SCAN_FILES)]
     allowlist_path = _resolve(root, args.allowlist)
     allowlist_rel = _rel(allowlist_path, root)
 
@@ -639,9 +662,9 @@ def main(argv: list[str] | None = None) -> int:
                 remedy=f"{RUN_COMMAND} --scan-dir team/scripts",
             )
         )
-        results: list[FileCounts] = []
+        results: list[FileCounts] = measure(root, scan_dir, verbose=args.verbose, scan_files=scan_files)
     else:
-        results = measure(root, scan_dir, verbose=args.verbose)
+        results = measure(root, scan_dir, verbose=args.verbose, scan_files=scan_files)
 
     if args.emit_allowlist:
         sys.stdout.write(format_allowlist(results))

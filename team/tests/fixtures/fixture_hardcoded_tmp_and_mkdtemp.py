@@ -17,10 +17,10 @@ anti-patterns that the extended lint_test_anti_patterns.py must flag:
      Without dir=, mkdtemp() lands directly in /tmp rather than under
      PGAI_AGENT_KANBAN_TEMP_DIR.
 
-Purpose: test_lint_hardcoded_tmp_guard.py calls the generator functions
-below to produce synthetic source code, writes it to temp files, and then
-runs _scan_file() against those temp files to prove that both detection
-rules fire on representative source content.
+Purpose: the generator functions below produce synthetic source code for
+lint tests to write under tmp_path and scan. test_lint_ap3_temp_root_literal.py
+uses make_hardcoded_literal_src() to prove the AP3 rule fires on
+representative source content.
 
 The generator functions use string concatenation to produce the bad patterns
 so that this fixture file itself does not contain raw anti-pattern literals

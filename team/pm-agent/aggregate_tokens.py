@@ -199,6 +199,12 @@ USAGE:
     0 -- success (warnings may have been emitted to stderr)
     1 -- usage error or unrecoverable configuration failure
 
+  Pricing table:
+    scripts/lib/token_pricing.json beside this script's own pm-agent/ directory:
+    <kanban root>/scripts/lib/ in an installed kanban, team/scripts/lib/ in a
+    source checkout. A project's dev tree is never consulted, so every project
+    is priced from the same kanban-side table.
+
   Graceful degradation:
     - Missing or malformed tokens.json: skip with a single stderr warning, continue.
     - Missing token_pricing.json or unknown model: set cost_usd to 0 for that task,
@@ -221,9 +227,12 @@ from typing import Any, NamedTuple
 
 # The pgai_agent_kanban package sits one level up from pm-agent/ in the same
 # tree (the pm_status.py idiom), dev tree and live install alike; the
-# archive lookup there lists the archived task folders the scan reads.
+# archive lookup there lists the archived task folders the scan reads, and
+# the section reader there reads every markdown field.
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 from pgai_agent_kanban.archive.lookup import task_dirs_with_archived  # noqa: E402
+from pgai_agent_kanban.lib import token_pricing  # noqa: E402
+from pgai_agent_kanban.task_status import section_value  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -232,8 +241,13 @@ TOKENS_JSON = "artifacts/tokens.json"
 README_MD = "README.md"
 STATUS_MD = "status.md"
 
-# Path to pricing file, relative to the dev tree root or kanban root
-PRICING_REL_PATH = "team/scripts/lib/token_pricing.json"
+# The pricing table ships beside this module: <tree>/scripts/lib/ next to
+# <tree>/pm-agent/. In the live install <tree> is the kanban root; in a
+# source checkout it is the repository's team/ directory. The layout rule is
+# pgai_agent_kanban.lib.token_pricing's, shared with the cost report; a
+# project's own repository is never consulted.
+PRICING_REL_PATH = token_pricing.PRICING_REL_PATH
+_OWN_TREE_ROOT = pathlib.Path(__file__).resolve().parent.parent
 
 # ---------------------------------------------------------------------------
 # Helpers: kanban root resolution
@@ -258,31 +272,6 @@ def resolve_kanban_root(override: str | None) -> pathlib.Path:
         print(f"ERROR: kanban root not found: {p}", file=sys.stderr)
         sys.exit(1)
     return p
-
-
-def dev_tree_path_for_project(kanban_root: pathlib.Path, project: str) -> pathlib.Path | None:
-    """
-    Try to read dev_tree_path from project.cfg (preferred) or PROJECT.cfg (fallback)
-    for the given project.
-    Returns None if not found (pricing lookup falls back to kanban_root).
-    """
-    proj_dir = kanban_root / "projects" / project
-    new_cfg = proj_dir / "project.cfg"
-    old_cfg = proj_dir / "PROJECT.cfg"
-    cfg = new_cfg if new_cfg.is_file() else (old_cfg if old_cfg.is_file() else None)
-    if cfg is None:
-        return None
-    for line in cfg.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if line.startswith("#") or "=" not in line:
-            continue
-        key, _, val = line.partition("=")
-        if key.strip() != "dev_tree_path":
-            continue
-        val = val.strip().strip('"').strip("'")
-        if val:
-            return pathlib.Path(val).expanduser().resolve()
-    return None
 
 
 # ---------------------------------------------------------------------------
@@ -310,42 +299,46 @@ def _emit_legacy_fallback_warning(count: int) -> None:
         )
 
 
-def load_pricing(kanban_root: pathlib.Path, project: str) -> dict[str, Any]:
-    """
-    Load token_pricing.json.  Checks the project dev_tree_path first,
-    then falls back to the kanban root PRICING_REL_PATH.
+def pricing_table_path(install_root: pathlib.Path | None = None) -> pathlib.Path:
+    """Return the path of the kanban's token_pricing.json.
 
-    Returns an empty dict if the file is absent (caller handles gracefully).
+    install_root -- the tree that holds pm-agent/ and scripts/lib/; defaults
+    to the tree this module itself ships in (the kanban root of a live
+    install, the repository's team/ directory in a source checkout). The
+    table belongs to the kanban, so no project's dev tree is ever a candidate.
+    """
+    return token_pricing.pricing_table_path(_OWN_TREE_ROOT if install_root is None else install_root)
+
+
+def load_pricing(install_root: pathlib.Path | None = None) -> dict[str, Any]:
+    """
+    Load the kanban's token_pricing.json from pricing_table_path(install_root).
+
+    Returns an empty dict if the file is absent or malformed (caller handles
+    gracefully); either case emits one stderr warning per run naming the
+    kanban-side path that was read.
     """
     global _PRICING_WARNED
 
-    dev_tree = dev_tree_path_for_project(kanban_root, project)
-    candidates: list[pathlib.Path] = []
-    if dev_tree:
-        candidates.append(dev_tree / PRICING_REL_PATH)
-    candidates.append(kanban_root / PRICING_REL_PATH)
+    path = pricing_table_path(install_root)
+    if path.is_file():
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError) as exc:
+            if not _PRICING_WARNED:
+                print(
+                    f"WARNING: token_pricing.json is malformed ({path}): {exc}; "
+                    "cost_usd will be 0 for all tasks.",
+                    file=sys.stderr,
+                )
+                _PRICING_WARNED = True
+            return {}
 
-    for path in candidates:
-        if path.is_file():
-            try:
-                return json.loads(path.read_text(encoding="utf-8"))
-            except (json.JSONDecodeError, OSError) as exc:
-                if not _PRICING_WARNED:
-                    print(
-                        f"WARNING: token_pricing.json is malformed ({path}): {exc}; "
-                        "cost_usd will be 0 for all tasks.",
-                        file=sys.stderr,
-                    )
-                    _PRICING_WARNED = True
-                return {}
-
-    # File not found in any candidate location
     if not _PRICING_WARNED:
-        first = candidates[0] if candidates else pathlib.Path("<unresolvable>")
         print(
-            f"WARNING: token_pricing.json not found (looked in {len(candidates)} location(s)); "
+            "WARNING: token_pricing.json not found; "
             "cost_usd will be 0 for all tasks. "
-            f"Expected at: {first}",
+            f"Expected at: {path}",
             file=sys.stderr,
         )
         _PRICING_WARNED = True
@@ -477,20 +470,16 @@ def compute_cost(pricing: dict[str, Any], tok: dict[str, Any]) -> CategoryCosts:
 
 
 def read_field_from_markdown(text: str, heading: str) -> str | None:
+    """Return the value of the '## <heading>' section, or None.
+
+    The value is read by task_status.section_value -- the first non-blank
+    line of the section, HTML comments dropped and a bold wrapper removed.
+    An empty section reads as None rather than as the next section's text,
+    and a '## ' line inside a fenced code block is not a heading.
+
+    Returns None if the heading or a value line is not found.
     """
-    Read the first non-blank, non-comment line after "## <heading>" in a
-    markdown file.  Returns None if the heading or a value is not found.
-    """
-    lines = text.splitlines()
-    target = f"## {heading}"
-    for i, line in enumerate(lines):
-        if line.strip() == target:
-            for follow in lines[i + 1:]:
-                v = follow.strip()
-                if v and not v.startswith("#"):
-                    return v
-            return None
-    return None
+    return section_value(text, heading, fences=True) or None
 
 
 def load_tokens_json(task_dir: pathlib.Path) -> dict[str, Any] | None:
@@ -1134,7 +1123,7 @@ def main() -> None:
     usage_daily_dir = project_dir / "usage" / "daily"
 
     # Load pricing (graceful: returns {} if absent or malformed)
-    pricing = load_pricing(kanban_root, project)
+    pricing = load_pricing()
 
     # Scan all tasks for token data
     records = scan_tasks(tasks_dir)

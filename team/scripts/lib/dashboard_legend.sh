@@ -12,7 +12,8 @@
 #      (name:priority[:display_color]) and falls back to the default palette
 #      read from team/config/default_palette.txt (PGAI_DEFAULT_PALETTE).
 #   2. STATUS color — the color of the entry text itself. Dynamic; reflects
-#      the row's lifecycle state (open / running / done / blocked).
+#      the row's lifecycle state (open / running / done / blocked /
+#      needs-operator). A carried row also carries a marker after its ID.
 #
 # Operators must be able to re-learn that convention without leaving the
 # dashboard. This file provides the one-line legend the visibility window
@@ -23,7 +24,7 @@
 # A single rendered line containing two logically distinct rows of
 # information separated by a vertical bar:
 #
-#   PROJECT: <tag> <name>  <tag> <name>  ...   |   STATUS: open  running  done  blocked
+#   PROJECT: <tag> <name>  ...   |   STATUS: open  running  done  wont-do  blocked  needs-operator  ↻ carried
 #
 # The two halves can be thought of as two rows folded onto a single visual
 # line — terse on purpose so the legend fits beneath the grid without
@@ -31,7 +32,10 @@
 #
 # The status values themselves are rendered in their mapped colors so the
 # operator can read the convention off the legend directly (open in the
-# default text color, running amber, done green, blocked red).
+# default text color, running amber, done green, blocked red,
+# needs-operator in the palette's status_needs_operator color). The carried
+# entry is the marker a carried row carries: "↻ carried" in color,
+# "[carried]" without.
 #
 # Color sources
 # -------------
@@ -43,9 +47,10 @@
 #   first, then iterate the registered projects to fill in the PROJECT half
 #   of the legend.
 # - Status-to-ANSI mapping lives in pgai_agent_kanban.dashboard.column_render
-#   (cells.status_color(), the board column panes' one mapping). The legend
-#   maps the status keywords through the same arms (running; done and
-#   wont-do; blocked; open) so legend and grid never disagree.
+#   (cells.status_color() and cells.status_marker(), the board column panes'
+#   one mapping). The legend maps the status keywords through the same arms
+#   (running; done, wont-do and duplicate; blocked; needs-operator; open) and
+#   draws carried with the same marker, so legend and grid never disagree.
 #
 # Template variables
 # ------------------
@@ -57,8 +62,8 @@
 #                       spaces. Each <tag> is the project's color square
 #                       (truecolor ANSI when the terminal supports it,
 #                       "[abbr]" fallback otherwise).
-#   {STATUS_BLOCK}    — the four status keywords "open  running  done
-#                       blocked", each painted with its own ANSI color
+#   {STATUS_BLOCK}    — the DASHBOARD_LEGEND_STATUS_KEYWORDS below, joined
+#                       by two spaces, each painted with its own ANSI color
 #                       and reset back to default between words.
 #
 # A stable separator " | " divides the two halves so the legend reads as
@@ -83,8 +88,10 @@ readonly DASHBOARD_LEGEND_TEMPLATE
 # Order matches the lifecycle progression open -> running -> done, with
 # blocked listed last as the attention-grabbing terminal state.
 # wont-do is included after done: both are terminal-resolved states (green).
+# needs-operator (waiting on an operator answer) and carried (the carried
+# row marker) follow: the two states that need the operator's attention.
 # ---------------------------------------------------------------------------
-DASHBOARD_LEGEND_STATUS_KEYWORDS=(open running done wont-do blocked)
+DASHBOARD_LEGEND_STATUS_KEYWORDS=(open running done wont-do blocked needs-operator carried)
 readonly DASHBOARD_LEGEND_STATUS_KEYWORDS
 
 # ---------------------------------------------------------------------------

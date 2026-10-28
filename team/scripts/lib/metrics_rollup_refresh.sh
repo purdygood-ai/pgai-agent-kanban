@@ -52,36 +52,31 @@
 #     at finalize keeps the finalize-time figures (docs/OPERATIONS.md,
 #     "Cumulative history.csv").
 #
-# Dependencies: bash 4+, awk, python3 (the aggregator), and pp_run_ops for
-# the workflow_type read (pgai_agent_kanban.lib.json_field), self-sourced
-# below; safe to source standalone.
+# Dependencies: bash 4+, python3 (the aggregator), pp_run_ops for the
+# workflow_type read (pgai_agent_kanban.lib.json_field) and read_md_field
+# (md_field.sh) for the Release Version read, both self-sourced below; safe
+# to source standalone.
 
 if ! declare -F pp_run_ops >/dev/null 2>&1; then
   # shellcheck source=pp_run_ops.sh
   source "$(dirname "${BASH_SOURCE[0]}")/pp_run_ops.sh"
 fi
+# shellcheck source=md_field.sh
+source "$(dirname "${BASH_SOURCE[0]}")/md_field.sh"
 
 # ---------------------------------------------------------------------------
 # _metrics_rollup_read_release_version <readme_path>
 #
 # Prints the value under "## Release Version" in <readme_path>, or nothing.
-# Liberal in what it accepts: the heading may carry trailing whitespace,
-# any number of blank lines may separate it from its value, and the value
-# is trimmed of surrounding whitespace (including a CR). The search ends at
-# the next "#"-prefixed line, so an empty field never reads the next
-# section's first line as its value.
+# The field is read by read_md_field --value, the section reader's own
+# reading of a task README (the one metrics_aggregator.py's
+# task_status.section_value read shares): the heading may carry trailing
+# whitespace, any number of blank lines may separate it from its value, the
+# value is trimmed of surrounding whitespace (including a CR), and an empty
+# field never reads the next section's first line as its value.
 # ---------------------------------------------------------------------------
 _metrics_rollup_read_release_version() {
-  local readme_path="$1"
-  awk '
-    found {
-      if ($0 ~ /^[[:space:]]*#/) exit
-      if (!NF) next
-      sub(/^[[:space:]]+/, ""); sub(/[[:space:]]+$/, "")
-      print; exit
-    }
-    /^[[:space:]]*##[[:space:]]+Release[[:space:]]+Version[[:space:]]*$/ { found = 1 }
-  ' "$readme_path" 2>/dev/null
+  read_md_field --value "$1" "Release Version" 2>/dev/null || true
 }
 
 # ---------------------------------------------------------------------------

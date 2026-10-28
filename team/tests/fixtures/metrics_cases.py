@@ -13,8 +13,11 @@ WHAT THE TREE HOLDS
 
 - ``projects.cfg`` registering ``demo`` (priority 1), ``quiet`` (2) and
   ``fresh`` (3).
+- ``scripts/lib/token_pricing.json``: the kanban's pricing table, laid out
+  as an install carries it.
 - ``demo``: a ``project.cfg`` whose ``dev_tree_path`` points at a fixture
-  dev tree carrying its own ``token_pricing.json``; daily roll-ups across
+  dev tree carrying a decoy ``token_pricing.json`` whose subscription prices
+  differ, so a report that read a project's tree would show; daily roll-ups across
   April and May 2026 (one with per-category costs, one with no activity,
   one unreadable); RC roll-ups for a shipped, a second shipped and an
   active RC; a ``metrics/history.csv`` whose rows cover a tracked, a zero
@@ -22,7 +25,7 @@ WHAT THE TREE HOLDS
   order differs from their name order; a ``release-state.md`` naming the
   active RC; and a roll-up for the day the tree is built (the costs pane
   reads "today").
-- ``quiet``: no ``dev_tree_path`` (so no pricing file), one daily roll-up,
+- ``quiet``: no ``dev_tree_path``, one daily roll-up,
   and a header-only ``history.csv``.
 - ``fresh``: registered with nothing on disk but its directory.
 
@@ -106,6 +109,16 @@ _PRICING = {
         "claude_max_programmatic_credit": 200.0,
         "chatgpt_plus": 20.0,
         "chatgpt_pro": 200.0,
+    },
+}
+
+#: A project dev tree's pricing table; the cost report never reads it.
+_DECOY_PRICING = {
+    "subscriptions": {
+        "claude_pro_programmatic_credit": 1.0,
+        "claude_max_programmatic_credit": 2.0,
+        "chatgpt_plus": 3.0,
+        "chatgpt_pro": 4.0,
     },
 }
 
@@ -307,8 +320,9 @@ def build_usage_tree(root: pathlib.Path, today: Optional[datetime.date] = None) 
         encoding="utf-8",
     )
 
+    _write_json(root / "scripts" / "lib" / "token_pricing.json", _PRICING)
     dev_tree = root / "devtree"
-    _write_json(dev_tree / "team" / "scripts" / "lib" / "token_pricing.json", _PRICING)
+    _write_json(dev_tree / "team" / "scripts" / "lib" / "token_pricing.json", _DECOY_PRICING)
 
     demo = root / "projects" / "demo"
     (demo / "tasks").mkdir(parents=True, exist_ok=True)
@@ -372,7 +386,7 @@ def build_usage_tree(root: pathlib.Path, today: Optional[datetime.date] = None) 
 CLI_CASES: tuple[tuple[str, str, tuple[str, ...], dict[str, str]], ...] = (
     ("cost month", "cost-report", ("--project", "demo", "--month", "2026-05"), {}),
     ("cost month legacy", "cost-report", ("--project", "demo", "--month", "2026-04"), {}),
-    ("cost month no pricing", "cost-report", ("--project", "quiet", "--month", "2026-05"), {}),
+    ("cost month no dev tree", "cost-report", ("--project", "quiet", "--month", "2026-05"), {}),
     ("cost day", "cost-report", ("--project", "demo", "--day", "2026-05-03"), {}),
     ("cost day idle", "cost-report", ("--project", "demo", "--day", "2026-05-11"), {}),
     ("cost rc", "cost-report", ("--project", "demo", "--rc", "v1.2.0"), {}),
@@ -431,7 +445,7 @@ REST_CASES: tuple[tuple[str, str, dict[str, Any]], ...] = (
     ("GET /costs month", "/costs", {"project": "demo", "month": "2026-05"}),
     ("GET /costs day", "/costs", {"project": "demo", "day": "2026-05-03"}),
     ("GET /costs rc", "/costs", {"project": "demo", "rc": "1.2.0"}),
-    ("GET /costs no pricing", "/costs", {"project": "quiet", "month": "2026-05"}),
+    ("GET /costs no dev tree", "/costs", {"project": "quiet", "month": "2026-05"}),
     ("GET /costs conflict", "/costs", {"project": "demo", "month": "2026-05", "rc": "v1.2.0"}),
     ("GET /costs unknown project", "/costs", {"project": "nope", "day": "2026-05-01"}),
     ("GET /costs json", "/costs", {"project": "demo", "format": "json"}),

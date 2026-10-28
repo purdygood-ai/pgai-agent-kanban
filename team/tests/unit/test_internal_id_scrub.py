@@ -32,6 +32,14 @@ Covers:
   9. The abbreviated <ROLE>-NNN task reference, including a possessive, and
      a longer multi-segment identifier the short form must not claim.
  10. An internal requirements-document path, with and without backticks.
+ 11. Git commit ids (bare, backticked, after "commit") are deleted and RC
+     branch names (prefixed or not, bare or backticked) replaced, with no
+     empty parenthesis pair left behind.
+ 12. All-letter words, bare versions, numbers, paths and long digests
+     survive the scrub.
+ 13. _strip_provenance_refs, the CHANGELOG path's half of the scrub, leaves
+     BUG-/PRIORITY- citations and provenance-free text byte-identical.
+ 14. The whitespace tidy never rewrites the inside of a code span.
 
 Test naming describes behavior, not bug or ticket IDs (roles/TESTER.md
 Anti-pattern 6). No filesystem or subprocess interaction -- this module
@@ -53,7 +61,7 @@ import pytest
 # by name.
 _CM_LIB_DIR = pathlib.Path(__file__).parent.parent.parent / "scripts" / "lib" / "cm"
 sys.path.insert(0, str(_CM_LIB_DIR))
-from internal_id_scrub import _strip_internal_ids  # noqa: E402
+from internal_id_scrub import _strip_internal_ids, _strip_provenance_refs  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -189,4 +197,103 @@ def test_requirements_document_path_is_replaced(citation):
     assert "requirements/" not in result
     assert result == (
         "The v2.26.0 requirement (the release's requirements document, Intent) exists because x."
+    )
+
+
+# ---------------------------------------------------------------------------
+# Commit ids and RC branch names
+# ---------------------------------------------------------------------------
+
+_PROVENANCE_SYMPTOM = (
+    "On ai_rc/v1.2.3 the unit suite (a1b2c3d4) fails, as TESTER-20260101-001 found."
+)
+_PROVENANCE_SCRUBBED = "On the release candidate the unit suite fails, as another item found."
+
+
+@pytest.mark.parametrize("scrub", [_strip_internal_ids, _strip_provenance_refs])
+def test_commit_id_branch_name_and_task_id_are_all_removed(scrub):
+    result = scrub(_PROVENANCE_SYMPTOM)
+    assert "a1b2c3d4" not in result
+    assert "ai_rc/v1.2.3" not in result
+    assert "TESTER-20260101-001" not in result
+    assert "()" not in result
+    assert result == _PROVENANCE_SCRUBBED
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("The unit gated suite exits 1 on the RC (commit d3e118d7).",
+         "The unit gated suite exits 1 on the RC."),
+        ("The findings file (`lint/findings-unit.json`, run at RC commit d3e118d7) holds six.",
+         "The findings file (`lint/findings-unit.json`, run at RC) holds six."),
+        ("Broken since `9f8e7d6c5b4a` landed.", "Broken since landed."),
+        ("Bisected to abc1234..def5678 today.", "Bisected to today."),
+    ],
+    ids=["after-commit-in-parens", "after-commit-mid-parenthetical", "backticked", "range"],
+)
+def test_commit_id_is_deleted_and_its_parenthetical_tidied(text, expected):
+    assert _strip_internal_ids(text) == expected
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("The suite fails on `ai_rc/v2.52.0` (df59917b) in `tests/unit/x.py`.",
+         "The suite fails on the release candidate in `tests/unit/x.py`."),
+        ("Stated wrongly on rc/v1.2.3.", "Stated wrongly on the release candidate."),
+        ("Seen on team_rc/v3.4.5-hotfix and ai_rc/v1.0.0.",
+         "Seen on the release candidate and the release candidate."),
+        ("Merged into the branch (ai_rc/v1.2.3, a1b2c3d4).",
+         "Merged into the branch (the release candidate)."),
+    ],
+    ids=["backticked-with-commit", "unprefixed", "other-prefix-and-suffix", "shared-parenthetical"],
+)
+def test_rc_branch_name_is_replaced_with_a_noun_phrase(text, expected):
+    assert _strip_internal_ids(text) == expected
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "The defaced notes file stays readable.",
+        "Shipped in v2.53.5 with no regressions.",
+        "Dated 20261027 with 1234567 rows read.",
+        "Read team/abc1234f/module.py and uuid 123e4567-e89b-12d3-a456-426614174000.",
+        "A sha256 digest " + "0a" * 32 + " is not a commit id.",
+        "Commit messages explain why.",
+    ],
+    ids=["all-letter-word", "bare-version", "numbers", "path-and-uuid", "long-digest", "word-commit"],
+)
+def test_ordinary_words_versions_and_numbers_survive(text):
+    assert _strip_internal_ids(text) == text
+    assert _strip_provenance_refs(text) == text
+
+
+def test_commit_word_takes_an_all_digit_id_but_a_bare_number_survives():
+    result = _strip_internal_ids("Reverted commit 1234567; 7654321 rows remain.")
+    assert result == "Reverted; 7654321 rows remain."
+
+
+# ---------------------------------------------------------------------------
+# The CHANGELOG path's half of the scrub
+# ---------------------------------------------------------------------------
+
+
+def test_provenance_scrub_keeps_ledger_citations():
+    text = "Fixes BUG-0011 and PRIORITY-0042 on ai_rc/v1.2.3."
+    assert _strip_provenance_refs(text) == (
+        "Fixes BUG-0011 and PRIORITY-0042 on the release candidate."
+    )
+
+
+def test_provenance_scrub_returns_text_without_provenance_byte_identical():
+    text = "- Fixed:  spacing  a caller formats itself ,kept ."
+    assert _strip_provenance_refs(text) == text
+
+
+def test_tidy_leaves_code_span_content_as_written():
+    text = "Running `pvg build . --scene 2` fails on ai_rc/v1.2.3 ."
+    assert _strip_internal_ids(text) == (
+        "Running `pvg build . --scene 2` fails on the release candidate."
     )

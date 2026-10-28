@@ -24,6 +24,12 @@ Coverage:
   4. The pieces: the range scopes against a pinned "today", the aggregator
      hand-off for a missing roll-up, the colour decision, the costs pane's
      block total and day total, and that no script keeps inline Python.
+  5. The pricing table and the aggregator are the kanban's: an
+     install-shaped root's scripts/lib/token_pricing.json gives a project
+     whose dev tree has none the subscription comparison with no warning and
+     no message naming the project's tree; a source checkout finds its own
+     team/scripts/lib/ table; with no table the warning names the kanban-side
+     path.
 """
 
 from __future__ import annotations
@@ -42,6 +48,7 @@ if str(_TEAM_DIR) not in sys.path:
     sys.path.insert(0, str(_TEAM_DIR))
 
 from pgai_agent_kanban.lib import metrics  # noqa: E402
+from pgai_agent_kanban.lib import token_pricing  # noqa: E402
 from pgai_agent_kanban.lib.metrics import costs as cost_report_module  # noqa: E402
 from pgai_agent_kanban.lib.metrics import costs_pane  # noqa: E402
 from pgai_agent_kanban.lib.metrics.common import color_enabled  # noqa: E402
@@ -133,7 +140,7 @@ def test_the_per_agent_query_renders_the_per_agent_view():
         ("cost month", "GET /costs month"),
         ("cost day", "GET /costs day"),
         ("cost rc", "GET /costs rc"),
-        ("cost month no pricing", "GET /costs no pricing"),
+        ("cost month no dev tree", "GET /costs no dev tree"),
         ("show project color", "GET /metrics"),
         ("show all projects color", "GET /metrics all projects"),
     ],
@@ -308,7 +315,11 @@ def test_a_missing_roll_up_is_handed_to_the_aggregator(tree):
         aggregator=str(root / "aggregate_tokens.py"), aggregate=lambda path, args: calls.append((path, args)),
     )
     assert result.stdout == "no data for rc=v9.9.9\n"
-    assert calls == []  # the named aggregator does not exist and the project's dev tree has none
+    # The named aggregator does not exist and the kanban root has no pm-agent/:
+    # the copy in this package's own tree runs, never a project's dev tree copy.
+    own_tree_aggregator = str(token_pricing.aggregator_path(token_pricing.OWN_TREE_ROOT))
+    assert calls == [(own_tree_aggregator, ["--project", "demo", "--rc", "v9.9.9"])]
+    calls.clear()
 
     stub = root / "aggregate_tokens.py"
     stub.write_text("", encoding="utf-8")
@@ -372,3 +383,141 @@ def test_json_rows_and_text_read_one_history(tree):
     rows = metrics.metrics_rows_for_project(root / "projects" / "demo")
     text = metrics.show_metrics(root, project="demo").stdout
     assert [r["version"] for r in rows] == re.findall(r"^(v\S+)\s", text, flags=re.MULTILINE)
+
+
+# ---------------------------------------------------------------------------
+# --help on the module and on a positional verb
+# ---------------------------------------------------------------------------
+
+
+def _metrics_cli(tmp_path: pathlib.Path, *args: str) -> "subprocess.CompletedProcess":
+    import subprocess
+
+    from tests.fixtures.scrubbed_subprocess_env import build_scrubbed_env
+
+    team_dir = pathlib.Path(__file__).resolve().parents[2]
+    env = build_scrubbed_env(home_dir=tmp_path / "home", extra_env={"PYTHONPATH": str(team_dir)})
+    return subprocess.run(
+        [sys.executable, "-m", "pgai_agent_kanban.lib.metrics", *args],
+        capture_output=True, text=True, env=env, cwd=str(tmp_path), timeout=60, check=False,
+    )
+
+
+def test_module_help_prints_the_verb_list_and_exits_zero(tmp_path: pathlib.Path) -> None:
+    result = _metrics_cli(tmp_path, "--help")
+    assert result.returncode == 0, result.stderr
+    assert "command-line entry point" in result.stdout
+    for verb in ("show_metrics", "metrics_pane", "cost_block", "compute_agent_averages"):
+        assert verb in result.stdout
+
+
+def test_metrics_pane_help_prints_its_usage_and_exits_zero(tmp_path: pathlib.Path) -> None:
+    result = _metrics_cli(tmp_path, "metrics_pane", "--help")
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.startswith(
+        "usage: metrics_pane USE_COLOR TODAY PROJECTS_JSON RESET BOLD DIM CYAN GREEN YELLOW"
+    )
+    assert "Metrics pane" in result.stdout
+
+
+@pytest.mark.parametrize("verb", ["history_csv", "rc_rollups_jsonl", "cost_block", "rc_label", "sum_amounts"])
+def test_every_positional_verb_answers_help(verb: str, tmp_path: pathlib.Path) -> None:
+    result = _metrics_cli(tmp_path, verb, "-h")
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.startswith(f"usage: {verb} ")
+
+
+# ---------------------------------------------------------------------------
+# 5. The pricing table and the aggregator are the kanban's, never a project's
+# ---------------------------------------------------------------------------
+
+#: A subscription price no shipped table carries, so the report shows which table it read.
+_SANDBOX_PRO_CREDIT = 37.0
+
+
+def _install_shaped_root(tmp_path: pathlib.Path, *, with_pricing: bool) -> tuple[pathlib.Path, pathlib.Path]:
+    """(kanban root, project dev tree) for one project ``alpha`` with one daily roll-up.
+
+    The root is laid out as installed -- ``scripts/lib/`` at its top, no
+    ``team/`` -- and carries the pricing table when *with_pricing*. Alpha's
+    ``dev_tree_path`` names a repository that carries no pricing table and no
+    aggregator.
+    """
+    root = tmp_path / "kanban"
+    if with_pricing:
+        table = token_pricing.pricing_table_path(root)
+        table.parent.mkdir(parents=True)
+        table.write_text(
+            json.dumps({"subscriptions": {"claude_pro_programmatic_credit": _SANDBOX_PRO_CREDIT}}),
+            encoding="utf-8",
+        )
+    dev_tree = tmp_path / "alpha-repo"
+    dev_tree.mkdir()
+    project = root / "projects" / "alpha"
+    (project / "usage" / "daily").mkdir(parents=True)
+    (project / "project.cfg").write_text(
+        f"[project]\nproject_name = alpha\ndev_tree_path = {dev_tree}\n", encoding="utf-8"
+    )
+    (project / "usage" / "daily" / "2026-05-02.json").write_text(
+        json.dumps({
+            "totals": {"input_tokens": 500, "output_tokens": 100, "cost_usd": 0.05, "invocations": 1},
+            "by_agent": {"pm": {"input": 500, "output": 100, "cost_usd": 0.05, "invocations": 1}},
+            "by_model": {"claude-sonnet-4-6": {"input": 500, "output": 100, "cost_usd": 0.05, "invocations": 1}},
+            "rcs_shipped": [],
+        }),
+        encoding="utf-8",
+    )
+    return root, dev_tree
+
+
+def test_install_layout_pricing_gives_a_project_without_one_the_subscription_comparison(tmp_path):
+    root, dev_tree = _install_shaped_root(tmp_path, with_pricing=True)
+
+    result = metrics.cost_report(["--project", "alpha", "--day", "2026-05-02"], default_kanban_root=str(root))
+
+    assert result.exit_code == 0, result.stderr
+    assert "Subscription comparison:" in result.stdout, result.stdout
+    assert f"(${_SANDBOX_PRO_CREDIT:.2f})" in result.stdout, "the comparison is priced from <root>/scripts/lib"
+    assert "token_pricing.json not found" not in result.stderr
+    assert str(dev_tree) not in result.stdout + result.stderr
+
+
+def test_the_pricing_table_and_aggregator_resolve_from_the_root_before_the_own_tree(tmp_path):
+    root, dev_tree = _install_shaped_root(tmp_path, with_pricing=True)
+    aggregator = token_pricing.aggregator_path(root)
+    aggregator.parent.mkdir(parents=True)
+    aggregator.write_text("", encoding="utf-8")
+
+    assert token_pricing.find_pricing_table(root) == root / "scripts" / "lib" / "token_pricing.json"
+    assert token_pricing.find_aggregator(root) == root / "pm-agent" / "aggregate_tokens.py"
+    assert dev_tree not in token_pricing.kanban_tree_candidates(root)
+
+
+def test_a_source_checkout_finds_its_own_team_scripts_lib_pricing_table(tmp_path):
+    root, _dev_tree = _install_shaped_root(tmp_path, with_pricing=False)
+    source_table = _TEAM_DIR / "scripts" / "lib" / "token_pricing.json"
+    assert source_table.is_file(), f"source checkout has no pricing table at {source_table}"
+
+    assert token_pricing.OWN_TREE_ROOT == _TEAM_DIR
+    assert token_pricing.find_pricing_table(root) == source_table
+    assert token_pricing.find_aggregator(root) == _TEAM_DIR / "pm-agent" / "aggregate_tokens.py"
+
+    result = metrics.cost_report(["--project", "alpha", "--day", "2026-05-02"], default_kanban_root=str(root))
+    assert "Subscription comparison:" in result.stdout, result.stdout
+    assert "token_pricing.json not found" not in result.stderr
+
+
+def test_with_no_pricing_table_the_warning_names_the_kanban_side_path_only(tmp_path, monkeypatch):
+    root, dev_tree = _install_shaped_root(tmp_path, with_pricing=False)
+    monkeypatch.setattr(token_pricing, "OWN_TREE_ROOT", tmp_path / "no-such-tree")
+
+    result = metrics.cost_report(["--project", "alpha", "--day", "2026-05-02"], default_kanban_root=str(root))
+
+    assert result.exit_code == 0, result.stderr
+    assert "Subscription comparison:" not in result.stdout
+    expected = root / "scripts" / "lib" / "token_pricing.json"
+    assert (
+        "WARNING: token_pricing.json not found; subscription comparison unavailable. "
+        f"Expected at: {expected}"
+    ) in result.stderr
+    assert str(dev_tree) not in result.stdout + result.stderr

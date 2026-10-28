@@ -25,7 +25,10 @@ Covered:
   6. The operator stop file ends the wait before the first pause.
   7. One lock_wait_seconds budget per project per firing: a second attempt
      in the same process waits only for what is left, here nothing.
-  8. Starvation guard: three deferrals with a BACKLOG task log the warning
+  8. While other projects remain in the batch, a wake-chain holder is not
+     waited on: one attempt, a deferral line naming the holder's
+     provenance, and the whole budget left for the retry pass's wait.
+  9. Starvation guard: three deferrals with a BACKLOG task log the warning
      on the third and flag the role for PM; taking the lock, or deferring
      with no BACKLOG task, resets the count; a threshold of 0 is off.
 
@@ -153,17 +156,24 @@ def _preamble(root: pathlib.Path, tmp_path: pathlib.Path, *, now: int, release_a
     """)
 
 
-_ACQUIRE = textwrap.dedent(f"""\
-    lock_fd=""
-    start=$FAKE_NOW
-    rc=0
-    wlw_acquire_chain_lock {_PROJECT} "$(pp_repo_lock_path {_PROJECT})" lock_fd || rc=$?
-    echo "RC=$rc PAUSES=$PAUSES WAITED=$(( FAKE_NOW - start )) FD=$lock_fd"
-    if [[ $rc -eq 0 ]]; then
-        cat "$(pp_repo_lock_path {_PROJECT})"
-        pgai_lock_release "$(pp_repo_lock_path {_PROJECT})" "$lock_fd"
-    fi
-""")
+def _acquire(others_pending: str = "") -> str:
+    """One wlw_acquire_chain_lock call, passing *others_pending* as its
+    fourth argument when given, and a line reporting what it did."""
+    pending = f" {others_pending}" if others_pending else ""
+    return textwrap.dedent(f"""\
+        lock_fd=""
+        start=$FAKE_NOW
+        rc=0
+        wlw_acquire_chain_lock {_PROJECT} "$(pp_repo_lock_path {_PROJECT})" lock_fd{pending} || rc=$?
+        echo "RC=$rc PAUSES=$PAUSES WAITED=$(( FAKE_NOW - start )) FD=$lock_fd"
+        if [[ $rc -eq 0 ]]; then
+            cat "$(pp_repo_lock_path {_PROJECT})"
+            pgai_lock_release "$(pp_repo_lock_path {_PROJECT})" "$lock_fd"
+        fi
+    """)
+
+
+_ACQUIRE = _acquire()
 
 
 def _field(stdout: str, key: str) -> str:
@@ -293,6 +303,51 @@ def test_one_wait_budget_per_project_per_firing(tmp_path):
     assert _field(second, "PAUSES") == _field(first, "PAUSES"), "the second attempt must not pause"
     assert int(_field(second, "WAITED")) == 0, second
     assert "no repo-lock wait left this firing (waited 120s of lock_wait_seconds=120" in second, second
+
+
+def test_wake_chain_holder_is_not_waited_on_while_other_projects_remain(tmp_path):
+    root = _root(tmp_path)
+    env = _env(tmp_path, root)
+    holder = _Holder(tmp_path, env, _lock_file(root), f"wake-chain:{_PROJECT}")
+    script = _preamble(root, tmp_path, now=_T0 + 60, release_at=None, wake_start=_T0 + 60) + _acquire("2")
+    try:
+        result = run_bash(tmp_path, script, base_env=env, timeout=120)
+    finally:
+        holder.stop()
+    out = result.stdout
+    assert _field(out, "RC") == "1", out + result.stderr
+    assert _field(out, "PAUSES") == "0" and _field(out, "WAITED") == "0", out
+    assert (
+        f"LOG: project {_PROJECT}: not waiting for the repo lock held by wake chain "
+        f"holder=pm pid={holder.proc.pid} op=wake-chain:{_PROJECT} task=none: "
+        "2 other project(s) remain in this batch and go first"
+    ) in out, out
+    assert "waiting up to" not in out, out
+
+
+def test_deferral_while_others_remain_leaves_the_whole_budget_for_the_retry(tmp_path):
+    # First pass with one project still to come, then the retry pass (no
+    # count): the retry waits the full lock_wait_seconds, not what is left.
+    body = _acquire("1") + 'echo "---"\n' + _ACQUIRE
+    result, _ = _run_against_holder(
+        tmp_path, op=f"wake-chain:{_PROJECT}", release_at=None, now=_T0, body=body,
+    )
+    first, retry = result.stdout.split("---\n")
+    assert _field(first, "RC") == "1" and _field(first, "PAUSES") == "0", first
+    assert "1 other project(s) remain in this batch" in first, first
+    assert _field(retry, "RC") == "1" and int(_field(retry, "WAITED")) == 120, retry
+    assert f"LOG: project {_PROJECT}: waiting up to 120s for the repo lock held by wake chain" in retry, retry
+    assert f"LOG: project {_PROJECT}: repo lock still held after waiting 120s (lock_wait_seconds=120)" in retry, retry
+
+
+def test_holder_that_is_not_a_wake_chain_still_defers_as_before_while_others_remain(tmp_path):
+    result, _ = _run_against_holder(
+        tmp_path, op="overwatch-halt-first-fix:check", release_at=None, now=_T0, body=_acquire("3"),
+    )
+    out = result.stdout
+    assert _field(out, "RC") == "1" and _field(out, "PAUSES") == "0", out + result.stderr
+    assert f"LOG: project {_PROJECT}: not waiting for the repo lock: its holder is not a wake chain" in out, out
+    assert "remain in this batch" not in out, out
 
 
 # ---------------------------------------------------------------------------

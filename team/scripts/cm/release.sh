@@ -61,9 +61,14 @@
 # by any other process skips it with nothing moved. A cancelled RC
 # (cm/cancel-rc.sh) never runs it.
 #
-# Operator handoff: after this script exits, the operator runs
-# cm/finalize-release.sh (or manually: git push origin main && git push
-# origin <VERSION>) to push main and the tag to origin.
+# Operator handoff, by the push_to_remote flag that gates Step 14:
+#   true  — this run pushes main and the tag to the remote in Step 14.
+#   false — main and the tag stay local and nothing here contacts the remote;
+#           the operator pushes both by hand (git push origin <main-branch>
+#           <tag>). Under push_to_remote = false cm/finalize-release.sh
+#           contacts no remote either; it pushes only once the flag is true.
+# A push the release itself made and the remote refused is push lag
+# (release_resolve.sh); the push-lag check retries it.
 
 # --- Argument parsing ---
 # Done before strict mode so error messages are clean.
@@ -130,12 +135,13 @@ Arguments:
                     (PGAI_AGENT_WAKE_ACTIVE=1). Cannot be combined with
                     --force or --reason. Narration goes to stderr; stdout
                     carries one line:
-                      ship-policy: decision=<SHIP-…|HALT> posture=<matrix|always> trigger=<n|none> notes_status=<…>
-                    trigger is the stop's trigger number on HALT ("none" for
-                    the unrecognized-TESTER-state and no-row-matched stops)
+                      ship-policy: decision=<SHIP-…|REQUEUE-VERIFICATION|VERIFICATION-PENDING|HALT> posture=<matrix|always> trigger=<n|none> notes_status=<…>
+                    trigger is the stop's trigger number on HALT (2, 3 or 8)
                     and, on a ship, each trigger the always posture shipped
                     through, comma-separated in the order they fired.
-                    notes_status is "none" on HALT. On HALT the line is
+                    notes_status is "none" on HALT, on
+                    REQUEUE-VERIFICATION and on VERIFICATION-PENDING (status
+                    4 for both). On HALT the line is
                     followed by the would-be HALT's error:, message: and
                     remedy: lines; error: is the HALT error key.
   --help, -h        print this message and exit 0
@@ -164,12 +170,46 @@ Project context resolution (highest to lowest precedence):
 Exit codes:
   0  Release shipped (or --help requested); with --decide-only, the
      decision is a SHIP-* decision
+  4  Not shipped yet: the RC's verification did not run (TESTER task
+     BLOCKED, or DONE with no report), so the TESTER task was returned to
+     BACKLOG once with its block cause (no HALT is written; inside the CM
+     wake the release task is set to WAITING). With --decide-only, the
+     decision is REQUEUE-VERIFICATION (nothing is written). Every later run
+     while that requeued task is still BACKLOG, WORKING or WAITING exits 4
+     again: verification is still pending, nothing is requeued a second
+     time, and no HALT, release-state.md change or inbox entry is written
+     (inside the CM wake the release task is set to WAITING again); with
+     --decide-only the decision is VERIFICATION-PENDING. Once the task is
+     BLOCKED or WONT-DO again, or DONE with no report, the release ships
+     NON-FUNCTIONAL with "Verification did not run" under the notes'
+     ## Known Issues and an operator inbox entry
   1  HALT condition, pre-condition error, or git failure
      (a \$KANBAN_ROOT/projects/<name>/HALT file is created on HALT
      conditions — project-scoped; the global \$KANBAN_ROOT/HALT is never
      written by this script); with --decide-only, a pre-condition error
-     that kept the decision from being reached (nothing on stdout)
+     that kept the decision from being reached (nothing on stdout).
+     The integrity stops (triggers 4, 10 and 11, the pre-tag hook and the
+     pre-tag VERSION gate) also write one operator inbox entry carrying the
+     stop's error key, reason and remedy; a pre-tag hook that exits
+     non-zero and the VERSION gate write no HALT file
   3  --decide-only: the decision is HALT (nothing is written)
+  5  Not shipped: the squash into main conflicted (trigger 5). The squash
+     was backed out, the RC cancelled and its cargo returned for rebundling
+     through the resolution stage's CANCEL-AND-REBUNDLE drill (its open
+     tasks, this release task included, are closed WONT-DO), and one
+     operator inbox entry names every conflicting path. No HALT is written.
+     When the resolution matrix does not allow the cancel (an approval
+     gate, the retry ceiling), the trigger 5 HALT is written instead (status 1)
+  6  Not shipped: the release tag is already on the remote (trigger 7).
+     One operator inbox entry names the tag; no HALT is written and
+     nothing changes locally (main returns to its pre-release commit, no
+     tag is cut, the RC branch and release-state.md are untouched)
+
+A push the remote refuses after the tag is cut (trigger 6: the RC-branch
+delete or the main and tag push) is push lag, not a failure: the release
+exits 0, appends a '## Push Lag Event' to release-state.md, and the
+push-lag check (scripts/cm/push-watchdog.sh) pushes main and the tag, and
+deletes the RC branch the event names, once the remote accepts.
 
 Example:
   scripts/cm/release.sh --project my-project
@@ -181,7 +221,7 @@ Configuration:
   CM_SQUASH_STRICT_POLLUTION_GUARD
                                  set to 'true' to HALT on squash pollution detection
   [release] ship_posture         matrix|always, in project.cfg or kanban.cfg
-                                 (default matrix). Under always, ship-policy
+                                 (default always). Under always, ship-policy
                                  triggers 2 and 3 ship with release-notes Status
                                  NON-FUNCTIONAL instead of halting, and trigger 8
                                  files a bug naming the pattern and ships; each
@@ -192,7 +232,9 @@ Configuration:
                                  notes' '## Known Issues'. Every other HALT is
                                  unchanged.
                                  A push_to_remote = true lane also needs
-                                 [release] ship_posture_confirm_remote = true.
+                                 [release] ship_posture_confirm_remote = true,
+                                 else it resolves to matrix. Set
+                                 ship_posture = matrix to halt on every HALT row.
 HELPTEXT
 }
 
@@ -419,8 +461,10 @@ KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH}"
 TEAM_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH}"
 [[ -f "$KANBAN_ROOT/bashrc" ]] && source "$KANBAN_ROOT/bashrc"
 [[ -f "$KANBAN_ROOT/env" ]] && source "$KANBAN_ROOT/env"
-# $HOME/.config/pgai-kanban.cfg is operator-local bash config; sourced as-is.
-[[ -f "$HOME/.config/pgai-kanban.cfg" ]] && source "$HOME/.config/pgai-kanban.cfg"
+# Operator user config, then [chain] pm_mode (config_loader.sh).
+# shellcheck source=../lib/config_loader.sh
+source "$(dirname "${BASH_SOURCE[0]}")/../lib/config_loader.sh"
+config_startup_prelude "$TEAM_ROOT"
 
 # shellcheck source=lib/project_paths.sh
 # NOTE: project_paths.sh loads ini_parser.sh (read_ini), used just below.
@@ -430,7 +474,6 @@ source "$(dirname "${BASH_SOURCE[0]}")/../lib/project_paths.sh"
 _CM_KANBAN_CFG="${TEAM_ROOT}/kanban.cfg"
 if [[ -f "$_CM_KANBAN_CFG" ]]; then
     export PGAI_DEV_TREE_PATH="${PGAI_DEV_TREE_PATH:-$(read_ini "$_CM_KANBAN_CFG" paths dev_tree_path "")}"
-    export PGAI_KANBAN_PM_MODE="${PGAI_KANBAN_PM_MODE:-$(read_ini "$_CM_KANBAN_CFG" chain pm_mode automatic)}"
 fi
 
 # shellcheck source=lib/projects.sh
@@ -532,11 +575,14 @@ cm_release_preflight
 _cm_run_pre_squash_hook_step() {
   echo "[Step 4b] Running pre-squash hook (if present)..."
   CM_RESOLVED_HOOK_PATH=""
+  # BLOCK-WORTHY (trigger 4, both stops below): a broken pre-squash hook is
+  # an integrity invariant; the HALT also writes the operator inbox (--inbox).
   cm_resolve_and_enforce_hook "$PROJECT_NAME" "pre-squash" "$PROJECT_HOOKS_DIR" "$REPO_ROOT" "$RC_BRANCH" || {
     cm_halt \
       "cm-release.trigger-4.pre-squash-hook-not-executable" \
       "Trigger 4: the cm-release-pre-squash in-repo hook exists but is not executable, so the finalization mechanic cannot run and the squash cannot proceed safely." \
-      "chmod +x the in-repo hook path printed above by cm_release_hooks.sh, commit the mode change, then re-run scripts/cm/release.sh."
+      "chmod +x the in-repo hook path printed above by cm_release_hooks.sh, commit the mode change, then re-run scripts/cm/release.sh." \
+      --inbox
   }
   _pre_squash_rc=0
   if [[ -n "$CM_RESOLVED_HOOK_PATH" ]]; then
@@ -549,7 +595,8 @@ _cm_run_pre_squash_hook_step() {
     cm_halt \
       "cm-release.trigger-4.pre-squash-hook-failed" \
       "Trigger 4: the cm-release-pre-squash hook exited non-zero (rc=${_pre_squash_rc}) for ${ACTIVE_RC} — the finalization mechanic is broken, so the squash cannot proceed safely." \
-      "Inspect the [hook cm-release-pre-squash]-prefixed lines printed above for the hook's own diagnostic output, fix the hook, then re-run scripts/cm/release.sh."
+      "Inspect the [hook cm-release-pre-squash]-prefixed lines printed above for the hook's own diagnostic output, fix the hook, then re-run scripts/cm/release.sh." \
+      --inbox
   fi
 }
 
@@ -559,6 +606,20 @@ _cm_run_pre_squash_hook_step() {
 # --- full step-by-step doc. Sets _SHIP_DECISION, _RELEASE_NOTES_STATUS,  ---
 # --- _TESTER_* globals, _HAS_LARGE_FIX_EFFORT, _TESTER_TASK_FOUND.       ---
 cm_release_apply_ship_policy "_cm_run_pre_squash_hook_step"
+
+# --- Verification requeued, or still pending after the RC's one requeue ---
+# --- (release_verification_retry.sh): nothing ships yet.                 ---
+if [[ "$_SHIP_DECISION" == "REQUEUE-VERIFICATION" || "$_SHIP_DECISION" == "VERIFICATION-PENDING" ]]; then
+  _verification_wait="verification was requeued once"
+  [[ "$_SHIP_DECISION" == "VERIFICATION-PENDING" ]] \
+    && _verification_wait="verification is still pending (the RC's one requeue is spent and the task reads ${_TESTER_STATUS}; nothing was requeued again)"
+  # AGENT-RESOLVABLE: nothing shipped this run, and no stop was written --
+  # the release task waits on the requeued TESTER task and runs again. The
+  # verification stage above emitted this outcome's dual-channel notice.
+  # CENSUS-ANCHOR: release-verification-requeued-01
+  echo "[cm-release] ${ACTIVE_RC} is not shipped yet: ${_verification_wait} (TESTER task ${_TESTER_TASK_ID}). No HALT was written and nothing failed: exit 4 means the release waits on that task. Inside the CM wake this release task is already WAITING; leave it WAITING (not BLOCKED), do not re-run this script in the same session, and the wake runs the release again once ${_TESTER_TASK_ID} finishes."
+  exit 4
+fi
 
 # --- Decide-only: a HALT already exited 3 inside the stage above; a ship ---
 # --- decision is printed here and the run exits 0 before any write.    ---
@@ -585,14 +646,18 @@ _cm_run_pre_tag_hook_step() {
   # cm_resolve_and_enforce_hook (see team/scripts/lib/cm_release_hooks.sh).
   echo "[Step 12c] Running pre-tag hook (if present)..."
   CM_RESOLVED_HOOK_PATH=""
+  # BLOCK-WORTHY: a pre-tag hook that cannot run is an integrity invariant;
+  # the HALT also writes the operator inbox (--inbox).
   cm_resolve_and_enforce_hook "$PROJECT_NAME" "pre-tag" "$PROJECT_HOOKS_DIR" "$REPO_ROOT" "$RC_BRANCH" || {
     cm_halt \
       "cm-release.pre-tag-hook-not-executable" \
       "The cm-release-pre-tag hook resolved to '${CM_HOOK_NONEXEC_PATH}' but is not executable, so the pre-tag phase cannot run it. (Full Cause/To-fix/Rule remedy block printed above by cm_release_hooks.sh.)" \
-      "${CM_HOOK_NONEXEC_FIX_CMD}"
+      "${CM_HOOK_NONEXEC_FIX_CMD}" \
+      --inbox
   }
   if [[ -n "$CM_RESOLVED_HOOK_PATH" ]]; then
-    _run_release_hook "cm-release-pre-tag" "$CM_RESOLVED_HOOK_PATH"
+    # --inbox: a failing pre-tag hook also writes the operator inbox entry.
+    _run_release_hook "cm-release-pre-tag" "$CM_RESOLVED_HOOK_PATH" --inbox
   fi
   # Clean up the materialized RC-branch hook file (only set when the resolver
   # read the hook from the RC branch's git tree rather than a persistent path).

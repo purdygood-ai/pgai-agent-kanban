@@ -117,19 +117,19 @@ def _run_discovery(
 def test_project_scoped_repair_leaves_sibling_project_running(
     two_project_root: pathlib.Path,
 ) -> None:
-    """overwatch_halt_first_fix repairing project_a must not block project_b.
+    """overwatch_halt_first_fix repairing project-a must not block project-b.
 
     Runs the REAL wrapper (real per-project lock, real HALT sentinel
-    write/restore) with OVERWATCH_PROJECT=project_a, and from inside the
-    wrapped mutation itself: (1) confirms project_a reads as halted via the
+    write/restore) with OVERWATCH_PROJECT=project-a, and from inside the
+    wrapped mutation itself: (1) confirms project-a reads as halted via the
     same reader wake dispatch and discovery.sh use (pp_project_halted),
-    (2) confirms project_b reads as NOT halted, (3) actually runs
-    project_b's discovery pipeline to completion and confirms it bundled
-    its pending bug -- proof project_b's chain can run end to end during
-    project_a's repair window, not just that a flag file is absent.
+    (2) confirms project-b reads as NOT halted, (3) actually runs
+    project-b's discovery pipeline to completion and confirms it bundled
+    its pending bug -- proof project-b's chain can run end to end during
+    project-a's repair window, not just that a flag file is absent.
     """
     root = two_project_root
-    _add_bug_file(root, "project_b", bug_id="BUG-0201", slug="sibling-runs-during-repair")
+    _add_bug_file(root, "project-b", bug_id="BUG-0201", slug="sibling-runs-during-repair")
 
     script = textwrap.dedent(
         f"""\
@@ -145,15 +145,15 @@ def test_project_scoped_repair_leaves_sibling_project_running(
 
         export KANBAN_ROOT="{root}"
         export TEAM_ROOT="{root}"
-        export OVERWATCH_PROJECT="project_a"
+        export OVERWATCH_PROJECT="project-a"
 
         _probe_and_run_sibling() {{
-            if pp_project_halted "project_a"; then
+            if pp_project_halted "project-a"; then
                 echo "PROJECT_A_HALTED=yes"
             else
                 echo "PROJECT_A_HALTED=no"
             fi
-            if pp_project_halted "project_b"; then
+            if pp_project_halted "project-b"; then
                 echo "PROJECT_B_HALTED=yes"
             else
                 echo "PROJECT_B_HALTED=no"
@@ -163,7 +163,7 @@ def test_project_scoped_repair_leaves_sibling_project_running(
             else
                 echo "ROOT_HALT_DURING=no"
             fi
-            discovery_run_pipeline "project_b"
+            discovery_run_pipeline "project-b"
             echo "PROJECT_B_DISCOVERY_STATUS=${{DISCOVERY_LAST_STATUS}}"
         }}
 
@@ -175,7 +175,7 @@ def test_project_scoped_repair_leaves_sibling_project_running(
         else
             echo "ROOT_HALT_AFTER=no"
         fi
-        if [[ -f "$KANBAN_ROOT/projects/project_a/HALT" ]]; then
+        if [[ -f "$KANBAN_ROOT/projects/project-a/HALT" ]]; then
             echo "PROJECT_A_HALT_AFTER=yes"
         else
             echo "PROJECT_A_HALT_AFTER=no"
@@ -211,11 +211,11 @@ def test_project_scoped_repair_leaves_sibling_project_running(
         f"repair.\nstdout: {out}"
     )
     assert "PROJECT_B_DISCOVERY_STATUS=produced_work" in out, (
-        f"project_b's discovery pipeline must run to completion and bundle "
-        f"its pending bug while project_a is being repaired.\nstdout: {out}"
+        f"project-b's discovery pipeline must run to completion and bundle "
+        f"its pending bug while project-a is being repaired.\nstdout: {out}"
     )
-    bundles_b = list(_requirements_dir(root, "project_b").glob("*-bugfix-bundle-*.md"))
-    assert bundles_b, f"Expected project_b to have bundled its bug.\nstdout: {out}"
+    bundles_b = list(_requirements_dir(root, "project-b").glob("*-bugfix-bundle-*.md"))
+    assert bundles_b, f"Expected project-b to have bundled its bug.\nstdout: {out}"
 
     assert "WRAPPER_EXIT=0" in out, out
     assert "ROOT_HALT_AFTER=no" in out, (
@@ -243,24 +243,24 @@ def test_operator_root_halt_still_blocks_every_project(
     write target.
     """
     root = two_project_root
-    _add_bug_file(root, "project_a", bug_id="BUG-0301", slug="root-halt-blocks-a")
-    _add_bug_file(root, "project_b", bug_id="BUG-0302", slug="root-halt-blocks-b")
+    _add_bug_file(root, "project-a", bug_id="BUG-0301", slug="root-halt-blocks-a")
+    _add_bug_file(root, "project-b", bug_id="BUG-0302", slug="root-halt-blocks-b")
 
     (root / "HALT").write_text(
         "operator-placed fleet-wide halt for end-to-end test\n", encoding="utf-8"
     )
 
-    result_a = _run_discovery(root, "project_a")
-    result_b = _run_discovery(root, "project_b")
+    result_a = _run_discovery(root, "project-a")
+    result_b = _run_discovery(root, "project-b")
 
     assert result_a.returncode == 0, result_a.stderr
     assert result_b.returncode == 0, result_b.stderr
     assert "DISCOVERY_STATUS=blocked" in result_a.stdout, (
-        f"Expected project_a blocked by the root HALT.\nstdout: {result_a.stdout}"
+        f"Expected project-a blocked by the root HALT.\nstdout: {result_a.stdout}"
     )
     assert "DISCOVERY_STATUS=blocked" in result_b.stdout, (
-        f"Expected project_b blocked by the root HALT too.\nstdout: {result_b.stdout}"
+        f"Expected project-b blocked by the root HALT too.\nstdout: {result_b.stdout}"
     )
-    assert not list(_requirements_dir(root, "project_a").glob("*-bugfix-bundle-*.md"))
-    req_b = _requirements_dir(root, "project_b")
+    assert not list(_requirements_dir(root, "project-a").glob("*-bugfix-bundle-*.md"))
+    req_b = _requirements_dir(root, "project-b")
     assert not (req_b.exists() and list(req_b.glob("*-bugfix-bundle-*.md")))

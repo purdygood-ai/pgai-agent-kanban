@@ -141,9 +141,12 @@ Fields
 Report level: ``recommendation`` (pass | ship-with-concerns |
 ship-with-serious-concerns) and ``systemic_risk`` (low | medium | high) are
 read from the first non-blank line of their own ``## Recommendation`` /
-``## Systemic Risk`` section (heading level 1 or 2, text starting with that
-name), skipping thematic breaks and deeper headings; a value after a colon on
-the heading line itself comes first. The line is read whole first, then as a
+``## Systemic Risk`` section, skipping thematic breaks and deeper headings;
+a value after a colon on the heading line itself comes first. The section
+is read by ``pgai_agent_kanban.task_status.read_section`` over the report
+as this parser sees it (fenced blocks blanked, comments removed): the
+heading is that name whole, in any case, and the section ends at the next
+level-2 heading. The line is read whole first, then as a
 field line, so ``SHIP-WITH-CONCERNS``, ``**Decision: PASS**`` and
 ``Recommendation: pass`` all read. ``summary`` is the text of the
 ``## Summary`` (or ``## Executive Summary``) section with comments removed
@@ -191,6 +194,7 @@ if not __package__:
 
 from pgai_agent_kanban.lib.html_comments import comment_spans  # noqa: E402
 from pgai_agent_kanban.lib.markdown_fence import find_fence_close, match_fence_opener  # noqa: E402
+from pgai_agent_kanban.task_status import read_section  # noqa: E402
 
 __all__ = [
     "ENUMERATED_FIELDS",
@@ -241,7 +245,6 @@ _FINDING_LABEL_RE = re.compile(
 _TITLE_SEPARATOR_RE = re.compile(r"^[\s*_]*[:.)–—-]*\s*")
 _FIRST_DIGITS_RE = re.compile(r"\d+")
 _FINDING_MIN_LEVEL = 2
-_SECTION_MAX_LEVEL = 2
 
 # Rule 3.
 _LIST_MARKER_RE = re.compile(r"^\s*(?:[-*+]|\d{1,9}[.)])\s+")
@@ -252,7 +255,8 @@ _THEMATIC_BREAK_RE = re.compile(r"^ {0,3}(?:(?:-[ \t]*){3,}|(?:\*[ \t]*){3,}|(?:
 
 _ID_RE = re.compile(r"\b(BUG|PRIORITY)-(\d+)", re.IGNORECASE)
 _ALTERNATIVES_SPLIT_RE = re.compile(r"\s*[|/]\s*")
-_SUMMARY_HEADING_RE = re.compile(r"^(?:executive\s+)?summary(?![A-Za-z0-9_])", re.IGNORECASE)
+# The report-level summary section names, in the order they are tried.
+_SUMMARY_HEADINGS = ("Summary", "Executive Summary")
 
 
 # ---------------------------------------------------------------------------
@@ -529,42 +533,22 @@ def _read_fields(finding: Finding, lines: list) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _section_lines(lines: list, matches) -> "tuple[Optional[str], list] | None":
-    """``(inline value, body lines)`` of the first level-1/2 section whose
-    heading text satisfies *matches*; the body runs to the next heading of
-    level 1 or 2. None when there is no such section."""
-    for idx, line in enumerate(lines):
-        heading = _heading(line)
-        if heading is None or heading[0] > _SECTION_MAX_LEVEL:
-            continue
-        text = heading[1].strip("*_ ")
-        if not matches(text):
-            continue
-        inline = text.split(":", 1)[1].strip() if ":" in text else None
-        body = []
-        for follow in lines[idx + 1:]:
-            nested = _heading(follow)
-            if nested is not None and nested[0] <= _SECTION_MAX_LEVEL:
-                break
-            body.append(follow)
-        return inline, body
-    return None
-
-
 def _section_value(lines: list, name: str) -> Optional[str]:
-    """The value line of the ``## <name>`` section, as written, or None."""
-    prefix = re.compile(re.escape(name) + r"(?![A-Za-z0-9_])", re.IGNORECASE)
-    section = _section_lines(lines, prefix.match)
-    if section is None:
+    """The value line of the ``## <name>`` section, as written, or None.
+
+    The section is read by :func:`task_status.read_section` over the
+    report's visible text -- each line's comment-free text, a fenced line
+    blank -- so a heading inside a fence or a comment neither starts nor
+    ends it. An inline ``## <name>: value`` is the body's first line. The
+    value is the first line of the body that is not blank, a thematic break
+    or a deeper (``#``-led) heading line.
+    """
+    body = read_section("\n".join(line.text for line in lines), name)
+    if body is None:
         return None
-    inline, body = section
-    if inline:
-        return inline
-    for line in body:
-        text = line.text.strip()
-        if line.code or not text or _THEMATIC_BREAK_RE.match(text) or _heading(line) is not None:
-            continue
-        return text
+    for text in (raw.strip() for raw in body.split("\n")):
+        if text and not _THEMATIC_BREAK_RE.match(text) and not text.startswith("#"):
+            return text
     return None
 
 
@@ -581,15 +565,21 @@ def _report_token(raw: Optional[str], tokens) -> Optional[str]:
 
 
 def _summary(lines: list) -> Optional[str]:
-    section = _section_lines(lines, _SUMMARY_HEADING_RE.match)
-    if section is None:
-        return None
-    inline, body = section
-    texts = ([inline] if inline else []) + [
-        (line.raw if line.code else line.text).rstrip() for line in body
-    ]
-    text = "\n".join(texts).strip("\n")
-    return text or None
+    """The ``## Summary`` (else ``## Executive Summary``) body, or None.
+
+    Read by :func:`task_status.read_section` over the report with comments
+    removed, fenced lines as written and trailing whitespace dropped from
+    each line (``fences=True``, so a heading
+    inside a fence neither starts nor ends the section); the body ends at
+    the next level-2 heading, and an inline ``## Summary: text`` is its
+    first line.
+    """
+    text = "\n".join((line.raw if line.code else line.text).rstrip() for line in lines)
+    for name in _SUMMARY_HEADINGS:
+        body = read_section(text, name, fences=True)
+        if body is not None:
+            return body.strip("\n") or None
+    return None
 
 
 # ---------------------------------------------------------------------------

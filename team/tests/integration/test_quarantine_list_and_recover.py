@@ -44,7 +44,7 @@ _SCRIPTS_LIB = _SCRIPTS_DIR / "lib"
 _LIST_REJECTED = _SCRIPTS_DIR / "list-rejected.sh"
 _RECOVER_REJECTED = _SCRIPTS_DIR / "recover-rejected.sh"
 
-_PROJECT = "project_a"
+_PROJECT = "project-a"
 
 
 def _sandbox_env(kanban_root: pathlib.Path) -> dict[str, str]:

@@ -15,9 +15,10 @@
 # Public entry point
 # -------------------
 #   _disc_find_unhandled_items <dir> <backlog_cache> <id_prefix> [state_dir] [project_name]
-#       Scans <dir> for BUG-/PRIORITY- items eligible for bundling: matches
-#       the canonical filename pattern, quarantines malformed names via
-#       _disc_maybe_quarantine once the per-file rejection threshold is
+#       Scans <dir> for BUG-/PRIORITY- items eligible for bundling: leaves
+#       out each carried item (a 'running' item every listing bundle has
+#       closed), matches the canonical filename pattern, quarantines malformed names
+#       via _disc_maybe_quarantine once the per-file rejection threshold is
 #       reached, applies the ## Status header as the authoritative
 #       eligibility gate, and suppresses any item whose settle guard has not
 #       yet expired. Called directly by discovery_step_bugs and
@@ -36,6 +37,11 @@
 #       start with '/' is dropped and narrated on stderr instead of
 #       emitted. A log() implementation that taps stdout, or a helper that
 #       echoes, therefore cannot reach the caller's captured value.
+#
+#   _disc_convert_carried_items <project_name> <intake_dir> <step_name>
+#       Converts each carried item in <intake_dir> to needs-operator with an
+#       operator-inbox question, inside the caller's write phase. Called by
+#       discovery_step_bugs and discovery_step_priority before the scan.
 #
 # Other functions in this file (_disc_check_bug_id_collisions,
 # _disc_maybe_quarantine, _disc_settle_guard_active, _disc_write_settle_marker,
@@ -67,16 +73,19 @@
 #     _disc_maybe_quarantine when project_name is supplied).
 #   team/scripts/lib/discovery_state.sh — _disc_set_status_field (called by
 #     _disc_reset_item_status_to_open).
-#   team/scripts/lib/discovery.sh itself — the log() shim, and TEAM_ROOT for
+#   team/scripts/lib/discovery.sh itself — the log() shim, TEAM_ROOT for
 #     _disc_check_bug_id_collisions's bug_scanner.py search (falls back to
-#     self-locating from BASH_SOURCE when TEAM_ROOT is unset).
+#     self-locating from BASH_SOURCE when TEAM_ROOT is unset), and
+#     _disc_enter_write_phase (called by _disc_convert_carried_items).
 #   team/scripts/lib/pp_run_ops.sh — self-sourced below. Every scan and
 #     state-file rewrite is a call into pgai_agent_kanban.discovery.items
 #     (the item scan, the rejection counter, the BUG-ID collision report),
 #     which imports pgai_agent_kanban.lib.ledger_filename_contract for the
 #     canonical BUG-/PRIORITY- filename pattern and
 #     pgai_agent_kanban.lib.bundle_items for the carried- and
-#     orphaned-item rules.
+#     orphaned-item rules -- or into pgai_agent_kanban.discovery.carried
+#     (the carried-item conversion, which writes through the
+#     ops.write.set_needs_operator intake verb).
 #
 # python3 must be on PATH.
 
@@ -326,15 +335,19 @@ _disc_maybe_quarantine() {
 #      permitted only immediately AFTER the number (historical compatibility).
 #      BUG- and PRIORITY- must stay in sync — both consumers import the same
 #      module, so tightening one tightens the other automatically.
-#   2. Have ## Status: open (or no ## Status) in their header -- or
-#      ## Status: running while every bundle in the sibling requirements/
-#      directory that lists them is done or wont-do: a release shipped
-#      them without a DONE task claiming their fix (carried), and they are
-#      candidates for the next bundle like any open item. A ## Status:
-#      running item that no bundle in requirements/ lists at all is
-#      orphaned -- its bundle was archived, purged or deleted while it was
-#      unfinished -- and is re-offered too, with a "WARNING: re-offering
-#      <name>" line on stderr.
+#   2. Have ## Status: open (or no ## Status) in their header. A
+#      ## Status: running item that no bundle in requirements/ lists at all
+#      is orphaned -- its bundle was archived, purged or deleted while it
+#      was unfinished -- and is re-offered too, with a "WARNING:
+#      re-offering <name>" line on stderr. needs-operator and closed items
+#      are skipped with a "skipping <name>" line on stderr.
+# A carried item -- ## Status: running while every bundle in the sibling
+# requirements/ directory that lists it is closed, because a release
+# shipped it without a DONE task claiming its fix -- is never offered:
+# the scan leaves it out ("skipping <name>: carried"). Converting it to
+# needs-operator is a write, so it is not done here; the calling step does
+# it inside its write phase (_disc_convert_carried_items, below) before
+# calling this scan.
 # <backlog_cache> is accepted for call-shape compatibility and not read:
 # the cache is derived from the same headers and never gates an item.
 # Outputs newline-separated absolute paths on stdout.
@@ -436,6 +449,38 @@ _disc_find_unhandled_items() {
             done <<< "$_py_validated_paths"
         fi
     } 3>&1 1>&2
+}
+
+# ---------------------------------------------------------------------------
+# _disc_convert_carried_items <project_name> <intake_dir> <step_name>
+#
+# Parks every carried item in <intake_dir> (bugs/ or priority/) on an
+# operator question: ## Status: running while every bundle in requirements/
+# that lists it is closed, because a release shipped it without a DONE
+# task claiming its fix. Each is set to needs-operator with one
+# operator-inbox entry naming the item, the bundle and the reason the
+# bundle's PM task recorded -- see the --help of
+# pgai_agent_kanban.discovery.carried, run through pp_run_ops. Reads first
+# (list); only when there is something to convert does it enter the write
+# phase as <step_name>, and a deferred write phase leaves the items
+# 'running' for the next pass, still left out of every bundle by the scan.
+# Answering an item's inbox entry sets it back to open, and the next pass
+# bundles it. Each conversion narrates one stderr line; the conversion's
+# stdout goes to stderr too, so nothing it prints can reach a caller's
+# captured item list. A conversion that fails leaves its item 'running',
+# narrated with a WARNING line, and the next pass retries. Always returns 0.
+# ---------------------------------------------------------------------------
+_disc_convert_carried_items() {
+    local project_name="$1" intake_dir="$2" step_name="$3" planned
+    planned="$(pp_run_ops pgai_agent_kanban.discovery.carried list "$intake_dir")" || planned=""
+    [[ -n "$planned" ]] || return 0
+    if ! _disc_enter_write_phase "$project_name" "$step_name"; then
+        log "${step_name}: carried items left 'running' until the next pass"
+        return 0
+    fi
+    pp_run_ops pgai_agent_kanban.discovery.carried convert "$intake_dir" >&2 \
+        || log "${step_name}: WARNING: the carried-item conversion for ${intake_dir} exited non-zero; carried items stay 'running' and out of every bundle, and the next pass retries"
+    return 0
 }
 
 # ---------------------------------------------------------------------------

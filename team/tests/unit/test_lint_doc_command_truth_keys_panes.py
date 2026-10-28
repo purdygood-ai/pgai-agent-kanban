@@ -249,9 +249,9 @@ def test_default_mismatch_and_unknown_key_are_distinct(tmp_path, capsys) -> None
     doc = _write(
         tmp_path / "fake.md",
         "# Fake doc\n\n"
+        "`[dashboard] rows_per_column` defaults to `99`.\n\n"
         "```ini\n"
         "[dashboard]\n"
-        "rows_per_column = 99\n"
         "totally_invented_key = 5\n"
         "```\n",
     )
@@ -283,9 +283,9 @@ def test_removing_unknown_key_seed_clears_its_finding(tmp_path, capsys) -> None:
     _write(
         doc_path,
         "# Fake doc\n\n"
+        "`[dashboard] rows_per_column` defaults to `99`.\n\n"
         "```ini\n"
         "[dashboard]\n"
-        "rows_per_column = 99\n"
         "totally_invented_key = 5\n"
         "```\n",
     )
@@ -298,7 +298,7 @@ def test_removing_unknown_key_seed_clears_its_finding(tmp_path, capsys) -> None:
     # Remove only the unknown-key seed; keep the default-mismatch seed.
     _write(
         doc_path,
-        "# Fake doc\n\n```ini\n[dashboard]\nrows_per_column = 99\n```\n",
+        "# Fake doc\n\n`[dashboard] rows_per_column` defaults to `99`.\n",
     )
     result_after = _run(doc_path, config_loader, census, tmp_path)
     out_after = capsys.readouterr().out
@@ -442,8 +442,8 @@ def test_na_registry_default_skips_default_mismatch_check(tmp_path, capsys) -> N
     project_registry = _fixture_project_registry(tmp_path)  # project_name is N/A
     census = _fixture_census(tmp_path)
     doc = _write(
-        tmp_path / "fake.md",
-        "# Fake doc\n\n```ini\n[project]\nproject_name = my-example-project\n```\n",
+        tmp_path / "fake.cfg_example",
+        "[project]\nproject_name = my-example-project\n",
     )
 
     result = _run(doc, config_loader, census, tmp_path, project_key_registry=project_registry)
@@ -477,8 +477,8 @@ def test_ordinary_default_without_na_marker_would_mismatch(tmp_path, capsys) -> 
     )
     census = _fixture_census(tmp_path)
     doc = _write(
-        tmp_path / "fake.md",
-        "# Fake doc\n\n```ini\n[project]\nproject_name = my-example-project\n```\n",
+        tmp_path / "fake.cfg_example",
+        "[project]\nproject_name = my-example-project\n",
     )
 
     result = _run(doc, config_loader, census, tmp_path, project_key_registry=plain_registry)

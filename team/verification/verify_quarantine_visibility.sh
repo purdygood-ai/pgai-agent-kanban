@@ -18,19 +18,27 @@
 #   bash verify_quarantine_visibility.sh [--dev-tree <path>] [--kanban-root <path>]
 #
 # Defaults:
-#   --dev-tree     $HOME/develop/pgai-agent-kanban
-#   --kanban-root  $HOME/pgai_agent_kanban
+#   --dev-tree     PGAI_DEV_TREE_PATH, else the project's [project]
+#                  dev_tree_path (PGAI_PROJECT_NAME, else pgai-agent-kanban,
+#                  read through project_paths.sh); with neither the run is
+#                  refused and the remedy names --dev-tree
+#   --kanban-root  $PGAI_AGENT_KANBAN_ROOT_PATH, else $HOME/pgai_agent_kanban
 #
 # Exit code:
 #   0 — all checks passed
 #   1 — one or more checks failed (details in output)
+#
+# A command whose output a step captures (the Step C quarantine helper, the
+# Step D and Step F scan_attention.py runs) and that exits non-zero is itself
+# recorded as a FAIL line carrying its exit status and output; the run still
+# reaches CLEANUP and SUMMARY, which emits the checks_failed error contract.
 
 set -euo pipefail
 
 # ---------------------------------------------------------------------------
 # Argument parsing
 # ---------------------------------------------------------------------------
-DEV_TREE="${PGAI_DEV_TREE_PATH:-$HOME/develop/pgai-agent-kanban}"
+DEV_TREE=""
 KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH:-$HOME/pgai_agent_kanban}"
 
 while [[ $# -gt 0 ]]; do
@@ -43,6 +51,27 @@ while [[ $# -gt 0 ]]; do
             echo "Unknown argument: $1" >&2; exit 1 ;;
     esac
 done
+
+# Refusals speak the shared dual-channel error contract (error / message /
+# remedy on stderr) through lib/verification_common.sh, which carries the
+# stand-in used when the scripts lib tree is missing, and which resolves
+# the dev tree a run without --dev-tree checks.
+_VQV_SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+_VQV_SELF="${_VQV_SELF_DIR}/$(basename "${BASH_SOURCE[0]}")"
+# shellcheck source=lib/verification_common.sh
+source "${_VQV_SELF_DIR}/lib/verification_common.sh"
+
+if [[ -z "$DEV_TREE" ]]; then
+    DEV_TREE="$(KANBAN_ROOT="$KANBAN_ROOT" verification_dev_tree)"
+fi
+if [[ -z "$DEV_TREE" ]]; then
+    # BLOCK-WORTHY: with no dev tree there are no scripts or tests to check, so no check can run.
+    pgai_emit_error_contract "verify_quarantine_visibility.dev_tree_unresolved" \
+        "verify_quarantine_visibility: no dev tree to check -- --dev-tree was not given, PGAI_DEV_TREE_PATH is unset and project ${PGAI_PROJECT_NAME:-pgai-agent-kanban} has no dev_tree_path under ${KANBAN_ROOT}. Pass --dev-tree with the checkout to check (the remedy names an example path)." \
+        "bash $(printf '%q' "$_VQV_SELF") --dev-tree ${VERIFICATION_EXAMPLE_DEV_TREE} --kanban-root $(printf '%q' "$KANBAN_ROOT")"
+    # CENSUS-ANCHOR: verify-quarantine-visibility-03
+    exit 1
+fi
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -60,6 +89,16 @@ fail() {
     (( FAIL_COUNT++ )) || true
 }
 
+# fail_capture <label> <exit-status> <output>
+# Record a captured command that exited non-zero as one FAIL line naming it,
+# its exit status and its output (newlines folded to " | "), so the failure
+# is visible in the run's own output instead of aborting it.
+fail_capture() {
+    local label="$1" status="$2" output="$3"
+    [[ -n "$output" ]] || output="(no output)"
+    fail "${label} exited ${status}; output: ${output//$'\n'/ | }"
+}
+
 section() {
     echo ""
     echo "=== $* ==="
@@ -71,7 +110,30 @@ section() {
 SCRIPTS_DIR="${DEV_TREE}/team/scripts"
 DASHBOARD_DIR="${DEV_TREE}/team/pgai_agent_kanban/dashboard"
 TESTS_DIR="${DEV_TREE}/team/tests"
-TEMP_ROOT="${PGAI_AGENT_KANBAN_TEMP_DIR:-/tmp/pgai_kanban_tmp}"
+# The scratch root is the temp root resolver's answer (override, then
+# kanban.cfg [paths], then its fallback); temp.sh is located beside this
+# script's own tree (team/verification -> team/scripts/lib, and the same
+# relative layout in an install).
+_VQV_LIB_DIR="${_VQV_SELF_DIR}/../scripts/lib"
+_VQV_TEMP_SH="${_VQV_LIB_DIR}/temp.sh"
+if [[ ! -r "$_VQV_TEMP_SH" ]]; then
+    # In a git checkout the file is restored from HEAD; otherwise the dev
+    # tree's own copy of this script runs against its own lib tree.
+    if git -C "$_VQV_SELF_DIR" rev-parse --git-dir >/dev/null 2>&1; then
+        _vqv_remedy="git -C '${_VQV_SELF_DIR}' checkout HEAD -- ../scripts/lib/temp.sh"
+    else
+        _vqv_remedy="bash '${DEV_TREE}/team/verification/verify_quarantine_visibility.sh' --dev-tree '${DEV_TREE}' --kanban-root '${KANBAN_ROOT}'"
+    fi
+    # BLOCK-WORTHY: with no temp root resolver there is no sandbox root, so no check can run.
+    pgai_emit_error_contract "verify_quarantine_visibility.temp_resolver_missing" \
+        "verify_quarantine_visibility: temp root resolver not found at ${_VQV_TEMP_SH}; no sandbox can be placed, so no check ran." \
+        "${_vqv_remedy}"
+    # CENSUS-ANCHOR: verify-quarantine-visibility-01
+    exit 1
+fi
+# shellcheck source=../scripts/lib/temp.sh
+source "$_VQV_TEMP_SH"
+TEMP_ROOT="$(pgai_temp_dir)"
 SANDBOX_ROOT="${TEMP_ROOT}/verify_quarantine_$$"
 
 # ---------------------------------------------------------------------------
@@ -200,9 +262,17 @@ _disc_maybe_quarantine \\
 echo "quarantine_call_exit=0"
 SUBSHELL
 
-QUARANTINE_RESULT="$(bash "$_SUBSHELL_SCRIPT" 2>&1)"
+# A helper that exits non-zero (a library it sources is missing, the call
+# itself fails) is recorded as a FAIL; the checks below still run and report
+# what did or did not land in rejected/.
+QUARANTINE_STATUS=0
+QUARANTINE_RESULT="$(bash "$_SUBSHELL_SCRIPT" 2>&1)" || QUARANTINE_STATUS=$?
 rm -f "$_SUBSHELL_SCRIPT"
 echo "  _disc_maybe_quarantine output: $QUARANTINE_RESULT"
+if [[ "$QUARANTINE_STATUS" -ne 0 ]]; then
+    fail_capture "STEP C synthetic quarantine helper (_disc_maybe_quarantine)" \
+        "$QUARANTINE_STATUS" "$QUARANTINE_RESULT"
+fi
 
 # Verify the quarantined file landed in rejected/
 if [[ -f "${SANDBOX_REJECTED}/${FIXTURE_NAME}" ]]; then
@@ -228,9 +298,11 @@ fi
 
 # Verify key sidecar fields
 if [[ -f "$SIDECAR" ]]; then
-    ORIG_TYPE="$(grep '^original_type=' "$SIDECAR" | cut -d= -f2)"
-    REASON_FIELD="$(grep '^reason=' "$SIDECAR" | cut -d= -f2-)"
-    RETRY_FIELD="$(grep '^retry_count=' "$SIDECAR" | cut -d= -f2)"
+    # A field missing from the sidecar reads as empty and fails its check
+    # below rather than aborting the run (grep exits 1 under pipefail).
+    ORIG_TYPE="$(grep '^original_type=' "$SIDECAR" | cut -d= -f2 || true)"
+    REASON_FIELD="$(grep '^reason=' "$SIDECAR" | cut -d= -f2- || true)"
+    RETRY_FIELD="$(grep '^retry_count=' "$SIDECAR" | cut -d= -f2 || true)"
 
     if [[ "$ORIG_TYPE" == "priority" ]]; then
         pass "sidecar.original_type = priority"
@@ -263,30 +335,37 @@ fi
 # ---------------------------------------------------------------------------
 section "STEP D: scan_attention.py rejected-files shows QUARANTINED FILES"
 
+ATTENTION_STATUS=0
 ATTENTION_OUTPUT="$(python3 "${DASHBOARD_DIR}/scan_attention.py" \
-    rejected-files "${SANDBOX_KANBAN}" --no-color 2>&1)"
+    rejected-files "${SANDBOX_KANBAN}" --no-color 2>&1)" || ATTENTION_STATUS=$?
 
 echo "  scan_attention.py output:"
 while IFS= read -r line; do
     echo "    ${line}"
 done <<< "$ATTENTION_OUTPUT"
 
-if grep -q "QUARANTINED FILES" <<< "$ATTENTION_OUTPUT"; then
-    pass "attention pane renders QUARANTINED FILES header"
+# A scan that exited non-zero rendered no pane, so its output is not graded.
+if [[ "$ATTENTION_STATUS" -ne 0 ]]; then
+    fail_capture "STEP D scan_attention.py rejected-files" \
+        "$ATTENTION_STATUS" "$ATTENTION_OUTPUT"
 else
-    fail "attention pane missing QUARANTINED FILES header"
-fi
+    if grep -q "QUARANTINED FILES" <<< "$ATTENTION_OUTPUT"; then
+        pass "attention pane renders QUARANTINED FILES header"
+    else
+        fail "attention pane missing QUARANTINED FILES header"
+    fi
 
-if grep -q "$FIXTURE_NAME" <<< "$ATTENTION_OUTPUT"; then
-    pass "attention pane lists fixture filename: ${FIXTURE_NAME}"
-else
-    fail "attention pane missing fixture filename: ${FIXTURE_NAME}"
-fi
+    if grep -q "$FIXTURE_NAME" <<< "$ATTENTION_OUTPUT"; then
+        pass "attention pane lists fixture filename: ${FIXTURE_NAME}"
+    else
+        fail "attention pane missing fixture filename: ${FIXTURE_NAME}"
+    fi
 
-if grep -q "priority" <<< "$ATTENTION_OUTPUT"; then
-    pass "attention pane shows original_type: priority"
-else
-    fail "attention pane missing original_type field"
+    if grep -q "priority" <<< "$ATTENTION_OUTPUT"; then
+        pass "attention pane shows original_type: priority"
+    else
+        fail "attention pane missing original_type field"
+    fi
 fi
 
 # ---------------------------------------------------------------------------
@@ -330,11 +409,16 @@ echo "  Removed: ${SANDBOX_REJECTED}/${FIXTURE_NAME}"
 echo "  Removed: ${SANDBOX_REJECTED}/${FIXTURE_NAME}.reason"
 
 # Rerun scan_attention.py — should emit nothing (section suppressed when empty)
+ATTENTION_EMPTY_STATUS=0
 ATTENTION_EMPTY="$(python3 "${DASHBOARD_DIR}/scan_attention.py" \
-    rejected-files "${SANDBOX_KANBAN}" --no-color 2>&1)"
+    rejected-files "${SANDBOX_KANBAN}" --no-color 2>&1)" || ATTENTION_EMPTY_STATUS=$?
 
 echo "  scan_attention.py output after deletion (should be blank):"
-if [[ -z "$ATTENTION_EMPTY" ]]; then
+# A scan that exited non-zero proves nothing about the pane being silent.
+if [[ "$ATTENTION_EMPTY_STATUS" -ne 0 ]]; then
+    fail_capture "STEP F scan_attention.py rejected-files after deletion" \
+        "$ATTENTION_EMPTY_STATUS" "$ATTENTION_EMPTY"
+elif [[ -z "$ATTENTION_EMPTY" ]]; then
     echo "    (empty — correct)"
     pass "attention pane suppressed when no quarantined files"
 else
@@ -392,5 +476,10 @@ if [[ "$FAIL_COUNT" -eq 0 ]]; then
     exit 0
 else
     echo "SOME CHECKS FAILED — see details above"
+    # BLOCK-WORTHY: a failed check means the quarantine visibility flow is broken; passing would hide it.
+    pgai_emit_error_contract "verify_quarantine_visibility.checks_failed" \
+        "verify_quarantine_visibility: ${FAIL_COUNT} check(s) failed, ${PASS_COUNT} passed; fix what each FAIL line above names, then re-run." \
+        "bash '${_VQV_SELF}' --dev-tree '${DEV_TREE}' --kanban-root '${KANBAN_ROOT}'"
+    # CENSUS-ANCHOR: verify-quarantine-visibility-02
     exit 1
 fi

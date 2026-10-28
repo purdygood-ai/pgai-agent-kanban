@@ -17,6 +17,9 @@ WHAT THE ENTRY POINT PROMISES
 - each suite's runner writes its own findings file exactly as it does when
   run on its own, and the entry point adds a one-line ``<suite>.exit`` and a
   ``<suite>.log`` (the runner's stdout and stderr) per suite;
+- ``--help`` and the run's own output name where each suite's findings and
+  coverage files land and say that files an earlier run left there are
+  never read (each runner removes them before it starts);
 - the entry point's exit status is 0 only when both suites exit 0;
 - ``--coverage`` passes through to each runner's own coverage gate and
   nothing else -- the entry point never sets PGAI_TESTING_COVERAGE;
@@ -533,6 +536,49 @@ def test_help_exits_zero_and_describes_every_flag(tmp_path: pathlib.Path) -> Non
                  "<suite>.exit", "<suite>.log", "--no-scratch-sweep", "COVERAGE_FILE", "PGAI_TESTING_COVERAGE=1"):
         assert flag in result.stdout, f"--help does not mention {flag!r}\n" + _describe(result)
     assert not any(tree.stub_dir.iterdir()), "--help started a runner"
+
+
+def test_help_names_each_suites_evidence_location_and_that_earlier_files_are_not_read(
+    tmp_path: pathlib.Path,
+) -> None:
+    tree = _StubTree(tmp_path, "3")
+
+    result = tree.run("--help")
+
+    assert result.returncode == 0, _describe(result)
+    help_text = " ".join(result.stdout.split())
+    for text in (
+        f"temp root (currently {tree.temp_dir})",
+        "lint/findings-<suite>.json",
+        "lint/*_<suite>.json",
+        "coverage/<suite>.json",
+        "files from earlier runs are never read",
+    ):
+        assert text in help_text, f"--help does not say {text!r}\n" + _describe(result)
+
+
+@pytest.mark.parametrize("workers", ["1", "3"])
+def test_run_prints_each_suites_evidence_location_before_and_after_it_runs(
+    workers: str, tmp_path: pathlib.Path
+) -> None:
+    tree = _StubTree(tmp_path, workers)
+
+    result = tree.run()
+
+    assert result.returncode == 0, _describe(result)
+    lines = result.stdout.splitlines()
+    for suite in _SUITES:
+        findings = f"{tree.temp_dir}/lint/findings-{suite}.json"
+        coverage = f"{tree.temp_dir}/coverage/{suite}.json"
+        announce = [i for i, ln in enumerate(lines) if ln.startswith(f"{suite}: this run's evidence:")]
+        started = [i for i, ln in enumerate(lines) if ln.startswith(f"{suite}: started ")]
+        assert announce and started and announce[0] < started[0], (
+            f"the {suite} evidence location must print before the suite starts\n" + _describe(result)
+        )
+        assert findings in lines[announce[0]] and coverage in lines[announce[0]], lines[announce[0]]
+        assert "never read" in lines[announce[0]], lines[announce[0]]
+        exited = [ln for ln in lines if ln.startswith(f"{suite}: exit 0;")]
+        assert exited and findings in exited[0] and coverage in exited[0], _describe(result)
 
 
 @pytest.mark.parametrize(

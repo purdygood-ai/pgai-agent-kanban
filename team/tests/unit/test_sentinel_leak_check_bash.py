@@ -160,3 +160,42 @@ def test_functions_are_safe_under_strict_mode(tmp_path: pathlib.Path) -> None:
     )
     assert result.returncode == 0, result.stderr
     assert "survived" in result.stdout
+
+
+def test_each_unattributed_difference_is_one_element_of_the_found_array(
+    tmp_path: pathlib.Path,
+) -> None:
+    """PGAI_SENTINEL_LEAKS_FOUND names every difference as kind, path and
+    note, one element each -- what the runners turn into one finding each."""
+    root = _root_with_project(tmp_path)
+    removed = root / "projects" / "alpha" / "HALT"
+    removed.write_text("", encoding="utf-8")
+    added = root / "HALT"
+    snap = tmp_path / "presuite.snap"
+    result = run_bash(
+        tmp_path,
+        f"unset PGAI_AGENT_KANBAN_ROOT_PATH KANBAN_ROOT; source {_LIB} && "
+        f"pgai_sentinel_snapshot '{root}' > '{snap}' && rm -f '{removed}' && : > '{added}'; "
+        f"pgai_sentinel_leak_check '{root}' '{snap}' 2>/dev/null; echo \"RC=$?\"; "
+        "for e in \"${PGAI_SENTINEL_LEAKS_FOUND[@]}\"; do printf 'FOUND=%s\\n' \"$e\"; done",
+    )
+    found = sorted(
+        tuple(line.removeprefix("FOUND=").split("\t"))
+        for line in result.stdout.splitlines()
+        if line.startswith("FOUND=")
+    )
+    assert "RC=1" in result.stdout, result.stdout + result.stderr
+    assert found == sorted([("added", str(added), ""), ("removed", str(removed), "")]), result.stdout
+
+
+def test_a_clean_check_leaves_the_found_array_empty(tmp_path: pathlib.Path) -> None:
+    root = _root_with_project(tmp_path)
+    snap = tmp_path / "presuite.snap"
+    result = run_bash(
+        tmp_path,
+        f"unset PGAI_AGENT_KANBAN_ROOT_PATH KANBAN_ROOT; source {_LIB} && "
+        "PGAI_SENTINEL_LEAKS_FOUND=(stale) && "
+        f"pgai_sentinel_snapshot '{root}' > '{snap}' && "
+        f"pgai_sentinel_leak_check '{root}' '{snap}' && echo \"COUNT=${{#PGAI_SENTINEL_LEAKS_FOUND[@]}}\"",
+    )
+    assert "COUNT=0" in result.stdout, result.stdout + result.stderr

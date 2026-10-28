@@ -137,9 +137,10 @@ from typing import Callable, Optional, Union
 
 from pgai_agent_kanban.lib import ini
 from pgai_agent_kanban.lib.error_contract import format_error_contract
-from pgai_agent_kanban.lib.project_cfg import project_cfg_file, read_cfg_key
+from pgai_agent_kanban.lib.project_cfg import resolve_tiered_cfg_value
 from pgai_agent_kanban.ops.context import OpsContext
 from pgai_agent_kanban.ops.errors import IoError, OpsError, Refused
+from pgai_agent_kanban.overwatch.halt_provenance import installed_script_command
 
 __all__ = [
     "ACQUIRE_MAX_ATTEMPTS",
@@ -211,7 +212,8 @@ EXIT_HOLDER_NOT_RELEASED = 5
 #: stopping wake's own cleanup after its provider's process group is gone.
 FORCE_WAIT_MARGIN_SECONDS = 10
 
-_SCRIPT = "team/scripts/release-locks.sh"
+#: The operator script, relative to the installed ``<kanban root>/scripts/``.
+_SCRIPT = "release-locks.sh"
 _LOCK_SUFFIX = ".lock"
 
 _DIGITS_RE = re.compile(r"[0-9]+")
@@ -351,6 +353,15 @@ def _print_line(line: str) -> None:
 # ---------------------------------------------------------------------------
 # The provenance record
 # ---------------------------------------------------------------------------
+
+
+def _release_locks_command(kanban_root: os.PathLike | str, *args: str) -> str:
+    """The installed ``release-locks.sh`` under *kanban_root* with *args*, runnable as printed.
+
+    Every word is shell-quoted (``halt_provenance.installed_script_command``),
+    so a remedy built from it runs from any directory.
+    """
+    return installed_script_command(kanban_root, _SCRIPT, *args)
 
 
 def read_provenance(path: os.PathLike | str) -> str:
@@ -598,17 +609,15 @@ def stale_lock_reap_periods(ctx: OpsContext, project: str) -> int:
     """``[locks] stale_lock_reap_after_wake_periods`` for *project*, in wake periods.
 
     project.cfg (or a legacy PROJECT.cfg) wins over kanban.cfg; absent from
-    both, the default of :data:`DEFAULT_STALE_WAKE_PERIODS`. A value at the
-    tier that supplies it which is not a positive integer reads as the
-    default too -- a display of the threshold never refuses over it.
+    both, the default of :data:`DEFAULT_STALE_WAKE_PERIODS`. The walk is
+    :func:`~pgai_agent_kanban.lib.project_cfg.resolve_tiered_cfg_value`, the
+    same chain ``pp_stale_lock_reap_after_wake_periods`` reads in bash. A
+    value at the tier that supplies it which is not a positive integer reads
+    as the default too -- a display of the threshold never refuses over it.
     """
-    key = "stale_lock_reap_after_wake_periods"
-    raw = ""
-    cfg = project_cfg_file(ctx.project_root(project))
-    if cfg is not None:
-        raw = read_cfg_key(cfg, "locks", key)
-    if not raw:
-        raw = ini.read_line_value(ctx.kanban_root / "kanban.cfg", "locks", key) or ""
+    raw = resolve_tiered_cfg_value(
+        ctx.kanban_root, ctx.project_root(project), "locks", "stale_lock_reap_after_wake_periods"
+    ).value
     if not raw:
         return DEFAULT_STALE_WAKE_PERIODS
     if not _DIGITS_RE.fullmatch(raw) or int(raw) == 0:
@@ -664,30 +673,90 @@ def format_age_seconds(seconds: int) -> str:
     return f"{secs // 3600}h {(secs % 3600) // 60}m"
 
 
+#: The guard lock wake-batch.sh takes per (project, agent):
+#: ``wake-batch-<agent>-<project>.lock``, beside its ``.record``.
+_WAKE_BATCH_LOCK_PREFIX = "wake-batch-"
+#: The ``op`` families whose ``<family>:<agent>:<project>`` value names the
+#: project of a wake-batch lock: the record's and the step lock's.
+_WAKE_BATCH_OPS = ("wake-batch", "wake-batch-guard")
+
+
+def _wake_batch_lock_project(locks_dir: str, stem: str) -> str:
+    """The project the wake-batch lock *stem* belongs to, as its own records name it.
+
+    Reads the ``op`` field of ``<stem>.record`` and then of ``<stem>.lock``;
+    the first ``wake-batch:<agent>:<project>`` (or ``wake-batch-guard:...``)
+    value whose agent and project spell *stem* back gives the project. A
+    project name cannot hold ``:``, so the value is unambiguous where the
+    file name is not. ``""`` when neither file names one.
+    """
+    for path in (f"{locks_dir}/{stem}.record", f"{locks_dir}/{stem}{_LOCK_SUFFIX}"):
+        parts = lock_field(read_provenance(path), "op").split(":")
+        if (
+            len(parts) == 3
+            and parts[0] in _WAKE_BATCH_OPS
+            and parts[1]
+            and parts[2]
+            and stem == f"{_WAKE_BATCH_LOCK_PREFIX}{parts[1]}-{parts[2]}"
+        ):
+            return parts[2]
+    return ""
+
+
+def _project_dir_names(locks_dir: str) -> list[str]:
+    """Names of the project directories beside *locks_dir* (``<root>/projects/*/``), hidden ones left out."""
+    projects_dir = os.path.join(os.path.dirname(os.path.normpath(locks_dir)), "projects")
+    try:
+        return [e.name for e in os.scandir(projects_dir) if not e.name.startswith(".") and e.is_dir()]
+    except OSError:
+        return []
+
+
 def project_lock_files(locks_dir: str, project: str) -> list[str]:
     """Every lock file directly in *locks_dir* that belongs to *project*, in name order.
 
-    A lock belongs to a project when its name ends ``-<project>.lock`` or
+    A lock is a candidate when its name ends ``-<project>.lock`` or
     ``-<repo id>.lock`` (the project name with ``/`` read as ``_`` and every
-    character outside ``[A-Za-z0-9_-]`` dropped) -- the repo-wake and
-    overwatch lock names alike. Hidden files are not locks; an entry that
-    does not resolve to an existing file or directory (a dangling link) is
-    skipped. Returns ``<locks_dir>/<name>`` strings; empty when *locks_dir*
-    is absent.
+    character outside ``[A-Za-z0-9_-]`` dropped) -- the repo-wake, overwatch
+    and wake-batch lock names alike. A candidate that is really another
+    project's is left out, so ``beta`` never claims ``alpha-beta``'s locks:
+
+    * a ``wake-batch-<agent>-<name>.lock`` whose record (or its own
+      provenance) names its project in ``op`` belongs to that project only;
+    * otherwise, a name that also ends ``-<other>.lock`` for a longer
+      project directory under ``<locks_dir>/../projects/`` belongs to that
+      other project.
+
+    Hidden files are not locks; an entry that does not resolve to an
+    existing file or directory (a dangling link) is skipped. Returns
+    ``<locks_dir>/<name>`` strings; empty when *locks_dir* is absent.
+    ``pgai_lock_files_for_project`` (lock_provenance.sh) is the bash form.
     """
     repo_id = _repo_id(project)
-    suffixes = (f"-{project}{_LOCK_SUFFIX}", f"-{repo_id}{_LOCK_SUFFIX}")
+    owners = (project, repo_id)
     try:
         names = sorted(entry.name for entry in os.scandir(locks_dir))
     except OSError:
         return []
+    others = [name for name in _project_dir_names(locks_dir) if name not in owners]
     found = []
     for name in names:
         if name.startswith(".") or not name.endswith(_LOCK_SUFFIX):
             continue
         path = f"{locks_dir}/{name}"
-        if os.path.exists(path) and name.endswith(suffixes):
-            found.append(path)
+        stem = name[: -len(_LOCK_SUFFIX)]
+        matched = max((o for o in owners if stem.endswith(f"-{o}")), key=len, default=None)
+        if matched is None or not os.path.exists(path):
+            continue
+        if stem.startswith(_WAKE_BATCH_LOCK_PREFIX):
+            recorded = _wake_batch_lock_project(locks_dir, stem)
+            if recorded:
+                if recorded in owners:
+                    found.append(path)
+                continue
+        if any(len(other) > len(matched) and stem.endswith(f"-{other}") for other in others):
+            continue
+        found.append(path)
     return found
 
 
@@ -1356,8 +1425,8 @@ def release_lock(
         raise LockRefusal(
             "release_locks.release_required",
             "release-locks.sh: no lock was named to release.",
-            f"Run {_SCRIPT} with no flags to list every lock by name, then re-run: "
-            f"{_SCRIPT} --release repo-wake-my-app",
+            f"Run {_release_locks_command(ctx.kanban_root)} with no flags to list every lock by name, "
+            f"then re-run: {_release_locks_command(ctx.kanban_root, '--release', 'repo-wake-my-app')}",
             EXIT_USAGE,
         )
     names = [_lock_name(path) for path in _lock_files(locks_dir)]
@@ -1373,8 +1442,8 @@ def release_lock(
         raise LockRefusal(
             "release_locks.not_found",
             f"release-locks.sh: no lock matches '{typed}' under {locks_dir} ({candidates}).",
-            f"Run {_SCRIPT} with no flags to list every lock by name, then re-run with the full "
-            "name or an unambiguous prefix.",
+            f"Run {_release_locks_command(ctx.kanban_root)} with no flags to list every lock by name, "
+            "then re-run with the full name or an unambiguous prefix.",
             EXIT_NOT_FOUND,
         )
     if len(matches) > 1:
@@ -1410,7 +1479,7 @@ def release_lock(
             f"release-locks.sh: lock '{target_name}' is held by {holder}, which is still running; "
             "refusing to release it without --force. Its lock file was left in place.",
             "If the holder is wedged rather than doing real work, re-run with --force: "
-            f"{_SCRIPT} --release {target_name} --force.",
+            f"{_release_locks_command(ctx.kanban_root, '--release', target_name, '--force')}.",
             EXIT_HOLDER_ALIVE,
         )
 
@@ -1471,7 +1540,8 @@ def _release_dead_holder(
                     "descriptor, a holder in another pid namespace, or an acquirer mid-rename). Refusing "
                     "to release it without --force; its lock file was left in place.",
                     "If those processes are leftovers of a stopped chain rather than live work, re-run "
-                    f"with --force to signal them: {_SCRIPT} --release {name} --force.",
+                    f"with --force to signal them: "
+                    f"{_release_locks_command(ctx.kanban_root, '--release', name, '--force')}.",
                     EXIT_HOLDER_ALIVE,
                 )
             waited = _signal_orphan_holders(ctx, name, target, pid, holder, holders, emit, grace_seconds, probe_fd)
@@ -1534,7 +1604,7 @@ def _signal_orphan_holders(
             )
             remedy = (
                 f"Signal them from the account that owns them: kill -TERM {' '.join(holders)} -- then re-run "
-                f"{_SCRIPT} --release {name}."
+                f"{_release_locks_command(ctx.kanban_root, '--release', name)}."
             )
         else:
             message = (
@@ -1544,7 +1614,7 @@ def _signal_orphan_holders(
             )
             remedy = (
                 f"List the processes holding it: find -L /proc/[0-9]*/fd -maxdepth 1 -samefile {target} "
-                f"2>/dev/null -- stop them, then re-run {_SCRIPT} --release {name}."
+                f"2>/dev/null -- stop them, then re-run {_release_locks_command(ctx.kanban_root, '--release', name)}."
             )
         # BLOCK-WORTHY (docs/blocking-site-census.md): the override was asked
         # for but cannot be delivered to any process holding the flock, and
@@ -1559,7 +1629,7 @@ def _signal_orphan_holders(
     waited = 0
     while not _take_flock(probe_fd):
         if waited >= grace:
-            message, remedy = _not_released_wording(name, target, pid, holder, waited, probe_fd)
+            message, remedy = _not_released_wording(ctx.kanban_root, name, target, pid, holder, waited, probe_fd)
             # BLOCK-WORTHY (docs/blocking-site-census.md): the override was
             # delivered but the flock is still held after the grace; reporting
             # the lock released would seat a second holder beside them.
@@ -1609,10 +1679,10 @@ def _signal_live_holder(
             emit(
                 f"release-locks: the holder recorded for lock {name} let go of it before it could be "
                 "signalled; the lock may already belong to a new holder, so nobody was signalled. "
-                f"To act on the lock as it is now, re-run: {_SCRIPT} --release {name}"
+                f"To act on the lock as it is now, re-run: {_release_locks_command(ctx.kanban_root, '--release', name)}"
             )
             return LockRelease(name, target, "holder_let_go")
-        return _signal_and_wait(name, target, pid, holder, emit, grace, probe_fd)
+        return _signal_and_wait(ctx.kanban_root, name, target, pid, holder, emit, grace, probe_fd)
     finally:
         if probe_fd is not None:
             os.close(probe_fd)
@@ -1634,6 +1704,7 @@ def _holder_changed(probe_fd: int, pid: str, read_inode: Optional[int]) -> bool:
 
 
 def _signal_and_wait(
+    kanban_root: os.PathLike | str,
     name: str,
     target: pathlib.Path,
     pid: str,
@@ -1642,7 +1713,10 @@ def _signal_and_wait(
     grace: int,
     probe_fd: Optional[int],
 ) -> Optional[LockRelease]:
-    """The body of :func:`_signal_live_holder`, run while *probe_fd* is open."""
+    """The body of :func:`_signal_live_holder`, run while *probe_fd* is open.
+
+    *kanban_root* names the installed script in the refusal remedies.
+    """
     inode = os.fstat(probe_fd).st_ino if probe_fd is not None else _inode(target)
     try:
         _kill(int(pid), signal.SIGTERM)
@@ -1659,7 +1733,7 @@ def _signal_and_wait(
                 "be sent SIGTERM from this account (a pid owned by another user cannot be signalled "
                 "here); its lock file was left untouched.",
                 f"Signal the holder from the account that owns it: kill -TERM {pid} -- then re-run "
-                f"{_SCRIPT} --release {name} once it has exited.",
+                f"{_release_locks_command(kanban_root, '--release', name)} once it has exited.",
                 EXIT_HOLDER_NOT_RELEASED,
             )
         emit(
@@ -1692,7 +1766,7 @@ def _signal_and_wait(
             return LockRelease(name, target, "holder_exited", pid=pid, waited_seconds=waited)
         emit(f"release-locks: released lock {name} ({target}): holder pid {pid} let go of it {waited}s after SIGTERM")
         return LockRelease(name, target, "holder_let_go", pid=pid, waited_seconds=waited)
-    message, remedy = _not_released_wording(name, target, pid, holder, waited, probe_fd)
+    message, remedy = _not_released_wording(kanban_root, name, target, pid, holder, waited, probe_fd)
     # BLOCK-WORTHY (docs/blocking-site-census.md): the override was delivered
     # but not honoured within the grace -- the holder, or a process that
     # inherited its lock descriptor, still holds the flock, and reporting the
@@ -1703,13 +1777,20 @@ def _signal_and_wait(
 
 
 def _not_released_wording(
-    name: str, target: pathlib.Path, pid: str, holder: str, waited: int, probe_fd: Optional[int]
+    kanban_root: os.PathLike | str,
+    name: str,
+    target: pathlib.Path,
+    pid: str,
+    holder: str,
+    waited: int,
+    probe_fd: Optional[int],
 ) -> tuple[str, str]:
     """The message and remedy of the exit-5 refusal after the grace ran out.
 
     Two shapes: the recorded holder pid is itself still alive, or it has
     exited while other processes still hold the flock on the lock's original
-    inode (named when ``/proc`` shows them).
+    inode (named when ``/proc`` shows them). Each remedy names the installed
+    ``release-locks.sh`` under *kanban_root*.
     """
     if _pid_answers(pid) or probe_fd is None:
         return (
@@ -1717,9 +1798,11 @@ def _not_released_wording(
             "holder is alive and has not released it -- a wake may still be stopping its provider's "
             "process group, which it does before it releases its lock -- and its lock file was left "
             "untouched (removing a live holder's file would only seat a second chain beside it).",
-            f"Give a stopping wake time to finish, then re-run (it waits again): {_SCRIPT} --release "
-            f"{name} --force. Only if the holder is wedged and must go: kill -KILL {pid} -- then re-run "
-            f"{_SCRIPT} --release {name} (a dead holder's record is cleared without --force).",
+            "Give a stopping wake time to finish, then re-run (it waits again): "
+            f"{_release_locks_command(kanban_root, '--release', name, '--force')}. Only if the holder is "
+            f"wedged and must go: kill -KILL {pid} -- then re-run "
+            f"{_release_locks_command(kanban_root, '--release', name)} "
+            "(a dead holder's record is cleared without --force).",
         )
     others = _inode_holder_pids(probe_fd)
     named = f"pids {' '.join(others)}" if others else "pids not visible to this account"
@@ -1732,12 +1815,12 @@ def _not_released_wording(
     if others:
         remedy = (
             f"Stop the processes still holding it: kill -TERM {' '.join(others)} -- then re-run "
-            f"{_SCRIPT} --release {name}."
+            f"{_release_locks_command(kanban_root, '--release', name)}."
         )
     else:
         remedy = (
             f"List the processes still holding it: find /proc/[0-9]*/fd -lname '{target}*' 2>/dev/null "
-            f"-- stop them, then re-run {_SCRIPT} --release {name}."
+            f"-- stop them, then re-run {_release_locks_command(kanban_root, '--release', name)}."
         )
     return message, remedy
 

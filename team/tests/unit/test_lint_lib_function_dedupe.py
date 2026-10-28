@@ -10,10 +10,12 @@ Tests cover:
      implementations from an earlier defect are in place and the lint is satisfied.
 
   2. **Behavioral negative** (planted duplicate): inject two synthetic lib
-     files that both define the same function name and assert the lint exits 1
-     with a clear message naming the function and the files.  This is the proof
-     that the guard guards — without it, a silent scanner bug would make the
-     gate always green.
+     files that both define the same function name and assert the lint reports
+     it as a finding naming the function and the files, and exits 0 (quality
+     class); a direct command-line run prints the finding in the line shape
+     audit_coding_standards.sh's D01 check embeds, writes it to the
+     --findings-file and exits 0.  This is the proof that the guard guards —
+     without it, a silent scanner bug would make the gate always green.
 
   3. **Allow-list exempts provider-polymorphic pairs**: a synthetic lib dir
      containing two files that both define the same function, where both files
@@ -38,10 +40,15 @@ paths, no live kanban state mutations.
 from __future__ import annotations
 
 import importlib.util
+import json
+import subprocess
+import sys
 import textwrap
 from pathlib import Path
 
 import pytest
+
+from tests.fixtures.lint_findings import run_main
 
 
 # ---------------------------------------------------------------------------
@@ -118,19 +125,21 @@ def test_clean_real_lib_dir_produces_no_violations() -> None:
     )
 
 
-def test_clean_real_lib_dir_main_exits_zero() -> None:
-    """main() returns 0 when run against the real team/scripts/lib/ directory."""
+def test_clean_real_lib_dir_main_exits_zero(tmp_path: Path) -> None:
+    """main() returns 0 and records no finding for the real team/scripts/lib/."""
     if not _REAL_LIB_DIR.is_dir():
         pytest.skip(f"Real lib dir not found at {_REAL_LIB_DIR}; skipping.")
 
     # Deliberately exercises the real team/scripts/lib/ tree (not a
     # fixture): this is a live regression guard, not an isolated behavior a
     # fixture could stand in for.
-    exit_code = _lint.main(["--lib-dir", str(_REAL_LIB_DIR)])
+    exit_code, findings = run_main(
+        _lint.main, ["--lib-dir", str(_REAL_LIB_DIR)], tmp_path / "findings.json"
+    )
 
-    assert exit_code == 0, (
-        f"Expected lint main() to return 0 for the clean real lib dir, "
-        f"but got exit code {exit_code}."
+    assert exit_code == 0 and findings == [], (
+        f"Expected lint main() to return 0 with no finding for the clean real "
+        f"lib dir, but got exit code {exit_code} and findings {findings}."
     )
 
 
@@ -168,26 +177,56 @@ def test_planted_duplicate_triggers_violation(tmp_path: Path) -> None:
     )
 
 
-def test_planted_duplicate_main_exits_nonzero(tmp_path: Path) -> None:
-    """main() returns exit code 1 when the lib dir contains a duplicate function.
+def test_planted_duplicate_main_records_finding_and_exits_zero(tmp_path: Path) -> None:
+    """main() records a duplicated function as one finding and returns 0.
 
     This verifies the end-to-end integration: find_duplicate_functions() results
-    cause main() to return 1 (not 0 or 2).
+    reach main()'s --findings-file as one finding per duplicated name, and the
+    quality-class lint still returns 0 (not 1 or 2).
     """
     lib_dir = tmp_path / "lib"
     lib_dir.mkdir()
     _write_lib_sh(lib_dir / "a.sh", ["shared_func"])
     _write_lib_sh(lib_dir / "b.sh", ["shared_func"])
 
-    exit_code = _lint.main([
+    exit_code, findings = run_main(_lint.main, [
         "--lib-dir", str(lib_dir),
         "--allow-file", "__no_file_allowed__",  # empty effective allow-list
-    ])
+    ], tmp_path / "findings.json")
 
-    assert exit_code == 1, (
-        f"Expected lint main() to return 1 for a lib dir with a duplicated "
-        f"function, but got exit code {exit_code}."
+    assert exit_code == 0, (
+        f"Expected lint main() to return 0 for a lib dir with a duplicated "
+        f"function (quality class), but got exit code {exit_code}."
     )
+    assert len(findings) == 1, findings
+    finding = findings[0]
+    assert finding["lint"] == "lib_function_dedupe" and finding["severity"] == "quality"
+    assert finding["function"] == "shared_func", finding
+    assert [Path(f).name for f in finding["files"]] == ["a.sh", "b.sh"], finding
+    assert "lint_lib_function_dedupe.py" in finding["remedy"], finding
+
+
+def test_direct_run_prints_writes_and_exits_zero(tmp_path: Path) -> None:
+    """A command-line run prints the finding in the line shape the coding-
+    standards audit embeds, writes it to --findings-file, and exits 0."""
+    lib_dir = tmp_path / "lib"
+    lib_dir.mkdir()
+    _write_lib_sh(lib_dir / "a.sh", ["shared_func"])
+    _write_lib_sh(lib_dir / "b.sh", ["shared_func"])
+    findings_path = tmp_path / "out" / "findings.json"
+
+    proc = subprocess.run(
+        [sys.executable, str(_LINT_SCRIPT), "--lib-dir", str(lib_dir),
+         "--findings-file", str(findings_path)],
+        capture_output=True,
+        text=True,
+    )
+
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "  shared_func() — defined in: a.sh, b.sh" in proc.stdout, proc.stdout
+    assert "error:   lint.lib-function-dedupe" in proc.stderr, proc.stderr
+    findings = json.loads(findings_path.read_text(encoding="utf-8"))
+    assert [f["function"] for f in findings] == ["shared_func"], findings
 
 
 def test_allow_list_suppresses_duplicate_for_allowed_pair(tmp_path: Path) -> None:

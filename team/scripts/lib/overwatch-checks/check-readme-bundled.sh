@@ -49,6 +49,10 @@
 #
 # --dry-run: scans and logs findings but does NOT modify task status or file bugs.
 
+# overwatch_registered_projects: the shared projects.cfg reader.
+# shellcheck source=../overwatch_config.sh
+source "$(dirname "${BASH_SOURCE[0]}")/../overwatch_config.sh"
+
 # ---------------------------------------------------------------------------
 # _crb_resolve_env
 # Resolve KANBAN_ROOT and OVERWATCH_PROJECT from the environment.
@@ -68,14 +72,9 @@ _crb_resolve_env() {
         # On a multi-project install the caller MUST set OVERWATCH_PROJECT; this
         # path is only safe for single-project installs.
         local _all_projects=""
-        if declare -f projects_cfg_list >/dev/null 2>&1; then
-            _all_projects="$(projects_cfg_list 2>/dev/null)"
-        else
-            local _cfg="${KANBAN_ROOT}/projects.cfg"
-            _all_projects="$(awk '/^\[project:[a-zA-Z0-9_-]+\]/{match($0,/\[project:([a-zA-Z0-9_-]+)\]/,a);print a[1]}' "$_cfg" 2>/dev/null)"
-        fi
+        _all_projects="$(overwatch_registered_projects)"
         local _project_count
-        _project_count="$(echo "${_all_projects}" | grep -c '[^[:space:]]' 2>/dev/null || echo 0)"
+        _project_count="$(echo "${_all_projects}" | grep -c '[^[:space:]]' 2>/dev/null)" || _project_count=0
         if [[ "${_project_count}" -gt 1 ]]; then
             echo "check-readme-bundled: ERROR: OVERWATCH_PROJECT is not set and multiple projects are registered." >&2
             echo "  Set OVERWATCH_PROJECT to the target project name before running this check." >&2
@@ -115,9 +114,30 @@ _crb_next_bug_number() {
 }
 
 # ---------------------------------------------------------------------------
+# _crb_load_md_field
+# Make read_md_field (../md_field.sh, the one bash section reader) available,
+# sourcing it from this file's own lib directory on first use unless the
+# caller already defines it. A pp_run_ops the caller defined before the
+# load (its own copy, or a test wrapper) stays the active one: md_field.sh
+# leaves it in place, and it is also saved and put back here. Returns 0
+# when read_md_field is defined.
+# ---------------------------------------------------------------------------
+_crb_load_md_field() {
+    declare -F read_md_field >/dev/null 2>&1 && return 0
+    local runner=""
+    runner="$(declare -f pp_run_ops 2>/dev/null)" || runner=""
+    # shellcheck source=../md_field.sh
+    source "$(dirname "${BASH_SOURCE[0]}")/../md_field.sh" || return 1
+    [[ -n "${runner}" ]] && eval "${runner}"
+    declare -F read_md_field >/dev/null 2>&1
+}
+
+# ---------------------------------------------------------------------------
 # _crb_extract_inputs_section <readme_file>
-# Echo the contents of the ## Inputs section from a task README.md.
-# Echoes one line per item. May be empty if no Inputs section exists.
+# Echo the contents of the ## Inputs section from a task README.md, one line
+# per item, with the blank lines around the body removed. Empty when the
+# README or its Inputs section is missing. The section is read by
+# read_md_field: the next "##" heading that is not "###" ends it.
 # ---------------------------------------------------------------------------
 _crb_extract_inputs_section() {
     local readme_file="$1"
@@ -125,16 +145,14 @@ _crb_extract_inputs_section() {
         return 0
     fi
 
-    awk '
-        /^## Inputs$/ { found=1; next }
-        found && /^## / { exit }
-        found { print }
-    ' "${readme_file}"
+    _crb_load_md_field || return 0
+    read_md_field "${readme_file}" Inputs 2>/dev/null || true
 }
 
 # ---------------------------------------------------------------------------
 # _crb_extract_task_state <status_file>
-# Echo the State field from a task status.md, upper-cased.
+# Echo the State field from a task status.md -- the first non-blank line of
+# the section, read by read_md_field -- with whitespace removed, upper-cased.
 # Echoes "UNKNOWN" if not found or status file missing.
 # ---------------------------------------------------------------------------
 _crb_extract_task_state() {
@@ -144,12 +162,12 @@ _crb_extract_task_state() {
         return 0
     fi
 
-    local state
-    state="$(awk '
-        /^## State$/ { found=1; next }
-        found && /^## / { exit }
-        found && /[^[:space:]]/ { print; exit }
-    ' "${status_file}" | tr -d '[:space:]' | tr '[:lower:]' '[:upper:]')"
+    local state=""
+    if _crb_load_md_field; then
+        state="$(read_md_field "${status_file}" State 2>/dev/null)" || state=""
+    fi
+    state="${state%%$'\n'*}"
+    state="$(printf '%s' "${state}" | tr -d '[:space:]' | tr '[:lower:]' '[:upper:]')"
 
     if [[ -z "${state}" ]]; then
         echo "UNKNOWN"
@@ -185,6 +203,22 @@ _crb_input_is_bad() {
 
     return 1
 }
+
+# ---------------------------------------------------------------------------
+# _crb_mark_status_wont_do <status_file> <bad_input> <bug_num> <bug_file> <detected_at>
+# Rewrite the PM task's status.md in place to WONT-DO: State, Summary,
+# Needs Human and Blocked Reason (added after ## Blockers when absent), as
+# pgai_agent_kanban.overwatch.pm_task_wont_do's docstring describes.
+# Exits 0 when rewritten; exits 1 with one stderr line when the file cannot
+# be read (left unchanged) or written. Runs in a subshell that loads this
+# file's own lib directory's pp_run_ops, so a caller's definition never
+# answers for the status file.
+# ---------------------------------------------------------------------------
+_crb_mark_status_wont_do() (
+    # shellcheck source=../pp_run_ops.sh
+    source "$(dirname "${BASH_SOURCE[0]}")/../pp_run_ops.sh" || exit 1
+    pp_run_ops pgai_agent_kanban.overwatch.pm_task_wont_do -- "$1" "$2" "$3" "$4" "$5"
+)
 
 # ---------------------------------------------------------------------------
 # _crb_do_remediate
@@ -302,82 +336,9 @@ EOF
     fi
 
     # Update PM task status.md: State -> WONT-DO, add Blocked Reason
-    # Use Python for atomic rewrite (same pattern as other checks)
     local update_exit=0
-    python3 - "${task_status}" "${task_id}" "${bad_input}" "${bug_num}" "${bug_file}" "${detected_at}" <<'PY' || update_exit=$?
-import pathlib, re, sys
-
-status_path = pathlib.Path(sys.argv[1])
-task_id     = sys.argv[2]
-bad_input   = sys.argv[3]
-bug_num     = sys.argv[4]
-bug_file    = sys.argv[5]
-detected_at = sys.argv[6]
-
-try:
-    text = status_path.read_text()
-except OSError as e:
-    raise SystemExit(f"Cannot read status file: {e}")
-
-new_summary = (
-    f"PM task marked WONT-DO by OVERWATCH check-readme-bundled at {detected_at}: "
-    f"input path points at a README.md or templates/ file, not a valid requirements bundle. "
-    f"Bug BUG-{bug_num} filed. Offending input: {bad_input}"
-)
-
-blocked_reason = (
-    f"Input path points at a README.md or templates/ file: {bad_input}. "
-    f"This is not a valid requirements bundle. "
-    f"Bug BUG-{bug_num} filed at {bug_file}."
-)
-
-# Section boundary: the heading line, then body lines none of which starts
-# with "##" (the boundary set_block in wake_task_state.sh splices with), so an
-# empty body is never read as running into the next section. The separator
-# after the body is re-emitted as found.
-def _section_pattern(heading):
-    return rf'(^## {re.escape(heading)}[^\S\n]*)((?:\n(?!##)[^\n]*)*?)(\n+##|\n*\Z)'
-
-def replace_block(text, heading, new_body):
-    text_new, n = re.subn(
-        _section_pattern(heading),
-        lambda m: m.group(1) + "\n" + new_body.strip() + (m.group(3) or "\n"),
-        text,
-        flags=re.M,
-    )
-    if n == 0:
-        # Field absent — skip silently
-        return text
-    return text_new
-
-new_text = replace_block(text,     "State",          "WONT-DO")
-new_text = replace_block(new_text, "Summary",        new_summary)
-new_text = replace_block(new_text, "Needs Human",    "no")
-
-# Inject Blocked Reason: insert after "## Blockers" if it exists,
-# otherwise append at end. If "## Blocked Reason" already exists, replace it.
-if re.search(r'^## Blocked Reason\s*$', new_text, flags=re.M):
-    new_text = replace_block(new_text, "Blocked Reason", blocked_reason)
-elif re.search(r'^## Blockers\s*$', new_text, flags=re.M):
-    new_text = re.sub(
-        _section_pattern("Blockers"),
-        lambda m: m.group(1) + m.group(2) + f"\n\n## Blocked Reason\n{blocked_reason.strip()}" + (m.group(3) or "\n"),
-        new_text,
-        flags=re.M,
-        count=1,
-    )
-else:
-    # Append Blocked Reason at end
-    new_text = new_text.rstrip() + f"\n\n## Blocked Reason\n{blocked_reason.strip()}\n"
-
-# Normalize: collapse 3+ consecutive blank lines to 2
-new_text = re.sub(r'\n\n\n+', '\n\n', new_text)
-
-try:
-    status_path.write_text(new_text)
-except OSError as e:
-    raise SystemExit(f"Failed to write status file: {e}")
-PY
+    _crb_mark_status_wont_do "${task_status}" "${bad_input}" "${bug_num}" "${bug_file}" "${detected_at}" \
+        || update_exit=$?
 
     if (( update_exit != 0 )); then
         echo "check-readme-bundled: status update failed for ${task_id}" >&2

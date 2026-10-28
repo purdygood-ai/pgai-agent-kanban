@@ -60,7 +60,7 @@
 # Reproduces team/demos/helloworld-demo/README.md's setup and run steps
 # without operator action, then drives the resulting tickets to completion:
 #
-#   1. Stands up a throwaway kanban root under $PGAI_AGENT_KANBAN_TEMP_DIR
+#   1. Stands up a throwaway kanban root under the framework temp root
 #      (via team/scripts/harness/lib/throwaway-root.sh) and a throwaway
 #      scratch git repo inside that same space (the demo's "make a local
 #      scratch repo" step).
@@ -179,8 +179,8 @@
 # REPEATABILITY
 # ===========================================================================
 # Every invocation creates a brand-new throwaway root via
-# harness_new_throwaway_root (mktemp -d under
-# $PGAI_AGENT_KANBAN_TEMP_DIR/harness/helloworld-flow-check/), so a second
+# harness_new_throwaway_root (mktemp -d under <framework temp
+# root>/harness/helloworld-flow-check/), so a second
 # consecutive run never collides with the first and needs no manual cleanup.
 # Nothing under the operator's live $PGAI_AGENT_KANBAN_ROOT_PATH is read or
 # written by this script.
@@ -188,10 +188,10 @@
 # ===========================================================================
 # ENVIRONMENT
 # ===========================================================================
-#   PGAI_AGENT_KANBAN_TEMP_DIR   Scratch root for the throwaway kanban root
-#                                and scratch git repo (default:
-#                                pgai_kanban_tmp under the system temp dir —
-#                                see team/scripts/lib/temp.sh).
+#   PGAI_AGENT_KANBAN_TEMP_DIR   Overrides the framework temp root that holds
+#                                the throwaway kanban root and scratch git
+#                                repo (default: kanban.cfg [paths], resolved
+#                                by team/scripts/lib/temp.sh).
 #
 set -euo pipefail
 
@@ -204,10 +204,31 @@ TEAM_DIR="${REPO_ROOT}/team"
 
 # shellcheck source=../lib/script_common.sh
 source "${SCRIPT_DIR}/../lib/script_common.sh"
+# The temp root comes from the shared wrapper (scripts/lib/temp.sh, one
+# directory up in the repo and the installed layout alike), loaded before
+# throwaway-root.sh so a missing copy refuses here, naming its path, before
+# any throwaway root is built.
+_HELLOWORLD_TEMP_SH="$(cd "${SCRIPT_DIR}/.." && pwd)/lib/temp.sh"
+if [[ ! -f "$_HELLOWORLD_TEMP_SH" ]]; then
+  # shellcheck source=../lib/error_contract.sh
+  source "${SCRIPT_DIR}/../lib/error_contract.sh"
+  # BLOCK-WORTHY: no temp root means no throwaway root; nothing was written.
+  # Exit 1 is this harness's setup-failure code.
+  pgai_emit_error_contract "helloworld-flow-check.temp-sh-missing" \
+    "helloworld-flow-check.sh needs the temp-root wrapper at ${_HELLOWORLD_TEMP_SH} and it does not exist; no throwaway root was built." \
+    "ls -l '${_HELLOWORLD_TEMP_SH}'"
+  # CENSUS-ANCHOR: helloworld-flow-check-temp-sh-missing-01
+  exit 1
+fi
+# shellcheck source=../lib/temp.sh
+source "$_HELLOWORLD_TEMP_SH"
+unset _HELLOWORLD_TEMP_SH
 # shellcheck source=lib/throwaway-root.sh
 source "${SCRIPT_DIR}/lib/throwaway-root.sh"
 # shellcheck source=../lib/project_paths.sh
 source "${TEAM_DIR}/scripts/lib/project_paths.sh"
+# shellcheck source=../lib/pp_run_ops.sh
+source "${TEAM_DIR}/scripts/lib/pp_run_ops.sh"
 # shellcheck source=../lib/wake_task_state.sh
 source "${TEAM_DIR}/scripts/lib/wake_task_state.sh"
 
@@ -223,7 +244,8 @@ log() {
 # ---------------------------------------------------------------------------
 GOLDEN_DIR="${TEAM_DIR}/tests/fixtures/helloworld-flow"
 OUTCOME_NAMES=(decompose verify ship)
-TEMP_ROOT="${PGAI_AGENT_KANBAN_TEMP_DIR:-/tmp/pgai_kanban_tmp}"
+# The framework temp root (pgai_temp_dir), scrubbed from captured outcomes.
+TEMP_ROOT="$(pgai_temp_dir)"
 _NORMALIZE_PY="${SCRIPT_DIR}/lib/normalize_baseline_text.py"
 
 # Delegates to the shared normalizer (team/scripts/harness/lib/
@@ -467,9 +489,16 @@ REPO_PATH="${ROOT}/scratch-repo/pgai-helloworld-src"
 # $KANBAN_ROOT/pgai_agent_kanban/cm/*.py — the live-install layout install.sh
 # deploys alongside a real kanban root. A throwaway root needs the same
 # layout seeded, or those scripts fail with "can't open file ...read_state_
-# field.py". Mirrors engine-behavior-baseline.sh's capture_ship_summary.
-mkdir -p "${ROOT}/pgai_agent_kanban/cm"
+# field.py". read_state_field.py reads sections through task_status.py, so
+# that module and the lib modules it imports are seeded too. Mirrors
+# engine-behavior-baseline.sh's capture_ship_summary.
+mkdir -p "${ROOT}/pgai_agent_kanban/cm" "${ROOT}/pgai_agent_kanban/lib"
 cp "${TEAM_DIR}/pgai_agent_kanban/cm/"*.py "${ROOT}/pgai_agent_kanban/cm/"
+cp "${TEAM_DIR}/pgai_agent_kanban/task_status.py" "${ROOT}/pgai_agent_kanban/"
+cp "${TEAM_DIR}/pgai_agent_kanban/lib/atomic_write.py" \
+   "${TEAM_DIR}/pgai_agent_kanban/lib/error_contract.py" \
+   "${TEAM_DIR}/pgai_agent_kanban/lib/markdown_fence.py" \
+   "${ROOT}/pgai_agent_kanban/lib/"
 
 log "throwaway root: ${ROOT}"
 log "scratch repo:   ${REPO_PATH}"
@@ -535,54 +564,11 @@ TASKS_DIR="${PROJECT_ROOT}/tasks"
 QUEUES_DIR="${TASKS_DIR}/queues"
 PLAN_JSON="${ROOT}/plan.json"
 
-python3 - "$PLAN_JSON" "$PROJECT_NAME" "$VERSION" "$REPO_PATH" "$DEPOSITED_INTAKE_PATH" <<'PY'
-import json
-import sys
-
-plan_path, project_name, version, repo_path, requirements_path = sys.argv[1:6]
-
-plan = {
-    "project_name": project_name,
-    "workflow_type": "release",
-    "test_required": "true",
-    "target_version": version,
-    "human_approval_required": "auto",
-    "requirements_path": requirements_path,
-    "tasks": [
-        {
-            "sequence": 1,
-            "slug": "hello-world-script",
-            "title": "Implement hello.py and test_hello.py",
-            "role": "CODER",
-            "working_directory": repo_path,
-            "git_repo": "none",
-            "source_branch": "none",
-            "goal": (
-                "Ship hello.py (prints exactly 'Hello, World!') and "
-                "test_hello.py (asserts stdout equality) per the intake doc."
-            ),
-            "inputs": [requirements_path],
-            "context_paths": [],
-            "required_output": "hello.py and test_hello.py in the repo root.",
-            "constraints": [
-                "No argparse, logging, config files, or dependencies beyond "
-                "the standard library.",
-            ],
-            "acceptance_criteria": [
-                "python3 hello.py outputs exactly 'Hello, World!'",
-                "python3 -m pytest test_hello.py -v exits 0",
-                "test asserts stdout equality to 'Hello, World!\\n', not a substring",
-                "python3 -m py_compile hello.py compiles clean",
-            ],
-            "depends_on": [],
-            "notes": "Deterministic content fixed by the intake doc; see harness header.",
-        }
-    ],
-}
-
-with open(plan_path, "w", encoding="utf-8") as fh:
-    json.dump(plan, fh, indent=2)
-PY
+# The plan is fixed by the intake doc; pgai_agent_kanban.testing.helloworld_plan
+# owns its content and writes it to PLAN_JSON.
+pp_run_ops pgai_agent_kanban.testing.helloworld_plan \
+  "$PLAN_JSON" "$PROJECT_NAME" "$VERSION" "$REPO_PATH" "$DEPOSITED_INTAKE_PATH" \
+  || fail_setup "could not write the decomposition plan to ${PLAN_JSON}"
 
 set +e
 MATERIALIZE_OUTPUT="$(

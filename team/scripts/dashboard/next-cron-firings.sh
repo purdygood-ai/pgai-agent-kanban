@@ -71,6 +71,8 @@
 #
 # Environment variables:
 #   PGAI_AGENT_KANBAN_ROOT_PATH  Kanban root override
+#   PGAI_CRONTAB_CMD             Command run as "<cmd> -l" to read the
+#                                crontab; unset or empty means 'crontab'
 #   NO_COLOR                            Set non-empty to disable colors
 #   TERM=dumb                           Also disables colors
 
@@ -175,7 +177,7 @@ fi
 # Read crontab (non-zero exit means no crontab installed — treat as empty)
 # ---------------------------------------------------------------------------
 CRONTAB_TEXT=""
-CRONTAB_TEXT=$(crontab -l 2>/dev/null) || CRONTAB_TEXT=""
+CRONTAB_TEXT=$("${PGAI_CRONTAB_CMD:-crontab}" -l 2>/dev/null) || CRONTAB_TEXT=""
 
 # ---------------------------------------------------------------------------
 # Capture a single reference timestamp so all per-agent computations in this

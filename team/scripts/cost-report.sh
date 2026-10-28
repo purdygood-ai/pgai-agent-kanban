@@ -11,8 +11,8 @@
 # New code should use metrics-report.sh directly.  cost-report.sh is retained
 # for backward compatibility.
 #
-# Reads roll-up files produced by team/pm-agent/aggregate_tokens.py and
-# pricing data from team/scripts/lib/token_pricing.json to produce
+# Reads roll-up files produced by pm-agent/aggregate_tokens.py and
+# pricing data from the kanban's scripts/lib/token_pricing.json to produce
 # human-readable or CSV cost reports.
 #
 # USAGE:
@@ -55,8 +55,11 @@
 #   aggregate_tokens.py to build it on demand, then produces the report.
 #
 # PRICING:
-#   Reads team/scripts/lib/token_pricing.json from the project's dev_tree_path
-#   (read from project.cfg) or falls back to the kanban root's copy.
+#   Reads the kanban's own pricing table, the one aggregate_tokens.py prices
+#   with: <kanban root>/scripts/lib/token_pricing.json, else the copy beside
+#   this script's tree (team/scripts/lib/ in a source checkout). A project's
+#   dev_tree_path is never read, so every project gets the comparison. With
+#   no table the comparison is left out and a warning names the expected path.
 #   Subscription comparison block values come from the "subscriptions" key.
 #   Dollar amounts are never hardcoded in this script.
 #
@@ -91,7 +94,7 @@ source "$(dirname "${BASH_SOURCE[0]}")/lib/env_bootstrap.sh"
 # this file's header (line 2 up to the "set -euo pipefail" line).
 #
 # For a missing roll-up the report runs the aggregator beside this script
-# (../pm-agent/aggregate_tokens.py), else the project's dev tree copy.
+# (../pm-agent/aggregate_tokens.py), else the kanban root's pm-agent/ copy.
 # ---------------------------------------------------------------------------
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib/pp_run_ops.sh

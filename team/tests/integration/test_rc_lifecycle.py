@@ -42,6 +42,7 @@ from typing import Optional
 
 import pytest
 from tests.fixtures.binary_guard import require_binary
+from tests.fixtures.section_reader_modules import copy_section_reader_modules
 
 
 @pytest.fixture(autouse=True)
@@ -254,6 +255,7 @@ def _build_kanban_root_for_rc(
         (cm_py_dir / py_file.name).write_text(
             py_file.read_text(encoding="utf-8"), encoding="utf-8"
         )
+    copy_section_reader_modules(cm_py_dir.parent)
 
     return root
 
@@ -382,6 +384,7 @@ def _add_tester_task(
     recommendation: str = "PASS",
     systemic_risk: str = "low",
     task_id_suffix: str = "001",
+    blockers: Optional[str] = None,
 ) -> pathlib.Path:
     """Add a synthetic TESTER task folder to the project's tasks directory.
 
@@ -403,6 +406,8 @@ def _add_tester_task(
                          lexicographic/creation order — this is how RCs that
                          are cancelled and re-cut end up with multiple TESTER
                          attempts (roles/PM.md "RC immutability").
+        blockers:       When given, status.md carries it as ``## Blockers``
+                         (a BLOCKED task's block cause); omitted otherwise.
 
     Returns:
         pathlib.Path — the created task directory.
@@ -420,10 +425,12 @@ def _add_tester_task(
         encoding="utf-8",
     )
 
+    blockers_section = f"\n## Blockers\n{blockers}\n" if blockers is not None else ""
     (task_dir / "status.md").write_text(
         f"# Status\n\n"
         f"## State\n{state}\n\n"
-        f"## Summary\nIntegration test synthetic TESTER task.\n",
+        f"## Summary\nIntegration test synthetic TESTER task.\n"
+        f"{blockers_section}",
         encoding="utf-8",
     )
 
@@ -460,7 +467,7 @@ class TestFullRCLifecycleLocalOnly:
         requirements of cm-open-rc.sh, but the RC branch itself is NOT pushed there.
         """
         version = "v0.1.0"
-        project_name = "lifecycle_test"
+        project_name = "lifecycle-test"
 
         bare_remote = tmp_path / "bare_remote.git"
         repo_path = tmp_path / "dev_repo"
@@ -520,7 +527,7 @@ class TestFullRCLifecycleLocalOnly:
         """
         import re as _re
         version = "v0.2.0"
-        project_name = "state_clear_test"
+        project_name = "state-clear-test"
 
         bare_remote = tmp_path / "bare_remote.git"
         repo_path = tmp_path / "dev_repo"
@@ -574,7 +581,7 @@ class TestFullRCLifecycleLocalOnly:
         import re as _re
         version = "v0.2.0"
         prior_last_released = "v0.1.0"
-        project_name = "last_released_preserve_test"
+        project_name = "last-released-preserve-test"
 
         bare_remote = tmp_path / "bare_remote.git"
         repo_path = tmp_path / "dev_repo"
@@ -645,7 +652,7 @@ class TestFullRCLifecycleLocalOnly:
         """
         import re as _re
         version = "v0.1.0"
-        project_name = "last_released_fresh_test"
+        project_name = "last-released-fresh-test"
 
         bare_remote = tmp_path / "bare_remote.git"
         repo_path = tmp_path / "dev_repo"
@@ -689,7 +696,7 @@ class TestFullRCLifecycleLocalOnly:
         present on main's working tree after cm-release.sh completes.
         """
         version = "v0.3.0"
-        project_name = "coder_reachable_test"
+        project_name = "coder-reachable-test"
 
         bare_remote = tmp_path / "bare_remote.git"
         repo_path = tmp_path / "dev_repo"
@@ -733,7 +740,7 @@ class TestFullRCLifecycleLocalOnly:
         """
         version_a = "v0.4.0"
         version_b = "v0.5.0"
-        project_name = "double_open_test"
+        project_name = "double-open-test"
 
         bare_remote = tmp_path / "bare_remote.git"
         repo_path = tmp_path / "dev_repo"
@@ -781,7 +788,7 @@ class TestBranchPrefixIsolation:
         carry the prefix.
         """
         version = "v0.1.0"
-        project_name = "prefix_test"
+        project_name = "prefix-test"
         prefix = "ai_"
 
         bare_remote = tmp_path / "bare_remote.git"
@@ -828,7 +835,7 @@ class TestBranchPrefixIsolation:
         the prefixed RC branch must be gone and the release tag must exist.
         """
         version = "v0.2.0"
-        project_name = "prefix_release_test"
+        project_name = "prefix-release-test"
         prefix = "ai_"
 
         bare_remote = tmp_path / "bare_remote.git"
@@ -904,7 +911,7 @@ class TestIdempotentRelease:
         main being deleted.
         """
         version = "v0.1.0"
-        project_name = "idempotent_test"
+        project_name = "idempotent-test"
 
         bare_remote = tmp_path / "bare_remote.git"
         repo_path = tmp_path / "dev_repo"
@@ -966,7 +973,7 @@ class TestLocalOnlyVsPushBehavior:
         must NOT appear on the bare remote.
         """
         version = "v0.1.0"
-        project_name = "local_only_test"
+        project_name = "local-only-test"
 
         bare_remote = tmp_path / "bare_remote.git"
         repo_path = tmp_path / "dev_repo"
@@ -1008,7 +1015,7 @@ class TestLocalOnlyVsPushBehavior:
         does not need to be (and must not be attempted to be) pushed to the remote.
         """
         version = "v0.2.0"
-        project_name = "local_only_release_test"
+        project_name = "local-only-release-test"
 
         bare_remote = tmp_path / "bare_remote.git"
         repo_path = tmp_path / "dev_repo"
@@ -1056,7 +1063,7 @@ class TestLocalOnlyVsPushBehavior:
         bare remote after cm-open-rc.sh completes.
         """
         version = "v0.1.0"
-        project_name = "push_test"
+        project_name = "push-test"
 
         bare_remote = tmp_path / "bare_remote.git"
         repo_path = tmp_path / "dev_repo"
@@ -1093,7 +1100,7 @@ class TestLocalOnlyVsPushBehavior:
         real network access.
         """
         version = "v0.1.0"
-        project_name = "push_release_test"
+        project_name = "push-release-test"
 
         bare_remote = tmp_path / "bare_remote.git"
         repo_path = tmp_path / "dev_repo"
@@ -1156,7 +1163,7 @@ class TestTesterVerificationGate:
         verification gate.
         """
         version = "v0.1.0"
-        project_name = "tester_pass_test"
+        project_name = "tester-pass-test"
 
         bare_remote = tmp_path / "bare_remote.git"
         repo_path = tmp_path / "dev_repo"
@@ -1189,17 +1196,20 @@ class TestTesterVerificationGate:
             f"stdout: {result.stdout}"
         )
 
-    def test_release_halts_when_tester_is_blocked(
+    def test_release_requeues_verification_when_tester_is_blocked(
         self, tmp_path: pathlib.Path
     ) -> None:
-        """When TESTER state is BLOCKED, cm-release.sh must halt and not ship.
+        """When TESTER state is BLOCKED, cm-release.sh requeues verification
+        once and ships nothing, without a HALT.
 
-        A BLOCKED TESTER task means verification could not complete.  The CM
-        script must refuse to ship and create a HALT file, leaving the dev tree
-        in its pre-release state (no tag, RC branch still exists).
+        A BLOCKED TESTER task means verification could not complete. The
+        release returns the task to BACKLOG with its block cause, records the
+        RC's one verification retry, cuts no tag and exits 4 -- the release
+        waits on that task rather than stopping the project.
         """
         version = "v0.1.0"
-        project_name = "tester_blocked_test"
+        project_name = "tester-blocked-test"
+        block_cause = "The suite runner could not start: no python3 venv."
 
         bare_remote = tmp_path / "bare_remote.git"
         repo_path = tmp_path / "dev_repo"
@@ -1215,45 +1225,56 @@ class TestTesterVerificationGate:
         )
         _simulate_coder_work(repo_path, f"rc/{version}")
 
-        # Add a TESTER task with BLOCKED state.
-        _add_tester_task(kanban_root, project_name, version, state="BLOCKED")
+        # Add a TESTER task with BLOCKED state and a recorded block cause.
+        task_dir = _add_tester_task(
+            kanban_root, project_name, version, state="BLOCKED", blockers=block_cause,
+        )
 
         result = _run_cm_script(
             _RELEASE_SCRIPT, [],
             kanban_root, project_name, repo_root=repo_path,
         )
-        assert result.returncode != 0, (
-            "cm-release.sh must exit non-zero when TESTER state is BLOCKED.\n"
-            f"stdout: {result.stdout}\nstderr: {result.stderr}"
+        out = f"stdout: {result.stdout}\nstderr: {result.stderr}"
+        assert result.returncode == 4, (
+            f"cm-release.sh must exit 4 (waiting on requeued verification) when TESTER is BLOCKED.\n{out}"
         )
+        assert "REQUEUE-VERIFICATION" in result.stdout, out
 
         # The release tag must NOT have been created.
         assert not _git_tag_exists(repo_path, version), (
-            f"Release tag '{version}' was created despite TESTER being BLOCKED.\n"
-            f"stdout: {result.stdout}\nstderr: {result.stderr}"
+            f"Release tag '{version}' was created despite TESTER being BLOCKED.\n{out}"
         )
 
-        # A HALT file must have been written, scoped to this project only —
-        # cm-release.sh writes projects/<name>/HALT, never the global
-        # sentinel (see team/tests/integration/test_cm_release_synthetic.py's
-        # TestHaltScopeRecurrence for the regression this scoping fixes).
-        halt_file = kanban_root / "projects" / project_name / "HALT"
-        assert halt_file.exists(), (
-            f"Project-scoped HALT file was not created when TESTER was BLOCKED.\n"
-            f"stdout: {result.stdout}\nstderr: {result.stderr}"
+        # No HALT is written at either scope: a BLOCKED TESTER is retried, never a stop.
+        assert not (kanban_root / "projects" / project_name / "HALT").exists(), (
+            f"A project HALT file was written for a BLOCKED TESTER task.\n{out}"
         )
+        assert not (kanban_root / "HALT").exists(), out
+
+        # The TESTER task is back in BACKLOG carrying its block cause.
+        status = (task_dir / "status.md").read_text(encoding="utf-8")
+        assert "## State\nBACKLOG" in status, status
+        assert block_cause in status, status
+        readme = (task_dir / "README.md").read_text(encoding="utf-8")
+        assert "## Triage Note" in readme and block_cause in readme, readme
+
+        record = kanban_root / "projects" / project_name / "release-state" / f"verification-retry-{version}"
+        assert record.is_file(), f"the RC's one verification retry is recorded\n{out}"
+        assert f"tester_task={task_dir.name}" in record.read_text(encoding="utf-8")
 
     def test_release_halts_when_tester_reports_high_systemic_risk(
         self, tmp_path: pathlib.Path
     ) -> None:
         """When TESTER reports Systemic Risk=high, cm-release.sh must halt.
 
-        High systemic risk indicates a broader framework regression.  The CM
-        script must refuse to auto-ship in this case, leaving the RC state intact
-        (no tag, no state change).
+        High systemic risk indicates a broader framework regression.  Under
+        ship_posture = matrix, which this project sets (a local-only lane
+        otherwise defaults to always and ships it NON-FUNCTIONAL), the CM
+        script must refuse to auto-ship, leaving the RC state intact (no tag,
+        no state change).
         """
         version = "v0.1.0"
-        project_name = "tester_high_risk_test"
+        project_name = "tester-high-risk-test"
 
         bare_remote = tmp_path / "bare_remote.git"
         repo_path = tmp_path / "dev_repo"
@@ -1261,6 +1282,11 @@ class TestTesterVerificationGate:
 
         kanban_root = _build_kanban_root_for_rc(
             tmp_path, project_name, repo_path, push_to_remote="false"
+        )
+        project_cfg = kanban_root / "projects" / project_name / "project.cfg"
+        project_cfg.write_text(
+            project_cfg.read_text(encoding="utf-8") + "\n[release]\nship_posture = matrix\n",
+            encoding="utf-8",
         )
 
         _run_cm_script(
@@ -1305,7 +1331,7 @@ class TestTesterVerificationGate:
         KNOWN-BUGS, not silently default-ship FUNCTIONAL off the stale task.
         """
         version = "v0.1.0"
-        project_name = "tester_selection_test"
+        project_name = "tester-selection-test"
 
         bare_remote = tmp_path / "bare_remote.git"
         repo_path = tmp_path / "dev_repo"
@@ -1373,20 +1399,19 @@ class TestTesterVerificationGate:
             f"release-notes contents:\n{notes_text}"
         )
 
-    def test_release_halts_on_tester_task_found_with_unrecognized_state(
+    def test_release_ships_known_bugs_and_files_a_bug_on_unrecognized_tester_state(
         self, tmp_path: pathlib.Path
     ) -> None:
         """A TESTER task that was FOUND but whose State is neither BLOCKED nor
-        DONE (e.g. WONT-DO) must HALT the release, per the ship-policy matrix's
-        '(unrecognized values)' row — never silently default-ship FUNCTIONAL.
+        DONE (e.g. WONT-DO) ships KNOWN-BUGS and files one bug quoting the
+        state -- never a silent FUNCTIONAL ship, and never a HALT.
 
-        Regression test for a second, independent defect: previously
-        cm_ship_policy() fell through to SHIP-FUNCTIONAL for any tester_state
-        other than exactly "blocked" or "done", which meant a WONT-DO task
-        carrying a high-risk report shipped as if no report existed at all.
+        A WONT-DO task carrying a high-risk report must not ship as if no
+        report existed at all: the ship-policy matrix has no row for the
+        state, so the release takes the SHIP-WITH-CONCERNS floor.
         """
         version = "v0.1.0"
-        project_name = "tester_unrecognized_state_test"
+        project_name = "tester-unrecognized-state-test"
 
         bare_remote = tmp_path / "bare_remote.git"
         repo_path = tmp_path / "dev_repo"
@@ -1414,28 +1439,37 @@ class TestTesterVerificationGate:
             _RELEASE_SCRIPT, [],
             kanban_root, project_name, repo_root=repo_path,
         )
-        assert result.returncode != 0, (
-            "cm-release.sh must exit non-zero when the found TESTER task's state "
-            "is neither BLOCKED nor DONE (unrecognized-values row).\n"
-            f"stdout: {result.stdout}\nstderr: {result.stderr}"
+        out = f"stdout: {result.stdout}\nstderr: {result.stderr}"
+        assert result.returncode == 0, (
+            f"cm-release.sh must ship (exit 0) when the found TESTER task's state is unrecognized.\n{out}"
         )
 
-        assert not _git_tag_exists(repo_path, version), (
-            f"Release tag '{version}' was created despite an unrecognized TESTER state.\n"
-            f"stdout: {result.stdout}\nstderr: {result.stderr}"
+        assert _git_tag_exists(repo_path, version), (
+            f"Release tag '{version}' was not created for an unrecognized TESTER state.\n{out}"
         )
 
-        # Project-scoped HALT file — see the sibling test above for why.
-        halt_file = kanban_root / "projects" / project_name / "HALT"
-        assert halt_file.exists(), (
-            f"Project-scoped HALT file was not created for an unrecognized TESTER state.\n"
-            f"stdout: {result.stdout}\nstderr: {result.stderr}"
+        notes_path = repo_path / "release-notes" / f"{version}.md"
+        assert notes_path.exists(), f"release-notes/{version}.md was not created.\n{out}"
+        notes_text = notes_path.read_text(encoding="utf-8")
+        assert "## Status\nKNOWN-BUGS" in notes_text, (
+            f"release-notes Status must be KNOWN-BUGS.\nrelease-notes contents:\n{notes_text}"
         )
-        halt_text = halt_file.read_text(encoding="utf-8")
-        assert "WONT-DO" in (halt_text + result.stdout), (
-            "The HALT reason must quote the unrecognized TESTER state ('WONT-DO') "
-            f"verbatim so the operator can diagnose it.\nHALT file:\n{halt_text}\n"
-            f"stdout: {result.stdout}"
+        assert "## Status\nFUNCTIONAL" not in notes_text, (
+            "An unrecognized TESTER state must never ship FUNCTIONAL.\n"
+            f"release-notes contents:\n{notes_text}"
+        )
+
+        # No HALT at either scope -- see the BLOCKED sibling test above.
+        assert not (kanban_root / "projects" / project_name / "HALT").exists(), (
+            f"A project HALT file was written for an unrecognized TESTER state.\n{out}"
+        )
+        assert not (kanban_root / "HALT").exists(), out
+
+        bugs = sorted((kanban_root / "projects" / project_name / "bugs").glob("BUG-*.md"))
+        assert len(bugs) == 1, f"expected exactly one filed bug; got {bugs}\n{out}"
+        assert "`WONT-DO`" in bugs[0].read_text(encoding="utf-8"), (
+            "The filed bug must quote the unrecognized TESTER state ('WONT-DO') verbatim.\n"
+            f"{bugs[0].read_text(encoding='utf-8')}"
         )
 
 
@@ -1452,7 +1486,7 @@ class TestFidelityGate:
         must complete normally with a local tag.
         """
         version = "v0.1.0"
-        project_name = "gate_pass_test"
+        project_name = "gate-pass-test"
 
         bare_remote = tmp_path / "bare_remote.git"
         repo_path = tmp_path / "dev_repo"
@@ -1505,7 +1539,7 @@ class TestFidelityGate:
         gate exits 1 directly); the RC branch must still exist after the failure.
         """
         version = "v0.2.0"
-        project_name = "gate_fail_test"
+        project_name = "gate-fail-test"
 
         bare_remote = tmp_path / "bare_remote.git"
         repo_path = tmp_path / "dev_repo"

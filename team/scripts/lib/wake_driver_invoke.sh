@@ -6,7 +6,8 @@
 # rotates stale artifacts, activates the git remote-boundary guard for non-CM
 # roles (wd_install_git_boundary_guard, wake_guard_wiring.sh), takes the pre-task
 # pollution/litter snapshots, and invokes the provider CLI (through the
-# five-function provider interface) in its own process group under the watchdog.
+# five-function provider interface) in its own process group under the watchdog,
+# then stops every process the run left running (agent_run_reap.sh).
 #
 # Public entry point
 # -------------------
@@ -56,7 +57,8 @@
 # self-sourced below; it in turn calls read_order_resolve_role from
 # read_order.sh), _wd_is_safeguard_refusal (wake_safeguard_refusal.sh,
 # self-sourced below), pgai_emit_error_contract (error_contract.sh),
-# wd_install_git_boundary_guard (wake_guard_wiring.sh) — all sourced before
+# wd_install_git_boundary_guard (wake_guard_wiring.sh), agent_run_begin /
+# agent_run_end (agent_run_reap.sh, self-sourced below) — all sourced before
 # this file's functions run.
 #
 # Telemetry-block safeguard retry: the optional documentation-feedback block
@@ -75,6 +77,8 @@ _WAKE_DRIVER_INVOKE_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${_WAKE_DRIVER_INVOKE_LIB_DIR}/wake_governance_composer.sh"
 # shellcheck source=wake_safeguard_refusal.sh
 source "${_WAKE_DRIVER_INVOKE_LIB_DIR}/wake_safeguard_refusal.sh"
+# shellcheck source=agent_run_reap.sh
+source "${_WAKE_DRIVER_INVOKE_LIB_DIR}/agent_run_reap.sh"
 # The JSON field reads below go through pp_run_ops (wake_bootstrap.sh's,
 # when this stage is loaded through the driver).
 if ! declare -F pp_run_ops >/dev/null 2>&1; then
@@ -610,6 +614,9 @@ wd_invoke_task() {
     _pollution_snapshot_ok=false
   }
 
+  # --- Mark the agent run: every process it starts inherits its run id (agent_run_reap.sh) ---
+  agent_run_begin "$task_id" "${task_log_dir}/process-reap.log"
+
   # --- Invoke provider CLI (through the five-function provider interface) ---
   # _wd_run_provider_with_telemetry_safeguard_retry calls
   # _wd_run_provider_and_capture_tokens (provider_dispatch then
@@ -681,7 +688,7 @@ wd_invoke_task() {
 
     # Temp file to receive the provider invocation exit code from the subshell.
     local _exit_code_file
-    _exit_code_file="$(pgai_mktemp pgai_invoke_exit 2>/dev/null || mktemp "${PGAI_AGENT_KANBAN_TEMP_DIR}/pgai_invoke_exit.XXXXXX" 2>/dev/null || echo "")"
+    _exit_code_file="$(pgai_mktemp pgai_invoke_exit 2>/dev/null)" || _exit_code_file=""
 
     # Job control on for the launch only: the subshell leads a new process group.
     set -m
@@ -780,6 +787,9 @@ wd_invoke_task() {
     "$_dispatch_log_offset_end" "$agent_exit" \
     || log "WARNING: task ${task_id}: dispatch ledger close failed (${task_log_dir}/dispatch.jsonl); the open record still names the batch log"
   # DISPATCH-LEDGER-END
+
+  # --- Reap the agent run (normal exit and timeout): no process it started outlives it ---
+  agent_run_end "${KILL_GRACE_SECONDS:-30}" || true
 
   return 0
 }

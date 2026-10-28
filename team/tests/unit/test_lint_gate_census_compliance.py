@@ -39,6 +39,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -893,6 +894,10 @@ def test_real_tree_default_scan_finding_count_stays_near_zero(capsys) -> None:
     captured = capsys.readouterr()
     json_block = captured.out.split("FINDINGS_JSON:", 1)[1].strip()
     data = json.loads(json_block)
+    # The CONVERT call-site check lists the conversion sweep's outstanding
+    # rows by design (the census's Converted column); this tripwire counts
+    # the gate-annotation findings only.
+    data = [f for f in data if f["kind"] != _lint._FINDING_KIND_CONVERT_SITE_FATAL]
 
     assert len(data) <= 5, (
         f"expected a clean-tree default scan to stay approximately zero now "
@@ -1495,7 +1500,7 @@ def test_main_bash_dirs_override_skips_locator_resolution(tmp_path: Path, capsys
 def _write_census_doc(
     docs_dir: Path,
     *,
-    rows: list[tuple[int, str]],
+    rows: list[tuple],
     rollup_sites: int,
     rollup_unclassified: int,
     rollup_block: int,
@@ -1503,18 +1508,25 @@ def _write_census_doc(
     rollup_agent: int,
 ) -> Path:
     """Build a minimal synthetic census doc: a numbered inventory table
-    (``rows`` is a list of ``(row_number, class)`` pairs) followed by the
-    two-line hand-authored rollup summary this lint reconciles against it."""
+    followed by the two-line hand-authored rollup summary this lint
+    reconciles against it. Each of ``rows`` is ``(row_number, class)``,
+    whose Decision cell reads ``none``, or ``(row_number, class, decision)``;
+    a ``decision`` of ``None`` writes the row with no Decision cell."""
     lines = [
         "# Blocking-Site Census\n",
         "\n",
         "## At-a-glance rollup\n",
         "\n",
-        "| # | Site | Source (path · locator) | Trigger | Class |\n",
-        "|---|---|---|---|---|\n",
+        "| # | Site | Source (path · locator) | Trigger | Class | Decision |\n",
+        "|---|---|---|---|---|---|\n",
     ]
-    for num, cls in rows:
-        lines.append(f"| {num} | Fixture site {num} | `some/path.sh` · `exit 1` | Some trigger | {cls} |\n")
+    for row in rows:
+        num, cls = row[0], row[1]
+        decision = row[2] if len(row) > 2 else "none"
+        decision_cell = "" if decision is None else f" {decision} |"
+        lines.append(
+            f"| {num} | Fixture site {num} | `some/path.sh` · `exit 1` | Some trigger | {cls} |{decision_cell}\n"
+        )
     lines.append("\n")
     lines.append(f"**Rollup: {rollup_sites} sites, {rollup_unclassified} unclassified.**\n")
     lines.append(f"{rollup_block} BLOCK-WORTHY, {rollup_convert} CONVERT, {rollup_agent} AGENT-RESOLVABLE.\n")
@@ -1738,3 +1750,611 @@ def test_real_tree_census_rollup_check_runs_without_crashing() -> None:
         assert finding.kind == _lint._FINDING_KIND_ROLLUP_MISMATCH
         assert finding.table_summary
         assert finding.rollup_summary
+
+
+# ---------------------------------------------------------------------------
+# DECISION COLUMN: every numbered row of the At-a-glance table ends in a
+# Decision cell from the closed set verb(<name>) / inbox / runaway / none.
+# See "DECISION COLUMN" in the lint's module docstring and
+# `_scan_census_decisions`.
+# ---------------------------------------------------------------------------
+
+_DECISION_VERBS = frozenset({"requeue", "resolution-stage"})
+
+
+def _decision_findings(tmp_path: Path, rows: list[tuple], known_verbs=_DECISION_VERBS) -> list:
+    """Write a census doc whose rollup agrees with ``rows`` and return the
+    Decision-column findings for it."""
+    classes = [row[1] for row in rows]
+    _write_census_doc(
+        tmp_path / "docs",
+        rows=rows,
+        rollup_sites=len(rows),
+        rollup_unclassified=0,
+        rollup_block=classes.count("BLOCK-WORTHY"),
+        rollup_convert=classes.count("CONVERT"),
+        rollup_agent=classes.count("AGENT-RESOLVABLE"),
+    )
+    return _lint._scan_census_decisions(tmp_path, known_verbs=known_verbs)
+
+
+def test_census_table_counts_read_class_before_a_decision_cell() -> None:
+    """The class count reads the Class cell whether or not a Decision cell
+    follows it, so adding the column changes no rollup count."""
+    lines = [
+        "| 1 | A | `a \\| b` | t | BLOCK-WORTHY | verb(resolution-stage) |",
+        "| 2 | B | `b` | t | CONVERT | none |",
+        "| 3 | C | `c` | t | AGENT-RESOLVABLE |",
+        "| 4 | D | `d` | t | AGENT-RESOLVABLE |  |",
+    ]
+    total, counts = _lint._census_table_counts(lines)
+    assert total == 4
+    assert counts == {"BLOCK-WORTHY": 1, "CONVERT": 1, "AGENT-RESOLVABLE": 2}
+
+
+def test_scan_census_decisions_closed_set_produces_no_finding(tmp_path: Path) -> None:
+    """Every value of the closed set passes, written liberally: backticks,
+    upper case and spaces inside the parentheses are tolerated."""
+    findings = _decision_findings(
+        tmp_path,
+        [
+            (1, "BLOCK-WORTHY", "verb(resolution-stage)"),
+            (2, "AGENT-RESOLVABLE", "verb(requeue)"),
+            (3, "BLOCK-WORTHY", "inbox"),
+            (4, "CONVERT", "runaway"),
+            (5, "CONVERT", "none"),
+            (6, "CONVERT", "`Verb( requeue )`"),
+            (7, "CONVERT", "None"),
+        ],
+    )
+    assert findings == []
+
+
+def test_scan_census_decisions_reports_an_empty_decision_cell(tmp_path: Path) -> None:
+    findings = _decision_findings(
+        tmp_path, [(1, "BLOCK-WORTHY", "none"), (2, "CONVERT", " ")]
+    )
+    assert len(findings) == 1
+    finding = findings[0]
+    assert finding.kind == _lint._FINDING_KIND_DECISION_INVALID
+    assert finding.row_number == 2
+    assert finding.decision == ""
+    assert finding.decision_problem == "has an empty Decision cell"
+
+
+def test_scan_census_decisions_reports_a_row_with_no_decision_cell(tmp_path: Path) -> None:
+    """A row still in the old shape (Class as its last cell) is reported as
+    missing its Decision, and its class is still counted by the rollup."""
+    findings = _decision_findings(tmp_path, [(1, "BLOCK-WORTHY", None), (2, "CONVERT", "none")])
+    assert [(f.row_number, f.decision) for f in findings] == [(1, None)]
+    assert "no Decision cell" in findings[0].decision_problem
+    assert _lint._scan_census_rollup(tmp_path) == []
+
+
+def test_scan_census_decisions_reports_a_value_outside_the_closed_set(tmp_path: Path) -> None:
+    findings = _decision_findings(
+        tmp_path,
+        [(1, "BLOCK-WORTHY", "escalate"), (2, "CONVERT", "verb()"), (3, "CONVERT", "verb(Bad_Name!)")],
+    )
+    assert [f.row_number for f in findings] == [1, 2, 3]
+    assert "not one of verb(<name>), inbox, runaway or none" in findings[0].decision_problem
+    assert "lower-case hyphenated" in findings[1].decision_problem
+    assert "lower-case hyphenated" in findings[2].decision_problem
+
+
+def test_scan_census_decisions_reports_a_verb_the_decision_wake_lacks(tmp_path: Path) -> None:
+    findings = _decision_findings(tmp_path, [(1, "BLOCK-WORTHY", "verb(frobnicate)")])
+    assert len(findings) == 1
+    assert "frobnicate is not a decision-wake verb" in findings[0].decision_problem
+    assert "requeue" in findings[0].decision_problem
+
+
+def test_scan_census_decisions_checks_verb_shape_only_without_the_vocabulary(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """When ``decide.VERBS`` cannot be loaded the verb name is checked by
+    shape alone: a well-formed unknown name passes, a malformed one does not."""
+    monkeypatch.setattr(_lint, "_decision_wake_verbs", lambda: None)
+    findings = _decision_findings(
+        tmp_path,
+        [(1, "BLOCK-WORTHY", "verb(frobnicate)"), (2, "CONVERT", "verb(not a name)")],
+        known_verbs=None,
+    )
+    assert [f.row_number for f in findings] == [2]
+
+
+def test_decision_wake_verbs_loads_the_decide_vocabulary() -> None:
+    from pgai_agent_kanban.overwatch.decide import VERBS
+
+    assert _lint._decision_wake_verbs() == frozenset(VERBS)
+
+
+def test_scan_census_decisions_missing_doc_fails_soft(tmp_path: Path) -> None:
+    assert _lint._scan_census_decisions(tmp_path) == []
+
+
+def test_decision_invalid_finding_carries_cause_and_remedy(tmp_path: Path) -> None:
+    findings = _decision_findings(tmp_path, [(1, "BLOCK-WORTHY", "")])
+    as_dict = _lint._finding_to_dict(findings[0], tmp_path)
+    assert as_dict["kind"] == "decision_invalid"
+    assert as_dict["row"] == 1
+    assert "row 1 has an empty Decision cell" in as_dict["cause"]
+    assert "verb(<name>), inbox, runaway or none" in as_dict["remedy"]
+
+
+def test_real_census_every_row_carries_a_decision_from_the_closed_set() -> None:
+    """Over the real census: every ``| N |`` row ends in a non-empty
+    Decision from the closed set, every named verb is one of
+    ``decide.VERBS``, and the lint reports neither a decision nor a rollup
+    finding for the document."""
+    from pgai_agent_kanban.overwatch.decide import VERBS
+
+    repo_root = _TEAM_DIR.parent
+    census_lines = (repo_root / "docs" / "blocking-site-census.md").read_text(encoding="utf-8").splitlines()
+    rows = [line for line in census_lines if re.match(r"^\|\s*\d+\s*\|", line)]
+    assert rows, "the census has no numbered rows"
+    for line in rows:
+        # The Decision cell is second to last: the Converted cell follows it.
+        decision = line.rstrip().rstrip("|").rsplit("|", 2)[1].strip()
+        verb = re.fullmatch(r"verb\(([a-z][a-z0-9-]*)\)", decision)
+        assert decision in ("inbox", "runaway", "none") or (verb and verb.group(1) in VERBS), (
+            f"census row has Decision {decision!r}: {line[:80]}"
+        )
+    assert _lint._scan_census_decisions(repo_root, known_verbs=VERBS) == []
+    assert _lint._scan_census_rollup(repo_root) == []
+
+
+def test_default_run_reports_a_seeded_empty_decision_and_exits_zero(tmp_path: Path) -> None:
+    """A copy of the real census with one row's Decision emptied (its
+    Converted cell kept): the default run (the script itself, no override
+    flags) reports exactly that row as ``decision_invalid`` and still exits
+    0."""
+    import shutil
+
+    repo = tmp_path / "repo"
+    (repo / "team" / "scripts").mkdir(parents=True)
+    shutil.copy(_LINT_SCRIPT, repo / "team" / "scripts" / _LINT_SCRIPT.name)
+    (repo / "docs").mkdir()
+    real_text = (_TEAM_DIR.parent / "docs" / "blocking-site-census.md").read_text(encoding="utf-8")
+    seeded, n = re.subn(
+        r"^(\|\s*1\s*\|.*\|)[^|]*(\|[^|]*\|\s*)$", r"\1  \2", real_text, count=1, flags=re.MULTILINE
+    )
+    assert n == 1, "fixture setup must find row 1 to seed"
+    (repo / "docs" / "blocking-site-census.md").write_text(seeded, encoding="utf-8")
+
+    result = subprocess.run(
+        [sys.executable, str(repo / "team" / "scripts" / _LINT_SCRIPT.name)],
+        capture_output=True, text=True, timeout=120, check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    findings = json.loads(result.stdout.split("FINDINGS_JSON:", 1)[1].strip())
+    decision_findings = [f for f in findings if f["kind"] == "decision_invalid"]
+    assert [(f["row"], f["decision"]) for f in decision_findings] == [(1, "")]
+    assert not [f for f in findings if f["kind"] == "rollup_mismatch"]
+
+
+# ---------------------------------------------------------------------------
+# Default scan surface: team/verification/*.sh
+# ---------------------------------------------------------------------------
+
+
+def _verification_copy_tree(tmp_path: Path) -> Path:
+    """A repo copy holding the lint, the census document and the
+    verification scripts -- the default run's surface, nothing else."""
+    import shutil
+
+    repo = tmp_path / "repo"
+    (repo / "team" / "scripts").mkdir(parents=True)
+    shutil.copy(_LINT_SCRIPT, repo / "team" / "scripts" / _LINT_SCRIPT.name)
+    (repo / "docs").mkdir()
+    shutil.copy(_SCRIPTS_DIR.parent.parent / "docs" / "blocking-site-census.md", repo / "docs")
+    shutil.copytree(_SCRIPTS_DIR.parent / "verification", repo / "team" / "verification")
+    return repo
+
+
+def _default_run_findings(repo: Path) -> list[dict]:
+    result = subprocess.run(
+        [sys.executable, str(repo / "team" / "scripts" / _LINT_SCRIPT.name)],
+        capture_output=True, text=True, timeout=120, check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    return json.loads(result.stdout.split("FINDINGS_JSON:", 1)[1].strip())
+
+
+def test_default_bash_files_include_the_verification_scripts() -> None:
+    resolved = {p.resolve() for p in _lint._default_bash_files(_SCRIPTS_DIR)}
+    verification = _SCRIPTS_DIR.parent / "verification"
+    expected = {
+        (verification / "verify_script_exec_bits.sh").resolve(),
+        (verification / "verify_quarantine_visibility.sh").resolve(),
+    }
+    assert expected <= resolved, sorted(str(p) for p in expected - resolved)
+
+
+def test_default_run_reports_a_verification_site_that_lost_its_anchor(tmp_path: Path) -> None:
+    """With a verification refusal's anchor and class comment removed, the
+    default run (no --bash-dirs) reports the now-uninventoried site."""
+    repo = _verification_copy_tree(tmp_path)
+    verifier = repo / "team" / "verification" / "verify_script_exec_bits.sh"
+    assert [f for f in _default_run_findings(repo) if "team/verification" in str(f.get("path", f.get("file", "")))] == []
+
+    lines = verifier.read_text(encoding="utf-8").splitlines(keepends=True)
+    stripped = [
+        line for line in lines
+        if "CENSUS-ANCHOR: verify-script-exec-bits-03" not in line
+        and not line.lstrip().startswith("# BLOCK-WORTHY: a script committed without its exec bit")
+    ]
+    assert len(stripped) == len(lines) - 2
+    verifier.write_text("".join(stripped), encoding="utf-8")
+
+    findings = [
+        f for f in _default_run_findings(repo)
+        if "verify_script_exec_bits.sh" in str(f.get("path", f.get("file", "")))
+    ]
+    kinds = {f.get("kind") for f in findings}
+    assert findings, "the default run did not report the verification site"
+    assert kinds - {"unresolved_locator"}, (
+        f"only the census-wide locator check saw it ({kinds}); the inline scan did not cover team/verification"
+    )
+
+
+# ---------------------------------------------------------------------------
+# CONVERTED COLUMN: every numbered row of the At-a-glance table carries a
+# Converted cell from the closed set yes / no / n/a, and a CONVERT row whose
+# call site still exits non-zero is reported. See "CONVERTED COLUMN" in the
+# lint's module docstring and `_scan_census_converted`.
+# ---------------------------------------------------------------------------
+
+
+def _write_converted_census(repo: Path, rows: list[tuple], index_lines: tuple = ()) -> Path:
+    """Write ``docs/blocking-site-census.md`` under *repo*, with a rollup
+    that agrees with *rows* and every Decision ``none``.
+
+    Each row is ``(number, class, converted)`` or ``(number, class,
+    converted, source)``; a ``converted`` of ``None`` writes the row with no
+    Converted cell, and ``source`` is the Source cell (by default a path
+    that does not exist). *index_lines* are the Locator Index entries."""
+    lines = [
+        "# Blocking-Site Census\n\n## At-a-glance rollup\n\n",
+        "| # | Site | Source (path · locator) | Trigger | Class | Decision | Converted |\n",
+        "|---|---|---|---|---|---|---|\n",
+    ]
+    classes = []
+    for row in rows:
+        num, cls, converted = row[0], row[1], row[2]
+        source = row[3] if len(row) > 3 else "`no/such/site.sh` · `exit 1`"
+        classes.append(cls)
+        converted_cell = "" if converted is None else f" {converted} |"
+        lines.append(
+            f"| {num} | Fixture site {num} | {source} | Some trigger | {cls} | none |{converted_cell}\n"
+        )
+    lines.append(f"\n**Rollup: {len(rows)} sites, 0 unclassified.**\n")
+    lines.append(
+        f"{classes.count('BLOCK-WORTHY')} BLOCK-WORTHY, {classes.count('CONVERT')} CONVERT, "
+        f"{classes.count('AGENT-RESOLVABLE')} AGENT-RESOLVABLE.\n\n"
+    )
+    lines.append("## Locator Index (lint-consumed)\n\n<!-- CENSUS-LOCATOR-INDEX-BEGIN -->\n")
+    lines.extend(f"{entry}\n" for entry in index_lines)
+    lines.append("<!-- CENSUS-LOCATOR-INDEX-END -->\n")
+    docs_dir = repo / "docs"
+    docs_dir.mkdir(parents=True, exist_ok=True)
+    census_doc = docs_dir / "blocking-site-census.md"
+    census_doc.write_text("".join(lines), encoding="utf-8")
+    return census_doc
+
+
+def _write_site(repo: Path, rel: str, content: str) -> Path:
+    path = repo / rel
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content, encoding="utf-8")
+    return path
+
+
+def _converted_findings(repo: Path, kind: str) -> list:
+    return [f for f in _lint._scan_census_converted(repo) if f.kind == kind]
+
+
+_FATAL_PY_LINT = (
+    "import sys\n"
+    "\n"
+    "def main():\n"
+    "    findings = ['x']\n"
+    "    if findings:\n"
+    "        return {status}\n"
+    "    return 0\n"
+    "\n"
+    "if __name__ == '__main__':\n"
+    "    sys.exit(main())\n"
+)
+
+
+def test_census_table_counts_read_class_before_decision_and_converted_cells() -> None:
+    """A row carrying both trailing cells is still counted by its class."""
+    lines = [
+        "| 1 | A | `a \\| b` | t | BLOCK-WORTHY | none | n/a |",
+        "| 2 | B | `b` | t | CONVERT | inbox | yes |",
+        "| 3 | C | `c` | t | CONVERT | none |",
+    ]
+    total, counts = _lint._census_table_counts(lines)
+    assert total == 3
+    assert counts == {"BLOCK-WORTHY": 1, "CONVERT": 2, "AGENT-RESOLVABLE": 0}
+
+
+def test_scan_census_decisions_reads_the_cell_after_class_when_converted_follows(tmp_path: Path) -> None:
+    """With a Converted cell after it, the Decision is still the first cell
+    after Class: a valid Decision passes and a bad one is reported as written."""
+    _write_converted_census(tmp_path, [(1, "BLOCK-WORTHY", "n/a"), (2, "CONVERT", "yes")])
+    assert _lint._scan_census_decisions(tmp_path, known_verbs=_DECISION_VERBS) == []
+
+    census = tmp_path / "docs" / "blocking-site-census.md"
+    census.write_text(census.read_text(encoding="utf-8").replace("| CONVERT | none | yes |", "| CONVERT | bogus | yes |"), encoding="utf-8")
+    findings = _lint._scan_census_decisions(tmp_path, known_verbs=_DECISION_VERBS)
+    assert [(f.row_number, f.decision) for f in findings] == [(2, "bogus")]
+
+
+def test_scan_census_converted_closed_set_produces_no_finding(tmp_path: Path) -> None:
+    """Every closed-set value its class takes passes, written liberally:
+    backticks and case are tolerated."""
+    _write_converted_census(
+        tmp_path,
+        [
+            (1, "BLOCK-WORTHY", "n/a"),
+            (2, "AGENT-RESOLVABLE", "`N/A`"),
+            (3, "CONVERT", "yes"),
+            (4, "CONVERT", "No"),
+        ],
+    )
+    assert _lint._scan_census_converted(tmp_path) == []
+
+
+def test_scan_census_converted_reports_a_row_with_no_converted_cell(tmp_path: Path) -> None:
+    """A row still in the old shape (Decision as its last cell) yields one
+    finding naming its row number; its Decision and class still count."""
+    _write_converted_census(tmp_path, [(1, "BLOCK-WORTHY", "n/a"), (2, "CONVERT", None)])
+    findings = _lint._scan_census_converted(tmp_path)
+    assert [(f.kind, f.row_number, f.converted) for f in findings] == [
+        (_lint._FINDING_KIND_CONVERTED_INVALID, 2, None)
+    ]
+    assert findings[0].converted_problem == "has no Converted cell after its Decision cell"
+    assert _lint._scan_census_decisions(tmp_path, known_verbs=_DECISION_VERBS) == []
+    assert _lint._scan_census_rollup(tmp_path) == []
+
+
+def test_scan_census_converted_reports_an_out_of_set_cell(tmp_path: Path) -> None:
+    """A value outside yes / no / n/a yields exactly one finding naming the row."""
+    _write_converted_census(tmp_path, [(1, "CONVERT", "yes"), (7, "CONVERT", "done")])
+    findings = _lint._scan_census_converted(tmp_path)
+    assert [(f.row_number, f.converted) for f in findings] == [(7, "done")]
+    assert "not one of yes, no or n/a" in findings[0].converted_problem
+
+
+def test_scan_census_converted_reports_an_empty_cell(tmp_path: Path) -> None:
+    _write_converted_census(tmp_path, [(3, "BLOCK-WORTHY", " ")])
+    findings = _lint._scan_census_converted(tmp_path)
+    assert [(f.row_number, f.converted_problem) for f in findings] == [(3, "has an empty Converted cell")]
+
+
+def test_scan_census_converted_reports_a_value_the_class_does_not_take(tmp_path: Path) -> None:
+    """n/a on a CONVERT row, and yes or no on any other row, are wrong."""
+    _write_converted_census(
+        tmp_path,
+        [(1, "CONVERT", "n/a"), (2, "BLOCK-WORTHY", "yes"), (3, "AGENT-RESOLVABLE", "no")],
+    )
+    findings = _lint._scan_census_converted(tmp_path)
+    assert [f.row_number for f in findings] == [1, 2, 3]
+    assert "classed CONVERT" in findings[0].converted_problem
+    assert "classed BLOCK-WORTHY" in findings[1].converted_problem
+    assert "classed AGENT-RESOLVABLE" in findings[2].converted_problem
+
+
+def test_converted_invalid_finding_carries_cause_and_remedy(tmp_path: Path) -> None:
+    _write_converted_census(tmp_path, [(5, "CONVERT", "maybe")])
+    as_dict = _lint._finding_to_dict(_lint._scan_census_converted(tmp_path)[0], tmp_path)
+    assert as_dict["kind"] == "converted_invalid"
+    assert as_dict["row"] == 5
+    assert as_dict["converted"] == "maybe"
+    assert "row 5 has Converted 'maybe'" in as_dict["cause"]
+    assert "yes" in as_dict["remedy"] and "n/a" in as_dict["remedy"]
+
+
+def test_scan_census_converted_missing_doc_fails_soft(tmp_path: Path) -> None:
+    assert _lint._scan_census_converted(tmp_path) == []
+
+
+def test_seeded_fatal_convert_site_is_reported_and_exit_zero_is_not(tmp_path: Path) -> None:
+    """A CONVERT row whose Source names a Python lint that still returns 1
+    from main is one finding naming the row and the file; the same fixture
+    with the site returning 0 reports none."""
+    site = _write_site(tmp_path, "team/scripts/fixture_lint.py", _FATAL_PY_LINT.format(status=1))
+    _write_converted_census(
+        tmp_path,
+        [(1, "BLOCK-WORTHY", "n/a"), (2, "CONVERT", "no", "`team/scripts/fixture_lint.py` · `return 1`")],
+    )
+
+    findings = _lint._scan_census_converted(tmp_path)
+    assert len(findings) == 1
+    finding = findings[0]
+    assert finding.kind == _lint._FINDING_KIND_CONVERT_SITE_FATAL
+    assert finding.row_number == 2
+    assert finding.path == site.resolve()
+    assert finding.line == 6
+    assert finding.snippet == "return 1"
+
+    site.write_text(_FATAL_PY_LINT.format(status=0), encoding="utf-8")
+    assert _lint._scan_census_converted(tmp_path) == []
+
+
+def test_default_run_reports_a_seeded_fatal_convert_site_and_exits_zero(tmp_path: Path) -> None:
+    """The script itself, default scope, over a repo copy holding only the
+    lint, a census and one bash call site: exactly one finding, naming the
+    row and the file, while the site exits 1 -- none once it exits 0 -- and
+    the run exits 0 both times."""
+    import shutil
+
+    repo = tmp_path / "repo"
+    (repo / "team" / "scripts").mkdir(parents=True)
+    shutil.copy(_LINT_SCRIPT, repo / "team" / "scripts" / _LINT_SCRIPT.name)
+    site = _write_site(repo, "team/scripts/fixture_check.sh", "#!/usr/bin/env bash\necho finding >&2\nexit 1\n")
+    _write_converted_census(
+        repo,
+        [(1, "CONVERT", "yes", "`team/scripts/fixture_check.sh` · `exit 1`"), (2, "BLOCK-WORTHY", "n/a")],
+    )
+
+    findings = _default_run_findings(repo)
+    assert [(f["kind"], f["row"], f["file"], f["line"]) for f in findings] == [
+        ("convert_site_fatal", 1, "team/scripts/fixture_check.sh", 3)
+    ]
+    assert "although the row's Converted cell reads yes" in findings[0]["cause"]
+
+    site.write_text("#!/usr/bin/env bash\necho finding >&2\nexit 0\n", encoding="utf-8")
+    assert _default_run_findings(repo) == []
+
+
+def test_convert_site_check_ignores_rows_of_other_classes(tmp_path: Path) -> None:
+    """A BLOCK-WORTHY row's fatal exit is its purpose, not a finding."""
+    _write_site(tmp_path, "team/scripts/fixture_gate.sh", "#!/usr/bin/env bash\nexit 1\n")
+    _write_converted_census(tmp_path, [(1, "BLOCK-WORTHY", "n/a", "`team/scripts/fixture_gate.sh`")])
+    assert _lint._scan_census_converted(tmp_path) == []
+
+
+def test_convert_site_check_resolves_short_paths_from_team_scripts(tmp_path: Path) -> None:
+    """``lib/x.sh`` in a Source cell resolves under team/scripts/."""
+    _write_site(tmp_path, "team/scripts/lib/fixture_lib.sh", "fixture_fn() {\n  exit 1\n}\n")
+    _write_converted_census(tmp_path, [(4, "CONVERT", "no", "`team/scripts/nothing.sh` (via `lib/fixture_lib.sh`)")])
+    findings = _converted_findings(tmp_path, _lint._FINDING_KIND_CONVERT_SITE_FATAL)
+    assert [(f.row_number, f.path.name, f.line) for f in findings] == [(4, "fixture_lib.sh", 2)]
+
+
+def test_convert_site_check_reads_python_status_expressions_and_helpers(tmp_path: Path) -> None:
+    """``return 0 if ok else 1`` in main, a literal returned by a function
+    main returns through, and ``raise SystemExit(1)`` are fatal; main
+    returning a value it computed at run time is not."""
+    _write_site(tmp_path, "team/scripts/a.py", "def main():\n    ok = False\n    return 0 if ok else 1\n")
+    _write_site(
+        tmp_path,
+        "team/scripts/b.py",
+        "def _report(findings):\n    if findings:\n        return 1\n    return 0\n\n"
+        "def main():\n    return _report(['x'])\n",
+    )
+    _write_site(tmp_path, "team/scripts/c.py", "def run():\n    raise SystemExit(1)\n")
+    _write_site(tmp_path, "team/scripts/d.py", "def main():\n    findings = []\n    return len(findings)\n")
+    _write_converted_census(
+        tmp_path,
+        [
+            (1, "CONVERT", "no", "`team/scripts/a.py`"),
+            (2, "CONVERT", "no", "`team/scripts/b.py`"),
+            (3, "CONVERT", "no", "`team/scripts/c.py`"),
+            (4, "CONVERT", "yes", "`team/scripts/d.py`"),
+        ],
+    )
+    findings = _converted_findings(tmp_path, _lint._FINDING_KIND_CONVERT_SITE_FATAL)
+    assert [(f.row_number, f.line) for f in findings] == [(1, 3), (2, 3), (3, 2)]
+
+
+def test_convert_site_check_skips_exits_that_belong_elsewhere(tmp_path: Path) -> None:
+    """Read whole, a file's fatal exits are not the row's when another
+    class claims them (an inline BLOCK-WORTHY comment, a BLOCK-WORTHY
+    Locator Index key), when they are operator-CLI argument refusals (a
+    positional ``case`` dispatch; a Python usage-error status 2), or when
+    they are a success exit."""
+    _write_site(
+        tmp_path,
+        "team/scripts/runner.sh",
+        "#!/usr/bin/env bash\n"
+        "case \"$1\" in\n"
+        "  --bad) exit 2 ;;\n"
+        "esac\n"
+        "# BLOCK-WORTHY: the suite failed.\n"
+        "exit 1\n"
+        "# CENSUS-ANCHOR: runner-preflight-01\n"
+        "exit 1\n"
+        "exit 0\n",
+    )
+    _write_site(
+        tmp_path,
+        "team/scripts/usage_lint.py",
+        "import sys\n\ndef main(argv=None):\n    if argv == ['--bogus']:\n        return 2\n    return 0\n",
+    )
+    _write_converted_census(
+        tmp_path,
+        [
+            (1, "CONVERT", "yes", "`team/scripts/runner.sh`"),
+            (2, "CONVERT", "yes", "`team/scripts/usage_lint.py`"),
+        ],
+        index_lines=("team/scripts/runner.sh:runner-preflight-01 BLOCK-WORTHY",),
+    )
+    assert _converted_findings(tmp_path, _lint._FINDING_KIND_CONVERT_SITE_FATAL) == []
+
+
+def test_convert_site_check_counts_a_usage_status_a_convert_key_names(tmp_path: Path) -> None:
+    """A Python status-2 exit a CONVERT Locator Index entry names is a site
+    (a lint's own precondition refusal), not an argument error."""
+    _write_site(
+        tmp_path,
+        "team/scripts/precondition_lint.py",
+        "import sys\n\ndef main():\n    # CENSUS-ANCHOR: precondition-lint-01\n    sys.exit(2)\n",
+    )
+    _write_converted_census(
+        tmp_path,
+        [(1, "CONVERT", "no", "`team/scripts/precondition_lint.py` · `sys.exit(2)`")],
+        index_lines=("team/scripts/precondition_lint.py:precondition-lint-01 CONVERT",),
+    )
+    findings = _converted_findings(tmp_path, _lint._FINDING_KIND_CONVERT_SITE_FATAL)
+    assert [(f.row_number, f.line) for f in findings] == [(1, 5)]
+
+
+def test_convert_site_check_reads_only_the_named_key_window(tmp_path: Path) -> None:
+    """A Source cell naming a Locator Index key reads that key's window,
+    not the whole file: the file's other fatal exits are not the row's,
+    and an exit inside the window is reported with the key."""
+    site = _write_site(
+        tmp_path,
+        "team/scripts/runner.sh",
+        "#!/usr/bin/env bash\n"
+        "exit 1\n"
+        "# CENSUS-ANCHOR: runner-sweep-01\n"
+        "gated_runner_run_quality_lint sweep -- sweep_fn\n"
+        "echo done\n",
+    )
+    _write_converted_census(
+        tmp_path,
+        [(9, "CONVERT", "yes", "`team/scripts/runner.sh` (`runner-sweep-01`)")],
+        index_lines=("team/scripts/runner.sh:runner-sweep-01 CONVERT",),
+    )
+    assert _converted_findings(tmp_path, _lint._FINDING_KIND_CONVERT_SITE_FATAL) == []
+
+    site.write_text(site.read_text(encoding="utf-8").replace("echo done\n", "exit 1\n"), encoding="utf-8")
+    findings = _converted_findings(tmp_path, _lint._FINDING_KIND_CONVERT_SITE_FATAL)
+    assert [(f.row_number, f.line, f.token) for f in findings] == [(9, 5, "runner-sweep-01")]
+    assert "through Locator Index key 'runner-sweep-01'" in _lint._finding_to_dict(findings[0], tmp_path)["cause"]
+
+
+def test_convert_site_check_reports_one_finding_per_row_and_file(tmp_path: Path) -> None:
+    """Several fatal exits in one file are one finding at the first; a row
+    naming two fatal files is one finding each."""
+    _write_site(tmp_path, "team/scripts/one.sh", "#!/usr/bin/env bash\nexit 1\nexit 3\n")
+    _write_site(tmp_path, "team/scripts/two.sh", "#!/usr/bin/env bash\nexit 1\n")
+    _write_converted_census(
+        tmp_path, [(6, "CONVERT", "no", "`team/scripts/one.sh`, `team/scripts/two.sh`")]
+    )
+    findings = _converted_findings(tmp_path, _lint._FINDING_KIND_CONVERT_SITE_FATAL)
+    assert sorted((f.row_number, f.path.name, f.line) for f in findings) == [
+        (6, "one.sh", 2),
+        (6, "two.sh", 2),
+    ]
+
+
+def test_real_census_every_row_carries_a_converted_cell_from_the_closed_set() -> None:
+    """Over the real census: every ``| N |`` row ends in a non-empty
+    Converted cell -- yes or no on a CONVERT row, n/a on every other -- and
+    the lint reports no converted_invalid finding for the document."""
+    repo_root = _TEAM_DIR.parent
+    census_lines = (repo_root / "docs" / "blocking-site-census.md").read_text(encoding="utf-8").splitlines()
+    rows = [line for line in census_lines if re.match(r"^\|\s*\d+\s*\|", line)]
+    assert rows, "the census has no numbered rows"
+    for line in rows:
+        cells = line.rstrip().rstrip("|").rsplit("|", 3)
+        cls, converted = cells[1].strip(), cells[3].strip()
+        allowed = ("yes", "no") if cls == "CONVERT" else ("n/a",)
+        assert converted in allowed, f"census row ({cls}) has Converted {converted!r}: {line[:80]}"
+    assert _converted_findings(repo_root, _lint._FINDING_KIND_CONVERTED_INVALID) == []

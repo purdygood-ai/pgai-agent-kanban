@@ -33,6 +33,7 @@ Supported verbs (see ops/write.py _cli_main for the full list):
     switch_provider KANBAN_ROOT PROVIDER
     deposit_intake  PROJECT_ROOT FILE_PATH
     close_item      PROJECT_ROOT KEY [STATE] [NOTE] [DRY_RUN]
+    set_needs_operator PROJECT_ROOT KEY QUESTION
     wontdo_item     PROJECT_ROOT KEY
     delete_item     PROJECT_ROOT KEY [FORCE]
     reset_item      PROJECT_ROOT KEY [KEEP_ARTIFACTS] [FORCE]
@@ -67,6 +68,8 @@ Read verbs (see ops/read.py _cli_main):
     get_task_status KANBAN_ROOT PROJECT KEY [status|readme]
     get_queues      KANBAN_ROOT PROJECT DATA_PROJECT DETAILS
     get_status      KANBAN_ROOT PROJECT NO_COLOR
+    get_release_state      KANBAN_ROOT PROJECT
+    get_deep_verify_status KANBAN_ROOT PROJECT
     get_test_report KANBAN_ROOT PROJECT KEY
     get_task_readme KANBAN_ROOT PROJECT KEY
     list_rejected   KANBAN_ROOT [PROJECT]

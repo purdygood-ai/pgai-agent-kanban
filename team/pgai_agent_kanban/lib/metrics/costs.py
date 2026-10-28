@@ -3,7 +3,7 @@ pgai_agent_kanban.lib.metrics.costs — the token-usage and cost report.
 
 ``cost_report()`` is the one implementation of ``scripts/cost-report.sh``:
 it parses the script's own arguments, resolves the project, pricing file
-and scope, reads the roll-ups ``team/pm-agent/aggregate_tokens.py``
+and scope, reads the roll-ups ``pm-agent/aggregate_tokens.py``
 writes (``usage/daily/<YYYY-MM-DD>.json`` and
 ``usage/rc/<version>-tokens.json``) and renders the human-readable report
 or the CSV rows. ``cost-report.sh`` reaches it through
@@ -34,17 +34,23 @@ header and shows as per-category cost columns.
 
 PRICING
 -------
-``token_pricing.json`` is read from the project's ``dev_tree_path`` (in
-``project.cfg``, or ``PROJECT.cfg`` on an older install) under
-``team/scripts/lib/``, else from ``<kanban root>/team/scripts/lib/``.
-Only its ``subscriptions`` block is used, for the subscription
-comparison; without the file that block is left out and a warning goes to
-stderr.
+``token_pricing.json`` is the kanban's table, resolved by
+:func:`pgai_agent_kanban.lib.token_pricing.find_pricing_table` -- the
+resolver ``pm-agent/aggregate_tokens.py`` shares: ``<kanban
+root>/scripts/lib/token_pricing.json`` (the install layout), else the copy
+in the tree this package ships in (``team/scripts/lib/`` in a source
+checkout). A project's ``dev_tree_path`` is never read, so every project
+gets the same table. Only its ``subscriptions`` block is used, for the
+subscription comparison; without the file that block is left out and a
+warning naming the expected path goes to stderr.
 
 MISSING ROLL-UPS
 ----------------
 When the roll-up a scope needs is missing, ``cost_report()`` hands the
-aggregator's path and arguments to its *aggregate* callable (the CLI runs
+aggregator's path and arguments to its *aggregate* callable. The aggregator
+is the caller's when it exists, else the one
+:func:`pgai_agent_kanban.lib.token_pricing.find_aggregator` resolves the
+same way as the pricing table (the CLI runs
 the aggregator; a caller that must not start a process passes None and the
 scope reports "no data").
 """
@@ -60,6 +66,7 @@ import pathlib
 import re
 from typing import Any, Callable, Optional, Sequence
 
+from ..token_pricing import PRICING_REL_PATH, find_aggregator, find_pricing_table
 from .common import TextOutput, TextResult, load_json_object
 
 __all__ = [
@@ -74,9 +81,6 @@ __all__ = [
 
 #: Runs the aggregator: called with its path and its arguments.
 Aggregate = Callable[[str, list[str]], None]
-
-_PRICING_REL = "team/scripts/lib/token_pricing.json"
-_AGGREGATOR_REL = "team/pm-agent/aggregate_tokens.py"
 
 _USAGE_HINT = "Run with --help for usage."
 
@@ -292,32 +296,6 @@ def resolve_range(args: CostReportArgs, today: datetime.date, run: _Run) -> str:
     if args.since:
         return f"{args.since}|{today_str}|Since {args.since} through {today_str}"
     return f"earliest|{args.until}|Through {args.until}"
-
-
-def _dev_tree_path(project_dir: pathlib.Path) -> str:
-    """``dev_tree_path`` from the project's config, read as ``key=value`` lines.
-
-    Prefers ``project.cfg`` and falls back to ``PROJECT.cfg``. The key loses
-    any ``#`` comment and every space; the value loses one leading and one
-    trailing space and one pair of surrounding quotes.
-    """
-    for name in ("project.cfg", "PROJECT.cfg"):
-        cfg = project_dir / name
-        if cfg.is_file():
-            break
-    else:
-        return ""
-    for line in cfg.read_text(encoding="utf-8", errors="replace").splitlines():
-        key, _sep, val = line.partition("=")
-        key = key.split("#", 1)[0].replace(" ", "")
-        val = val[1:] if val.startswith(" ") else val
-        val = val[:-1] if val.endswith(" ") else val
-        for quote in ('"', "'"):
-            val = val[1:] if val.startswith(quote) else val
-            val = val[:-1] if val.endswith(quote) else val
-        if key == "dev_tree_path" and val:
-            return val
-    return ""
 
 
 # ---------------------------------------------------------------------------
@@ -750,8 +728,8 @@ def cost_report(
         default_project:     The project when ``--project`` is not given
             (``PGAI_PROJECT_NAME``).
         aggregator:          The aggregator the caller found beside itself;
-            the project's dev tree copy is used when this is empty or
-            missing.
+            when this is empty or missing, the kanban tree's own copy
+            (``find_aggregator``) is used.
         aggregate:           Runs the aggregator for a missing roll-up, or
             None to report the scope as it stands.
         help_source:         The script whose header is printed for
@@ -798,19 +776,17 @@ def _report(
     if not project_dir.is_dir():
         raise run.fail(f"ERROR: project directory not found: {kanban_root}/projects/{args.project}")
 
-    dev_tree = _dev_tree_path(project_dir)
-    pricing_file = ""
-    if dev_tree and pathlib.Path(f"{dev_tree}/{_PRICING_REL}").is_file():
-        pricing_file = f"{dev_tree}/{_PRICING_REL}"
-    elif pathlib.Path(f"{kanban_root}/{_PRICING_REL}").is_file():
-        pricing_file = f"{kanban_root}/{_PRICING_REL}"
-    else:
-        run.err.append("WARNING: token_pricing.json not found; subscription comparison unavailable.")
+    found_pricing = find_pricing_table(kanban_root)
+    pricing_file = str(found_pricing) if found_pricing is not None else ""
+    if not pricing_file:
+        run.err.append(
+            "WARNING: token_pricing.json not found; subscription comparison unavailable. "
+            f"Expected at: {pathlib.Path(kanban_root) / PRICING_REL_PATH}"
+        )
 
     if not (aggregator and pathlib.Path(aggregator).is_file()):
-        aggregator = ""
-        if dev_tree and pathlib.Path(f"{dev_tree}/{_AGGREGATOR_REL}").is_file():
-            aggregator = f"{dev_tree}/{_AGGREGATOR_REL}"
+        found_aggregator = find_aggregator(kanban_root)
+        aggregator = str(found_aggregator) if found_aggregator is not None else ""
 
     if not args.scope_value and args.scope_type == "month" and not args.scope_flag:
         args.scope_value = today.strftime("%Y-%m")

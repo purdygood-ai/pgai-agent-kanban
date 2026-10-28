@@ -28,11 +28,9 @@ import subprocess
 
 from pgai_agent_kanban.cm.read_state_field import (
     ReleaseStateValidationError,
-    _is_horizontal_rule,
     load_release_state,
     read_release_state_field,
     read_state_field,
-    read_state_section,
     validate_release_state_fields,
 )
 from pgai_agent_kanban.cm.write_rc_state import (
@@ -41,6 +39,8 @@ from pgai_agent_kanban.cm.write_rc_state import (
     write_open,
     write_ship,
 )
+from pgai_agent_kanban.task_status import is_horizontal_rule as _is_horizontal_rule
+from tests.fixtures.release_state_section import release_state_section_value
 
 
 # ---------------------------------------------------------------------------
@@ -219,7 +219,7 @@ def test_read_state_field(
 
 
 # ---------------------------------------------------------------------------
-# read_state_section — the same walk, bounded at the next '##' heading
+# release_state_section_value — the same walk, bounded at the next '##' heading
 # ---------------------------------------------------------------------------
 
 
@@ -240,14 +240,14 @@ def test_read_state_field(
         pytest.param("## Last Released At\n2026-01-01T00:00:00Z\n", "Last Released", None, id="retired_heading_is_not_the_field"),
     ],
 )
-def test_read_state_section(tmp_path: Path, file_content: str, heading: str, expected) -> None:
+def test_release_state_section_value(tmp_path: Path, file_content: str, heading: str, expected) -> None:
     md = tmp_path / "state.md"
     md.write_text(file_content, encoding="utf-8")
-    assert read_state_section(str(md), heading) == expected
+    assert release_state_section_value(str(md), heading) == expected
 
 
-def test_read_state_section_missing_file_is_none(tmp_path: Path) -> None:
-    assert read_state_section(str(tmp_path / "absent.md"), "Active RC") is None
+def test_release_state_section_value_missing_file_is_none(tmp_path: Path) -> None:
+    assert release_state_section_value(str(tmp_path / "absent.md"), "Active RC") is None
 
 
 def _cli(*args: str) -> subprocess.CompletedProcess:
@@ -335,7 +335,7 @@ def test_empty_release_state_field_is_refused_as_empty_value(
 
     (result,) = validate_release_state_fields(str(md), (heading,))
     assert (result.ok, result.error_key, result.received) == (False, "release-state.empty-value", None)
-    assert read_state_section(str(md), heading) == ""
+    assert release_state_section_value(str(md), heading) == ""
     assert read_state_field(str(md), heading) == "none"
 
 
@@ -428,7 +428,7 @@ def test_populated_release_state_reads_the_same_through_every_reader(
         # The section read keeps an absent heading apart (None); every other
         # field reads the same value as the walks above.
         heading_present = f"## {heading}\n" in file_content
-        assert read_state_section(str(md), heading) == (value if heading_present else None), heading
+        assert release_state_section_value(str(md), heading) == (value if heading_present else None), heading
 
 
 # ---------------------------------------------------------------------------
@@ -496,7 +496,7 @@ def test_field_reads_are_unchanged_by_auto_ship_events(tmp_path: Path, file_cont
         expected = read_state_field(str(plain), heading)
         assert read_state_field(str(with_events), heading) == expected, heading
         assert read_release_state_field(str(with_events), heading) == expected, heading
-        assert read_state_section(str(with_events), heading) == read_state_section(str(plain), heading), heading
+        assert release_state_section_value(str(with_events), heading) == release_state_section_value(str(plain), heading), heading
 
 
 def test_populated_release_state_retired_and_appended_sections_read_as_written(tmp_path: Path) -> None:

@@ -2,8 +2,9 @@
 test_lint_dashboard_network_git_gate.py
 ========================================
 Tests for team/scripts/lint_dashboard_network_git_gate.py — the
-"teeth" lint that fails when any network-capable git invocation
-(ls-remote|fetch|pull|push|clone) appears under team/scripts/dashboard/*.
+"teeth" lint that reports every network-capable git invocation
+(ls-remote|fetch|pull|push|clone) under team/scripts/dashboard/* as a
+quality finding and exits 0.
 
 Test coverage:
 
@@ -20,8 +21,11 @@ Test coverage:
      forbidden verb (several real dashboard scripts document their own
      local-only guarantee using these exact words).
   9. Nested lib/ subdirectory is scanned (recursive scope).
- 10. main() returns 0 on a clean synthetic tree.
- 11. main() returns 1 when a violation is present.
+ 10. main() returns 0 and records no finding on a clean synthetic tree.
+ 11. main() returns 0 and records the violation as one finding (file, line,
+     verb) in its --findings-file when a violation is present; a direct
+     command-line run prints it, writes it and exits 0, and the finding's
+     own remedy, run as printed, clears it.
  12. main() returns 2 when --team-dir does not exist.
  13. main() returns 2 when the dashboard/ subdirectory does not exist.
  14. --help exits 0 (argparse integration smoke test).
@@ -34,12 +38,13 @@ Test coverage:
  17. Remedy commands clear the gate: the exact numbered commands printed in
      the remedy block are parsed out of the captured output and executed,
      verbatim, through a real shell — the offending line is commented out and
-     the lint re-run against the fixture exits 0.
+     the lint re-run against the fixture records no finding.
 """
 
 from __future__ import annotations
 
 import importlib.util
+import json
 import re
 import subprocess
 import sys
@@ -47,6 +52,8 @@ import textwrap
 from pathlib import Path
 
 import pytest
+
+from tests.fixtures.lint_findings import run_main
 
 # ---------------------------------------------------------------------------
 # Load lint_dashboard_network_git_gate.py as a module (mirrors sibling tests'
@@ -264,16 +271,19 @@ def test_main_returns_zero_on_clean_tree(tmp_path: Path) -> None:
         """,
     )
 
-    rc = _lint.main(["--team-dir", str(tmp_path / "team")])
+    rc, findings = run_main(
+        _lint.main, ["--team-dir", str(tmp_path / "team")], tmp_path / "findings.json"
+    )
     assert rc == 0, f"Expected main() to return 0 on a clean tree, got {rc}"
+    assert findings == [], f"Expected no finding on a clean tree, got {findings}"
 
 
 # ---------------------------------------------------------------------------
-# Case 11 — main() returns 1 on a violation
+# Case 11 — a violation is a finding, and main() still returns 0
 # ---------------------------------------------------------------------------
 
 
-def test_main_returns_one_on_violation(tmp_path: Path) -> None:
+def test_main_records_violation_as_finding_and_returns_zero(tmp_path: Path) -> None:
     dashboard = _make_dashboard_dir(tmp_path)
     _write_sh(
         dashboard / "violator.sh",
@@ -283,8 +293,47 @@ def test_main_returns_one_on_violation(tmp_path: Path) -> None:
         """,
     )
 
-    rc = _lint.main(["--team-dir", str(tmp_path / "team")])
-    assert rc == 1, f"Expected main() to return 1 on a violation, got {rc}"
+    rc, findings = run_main(
+        _lint.main, ["--team-dir", str(tmp_path / "team")], tmp_path / "findings.json"
+    )
+    assert rc == 0, f"Expected main() to return 0 on a violation (quality class), got {rc}"
+    assert len(findings) == 1, findings
+    finding = findings[0]
+    assert finding["lint"] == "dashboard_network_git_gate"
+    assert finding["severity"] == "quality"
+    assert finding["file"].endswith("scripts/dashboard/violator.sh"), finding
+    assert finding["line"] == 2 and finding["verb"] == "ls-remote", finding
+    assert finding["summary"] == finding["cause"] and finding["remedy"], finding
+
+
+def test_direct_run_prints_writes_and_exits_zero_and_the_remedy_clears_it(
+    tmp_path: Path,
+) -> None:
+    dashboard = _make_dashboard_dir(tmp_path)
+    violator = _write_sh(
+        dashboard / "violator.sh",
+        """\
+        #!/usr/bin/env bash
+        git -C "$dev_tree" fetch origin --tags
+        """,
+    )
+    findings_path = tmp_path / "out" / "findings.json"
+    argv = [sys.executable, str(_LINT_SCRIPT), "--team-dir", str(tmp_path / "team")]
+
+    proc = subprocess.run(
+        [*argv, "--findings-file", str(findings_path)], capture_output=True, text=True
+    )
+
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert f"{violator}:2: network-capable git verb 'fetch'" in proc.stdout, proc.stdout
+    assert "error:   lint.dashboard-network-git" in proc.stderr, proc.stderr
+    findings = json.loads(findings_path.read_text(encoding="utf-8"))
+    assert [(f["line"], f["verb"]) for f in findings] == [(2, "fetch")], findings
+
+    remedy = subprocess.run(findings[0]["remedy"], shell=True, capture_output=True, text=True)
+    assert remedy.returncode == 0, remedy.stdout + remedy.stderr
+    rc, after = run_main(_lint.main, argv[2:], tmp_path / "after.json")
+    assert rc == 0 and after == [], after
 
 
 # ---------------------------------------------------------------------------
@@ -411,8 +460,12 @@ class TestDashboardNetworkGitGateRemedyBlock:
         """
         team_dir, fixture_sh = self._write_violation_fixture(tmp_path)
 
-        result = _lint.main(["--team-dir", str(team_dir)])
-        assert result == 1, "Forced network-git violation did not fail the gate."
+        result, findings = run_main(
+            _lint.main, ["--team-dir", str(team_dir)], tmp_path / "findings.json"
+        )
+        assert result == 0 and len(findings) == 1, (
+            f"Forced network-git violation was not recorded as one finding: {findings}"
+        )
 
         out = capsys.readouterr().out
 
@@ -459,12 +512,16 @@ class TestDashboardNetworkGitGateRemedyBlock:
         The test parses the exact numbered command strings out of the
         captured stdout (not a hand-reconstructed equivalent) and runs them
         through a real shell, then re-invokes the lint directly to confirm
-        it now exits 0.
+        it now records no finding.
         """
         team_dir, fixture_sh = self._write_violation_fixture(tmp_path)
 
-        result = _lint.main(["--team-dir", str(team_dir)])
-        assert result == 1, "Forced network-git violation did not fail the gate."
+        result, findings = run_main(
+            _lint.main, ["--team-dir", str(team_dir)], tmp_path / "findings.json"
+        )
+        assert result == 0 and len(findings) == 1, (
+            f"Forced network-git violation was not recorded as one finding: {findings}"
+        )
 
         out = capsys.readouterr().out
         commands = _NUMBERED_COMMAND_RE.findall(out)
@@ -484,13 +541,15 @@ class TestDashboardNetworkGitGateRemedyBlock:
                 f"stdout: {proc.stdout!r}\nstderr: {proc.stderr!r}"
             )
 
-        # The last command IS the re-lint verification command and already
-        # asserted returncode == 0 above. Confirm independently via a direct
-        # main() call for belt-and-braces.
-        recheck = _lint.main(["--team-dir", str(team_dir)])
-        assert recheck == 0, (
-            "lint_dashboard_network_git_gate still fails against the fixture "
-            "tree after running every printed remedy command verbatim."
+        # The last command IS the re-lint verification command; it exits 0
+        # whatever it finds, so confirm via a direct main() call that the
+        # fixture tree now carries no finding.
+        recheck, after = run_main(
+            _lint.main, ["--team-dir", str(team_dir)], tmp_path / "after.json"
+        )
+        assert recheck == 0 and after == [], (
+            "lint_dashboard_network_git_gate still reports a finding against the "
+            f"fixture tree after running every printed remedy command verbatim: {after}"
         )
 
         # The offending line must now be a comment — proof the fix actually

@@ -56,7 +56,8 @@
 #   only legal one.
 #
 #   Order of work, every time it fires: (1) stop the process group named by
-#   CLEANUP_ON_EXIT_PROCESS_GROUP, (2) the pre-hook, (3) kill the remaining
+#   CLEANUP_ON_EXIT_PROCESS_GROUP, then the agent run named by
+#   CLEANUP_ON_EXIT_AGENT_RUN_ID, (2) the pre-hook, (3) kill the remaining
 #   jobs and wait, (4) exit. A process group comes first because a pre-hook
 #   may release something (a lock) that a still-running group member is
 #   relying on: releasing first lets a second process take it while the
@@ -74,6 +75,14 @@
 #   CLEANUP_ON_EXIT_PROCESS_GROUP_GRACE (optional): seconds to wait after
 #   SIGTERM before SIGKILL (and again after SIGKILL for the kernel to finish
 #   the teardown). Defaults to KILL_GRACE_SECONDS, then 30.
+#
+#   CLEANUP_ON_EXIT_AGENT_RUN_ID / CLEANUP_ON_EXIT_AGENT_RUN_LOG (optional):
+#   an agent run still in progress and its task log file, set by
+#   agent_run_begin (agent_run_reap.sh). When the run id is set and
+#   agent_run_reap is defined, cleanup_on_exit stops every process carrying
+#   that run id right after the process group -- TERM, the same grace, KILL
+#   -- and logs each one, so a run's processes outside the group do not
+#   outlive a wake stopped mid-run.
 #
 # cleanup_stop_process_group <pgid> [grace_seconds]
 #   Stops every member of process group <pgid>: SIGTERM to the group, poll
@@ -160,6 +169,12 @@ cleanup_on_exit() {
     # Stopped (or past SIGKILL): a signal trap's own `exit` re-enters this
     # function through the EXIT trap, which must not wait on it twice.
     CLEANUP_ON_EXIT_PROCESS_GROUP=""
+  fi
+  if [[ -n "${CLEANUP_ON_EXIT_AGENT_RUN_ID:-}" ]] && declare -F agent_run_reap >/dev/null 2>&1; then
+    agent_run_reap "$CLEANUP_ON_EXIT_AGENT_RUN_ID" \
+      "${CLEANUP_ON_EXIT_PROCESS_GROUP_GRACE:-${KILL_GRACE_SECONDS:-30}}" \
+      "${CLEANUP_ON_EXIT_AGENT_RUN_LOG:-}" || true
+    CLEANUP_ON_EXIT_AGENT_RUN_ID=""
   fi
   if [[ -n "${CLEANUP_ON_EXIT_PRE_HOOK:-}" ]]; then
     "$CLEANUP_ON_EXIT_PRE_HOOK" "$exit_code" || true

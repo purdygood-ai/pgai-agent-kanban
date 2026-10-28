@@ -19,6 +19,11 @@
 #   --project-root DIR  PGAI_PROJECT_ROOT (default: kanban-root/projects/pgai-agent-kanban)
 #   --help              Print this usage text and exit 0
 #
+# Environment:
+#   PGAI_AGENT_KANBAN_TEMP_DIR  Overrides the framework temp root (resolved by
+#                               team/scripts/lib/temp.sh) that the synthetic
+#                               task folders are built under and removed from
+#
 # Exit codes:
 #   0  — all smoke tests passed
 #   1  — one or more tests failed
@@ -51,9 +56,28 @@ if [[ ! -f "$SCRIPT_UNDER_TEST" ]]; then
   exit 1
 fi
 
+# The scratch root comes from the shared temp wrapper (scripts/lib/temp.sh,
+# one directory up in the repo and the installed layout alike). A missing
+# copy refuses here, before any branch or task folder is made.
+_SMOKE_TEMP_SH="$(dirname "$SCRIPT_DIR")/lib/temp.sh"
+if [[ ! -f "$_SMOKE_TEMP_SH" ]]; then
+  # shellcheck source=../lib/error_contract.sh
+  source "$(dirname "$SCRIPT_DIR")/lib/error_contract.sh"
+  # BLOCK-WORTHY: no temp root means the smoke tests cannot run; nothing was
+  # created in the worktree or under any temp directory.
+  pgai_emit_error_contract "test-stale-artifact-branches.temp-sh-missing" \
+    "test-stale-artifact-branches.sh needs the temp-root wrapper at ${_SMOKE_TEMP_SH} and it does not exist; no smoke test ran." \
+    "ls -l '${_SMOKE_TEMP_SH}'"
+  # CENSUS-ANCHOR: test-stale-artifact-branches-temp-sh-missing-01
+  exit 1
+fi
+# shellcheck source=../lib/temp.sh
+source "$_SMOKE_TEMP_SH"
+unset _SMOKE_TEMP_SH
+
 PASS=0
 FAIL=0
-TEMP_ROOT="$(mktemp -d /tmp/pgai_kanban_tmp/smoke-stale-branches-XXXXXX)"
+TEMP_ROOT="$(mktemp -d "$(pgai_temp_dir)/smoke-stale-branches-XXXXXX")"
 TASKS_DIR="$TEMP_ROOT/tasks"
 mkdir -p "$TASKS_DIR"
 

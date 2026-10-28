@@ -76,11 +76,11 @@ _SCRIPTS_DIR = _TEAM_DIR / "scripts"
 _LIB_DIR = _SCRIPTS_DIR / "lib"
 
 _VERSION_STAMP_SH = _LIB_DIR / "version_stamp.sh"
-# The Step 13 pre-tag VERSION gate this class's remedy-text anti-drift check
-# guards lives in release_finalize.sh, not release.sh itself, since the
-# v2.9.20 engine-decomposition moved Step 13 into that lib stage (release.sh
-# now only calls cm_release_finalize; see that file's own module doc).
+# The Step 13 pre-tag VERSION gate runs in release_finalize.sh; the remedy
+# text this class's anti-drift check guards is printed by the gate's report
+# helper, cm_release_version_gate_report in release_stop_inbox.sh.
 _CM_RELEASE_FINALIZE_SH = _LIB_DIR / "cm" / "release_finalize.sh"
+_CM_RELEASE_STOP_INBOX_SH = _LIB_DIR / "cm" / "release_stop_inbox.sh"
 _STATUS_RIGHT_SH = _SCRIPTS_DIR / "dashboard" / "status-right.sh"
 
 
@@ -520,15 +520,16 @@ fi
         assert created_tag == tag
 
     def test_release_sh_source_matches_remedy_text(self) -> None:
-        """Anti-drift guard: the live release_finalize.sh (Step 13's home
-        since the v2.9.20 engine-decomposition) must still contain the exact
-        remedy strings this class exercises, so a future edit to Step 13 that
+        """Anti-drift guard: the live gate report (release_stop_inbox.sh,
+        called by Step 13 in release_finalize.sh) must still contain the exact
+        remedy strings this class exercises, so a future edit to the gate that
         changes the wording is caught here rather than only via silent
         fixture drift between this replica and the real script."""
-        assert _CM_RELEASE_FINALIZE_SH.exists(), (
-            f"release_finalize.sh not found at {_CM_RELEASE_FINALIZE_SH}"
+        assert _CM_RELEASE_STOP_INBOX_SH.exists(), (
+            f"release_stop_inbox.sh not found at {_CM_RELEASE_STOP_INBOX_SH}"
         )
-        src = _CM_RELEASE_FINALIZE_SH.read_text(encoding="utf-8")
+        assert "cm_release_version_gate_report" in _CM_RELEASE_FINALIZE_SH.read_text(encoding="utf-8")
+        src = _CM_RELEASE_STOP_INBOX_SH.read_text(encoding="utf-8")
         assert "[Pre-tag VERSION gate] FAIL" in src
         assert "Cause(s):" in src
         assert "To fix:" in src

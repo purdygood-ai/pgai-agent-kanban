@@ -38,12 +38,12 @@ import pathlib
 
 import pytest
 
-from pgai_agent_kanban.cm.read_state_field import read_state_section
 from tests.fixtures.dashboard_render_fixture import (
     build_dashboard_project_root,
     clean_subprocess_env,
     run_dashboard_script,
 )
+from tests.fixtures.release_state_section import release_state_section_value
 from tests.unit.shell_harness import run_bash
 
 _TEAM_DIR = pathlib.Path(__file__).resolve().parents[2]
@@ -169,7 +169,7 @@ printf '%s|%s' "$(release_state_value '{rs}' 'Active RC')" "$(release_state_acti
 """,
     )
     assert out == "none|none"
-    assert read_state_section(str(rs), "Active RC") == ""
+    assert release_state_section_value(str(rs), "Active RC") == ""
 
 
 def _active_rc(tmp_path: pathlib.Path, project: str = "demo") -> str:

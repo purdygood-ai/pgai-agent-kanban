@@ -42,11 +42,14 @@ THE HISTORY TABLE
     <blank>
     RC  Wall  Blocked  Input  Output  Cache Read  Cache Write  Tasks
     <one row per history.csv row, the last N>
-    Blocked tracked from v2.24.0          (only when a row has no Blocked value)
+    Blocked untracked for <K> RC(s)       (only when a rendered row has no Blocked value)
 
 Wall prints ``--`` when ``wall_time_minutes`` is empty and the raw value
 otherwise. Blocked prints a single ``-`` when ``blocked_minutes`` is empty
 or absent, and the comma-formatted minutes (a real 0 included) otherwise.
+The footer counts the rendered rows that print ``-`` (see
+``blocked_untracked_footer``), so it states what the table shows and names
+no release.
 The token and task columns are comma-formatted by
 ``pgai_agent_kanban.lib.number_format.format_int`` (``--`` for empty). A
 history.csv with a header and no rows prints ``No data``; a project with
@@ -71,6 +74,7 @@ __all__ = [
     "read_history_csv",
     "show_metrics",
     "render_history_table",
+    "blocked_untracked_footer",
     "render_per_agent",
     "history_csv",
     "rc_rollups_jsonl",
@@ -79,8 +83,6 @@ __all__ = [
 # Column layout of the history table; Blocked sits right of Wall.
 _HISTORY_ROW = "{:<12} {:<10} {:>8} {:>10} {:>10} {:>12} {:>13}  {:>5}"
 _HISTORY_HEADER = ("RC", "Wall", "Blocked", "Input", "Output", "Cache Read", "Cache Write", "Tasks")
-# The footer printed once when any rendered row has no Blocked value.
-_BLOCKED_UNTRACKED_FOOTER = "Blocked tracked from v2.24.0"
 
 # Column layout of the per-agent table.
 _AGENT_ROW = "{:<12} {:>10} {:>10} {:>12} {:>13} {:>11}"
@@ -201,6 +203,19 @@ def _fmt_blocked(raw: Optional[str]) -> str:
     return format_int(s) if s else "-"
 
 
+def blocked_untracked_footer(blocked_cells: Sequence[str]) -> str:
+    """The footer line for a table whose Blocked column printed *blocked_cells*.
+
+    Counts the cells that printed ``-`` (no Blocked value) and returns
+    ``Blocked untracked for <K> RC`` / ``... RCs``, or ``""`` when every
+    rendered row carries a value -- the caller prints nothing then.
+    """
+    untracked = sum(1 for cell in blocked_cells if cell == "-")
+    if not untracked:
+        return ""
+    return f"Blocked untracked for {untracked} RC{'' if untracked == 1 else 's'}"
+
+
 def render_history_table(
     rows: Sequence[dict[str, str]], project: str, last_n: int, colors: Colors
 ) -> list[str]:
@@ -210,11 +225,10 @@ def render_history_table(
     rows = list(rows)[-last_n:]
     lines = [f"{colors.cyan}{colors.bold}=== RC Metrics: {project} (last {last_n}) ==={colors.reset}", ""]
     lines.append(f"{colors.bold}{_HISTORY_ROW.format(*_HISTORY_HEADER)}{colors.reset}")
-    saw_untracked_row = False
+    blocked_cells: list[str] = []
     for row in rows:
         blocked = _fmt_blocked(row.get("blocked_minutes"))
-        if blocked == "-":
-            saw_untracked_row = True
+        blocked_cells.append(blocked)
         lines.append(
             _HISTORY_ROW.format(
                 str(row.get("rc", "")).strip(),
@@ -227,8 +241,9 @@ def render_history_table(
                 format_int(row.get("tasks_total", "")),
             )
         )
-    if saw_untracked_row:
-        lines.append(f"{colors.dim}{_BLOCKED_UNTRACKED_FOOTER}{colors.reset}")
+    footer = blocked_untracked_footer(blocked_cells)
+    if footer:
+        lines.append(f"{colors.dim}{footer}{colors.reset}")
     return lines
 
 

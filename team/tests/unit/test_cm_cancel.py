@@ -53,6 +53,7 @@ if str(_TEAM_DIR) not in sys.path:
 from pgai_agent_kanban.cm import cancel  # noqa: E402
 from pgai_agent_kanban.lib.error_contract import parse_error_contract  # noqa: E402
 from pgai_agent_kanban.ops.context import OpsContext  # noqa: E402
+from pgai_agent_kanban.overwatch.halt_provenance import installed_script_command  # noqa: E402
 
 _PROJECT = "cancel-unit"
 _VERSION = "v2.1.0"
@@ -204,7 +205,9 @@ def test_no_confirmation_refuses_before_anything_runs(board, monkeypatch, force)
     triple = parse_error_contract(result.text)
     assert triple is not None and triple["error"] == "cancel_rc.confirmation_required", result.text
     assert _VERSION in triple["message"] and _PROJECT in triple["message"]
-    assert triple["remedy"] == f"team/scripts/cm/cancel-rc.sh --project {_PROJECT} --key {_VERSION}"
+    assert triple["remedy"] == installed_script_command(
+        board.resolve(), "cm/cancel-rc.sh", "--project", _PROJECT, "--key", _VERSION
+    )
     assert git.calls == [], "no git command may run without confirmation"
     assert streams.stdout == "" and streams.stderr == ""
     assert _files(board) == before

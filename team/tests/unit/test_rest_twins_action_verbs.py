@@ -282,7 +282,9 @@ class TestDeferUntilRefusalMachineKeyParityAcrossSurfaces:
         body = resp.json()
         assert resp.status_code == 422
         assert "defer.until_required" in body["stderr"], body
-        assert body["stderr"] == cli.stderr
+        # The remedy names the installed defer.sh under each surface's own
+        # root; with the roots aligned the two stderr streams are identical.
+        assert body["stderr"].replace(str(http_root.resolve()), str(cli_root.resolve())) == cli.stderr
 
 
 # ---------------------------------------------------------------------------

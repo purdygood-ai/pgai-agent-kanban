@@ -14,8 +14,10 @@
 # -----------------
 # The posture is read once per release through pp_ship_posture
 # (team/scripts/lib/project_paths.sh), which applies the project.cfg-then-
-# kanban.cfg chain and the remote-lane guard and always answers "matrix" or
-# "always".
+# kanban.cfg chain (the built-in default is "always" when neither sets the
+# key) and the remote-lane guard (a push_to_remote = true lane stays on
+# "matrix" unless ship_posture_confirm_remote = true), and always answers
+# "matrix" or "always".
 #   matrix — the ship-policy matrix as written: every HALT row halts. Under
 #            matrix nothing in this file prints a line or changes a value,
 #            so the release's output, exit code, HALT file and release-state
@@ -38,14 +40,15 @@
 #            task, plus the filed bug for trigger 8, and puts one
 #            "Auto-shipped under ship_posture=always (would have halted:
 #            trigger N — <error key>)" line under the release notes'
-#            "## Known Issues", on both notes paths. Every other HALT —
-#            trigger 1 (TESTER BLOCKED), the unrecognized-TESTER-state and
-#            no-row-matched rows, and the mechanical triggers 4-11 — halts
-#            exactly as it does under matrix.
+#            "## Known Issues", on both notes paths. The mechanical
+#            triggers 4-11 halt exactly as they do under matrix.
+#
+# A TESTER report problem halts under neither posture: a BLOCKED TESTER task
+# or a missing report is requeued once and then ships NON-FUNCTIONAL, and an
+# unrecognised TESTER state ships KNOWN-BUGS (release_verification_retry.sh).
 #
 # The --force / --reason operator override is unchanged: under always,
-# triggers 2 and 3 never reach a HALT for it to pass, and it still passes
-# trigger 1 as before.
+# triggers 2 and 3 never reach a HALT for it to pass.
 #
 # Public entry points
 # --------------------
@@ -55,7 +58,8 @@
 #       release_ship_policy.sh's HALT dispatch and the posture both read it.
 #   cm_ship_policy_trigger_number <error_key>
 #       Pure. Prints the trigger number an error key names
-#       ("cm-release.trigger-2.…" -> 2), or "none" for a row with no number.
+#       ("cm-release.trigger-2.…" -> 2, "cm-release.trigger-5b.…" -> 5b), or
+#       "none" for a row with no number.
 #   cm_ship_posture_passes <posture> <trigger>
 #       Pure. Status 0 when <posture> ships through <trigger>, 1 otherwise.
 #   cm_ship_posture_read
@@ -145,7 +149,7 @@ cm_ship_policy_halt_key() {
 # Helper: the trigger number an error key names, or "none".
 # Usage: cm_ship_policy_trigger_number <error_key>
 cm_ship_policy_trigger_number() {
-  if [[ "${1:-}" =~ ^cm-release\.trigger-([0-9]+)\. ]]; then
+  if [[ "${1:-}" =~ ^cm-release\.trigger-([0-9]+[a-z]?)\. ]]; then
     echo "${BASH_REMATCH[1]}"
   else
     echo "none"
@@ -168,9 +172,10 @@ cm_ship_posture_passes() {
 
 # Helper: read the project's ship posture once, into _SHIP_POSTURE.
 # pp_ship_posture prints its own warning line for an unrecognized value or
-# an unconfirmed remote lane and answers "matrix"; anything other than
-# "always" here, including a resolver that is unavailable or fails, reads
-# as "matrix". Prints one line under always and nothing under matrix.
+# a cfg-set always on an unconfirmed remote lane and answers "matrix";
+# anything other than "always" here, including a resolver that is
+# unavailable or fails, reads as "matrix" (the fail-safe answer, not the
+# default: an unset key resolves to "always" in pp_ship_posture). Prints one line under always and nothing under matrix.
 cm_ship_posture_read() {
   _SHIP_POSTURE="matrix"
   if declare -F pp_ship_posture >/dev/null 2>&1; then
@@ -318,7 +323,9 @@ cm_ship_posture_stamp_notes() {
 # auto-ship-event, in the order the events happened. The release has
 # already been tagged by then, so a writer failure is a WARNING naming the
 # command that appends the event by hand, never an exit — the remaining
-# steps still run. Prints nothing when no event was recorded.
+# steps still run. Prints nothing when no event was recorded. Then, at the
+# same point, an unverified ship's operator inbox entry
+# (cm_verification_retry_after_ship, release_verification_retry.sh).
 cm_release_append_auto_ship_events() {
   local entry timestamp trigger error_key filed_bug
   local -a bug_args
@@ -335,5 +342,8 @@ cm_release_append_auto_ship_events() {
       echo "[cm-release] WARNING: the Auto-Ship Event for trigger ${trigger} could not be appended to ${RELEASE_STATE}; the release has shipped. Append it by hand: python3 $KANBAN_ROOT/pgai_agent_kanban/cm/write_rc_state.py auto-ship-event ${RELEASE_STATE} --version ${ACTIVE_RC} --trigger ${trigger} --error-key ${error_key} --ship-posture ${_SHIP_POSTURE:-always} --tester-task ${_TESTER_TASK_ID:-none} --timestamp ${timestamp}${filed_bug:+ --filed-bug ${filed_bug}}" >&2
     fi
   done
+  if declare -F cm_verification_retry_after_ship >/dev/null 2>&1; then
+    cm_verification_retry_after_ship
+  fi
   return 0
 }

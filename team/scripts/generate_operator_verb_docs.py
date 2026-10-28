@@ -94,17 +94,35 @@ Exit codes:
     1   --check found one or more disagreements (CONVERT: documentation
         drift carries zero runtime-failure risk -- see the refusal site
         below for the full classification rationale).
-    2   Usage error, missing/malformed census, missing doc or ICD file, or
+    2   Usage error, missing/malformed census, missing doc or ICD file,
         a document missing its section marker pair (a structural problem
-        the render can't repair by itself).
+        the render can't repair by itself), or PGAI_AGENT_KANBAN_ROOT_PATH
+        unusable -- unset, empty, or naming a directory that does not
+        exist (see below).
+
+Environment:
+    PGAI_AGENT_KANBAN_ROOT_PATH must name an existing directory: every shell
+    verb resolves it before answering --help, and several refuse with
+    "kanban root not found" when the directory is missing. When it is unset
+    or empty, when it names a path that is not an existing directory, or
+    when the first shell verb's --help refuses for want of it, the run
+    refuses with exit 2 before reporting any drift or writing anything (in
+    --check and render mode alike), names the variable and the path, and
+    gives the export to run -- rather than reporting the refusing verbs as
+    drifted or overwriting their blocks with the refusal. A relative value
+    is resolved against --team-dir, where each verb's --help runs. From a
+    checkout the tree's own team/ directory works:
+        PGAI_AGENT_KANBAN_ROOT_PATH="$PWD/team" python3 team/scripts/generate_operator_verb_docs.py --check
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import os
 import pathlib
 import re
+import shlex
 import subprocess
 import sys
 from dataclasses import dataclass, field
@@ -143,6 +161,14 @@ _NONE = "NONE"
 
 _REGENERATE_COMMAND = "python3 team/scripts/generate_operator_verb_docs.py"
 _ICD_REGENERATE_COMMAND = "bash team/scripts/generate-icd.sh"
+
+# Every shell verb resolves this variable through lib/env_bootstrap.sh before
+# it answers --help; without it each one refuses instead of printing usage.
+_ROOT_ENV_VAR = "PGAI_AGENT_KANBAN_ROOT_PATH"
+# env_bootstrap.sh's refusal, as it reaches a capture's reason (first stderr line).
+_SHELL_ENV_REFUSAL_RE = re.compile(
+    r"PGAI_AGENT_KANBAN_ROOT_PATH\s+not\s+set|shell-env\s+missing", re.IGNORECASE
+)
 
 
 def _begin_marker(verb_name: str) -> str:
@@ -238,6 +264,24 @@ def capture_help(
     if not text:
         return HelpCapture(False, None, "--help printed no output on stdout or stderr")
     return HelpCapture(True, text, None)
+
+
+def _is_shell_verb(verb: ovm.Verb) -> bool:
+    """True when *verb*'s script runs under bash (and so through env_bootstrap.sh)."""
+    return pathlib.PurePath(verb.script).suffix != ".py"
+
+
+class ShellEnvUnavailableError(RuntimeError):
+    """A shell verb's --help refused because the kanban root variable is missing.
+
+    Every other shell verb would refuse the same way, so rendering on would
+    replace each real block with an "unavailable" stub.
+    """
+
+    def __init__(self, verb_name: str, reason: str) -> None:
+        super().__init__(f"verb={verb_name!r}: {reason}")
+        self.verb_name = verb_name
+        self.reason = reason
 
 
 # ---------------------------------------------------------------------------
@@ -571,12 +615,20 @@ def render_docs(
     Raises:
         FileNotFoundError: a document does not exist.
         MarkerNotFoundError: a document has no section marker pair.
+        ShellEnvUnavailableError: the first shell verb's --help refused for
+            want of the kanban root variable; nothing further is captured.
     """
     active_verbs = [v for v in verbs.values() if v.status == "active"]
 
-    captures: dict[str, HelpCapture] = {
-        v.name: capture_help(v, team_dir, timeout) for v in active_verbs
-    }
+    captures: dict[str, HelpCapture] = {}
+    first_shell_checked = False
+    for verb in active_verbs:
+        capture = capture_help(verb, team_dir, timeout)
+        if _is_shell_verb(verb) and not first_shell_checked:
+            first_shell_checked = True
+            if not capture.ok and _SHELL_ENV_REFUSAL_RE.search(capture.reason or ""):
+                raise ShellEnvUnavailableError(verb.name, capture.reason or "")
+        captures[verb.name] = capture
 
     verb_current = doc_path.read_text(encoding="utf-8")
     verb_rendered = _replace_section(
@@ -730,13 +782,63 @@ def _write_if_changed(doc: DocRender, verb_names: list[str]) -> None:
         )
 
 
+def _missing_root_cause(root_value: str, team_dir: pathlib.Path) -> Optional[str]:
+    """Describe why *root_value* is not a usable kanban root, or None if it is.
+
+    The value is resolved the way each verb's --help sees it: verbs run with
+    *team_dir* as their working directory, so a relative value is joined to
+    it (an absolute value is used as is).
+    """
+    resolved = team_dir / root_value
+    if resolved.is_dir():
+        return None
+    where = "" if pathlib.PurePath(root_value).is_absolute() else f", resolved to {resolved}"
+    return f"it names {root_value}{where}, which is not an existing directory"
+
+
+def _refuse_shell_env(
+    team_dir: pathlib.Path,
+    argv: list[str],
+    cause: str,
+    error_key: str = "operator-verb-docs.root-path-unset",
+) -> int:
+    """Refuse the whole run because shell verbs cannot answer --help here.
+
+    Printed instead of any drift report or write: one dual-channel refusal
+    naming the variable, why it is unusable (*cause*, which names the path
+    when one was given), and a command that re-runs this invocation with it
+    exported to this tree's own team/ directory. *error_key* separates an
+    unset variable (the default) from one naming a missing directory.
+    """
+    rerun = shlex.join([sys.executable, str(_THIS_FILE), *argv])
+    # BLOCK-WORTHY: with the kanban root variable unset, or naming a
+    # directory that does not exist, shell verbs' --help refuses, so --check
+    # cannot verify anything (verification unable to run) and a render would
+    # overwrite real blocks with a stub or the refusal text.
+    emit_error_contract(
+        error_key,
+        (
+            f"{_ROOT_ENV_VAR} is not usable in this shell ({cause}), so shell "
+            "verbs cannot print their --help; no drift was checked and nothing "
+            f"was written. Export {_ROOT_ENV_VAR} as an existing kanban root "
+            "and re-run."
+        ),
+        f"export {_ROOT_ENV_VAR}={shlex.quote(str(team_dir))} && {rerun}",
+    )
+    # CENSUS-ANCHOR: generate-operator-verb-docs-root-path-unset-01
+    return 2
+
+
 def main(argv: list[str] | None = None) -> int:
     """Run the operator-verb docs generator: render both references, or with ``--check`` compare.
 
     Exit codes: 0 rendered, or ``--check`` found no drift; 1 ``--check`` found
     one or more disagreements (printed; nothing written); 2 usage error, a
-    missing or malformed manifest, or a missing document or ICD file.
+    missing or malformed manifest, a missing document or ICD file, or
+    PGAI_AGENT_KANBAN_ROOT_PATH unusable (unset, empty, or naming a directory
+    that does not exist) so shell verbs cannot print --help.
     """
+    argv = list(sys.argv[1:] if argv is None else argv)
     args = _parse_args(argv)
 
     team_dir = pathlib.Path(args.team_dir).resolve() if args.team_dir else _TEAM_DIR
@@ -772,11 +874,26 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 2
 
+    has_shell_verb = any(_is_shell_verb(v) for v in verbs.values() if v.status == "active")
+    root_value = os.environ.get(_ROOT_ENV_VAR, "")
+    if has_shell_verb and not root_value:
+        return _refuse_shell_env(team_dir, argv, "it is unset or empty")
+    # A set root that is not a directory makes the verbs that check it refuse
+    # their --help; checked before any capture so neither --check nor a
+    # render ever compares against or writes that refusal.
+    missing_cause = _missing_root_cause(root_value, team_dir) if has_shell_verb else None
+    if missing_cause is not None:
+        return _refuse_shell_env(
+            team_dir, argv, missing_cause, error_key="operator-verb-docs.root-path-missing"
+        )
+
     try:
         result = render_docs(verbs, team_dir, doc_path, api_doc_path, icd, args.timeout)
     except MarkerNotFoundError as exc:
         print(f"generate_operator_verb_docs: {exc}", file=sys.stderr)
         return 2
+    except ShellEnvUnavailableError as exc:
+        return _refuse_shell_env(team_dir, argv, f"the first shell verb's --help refused: {exc}")
 
     verb_names = [v.name for v in result.active_verbs]
     failed = _failed_captures(result.captures)

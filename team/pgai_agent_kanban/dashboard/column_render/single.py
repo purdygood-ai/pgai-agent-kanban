@@ -5,7 +5,8 @@ queue column (one ``<agent>_backlog.md``).
 
 Each item's status comes from ``pgai_agent_kanban.board`` — the classifier
 ``GET /board`` uses — and its row is coloured by that status
-(``cells.display_status`` / ``cells.status_color``).
+(``cells.display_status`` / ``cells.status_color``); a carried or
+needs-operator row also carries its status marker (``cells.status_marker``).
 
 Input column
 ------------
@@ -24,8 +25,8 @@ A requirements row shows its vX.Y.Z, with " [active]" for the active RC,
 and an open requirement the project's version ceilings stop carries
 " [ceiling]" (its target exceeds a ceiling) or " [ceiling?]" (a ceiling is
 unreadable, so nothing is queued) after its coloured label
-(``CeilingCards``); a bug or priority row its BUG-/PRIORITY- ID, followed on
-bug cards by the deferral glyph (``DeferCards``).  Rows are truncated to *width* visible
+(``CeilingCards``); a bug or priority row its BUG-/PRIORITY- ID, then its
+status marker, then on bug cards the deferral glyph (``DeferCards``).  Rows are truncated to *width* visible
 characters.  An absent or empty directory renders "(empty)".
 
 Queue column
@@ -42,12 +43,14 @@ than *max_rows* items the window is cut to ``max_rows - 1`` rows and a
 from __future__ import annotations
 
 import pathlib
+from typing import Optional
 
 from pgai_agent_kanban.board import (
-    classify_intake_status,
+    classify_intake_file,
     classify_queue_item,
     classify_requirement,
     get_target_version_for_item,
+    intake_carried_names,
     marker_to_state,
     parse_queue_line,
     read_intake_status,
@@ -62,12 +65,14 @@ from pgai_agent_kanban.dashboard.column_render.cells import (
     display_status,
     middle_position_window,
     status_color,
+    status_marker,
     truncate_ansi,
 )
 
 __all__ = [
     "QUEUE_MAX_ROWS",
     "classify_input_file",
+    "input_files",
     "parse_max_rows",
     "queue_items",
     "render_input_column",
@@ -89,8 +94,12 @@ def parse_max_rows(value: str, default: int = 20) -> int:
     return parsed if parsed >= 1 else default
 
 
-def _input_files(input_dir: pathlib.Path) -> list:
-    """Return the directory's *.md files (README* excluded), newest first."""
+def input_files(input_dir: pathlib.Path) -> list:
+    """Return the directory's *.md files (README* excluded), newest first.
+
+    Newest is the latest modification time.  This listing is the one the
+    input pane draws and ``GET /board`` returns for an intake column.
+    """
     files = [
         entry for entry in input_dir.iterdir()
         if entry.is_file() and entry.name.endswith(".md") and not entry.name.upper().startswith("README")
@@ -105,17 +114,21 @@ def classify_input_file(
     is_requirements: bool,
     active_rc: str,
     last_released: str,
+    carried: Optional[frozenset] = None,
 ) -> tuple:
     """Return ``(board_status, raw_status)`` for one input file.
 
     *raw_status* is the bug/priority file's own ``## Status`` word ("" when
     it has none), which the deferral glyph decision reads; it is "" for a
-    requirement.
+    requirement.  *carried* is ``board.intake_carried_names`` of the file's
+    directory, which a caller listing a whole column reads once and passes;
+    ``None`` reads it for a running file (``board.classify_intake_file``).
+    A running bug or priority named in it is ``"carried"``.
     """
     if is_requirements:
         return classify_requirement(get_target_version_for_item(path), active_rc, last_released), ""
     raw = read_intake_status(path, default="")
-    return classify_intake_status(raw), raw
+    return classify_intake_file(path, raw, carried), raw
 
 
 def render_input_column(
@@ -134,16 +147,18 @@ def render_input_column(
     """Render one project's input column; returns the pane's lines."""
     if not input_dir.is_dir():
         return list(_EMPTY)
-    files = _input_files(input_dir)
+    files = input_files(input_dir)
     if not files:
         return list(_EMPTY)
 
     statuses: dict = {}
+    carried = frozenset() if is_requirements else intake_carried_names(input_dir)
 
     def classify(path):
         if path not in statuses:
             statuses[path] = classify_input_file(
                 path, is_requirements=is_requirements, active_rc=active_rc, last_released=last_released,
+                carried=carried,
             )
         return statuses[path]
 
@@ -156,10 +171,12 @@ def render_input_column(
             mark = ceiling.suffix(board_status, get_target_version_for_item(path)) if ceiling.active else ""
             text = f"{colour}{label}{palette.reset}{mark}" if palette.use_color and colour else f"{label}{mark}"
         else:
-            # The glyph follows the coloured ID so every ID starts in the
-            # same column whether or not its card carries a glyph.
+            # The marker and glyph follow the coloured ID so every ID starts
+            # in the same column whether or not its card carries either.
+            marker = status_marker(display_status(board_status), palette.use_color)
             glyph = defer.suffix(cid, raw_status, palette.use_color)
-            text = f"{colour}{cid}{palette.reset}{glyph}" if palette.use_color and colour else f"{cid}{glyph}"
+            suffix = f"{marker}{glyph}"
+            text = f"{colour}{cid}{palette.reset}{suffix}" if palette.use_color and colour else f"{cid}{suffix}"
         return truncate_ansi(text, width, palette)
 
     total = len(files)

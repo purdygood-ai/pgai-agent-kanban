@@ -48,6 +48,11 @@
 #
 # --dry-run: scans and logs findings but does NOT modify release-state.md.
 
+# overwatch_registered_projects and overwatch_branch_prefix: the shared
+# projects.cfg and branch_prefix readers.
+# shellcheck source=../overwatch_config.sh
+source "$(dirname "${BASH_SOURCE[0]}")/../overwatch_config.sh"
+
 # ---------------------------------------------------------------------------
 # _csarc_resolve_env
 # Resolve KANBAN_ROOT, OVERWATCH_PROJECT, and the dev tree path from the env.
@@ -68,14 +73,9 @@ _csarc_resolve_env() {
         # On a multi-project install the caller MUST set OVERWATCH_PROJECT; this
         # path is only safe for single-project installs.
         local _all_projects=""
-        if declare -f projects_cfg_list >/dev/null 2>&1; then
-            _all_projects="$(projects_cfg_list 2>/dev/null)"
-        else
-            local _cfg="${KANBAN_ROOT}/projects.cfg"
-            _all_projects="$(awk '/^\[project:[a-zA-Z0-9_-]+\]/{match($0,/\[project:([a-zA-Z0-9_-]+)\]/,a);print a[1]}' "$_cfg" 2>/dev/null)"
-        fi
+        _all_projects="$(overwatch_registered_projects)"
         local _project_count
-        _project_count="$(echo "${_all_projects}" | grep -c '[^[:space:]]' 2>/dev/null || echo 0)"
+        _project_count="$(echo "${_all_projects}" | grep -c '[^[:space:]]' 2>/dev/null)" || _project_count=0
         if [[ "${_project_count}" -gt 1 ]]; then
             echo "check-stale-active-rc: ERROR: OVERWATCH_PROJECT is not set and multiple projects are registered." >&2
             echo "  Set OVERWATCH_PROJECT to the target project name before running this check." >&2
@@ -116,15 +116,11 @@ _csarc_resolve_env() {
         return 1
     fi
 
-    # Read branch_prefix from project config; default to empty (no prefix).
-    # Strips surrounding double-quotes so that `branch_prefix = ""` is treated as empty.
+    # Read branch_prefix through the shared reader (pp_branch_prefix): empty
+    # when unset or `branch_prefix = ""` (no prefix); an invalid value refuses.
     _CSARC_BRANCH_PREFIX=""
     if [[ -n "${cfg_file}" ]]; then
-        local _raw_prefix
-        _raw_prefix="$(grep -E '^[[:space:]]*branch_prefix[[:space:]]*=' "${cfg_file}" \
-            | head -n1 \
-            | sed 's|^[^=]*=[[:space:]]*||; s|[[:space:]]*$||; s|^["'"'"']||; s|["'"'"']$||')"
-        _CSARC_BRANCH_PREFIX="${_raw_prefix:-}"
+        _CSARC_BRANCH_PREFIX="$(overwatch_branch_prefix "${OVERWATCH_PROJECT}")" || return 1
     fi
 
     return 0

@@ -13,9 +13,11 @@ Coverage:
   - Requirements bundle is queued for PM when the chain is idle
   - Per-project HALT file blocks only the affected project
   - Global HALT file blocks all projects
+  - Each HALT guard's remedy names the installed unhalt script under the
+    kanban root, and runs as printed even when the root holds a space
   - Active-RC gate defers bundling until after the RC ships
   - Version-ceiling gate prevents bundles whose version exceeds max_patch
-  - Per-project isolation: bug in project_a does not affect project_b
+  - Per-project isolation: bug in project-a does not affect project-b
   - Malformed-filename quarantine: files that fail format validation three
     times are moved to the project-level rejected/ directory
 
@@ -42,6 +44,7 @@ from typing import Optional
 import pytest
 
 from pgai_agent_kanban.cm.bundle_family import parse_bundled_item_basenames
+from tests.fixtures.two_project import build_two_project_root
 
 # ---------------------------------------------------------------------------
 # Path to the dev tree (resolves from this file's own location: the dev tree
@@ -295,6 +298,40 @@ def _set_max_patch_ceiling(
     cfg_path.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
 
 
+#: Kanban root directory names for the HALT-remedy tests: a plain one, and
+#: one holding a space, which only a shell-quoted command survives.
+_HALT_REMEDY_ROOT_NAMES = ["kanban_two_project", "kanban root"]
+
+
+def _error_contract_fields(stderr: str) -> dict[str, str]:
+    """The ``error`` / ``message`` / ``remedy`` lines of a dual-channel
+    refusal on *stderr*, tolerant of the emitter's colon alignment."""
+    fields: dict[str, str] = {}
+    for name in ("error", "message", "remedy"):
+        match = re.search(rf"^{name}:\s*(.*)$", stderr, re.MULTILINE)
+        if match:
+            fields[name] = match.group(1).strip()
+    return fields
+
+
+def _remedy_command_words(remedy: str) -> list[str]:
+    """The words bash splits the command after the remedy's ``run:`` into.
+
+    Run through bash itself, so the assertion is on how an operator's shell
+    reads the pasted command, not on one quoting style.
+    """
+    _, sep, command = remedy.partition("run:")
+    assert sep, f"remedy names no command after 'run:': {remedy!r}"
+    run = subprocess.run(
+        ["bash", "-c", f"printf '%s\\n' {command}"],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert run.returncode == 0, f"remedy command does not parse in bash: {command!r}\n{run.stderr}"
+    return run.stdout.splitlines()
+
+
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
@@ -314,16 +351,16 @@ class TestBugIntakeToBundleFlow:
         bundle file exists and names the right version.
         """
         root = two_project_root
-        _add_bug_file(root, "project_a")
+        _add_bug_file(root, "project-a")
 
-        result = _run_discovery(root, "project_a")
+        result = _run_discovery(root, "project-a")
 
         assert result.returncode == 0, (
             f"discovery_run_pipeline exited non-zero.\nstdout: {result.stdout}\n"
             f"stderr: {result.stderr}"
         )
 
-        req_dir = _requirements_dir(root, "project_a")
+        req_dir = _requirements_dir(root, "project-a")
         bundle_files = list(req_dir.glob("*-bugfix-bundle-*.md"))
         assert bundle_files, (
             f"Expected a bugfix-bundle-*.md file in {req_dir}.\n"
@@ -340,9 +377,9 @@ class TestBugIntakeToBundleFlow:
         from re-bundling the same bug on the next iteration.
         """
         root = two_project_root
-        bug_file = _add_bug_file(root, "project_a", bug_id="BUG-0002", slug="mark-status-test")
+        bug_file = _add_bug_file(root, "project-a", bug_id="BUG-0002", slug="mark-status-test")
 
-        result = _run_discovery(root, "project_a")
+        result = _run_discovery(root, "project-a")
 
         assert result.returncode == 0, (
             f"discovery_run_pipeline exited non-zero.\nstdout: {result.stdout}\n"
@@ -364,11 +401,11 @@ class TestBugIntakeToBundleFlow:
         written with any other initial status would be silently skipped.
         """
         root = two_project_root
-        _add_bug_file(root, "project_a", bug_id="BUG-0003", slug="bundle-status-test")
+        _add_bug_file(root, "project-a", bug_id="BUG-0003", slug="bundle-status-test")
 
-        _run_discovery(root, "project_a")
+        _run_discovery(root, "project-a")
 
-        req_dir = _requirements_dir(root, "project_a")
+        req_dir = _requirements_dir(root, "project-a")
         bundle_files = list(req_dir.glob("*-bugfix-bundle-*.md"))
         assert bundle_files, f"No bundle file found in {req_dir}"
         bundle_text = bundle_files[0].read_text(encoding="utf-8")
@@ -387,9 +424,9 @@ class TestBugIntakeToBundleFlow:
         iterate the pipeline again.
         """
         root = two_project_root
-        _add_bug_file(root, "project_a", bug_id="BUG-0004", slug="status-signal-test")
+        _add_bug_file(root, "project-a", bug_id="BUG-0004", slug="status-signal-test")
 
-        result = _run_discovery(root, "project_a")
+        result = _run_discovery(root, "project-a")
 
         assert result.returncode == 0
         assert "DISCOVERY_STATUS=produced_work" in result.stdout, (
@@ -410,16 +447,16 @@ class TestPriorityIntakeToBundleFlow:
         vX.Y.Z-priority-bundle-<date>.md file into requirements/.
         """
         root = two_project_root
-        _add_priority_file(root, "project_a")
+        _add_priority_file(root, "project-a")
 
-        result = _run_discovery(root, "project_a")
+        result = _run_discovery(root, "project-a")
 
         assert result.returncode == 0, (
             f"discovery_run_pipeline exited non-zero.\nstdout: {result.stdout}\n"
             f"stderr: {result.stderr}"
         )
 
-        req_dir = _requirements_dir(root, "project_a")
+        req_dir = _requirements_dir(root, "project-a")
         bundle_files = list(req_dir.glob("*-priority-bundle-*.md"))
         assert bundle_files, (
             f"Expected a priority-bundle-*.md file in {req_dir}.\n"
@@ -433,10 +470,10 @@ class TestPriorityIntakeToBundleFlow:
         """After bundling, the priority file's ## Status is updated to 'running'."""
         root = two_project_root
         prio_file = _add_priority_file(
-            root, "project_a", priority_id="PRIORITY-0002", slug="mark-running-test"
+            root, "project-a", priority_id="PRIORITY-0002", slug="mark-running-test"
         )
 
-        result = _run_discovery(root, "project_a")
+        result = _run_discovery(root, "project-a")
 
         assert result.returncode == 0
         updated_text = prio_file.read_text(encoding="utf-8")
@@ -462,16 +499,16 @@ class TestMintGovernorLeavesASingleBugAcrossPasses:
         self, two_project_root: pathlib.Path
     ) -> None:
         root = two_project_root
-        _add_bug_file(root, "project_a", bug_id="BUG-0601", slug="single-eligible-bug")
+        _add_bug_file(root, "project-a", bug_id="BUG-0601", slug="single-eligible-bug")
 
         for i in range(3):
-            result = _run_discovery(root, "project_a")
+            result = _run_discovery(root, "project-a")
             assert result.returncode == 0, (
                 f"discovery_run_pipeline exited non-zero on pass {i + 1}.\n"
                 f"stdout: {result.stdout}\nstderr: {result.stderr}"
             )
 
-        req_dir = _requirements_dir(root, "project_a")
+        req_dir = _requirements_dir(root, "project-a")
         bugfix_bundles = list(req_dir.glob("*-bugfix-bundle-*.md"))
         assert len(bugfix_bundles) == 1, (
             f"Expected exactly one pending bugfix bundle after three passes.\n"
@@ -501,23 +538,23 @@ class TestMintGovernorDeclinesForPendingBundleOfSameType:
         # in requirements/ with ## Status: open (not yet queued for PM).
         pending = _add_requirements_file(
             root,
-            "project_a",
+            "project-a",
             version="v0.0.1",
             slug="bugfix-bundle-20260901",
             status="open",
         )
         # A genuinely new, unhandled bug arrives while the pending bundle
         # above is still unprocessed.
-        new_bug = _add_bug_file(root, "project_a", bug_id="BUG-0501", slug="second-bug")
+        new_bug = _add_bug_file(root, "project-a", bug_id="BUG-0501", slug="second-bug")
 
-        result = _run_discovery(root, "project_a")
+        result = _run_discovery(root, "project-a")
 
         assert result.returncode == 0, (
             "A pass finding the slot already taken has behaved correctly "
             f"and must exit zero.\nstdout: {result.stdout}\nstderr: {result.stderr}"
         )
 
-        req_dir = _requirements_dir(root, "project_a")
+        req_dir = _requirements_dir(root, "project-a")
         bugfix_bundles = sorted(req_dir.glob("*-bugfix-bundle-*.md"))
         assert bugfix_bundles == [pending], (
             "Expected the pre-existing pending bundle to remain the only "
@@ -550,7 +587,7 @@ class TestMintGovernorDeclinesForPendingBundleOfSameType:
             read_latest,
         )
 
-        record = read_latest(ledger_path_for_project(str(root), "project_a"))
+        record = read_latest(ledger_path_for_project(str(root), "project-a"))
         assert record is not None, "The decline must leave a refusal-ledger record"
         assert record["error"] == "discovery.bug-bundle-already-pending"
         assert str(pending) in record["message"]
@@ -565,16 +602,16 @@ class TestMintGovernorDeclinesForPendingBundleOfSameType:
         root = two_project_root
         pending = _add_requirements_file(
             root,
-            "project_a",
+            "project-a",
             version="v0.0.1",
             slug="bugfix-bundle-20260901",
             status="open",
         )
-        _add_bug_file(root, "project_a", bug_id="BUG-0502", slug="repeated-pass-bug")
+        _add_bug_file(root, "project-a", bug_id="BUG-0502", slug="repeated-pass-bug")
 
-        req_dir = _requirements_dir(root, "project_a")
+        req_dir = _requirements_dir(root, "project-a")
         for i in range(2):
-            result = _run_discovery(root, "project_a")
+            result = _run_discovery(root, "project-a")
             assert result.returncode == 0, (
                 f"Pass {i + 1} exited non-zero.\nstdout: {result.stdout}\n"
                 f"stderr: {result.stderr}"
@@ -592,22 +629,22 @@ class TestMintGovernorDeclinesForPendingBundleOfSameType:
         root = two_project_root
         pending = _add_requirements_file(
             root,
-            "project_a",
+            "project-a",
             version="v0.0.1",
             slug="priority-bundle-20260901",
             status="open",
         )
         new_priority = _add_priority_file(
-            root, "project_a", priority_id="PRIORITY-0501", slug="second-priority"
+            root, "project-a", priority_id="PRIORITY-0501", slug="second-priority"
         )
 
-        result = _run_discovery(root, "project_a")
+        result = _run_discovery(root, "project-a")
 
         assert result.returncode == 0, (
             f"stdout: {result.stdout}\nstderr: {result.stderr}"
         )
 
-        req_dir = _requirements_dir(root, "project_a")
+        req_dir = _requirements_dir(root, "project-a")
         priority_bundles = sorted(req_dir.glob("*-priority-bundle-*.md"))
         assert priority_bundles == [pending], (
             f"Expected the pre-existing pending bundle to remain the only "
@@ -652,7 +689,7 @@ class TestRequirementsBundleQueuedForPM:
         scripts_dir.mkdir(parents=True, exist_ok=True)
 
         task_id = "PM-20260628-001-decompose-v0-0-2-test-feature"
-        pm_tasks_dir = root / "projects" / "project_a" / "tasks"
+        pm_tasks_dir = root / "projects" / "project-a" / "tasks"
         pm_tasks_dir.mkdir(parents=True, exist_ok=True)
 
         stub_pm = scripts_dir / "pm-agent.sh"
@@ -666,7 +703,7 @@ class TestRequirementsBundleQueuedForPM:
                 mkdir -p "$TASK_DIR"
                 printf '# %s\\n## State\\nBACKLOG\\n' "$TASK_ID" > "$TASK_DIR/status.md"
                 # Also write to pm_backlog (resolved by PGAI_PROJECT_NAME):
-                PM_BACKLOG="${{KANBAN_ROOT}}/projects/${{PGAI_PROJECT_NAME:-project_a}}/tasks/queues/pm_backlog.md"
+                PM_BACKLOG="${{KANBAN_ROOT}}/projects/${{PGAI_PROJECT_NAME:-project-a}}/tasks/queues/pm_backlog.md"
                 echo "- [ ] $TASK_ID" >> "$PM_BACKLOG"
                 # Emit the Folder line that discovery_step_requirements parses.
                 echo "  Folder   : $TASK_DIR"
@@ -676,9 +713,9 @@ class TestRequirementsBundleQueuedForPM:
         stub_pm.chmod(0o755)
 
         # Place an open requirements file for the pipeline to find.
-        _add_requirements_file(root, "project_a", version="v0.0.2", slug="test-feature")
+        _add_requirements_file(root, "project-a", version="v0.0.2", slug="test-feature")
 
-        result = _run_discovery(root, "project_a")
+        result = _run_discovery(root, "project-a")
 
         assert result.returncode == 0, (
             f"discovery_run_pipeline exited non-zero.\nstdout: {result.stdout}\n"
@@ -686,7 +723,7 @@ class TestRequirementsBundleQueuedForPM:
         )
 
         # Assert: bundle ## Status was updated to 'running'
-        req_dir = _requirements_dir(root, "project_a")
+        req_dir = _requirements_dir(root, "project-a")
         req_files = list(req_dir.glob("v0.0.2-test-feature.md"))
         assert req_files, f"Requirements file not found in {req_dir}"
         req_text = req_files[0].read_text(encoding="utf-8")
@@ -696,7 +733,7 @@ class TestRequirementsBundleQueuedForPM:
         )
 
         # Assert: PM backlog now has a pending entry for this task
-        pm_backlog = root / "projects" / "project_a" / "tasks" / "queues" / "pm_backlog.md"
+        pm_backlog = root / "projects" / "project-a" / "tasks" / "queues" / "pm_backlog.md"
         backlog_text = pm_backlog.read_text(encoding="utf-8") if pm_backlog.exists() else ""
         assert task_id in backlog_text, (
             f"Expected task ID {task_id!r} in pm_backlog.\n"
@@ -717,12 +754,12 @@ class TestPerProjectHaltGate:
         """
         root = two_project_root
 
-        # Place a bug in project_a and a HALT file in project_a.
-        _add_bug_file(root, "project_a", bug_id="BUG-0010", slug="halt-gate-test")
-        halt_file = root / "projects" / "project_a" / "HALT"
+        # Place a bug in project-a and a HALT file in project-a.
+        _add_bug_file(root, "project-a", bug_id="BUG-0010", slug="halt-gate-test")
+        halt_file = root / "projects" / "project-a" / "HALT"
         halt_file.write_text("halted for testing\n", encoding="utf-8")
 
-        result = _run_discovery(root, "project_a")
+        result = _run_discovery(root, "project-a")
 
         assert result.returncode == 0, (
             f"Pipeline exited non-zero (expected clean exit even when halted).\n"
@@ -730,10 +767,10 @@ class TestPerProjectHaltGate:
         )
 
         # No bundle should have been produced for the halted project.
-        req_dir = _requirements_dir(root, "project_a")
+        req_dir = _requirements_dir(root, "project-a")
         bundle_files = list(req_dir.glob("*-bugfix-bundle-*.md")) if req_dir.exists() else []
         assert not bundle_files, (
-            f"Expected no bundle for halted project_a, but found: {bundle_files}"
+            f"Expected no bundle for halted project-a, but found: {bundle_files}"
         )
 
         # DISCOVERY_STATUS must be 'blocked', not 'produced_work'.
@@ -744,7 +781,7 @@ class TestPerProjectHaltGate:
     def test_per_project_halt_does_not_affect_other_projects(
         self, two_project_root: pathlib.Path
     ) -> None:
-        """A HALT file in project_a does not prevent project_b from bundling.
+        """A HALT file in project-a does not prevent project-b from bundling.
 
         Per-project HALT is scoped: halting one project must not stop the
         pipeline from running for other registered projects.  (Each project's
@@ -752,23 +789,44 @@ class TestPerProjectHaltGate:
         """
         root = two_project_root
 
-        # Halt project_a, add a bug in project_b.
-        (root / "projects" / "project_a" / "HALT").write_text(
+        # Halt project-a, add a bug in project-b.
+        (root / "projects" / "project-a" / "HALT").write_text(
             "halted\n", encoding="utf-8"
         )
-        _add_bug_file(root, "project_b", bug_id="BUG-0011", slug="isolation-from-halt")
+        _add_bug_file(root, "project-b", bug_id="BUG-0011", slug="isolation-from-halt")
 
-        # Run discovery for project_b — should succeed.
-        result = _run_discovery(root, "project_b")
+        # Run discovery for project-b — should succeed.
+        result = _run_discovery(root, "project-b")
 
         assert result.returncode == 0
-        req_dir = _requirements_dir(root, "project_b")
+        req_dir = _requirements_dir(root, "project-b")
         bundle_files = list(req_dir.glob("*-bugfix-bundle-*.md")) if req_dir.exists() else []
         assert bundle_files, (
-            f"Expected project_b to produce a bundle despite project_a being halted.\n"
+            f"Expected project-b to produce a bundle despite project-a being halted.\n"
             f"req_dir contents: {list(req_dir.iterdir()) if req_dir.exists() else '(missing)'}\n"
             f"stdout: {result.stdout}\nstderr: {result.stderr}"
         )
+
+
+    @pytest.mark.parametrize("root_name", _HALT_REMEDY_ROOT_NAMES)
+    def test_per_project_halt_remedy_names_the_installed_unhalt_script(
+        self, tmp_path: pathlib.Path, root_name: str
+    ) -> None:
+        """The refusal's remedy is ``<kanban root>/scripts/unhalt.sh --project
+        <name>``: the script as install.sh lays it out, runnable as printed."""
+        root = build_two_project_root(tmp_path, root_name)
+        (root / "projects" / "project-a" / "HALT").write_text("halted\n", encoding="utf-8")
+
+        result = _run_discovery(root, "project-a")
+
+        assert result.returncode == 0, f"stdout: {result.stdout}\nstderr: {result.stderr}"
+        fields = _error_contract_fields(result.stderr)
+        assert fields.get("error") == "discovery.per-project-halt", result.stderr
+        assert _remedy_command_words(fields["remedy"]) == [
+            str(root / "scripts" / "unhalt.sh"),
+            "--project",
+            "project-a",
+        ], fields["remedy"]
 
 
 class TestGlobalHaltGate:
@@ -783,14 +841,14 @@ class TestGlobalHaltGate:
         The pipeline exits with DISCOVERY_LAST_STATUS=blocked.
         """
         root = two_project_root
-        _add_bug_file(root, "project_a", bug_id="BUG-0020", slug="global-halt-test")
-        _add_bug_file(root, "project_b", bug_id="BUG-0021", slug="global-halt-test-b")
+        _add_bug_file(root, "project-a", bug_id="BUG-0020", slug="global-halt-test")
+        _add_bug_file(root, "project-b", bug_id="BUG-0021", slug="global-halt-test-b")
 
         # Place the global HALT file at the kanban root.
         global_halt = root / "HALT"
         global_halt.write_text("global halt for testing\n", encoding="utf-8")
 
-        for project_name in ["project_a", "project_b"]:
+        for project_name in ["project-a", "project-b"]:
             result = _run_discovery(root, project_name)
 
             assert result.returncode == 0, (
@@ -811,6 +869,25 @@ class TestGlobalHaltGate:
             )
 
 
+    @pytest.mark.parametrize("root_name", _HALT_REMEDY_ROOT_NAMES)
+    def test_global_halt_remedy_names_the_installed_unhalt_global_script(
+        self, tmp_path: pathlib.Path, root_name: str
+    ) -> None:
+        """The refusal's remedy is ``<kanban root>/scripts/unhalt-global.sh``:
+        the script as install.sh lays it out, runnable as printed."""
+        root = build_two_project_root(tmp_path, root_name)
+        (root / "HALT").write_text("global halt\n", encoding="utf-8")
+
+        result = _run_discovery(root, "project-b")
+
+        assert result.returncode == 0, f"stdout: {result.stdout}\nstderr: {result.stderr}"
+        fields = _error_contract_fields(result.stderr)
+        assert fields.get("error") == "discovery.global-halt", result.stderr
+        assert _remedy_command_words(fields["remedy"]) == [
+            str(root / "scripts" / "unhalt-global.sh"),
+        ], fields["remedy"]
+
+
 class TestActiveRCGate:
     """Active-RC gate defers bug/priority bundling until after the RC ships."""
 
@@ -824,16 +901,16 @@ class TestActiveRCGate:
         bundle.  The pipeline defers until after the RC ships.
         """
         root = two_project_root
-        _add_bug_file(root, "project_a", bug_id="BUG-0030", slug="active-rc-block")
-        _set_active_rc(root, "project_a", "v0.1.0")
+        _add_bug_file(root, "project-a", bug_id="BUG-0030", slug="active-rc-block")
+        _set_active_rc(root, "project-a", "v0.1.0")
 
-        result = _run_discovery(root, "project_a")
+        result = _run_discovery(root, "project-a")
 
         assert result.returncode == 0, (
             f"Pipeline exited non-zero.\nstdout: {result.stdout}\nstderr: {result.stderr}"
         )
 
-        req_dir = _requirements_dir(root, "project_a")
+        req_dir = _requirements_dir(root, "project-a")
         bundle_files = list(req_dir.glob("*-bugfix-bundle-*.md")) if req_dir.exists() else []
         assert not bundle_files, (
             f"Expected no bug bundle while Active RC is in flight, but found: {bundle_files}\n"
@@ -849,13 +926,13 @@ class TestActiveRCGate:
         bundles from being written until the RC ships.
         """
         root = two_project_root
-        _add_priority_file(root, "project_a", priority_id="PRIORITY-0030", slug="rc-deferral")
-        _set_active_rc(root, "project_a", "v0.1.0")
+        _add_priority_file(root, "project-a", priority_id="PRIORITY-0030", slug="rc-deferral")
+        _set_active_rc(root, "project-a", "v0.1.0")
 
-        result = _run_discovery(root, "project_a")
+        result = _run_discovery(root, "project-a")
 
         assert result.returncode == 0
-        req_dir = _requirements_dir(root, "project_a")
+        req_dir = _requirements_dir(root, "project-a")
         bundle_files = list(req_dir.glob("*-priority-bundle-*.md")) if req_dir.exists() else []
         assert not bundle_files, (
             f"Expected no priority bundle while Active RC is in flight, but found: {bundle_files}\n"
@@ -871,24 +948,24 @@ class TestActiveRCGate:
         next discovery iteration bundles the waiting bug files.
         """
         root = two_project_root
-        _add_bug_file(root, "project_a", bug_id="BUG-0031", slug="resumes-after-rc")
+        _add_bug_file(root, "project-a", bug_id="BUG-0031", slug="resumes-after-rc")
 
         # First run: RC in flight — no bundle.
-        _set_active_rc(root, "project_a", "v0.1.0")
-        _run_discovery(root, "project_a")
+        _set_active_rc(root, "project-a", "v0.1.0")
+        _run_discovery(root, "project-a")
 
-        req_dir = _requirements_dir(root, "project_a")
+        req_dir = _requirements_dir(root, "project-a")
         assert not list(req_dir.glob("*-bugfix-bundle-*.md")), (
             "No bundle expected while Active RC is in flight."
         )
 
         # Second run: RC ships — Active RC clears.
-        (root / "projects" / "project_a" / "release-state.md").write_text(
+        (root / "projects" / "project-a" / "release-state.md").write_text(
             "# Release State\n\n## Active RC\nnone\n\n"
             "## RC Opened At\nnone\n\n## RC Opened By Task\nnone\n",
             encoding="utf-8",
         )
-        result = _run_discovery(root, "project_a")
+        result = _run_discovery(root, "project-a")
 
         assert result.returncode == 0
         bundle_files = list(req_dir.glob("*-bugfix-bundle-*.md"))
@@ -916,20 +993,20 @@ class TestActiveRCGate:
         )
 
         root = two_project_root
-        _add_bug_file(root, "project_a", bug_id="BUG-0032", slug="active-rc-ledger")
-        _set_active_rc(root, "project_a", "v0.1.0")
+        _add_bug_file(root, "project-a", bug_id="BUG-0032", slug="active-rc-ledger")
+        _set_active_rc(root, "project-a", "v0.1.0")
 
         result = _run_discovery(
-            root, "project_a", entry='discovery_step_bugs "project_a" || true'
+            root, "project-a", entry='discovery_step_bugs "project-a" || true'
         )
 
         # Same control-flow assertion as the pipeline-level test above.
         assert result.returncode == 0
-        req_dir = _requirements_dir(root, "project_a")
+        req_dir = _requirements_dir(root, "project-a")
         bundle_files = list(req_dir.glob("*-bugfix-bundle-*.md")) if req_dir.exists() else []
         assert not bundle_files, "Active-RC deferral must still skip bundling after conversion"
 
-        record = read_latest(ledger_path_for_project(str(root), "project_a"))
+        record = read_latest(ledger_path_for_project(str(root), "project-a"))
         assert record is not None, "Active-RC deferral must leave a refusal-ledger record"
         assert record["error"] == "discovery.active-rc-in-flight"
         assert "v0.1.0" in record["message"]
@@ -951,16 +1028,16 @@ class TestVersionCeilingGate:
 
         # The two_project fixture sets max_patch = 99, last_released defaults to
         # v0.0.0, so next patch would be v0.0.1.  Set max_patch = 0 to block v0.0.1.
-        _set_max_patch_ceiling(root, "project_a", max_patch=0)
-        _add_bug_file(root, "project_a", bug_id="BUG-0040", slug="ceiling-gate-test")
+        _set_max_patch_ceiling(root, "project-a", max_patch=0)
+        _add_bug_file(root, "project-a", bug_id="BUG-0040", slug="ceiling-gate-test")
 
-        result = _run_discovery(root, "project_a")
+        result = _run_discovery(root, "project-a")
 
         assert result.returncode == 0, (
             f"Pipeline exited non-zero.\nstdout: {result.stdout}\nstderr: {result.stderr}"
         )
 
-        req_dir = _requirements_dir(root, "project_a")
+        req_dir = _requirements_dir(root, "project-a")
         bundle_files = list(req_dir.glob("*-bugfix-bundle-*.md")) if req_dir.exists() else []
         assert not bundle_files, (
             f"Expected no bundle when version exceeds ceiling, but found: {bundle_files}\n"
@@ -978,12 +1055,12 @@ class TestVersionCeilingGate:
         """
         root = two_project_root
         # Default max_patch = 99 from the fixture; no override needed.
-        _add_bug_file(root, "project_a", bug_id="BUG-0041", slug="ceiling-allow-test")
+        _add_bug_file(root, "project-a", bug_id="BUG-0041", slug="ceiling-allow-test")
 
-        result = _run_discovery(root, "project_a")
+        result = _run_discovery(root, "project-a")
 
         assert result.returncode == 0
-        req_dir = _requirements_dir(root, "project_a")
+        req_dir = _requirements_dir(root, "project-a")
         bundle_files = list(req_dir.glob("*-bugfix-bundle-*.md")) if req_dir.exists() else []
         assert bundle_files, (
             f"Expected a bundle within max_patch ceiling, but none found.\n"
@@ -1008,21 +1085,21 @@ class TestVersionCeilingGate:
         )
 
         root = two_project_root
-        _set_max_patch_ceiling(root, "project_a", max_patch=0)
-        _add_bug_file(root, "project_a", bug_id="BUG-0042", slug="ceiling-ledger-test")
+        _set_max_patch_ceiling(root, "project-a", max_patch=0)
+        _add_bug_file(root, "project-a", bug_id="BUG-0042", slug="ceiling-ledger-test")
 
-        result = _run_discovery(root, "project_a")
+        result = _run_discovery(root, "project-a")
 
         # Same control-flow assertion as the unconverted-behavior test above.
         assert result.returncode == 0
-        req_dir = _requirements_dir(root, "project_a")
+        req_dir = _requirements_dir(root, "project-a")
         bundle_files = list(req_dir.glob("*-bugfix-bundle-*.md")) if req_dir.exists() else []
         assert not bundle_files, "ceiling rejection must still skip bundling after conversion"
 
-        record = read_latest(ledger_path_for_project(str(root), "project_a"))
+        record = read_latest(ledger_path_for_project(str(root), "project-a"))
         assert record is not None, "ceiling rejection must leave a refusal-ledger record"
         assert record["error"] == "discovery.ceiling-patch-exceeded"
-        assert "project_a" in record["message"]
+        assert "project-a" in record["message"]
 
 
 class TestPerProjectIsolation:
@@ -1031,22 +1108,22 @@ class TestPerProjectIsolation:
     def test_bug_bundle_for_one_project_leaves_other_project_unchanged(
         self, two_project_root: pathlib.Path
     ) -> None:
-        """A bug in project_a produces a bundle in project_a only.
+        """A bug in project-a produces a bundle in project-a only.
 
-        project_b's requirements/ directory must remain empty (no files created,
-        no side effects from project_a's pipeline run).
+        project-b's requirements/ directory must remain empty (no files created,
+        no side effects from project-a's pipeline run).
         """
         root = two_project_root
-        _add_bug_file(root, "project_a", bug_id="BUG-0050", slug="isolation-test")
+        _add_bug_file(root, "project-a", bug_id="BUG-0050", slug="isolation-test")
 
-        _run_discovery(root, "project_a")
+        _run_discovery(root, "project-a")
 
-        # project_b should have no bundle files.
-        req_dir_b = _requirements_dir(root, "project_b")
+        # project-b should have no bundle files.
+        req_dir_b = _requirements_dir(root, "project-b")
         files_in_b = list(req_dir_b.iterdir()) if req_dir_b.exists() else []
         assert not files_in_b, (
-            f"Expected project_b requirements/ to be empty after project_a's pipeline run.\n"
-            f"Found in project_b requirements/: {files_in_b}"
+            f"Expected project-b requirements/ to be empty after project-a's pipeline run.\n"
+            f"Found in project-b requirements/: {files_in_b}"
         )
 
     def test_each_project_bundles_its_own_bugs_independently(
@@ -1059,23 +1136,23 @@ class TestPerProjectIsolation:
         project has its own versioning namespace.
         """
         root = two_project_root
-        _add_bug_file(root, "project_a", bug_id="BUG-0051", slug="dual-bundle-a")
-        _add_bug_file(root, "project_b", bug_id="BUG-0052", slug="dual-bundle-b")
+        _add_bug_file(root, "project-a", bug_id="BUG-0051", slug="dual-bundle-a")
+        _add_bug_file(root, "project-b", bug_id="BUG-0052", slug="dual-bundle-b")
 
-        result_a = _run_discovery(root, "project_a")
-        result_b = _run_discovery(root, "project_b")
+        result_a = _run_discovery(root, "project-a")
+        result_b = _run_discovery(root, "project-b")
 
-        assert result_a.returncode == 0, f"project_a pipeline failed: {result_a.stderr}"
-        assert result_b.returncode == 0, f"project_b pipeline failed: {result_b.stderr}"
+        assert result_a.returncode == 0, f"project-a pipeline failed: {result_a.stderr}"
+        assert result_b.returncode == 0, f"project-b pipeline failed: {result_b.stderr}"
 
-        req_a = list(_requirements_dir(root, "project_a").glob("*-bugfix-bundle-*.md"))
-        req_b = list(_requirements_dir(root, "project_b").glob("*-bugfix-bundle-*.md"))
-        assert req_a, "Expected project_a to have a bundle"
-        assert req_b, "Expected project_b to have a bundle"
+        req_a = list(_requirements_dir(root, "project-a").glob("*-bugfix-bundle-*.md"))
+        req_b = list(_requirements_dir(root, "project-b").glob("*-bugfix-bundle-*.md"))
+        assert req_a, "Expected project-a to have a bundle"
+        assert req_b, "Expected project-b to have a bundle"
 
         # The two bundles must reside under different project directories.
         assert req_a[0].parts != req_b[0].parts, (
-            "project_a and project_b bundles must be in separate directories"
+            "project-a and project-b bundles must be in separate directories"
         )
 
 
@@ -1093,7 +1170,7 @@ class TestRejectionQuarantine:
         directory so it no longer clutters the discovery loop.
         """
         root = two_project_root
-        bugs_dir = root / "projects" / "project_a" / "bugs"
+        bugs_dir = root / "projects" / "project-a" / "bugs"
         bugs_dir.mkdir(parents=True, exist_ok=True)
 
         # A file whose name does not match the canonical BUG-NNNN-<slug>.md pattern.
@@ -1106,17 +1183,17 @@ class TestRejectionQuarantine:
 
         # Set threshold to 1 so the file is quarantined on the first rejection.
         for _ in range(1):
-            result = _run_discovery(root, "project_a", threshold=1)
+            result = _run_discovery(root, "project-a", threshold=1)
             assert result.returncode == 0, (
                 f"Pipeline exited non-zero.\nstdout: {result.stdout}\nstderr: {result.stderr}"
             )
 
         # The malformed file must have been moved to the rejected/ directory.
-        rejected_path = _rejected_dir(root, "project_a") / "BUG-1-bad.md"
+        rejected_path = _rejected_dir(root, "project-a") / "BUG-1-bad.md"
         assert rejected_path.exists(), (
             f"Expected malformed bug file to be quarantined at {rejected_path}.\n"
             f"bugs/ contents: {list(bugs_dir.iterdir())}\n"
-            f"rejected/ contents: {list(_rejected_dir(root, 'project_a').iterdir()) if _rejected_dir(root, 'project_a').exists() else '(missing)'}\n"
+            f"rejected/ contents: {list(_rejected_dir(root, 'project-a').iterdir()) if _rejected_dir(root, 'project-a').exists() else '(missing)'}\n"
             f"stdout: {result.stdout}\nstderr: {result.stderr}"
         )
 
@@ -1135,7 +1212,7 @@ class TestRejectionQuarantine:
         the quarantine timestamp so operators can understand why the file was moved.
         """
         root = two_project_root
-        bugs_dir = root / "projects" / "project_a" / "bugs"
+        bugs_dir = root / "projects" / "project-a" / "bugs"
         bugs_dir.mkdir(parents=True, exist_ok=True)
 
         malformed_file = bugs_dir / "BUG-2-sidecar-test.md"
@@ -1144,12 +1221,12 @@ class TestRejectionQuarantine:
             encoding="utf-8",
         )
 
-        _run_discovery(root, "project_a", threshold=1)
+        _run_discovery(root, "project-a", threshold=1)
 
-        sidecar_path = _rejected_dir(root, "project_a") / "BUG-2-sidecar-test.md.reason"
+        sidecar_path = _rejected_dir(root, "project-a") / "BUG-2-sidecar-test.md.reason"
         assert sidecar_path.exists(), (
             f"Expected sidecar file at {sidecar_path}.\n"
-            f"rejected/ contents: {list(_rejected_dir(root, 'project_a').iterdir()) if _rejected_dir(root, 'project_a').exists() else '(missing)'}"
+            f"rejected/ contents: {list(_rejected_dir(root, 'project-a').iterdir()) if _rejected_dir(root, 'project-a').exists() else '(missing)'}"
         )
 
         sidecar_text = sidecar_path.read_text(encoding="utf-8")
@@ -1167,11 +1244,11 @@ class TestRejectionQuarantine:
         triggered by genuinely malformed filenames, not by valid ones.
         """
         root = two_project_root
-        _add_bug_file(root, "project_a", bug_id="BUG-0060", slug="well-formed-no-quarantine")
+        _add_bug_file(root, "project-a", bug_id="BUG-0060", slug="well-formed-no-quarantine")
 
-        _run_discovery(root, "project_a", threshold=1)
+        _run_discovery(root, "project-a", threshold=1)
 
-        rejected_dir = _rejected_dir(root, "project_a")
+        rejected_dir = _rejected_dir(root, "project-a")
         quarantined = list(rejected_dir.glob("BUG-0060-*.md")) if rejected_dir.exists() else []
         assert not quarantined, (
             f"Expected well-formed bug file NOT to be quarantined.\n"
@@ -1211,7 +1288,7 @@ class TestTerminalStateBundleFilter:
         scripts_dir = root / "scripts"
         scripts_dir.mkdir(parents=True, exist_ok=True)
         task_id = "PM-20260711-001-decompose-v0-0-3-bugfix-bundle"
-        pm_tasks_dir = root / "projects" / "project_a" / "tasks"
+        pm_tasks_dir = root / "projects" / "project-a" / "tasks"
         pm_tasks_dir.mkdir(parents=True, exist_ok=True)
         stub_pm = scripts_dir / "pm-agent.sh"
         stub_pm.write_text(
@@ -1221,7 +1298,7 @@ class TestTerminalStateBundleFilter:
                 TASK_DIR="{pm_tasks_dir}/${{TASK_ID}}"
                 mkdir -p "$TASK_DIR"
                 printf '# %s\\n## State\\nBACKLOG\\n' "$TASK_ID" > "$TASK_DIR/status.md"
-                PM_BACKLOG="${{KANBAN_ROOT}}/projects/${{PGAI_PROJECT_NAME:-project_a}}/tasks/queues/pm_backlog.md"
+                PM_BACKLOG="${{KANBAN_ROOT}}/projects/${{PGAI_PROJECT_NAME:-project-a}}/tasks/queues/pm_backlog.md"
                 echo "- [ ] $TASK_ID" >> "$PM_BACKLOG"
                 echo "  Folder   : $TASK_DIR"
             """),
@@ -1229,11 +1306,11 @@ class TestTerminalStateBundleFilter:
         )
         stub_pm.chmod(0o755)
 
-        req_dir = _requirements_dir(root, "project_a")
+        req_dir = _requirements_dir(root, "project-a")
 
         # Closed bundle (wont-do) — lower version.
         closed_bundle = _add_requirements_file(
-            root, "project_a",
+            root, "project-a",
             version="v0.0.2",
             slug="bugfix-bundle-20260711",
             status="wont-do",
@@ -1242,13 +1319,13 @@ class TestTerminalStateBundleFilter:
 
         # Live bundle (open) — higher version.
         _add_requirements_file(
-            root, "project_a",
+            root, "project-a",
             version="v0.0.3",
             slug="bugfix-bundle-20260711",
             status="open",
         )
 
-        result = _run_discovery(root, "project_a")
+        result = _run_discovery(root, "project-a")
 
         assert result.returncode == 0, (
             f"discovery_run_pipeline exited non-zero.\n"
@@ -1300,7 +1377,7 @@ class TestTerminalStateBundleFilter:
         scripts_dir = root / "scripts"
         scripts_dir.mkdir(parents=True, exist_ok=True)
         task_id = "PM-20260711-002-decompose-v0-0-3-live-bugfix-bundle"
-        pm_tasks_dir = root / "projects" / "project_a" / "tasks"
+        pm_tasks_dir = root / "projects" / "project-a" / "tasks"
         pm_tasks_dir.mkdir(parents=True, exist_ok=True)
         stub_pm = scripts_dir / "pm-agent.sh"
         stub_pm.write_text(
@@ -1310,7 +1387,7 @@ class TestTerminalStateBundleFilter:
                 TASK_DIR="{pm_tasks_dir}/${{TASK_ID}}"
                 mkdir -p "$TASK_DIR"
                 printf '# %s\\n## State\\nBACKLOG\\n' "$TASK_ID" > "$TASK_DIR/status.md"
-                PM_BACKLOG="${{KANBAN_ROOT}}/projects/${{PGAI_PROJECT_NAME:-project_a}}/tasks/queues/pm_backlog.md"
+                PM_BACKLOG="${{KANBAN_ROOT}}/projects/${{PGAI_PROJECT_NAME:-project-a}}/tasks/queues/pm_backlog.md"
                 echo "- [ ] $TASK_ID" >> "$PM_BACKLOG"
                 echo "  Folder   : $TASK_DIR"
             """),
@@ -1318,11 +1395,11 @@ class TestTerminalStateBundleFilter:
         )
         stub_pm.chmod(0o755)
 
-        req_dir = _requirements_dir(root, "project_a")
+        req_dir = _requirements_dir(root, "project-a")
 
         # Closed bundle (done) — lower version.
         done_bundle = _add_requirements_file(
-            root, "project_a",
+            root, "project-a",
             version="v0.0.2",
             slug="bugfix-bundle-done-20260711",
             status="done",
@@ -1331,13 +1408,13 @@ class TestTerminalStateBundleFilter:
 
         # Live bundle (open) — higher version.
         _add_requirements_file(
-            root, "project_a",
+            root, "project-a",
             version="v0.0.3",
             slug="bugfix-bundle-live-20260711",
             status="open",
         )
 
-        result = _run_discovery(root, "project_a")
+        result = _run_discovery(root, "project-a")
 
         assert result.returncode == 0, (
             f"discovery_run_pipeline exited non-zero.\n"
@@ -1375,7 +1452,7 @@ class TestTerminalStateBundleFilter:
 
         # Closed bug (wont-do).
         closed_bug = _add_bug_file(
-            root, "project_a",
+            root, "project-a",
             bug_id="BUG-0100",
             slug="closed-bug",
             status="wont-do",
@@ -1384,13 +1461,13 @@ class TestTerminalStateBundleFilter:
 
         # Open bug — should be the only one bundled.
         _add_bug_file(
-            root, "project_a",
+            root, "project-a",
             bug_id="BUG-0101",
             slug="open-bug",
             status="open",
         )
 
-        result = _run_discovery(root, "project_a")
+        result = _run_discovery(root, "project-a")
 
         assert result.returncode == 0, (
             f"stdout: {result.stdout}\nstderr: {result.stderr}"
@@ -1411,7 +1488,7 @@ class TestTerminalStateBundleFilter:
         )
 
         # A bundle must still have been created (for the open bug).
-        req_dir = _requirements_dir(root, "project_a")
+        req_dir = _requirements_dir(root, "project-a")
         bundles = list(req_dir.glob("*-bugfix-bundle-*.md"))
         assert bundles, (
             "Expected a bundle to be created for the open bug even though a "
@@ -1462,7 +1539,7 @@ class TestPMAgentFailureRetryAndStuckStateReconciliation:
 
         # Place a requirements bundle in 'open' state.
         req_file = _add_requirements_file(
-            root, "project_a", version="v0.0.2", slug="pm-fail-retry"
+            root, "project-a", version="v0.0.2", slug="pm-fail-retry"
         )
 
         # --- First pass: install a failing pm-agent stub (exits 1, no Folder line). ---
@@ -1478,7 +1555,7 @@ class TestPMAgentFailureRetryAndStuckStateReconciliation:
         )
         stub_pm.chmod(0o755)
 
-        result_fail = _run_discovery(root, "project_a")
+        result_fail = _run_discovery(root, "project-a")
 
         # Pipeline must still exit 0 (failure inside Step 3 is not a pipeline crash).
         assert result_fail.returncode == 0, (
@@ -1506,7 +1583,7 @@ class TestPMAgentFailureRetryAndStuckStateReconciliation:
 
         # --- Second pass: replace with a succeeding stub; bundle must be re-selected. ---
         task_id = "PM-20260712-001-decompose-v0-0-2-pm-fail-retry"
-        pm_tasks_dir = root / "projects" / "project_a" / "tasks"
+        pm_tasks_dir = root / "projects" / "project-a" / "tasks"
         pm_tasks_dir.mkdir(parents=True, exist_ok=True)
         stub_pm.write_text(
             textwrap.dedent(f"""\
@@ -1515,7 +1592,7 @@ class TestPMAgentFailureRetryAndStuckStateReconciliation:
                 TASK_DIR="{pm_tasks_dir}/${{TASK_ID}}"
                 mkdir -p "$TASK_DIR"
                 printf '# %s\\n## State\\nBACKLOG\\n' "$TASK_ID" > "$TASK_DIR/status.md"
-                PM_BACKLOG="${{KANBAN_ROOT}}/projects/${{PGAI_PROJECT_NAME:-project_a}}/tasks/queues/pm_backlog.md"
+                PM_BACKLOG="${{KANBAN_ROOT}}/projects/${{PGAI_PROJECT_NAME:-project-a}}/tasks/queues/pm_backlog.md"
                 mkdir -p "$(dirname "$PM_BACKLOG")"
                 echo "- [ ] $TASK_ID" >> "$PM_BACKLOG"
                 echo "  Folder   : $TASK_DIR"
@@ -1524,7 +1601,7 @@ class TestPMAgentFailureRetryAndStuckStateReconciliation:
         )
         stub_pm.chmod(0o755)
 
-        result_retry = _run_discovery(root, "project_a")
+        result_retry = _run_discovery(root, "project-a")
 
         assert result_retry.returncode == 0, (
             f"Pipeline must exit 0 on retry with passing pm-agent.\n"
@@ -1539,7 +1616,7 @@ class TestPMAgentFailureRetryAndStuckStateReconciliation:
         )
 
         # PM backlog must contain the task entry.
-        pm_backlog = root / "projects" / "project_a" / "tasks" / "queues" / "pm_backlog.md"
+        pm_backlog = root / "projects" / "project-a" / "tasks" / "queues" / "pm_backlog.md"
         backlog_text = pm_backlog.read_text(encoding="utf-8") if pm_backlog.exists() else ""
         assert task_id in backlog_text, (
             f"Expected task ID {task_id!r} in pm_backlog after retry.\n"
@@ -1562,7 +1639,7 @@ class TestPMAgentFailureRetryAndStuckStateReconciliation:
         scripts_dir.mkdir(parents=True, exist_ok=True)
 
         task_id = "PM-20260712-002-decompose-v0-0-2-success-regression"
-        pm_tasks_dir = root / "projects" / "project_a" / "tasks"
+        pm_tasks_dir = root / "projects" / "project-a" / "tasks"
         pm_tasks_dir.mkdir(parents=True, exist_ok=True)
 
         stub_pm = scripts_dir / "pm-agent.sh"
@@ -1573,7 +1650,7 @@ class TestPMAgentFailureRetryAndStuckStateReconciliation:
                 TASK_DIR="{pm_tasks_dir}/${{TASK_ID}}"
                 mkdir -p "$TASK_DIR"
                 printf '# %s\\n## State\\nBACKLOG\\n' "$TASK_ID" > "$TASK_DIR/status.md"
-                PM_BACKLOG="${{KANBAN_ROOT}}/projects/${{PGAI_PROJECT_NAME:-project_a}}/tasks/queues/pm_backlog.md"
+                PM_BACKLOG="${{KANBAN_ROOT}}/projects/${{PGAI_PROJECT_NAME:-project-a}}/tasks/queues/pm_backlog.md"
                 mkdir -p "$(dirname "$PM_BACKLOG")"
                 echo "- [ ] $TASK_ID" >> "$PM_BACKLOG"
                 echo "  Folder   : $TASK_DIR"
@@ -1583,10 +1660,10 @@ class TestPMAgentFailureRetryAndStuckStateReconciliation:
         stub_pm.chmod(0o755)
 
         req_file = _add_requirements_file(
-            root, "project_a", version="v0.0.2", slug="success-regression"
+            root, "project-a", version="v0.0.2", slug="success-regression"
         )
 
-        result = _run_discovery(root, "project_a")
+        result = _run_discovery(root, "project-a")
 
         assert result.returncode == 0, (
             f"Pipeline exited non-zero.\nstdout: {result.stdout}\nstderr: {result.stderr}"
@@ -1602,7 +1679,7 @@ class TestPMAgentFailureRetryAndStuckStateReconciliation:
             f"Bundle content:\n{req_text}"
         )
 
-        pm_backlog = root / "projects" / "project_a" / "tasks" / "queues" / "pm_backlog.md"
+        pm_backlog = root / "projects" / "project-a" / "tasks" / "queues" / "pm_backlog.md"
         backlog_text = pm_backlog.read_text(encoding="utf-8") if pm_backlog.exists() else ""
         assert task_id in backlog_text, (
             f"Expected task ID {task_id!r} in pm_backlog.\n"
@@ -1627,7 +1704,7 @@ class TestPMAgentFailureRetryAndStuckStateReconciliation:
         root = two_project_root
 
         # Create a bundle in the stuck state: ## Status: running, ## PM Task: none.
-        req_dir = _requirements_dir(root, "project_a")
+        req_dir = _requirements_dir(root, "project-a")
         req_dir.mkdir(parents=True, exist_ok=True)
         stuck_bundle = req_dir / "v0.0.2-stuck-bundle-20260712.md"
         stuck_bundle.write_text(
@@ -1641,7 +1718,7 @@ class TestPMAgentFailureRetryAndStuckStateReconciliation:
         )
 
         # Create an empty pm_backlog file (exists, but contains no matching entry).
-        queues_dir = root / "projects" / "project_a" / "tasks" / "queues"
+        queues_dir = root / "projects" / "project-a" / "tasks" / "queues"
         queues_dir.mkdir(parents=True, exist_ok=True)
         pm_backlog = queues_dir / "pm_backlog.md"
         pm_backlog.write_text(
@@ -1650,7 +1727,7 @@ class TestPMAgentFailureRetryAndStuckStateReconciliation:
             encoding="utf-8",
         )
 
-        result = _run_discovery(root, "project_a")
+        result = _run_discovery(root, "project-a")
 
         # Pipeline must exit cleanly.
         assert result.returncode == 0, (
@@ -1713,7 +1790,7 @@ class TestCategoryFirstOrdering:
         # For clarity: use v0.0.2 as the requirement and let the bug bundle land
         # at v0.0.1.  Both are above v0.0.0; the bug (at v0.0.1) has a LOWER
         # version number but is in the bug CATEGORY, which takes priority.
-        req_dir = _requirements_dir(root, "project_a")
+        req_dir = _requirements_dir(root, "project-a")
         req_dir.mkdir(parents=True, exist_ok=True)
         req_file = req_dir / "v0.0.2-operator-authored-feature.md"
         req_file.write_text(
@@ -1727,9 +1804,9 @@ class TestCategoryFirstOrdering:
         )
 
         # Add an unhandled bug file — discovery_step_bugs will bundle it at v0.0.1.
-        _add_bug_file(root, "project_a", bug_id="BUG-0010", slug="category-order-test")
+        _add_bug_file(root, "project-a", bug_id="BUG-0010", slug="category-order-test")
 
-        result = _run_discovery(root, "project_a")
+        result = _run_discovery(root, "project-a")
 
         assert result.returncode == 0, (
             f"Pipeline must exit 0.\nstdout: {result.stdout}\nstderr: {result.stderr}"
@@ -1779,7 +1856,7 @@ class TestCategoryFirstOrdering:
         # "last released = v0.0.2" by pre-populating a requirements file at v0.0.1
         # and v0.0.2 with Status: done (so compute_next_patch starts at v0.0.3+1=v0.0.4
         # because v0.0.3 is taken by the operator requirement below).
-        req_dir = _requirements_dir(root, "project_a")
+        req_dir = _requirements_dir(root, "project-a")
         req_dir.mkdir(parents=True, exist_ok=True)
 
         # Mark v0.0.1 and v0.0.2 as "taken" via existing requirements files.
@@ -1807,9 +1884,9 @@ class TestCategoryFirstOrdering:
         )
 
         # Unhandled bug — will be bundled at v0.0.4 (v0.0.3 is occupied by req file).
-        _add_bug_file(root, "project_a", bug_id="BUG-0011", slug="higher-version-bug-test")
+        _add_bug_file(root, "project-a", bug_id="BUG-0011", slug="higher-version-bug-test")
 
-        result = _run_discovery(root, "project_a")
+        result = _run_discovery(root, "project-a")
 
         assert result.returncode == 0, (
             f"Pipeline must exit 0.\nstdout: {result.stdout}\nstderr: {result.stderr}"
@@ -1844,7 +1921,7 @@ class TestCategoryFirstOrdering:
         root = two_project_root
 
         # No bug or priority files — only a requirements file.
-        req_dir = _requirements_dir(root, "project_a")
+        req_dir = _requirements_dir(root, "project-a")
         req_dir.mkdir(parents=True, exist_ok=True)
         req_file = req_dir / "v0.0.2-feature-only.md"
         req_file.write_text(
@@ -1857,7 +1934,7 @@ class TestCategoryFirstOrdering:
             encoding="utf-8",
         )
 
-        result = _run_discovery(root, "project_a")
+        result = _run_discovery(root, "project-a")
 
         assert result.returncode == 0, (
             f"Pipeline must exit 0.\nstdout: {result.stdout}\nstderr: {result.stderr}"
@@ -1990,19 +2067,19 @@ class TestKnownIssueMarkerBundleOrdering:
     ) -> None:
         """One marked bug among several unmarked ones renders first."""
         root = two_project_root
-        _add_bug_file(root, "project_a", bug_id="BUG-0200", slug="alpha")
+        _add_bug_file(root, "project-a", bug_id="BUG-0200", slug="alpha")
         _add_bug_file_with_known_issue_marker(
-            root, "project_a", bug_id="BUG-0201", slug="bravo-marked"
+            root, "project-a", bug_id="BUG-0201", slug="bravo-marked"
         )
-        _add_bug_file(root, "project_a", bug_id="BUG-0202", slug="charlie")
+        _add_bug_file(root, "project-a", bug_id="BUG-0202", slug="charlie")
 
-        result = _run_discovery(root, "project_a")
+        result = _run_discovery(root, "project-a")
         assert result.returncode == 0, (
             f"stdout: {result.stdout}\nstderr: {result.stderr}"
         )
 
         bundle_files = list(
-            _requirements_dir(root, "project_a").glob("*-bugfix-bundle-*.md")
+            _requirements_dir(root, "project-a").glob("*-bugfix-bundle-*.md")
         )
         assert bundle_files, f"No bundle produced.\nstdout: {result.stdout}"
         order = _bundled_item_order(bundle_files[0])
@@ -2023,25 +2100,25 @@ class TestKnownIssueMarkerBundleOrdering:
         the remaining two follow in theirs."""
         root = two_project_root
         # Scan order is filename-lexical ascending.
-        _add_bug_file(root, "project_a", bug_id="BUG-0210", slug="unmarked-one")
+        _add_bug_file(root, "project-a", bug_id="BUG-0210", slug="unmarked-one")
         _add_bug_file_with_known_issue_marker(
-            root, "project_a", bug_id="BUG-0211", slug="marked-one"
+            root, "project-a", bug_id="BUG-0211", slug="marked-one"
         )
-        _add_bug_file(root, "project_a", bug_id="BUG-0212", slug="unmarked-two")
+        _add_bug_file(root, "project-a", bug_id="BUG-0212", slug="unmarked-two")
         _add_bug_file_with_known_issue_marker(
-            root, "project_a", bug_id="BUG-0213", slug="marked-two"
+            root, "project-a", bug_id="BUG-0213", slug="marked-two"
         )
         _add_bug_file_with_known_issue_marker(
-            root, "project_a", bug_id="BUG-0214", slug="marked-three"
+            root, "project-a", bug_id="BUG-0214", slug="marked-three"
         )
 
-        result = _run_discovery(root, "project_a")
+        result = _run_discovery(root, "project-a")
         assert result.returncode == 0, (
             f"stdout: {result.stdout}\nstderr: {result.stderr}"
         )
 
         bundle_files = list(
-            _requirements_dir(root, "project_a").glob("*-bugfix-bundle-*.md")
+            _requirements_dir(root, "project-a").glob("*-bugfix-bundle-*.md")
         )
         assert bundle_files, f"No bundle produced.\nstdout: {result.stdout}"
         order = _bundled_item_order(bundle_files[0])
@@ -2060,17 +2137,17 @@ class TestKnownIssueMarkerBundleOrdering:
         """With no marker present anywhere, the rendered order is exactly the
         scan order -- ordinary bundling is provably unchanged."""
         root = two_project_root
-        _add_bug_file(root, "project_a", bug_id="BUG-0220", slug="alpha")
-        _add_bug_file(root, "project_a", bug_id="BUG-0221", slug="bravo")
-        _add_bug_file(root, "project_a", bug_id="BUG-0222", slug="charlie")
+        _add_bug_file(root, "project-a", bug_id="BUG-0220", slug="alpha")
+        _add_bug_file(root, "project-a", bug_id="BUG-0221", slug="bravo")
+        _add_bug_file(root, "project-a", bug_id="BUG-0222", slug="charlie")
 
-        result = _run_discovery(root, "project_a")
+        result = _run_discovery(root, "project-a")
         assert result.returncode == 0, (
             f"stdout: {result.stdout}\nstderr: {result.stderr}"
         )
 
         bundle_files = list(
-            _requirements_dir(root, "project_a").glob("*-bugfix-bundle-*.md")
+            _requirements_dir(root, "project-a").glob("*-bugfix-bundle-*.md")
         )
         assert bundle_files, f"No bundle produced.\nstdout: {result.stdout}"
         order = _bundled_item_order(bundle_files[0])
@@ -2088,19 +2165,19 @@ class TestKnownIssueMarkerBundleOrdering:
         Items parser (team/pgai_agent_kanban/cm/bundle_family.py) -- the
         rendered section's line shape is unchanged; only the item order is."""
         root = two_project_root
-        _add_bug_file(root, "project_a", bug_id="BUG-0230", slug="alpha")
+        _add_bug_file(root, "project-a", bug_id="BUG-0230", slug="alpha")
         _add_bug_file_with_known_issue_marker(
-            root, "project_a", bug_id="BUG-0231", slug="bravo-marked"
+            root, "project-a", bug_id="BUG-0231", slug="bravo-marked"
         )
-        _add_bug_file(root, "project_a", bug_id="BUG-0232", slug="charlie")
+        _add_bug_file(root, "project-a", bug_id="BUG-0232", slug="charlie")
 
-        result = _run_discovery(root, "project_a")
+        result = _run_discovery(root, "project-a")
         assert result.returncode == 0, (
             f"stdout: {result.stdout}\nstderr: {result.stderr}"
         )
 
         bundle_files = list(
-            _requirements_dir(root, "project_a").glob("*-bugfix-bundle-*.md")
+            _requirements_dir(root, "project-a").glob("*-bugfix-bundle-*.md")
         )
         assert bundle_files, f"No bundle produced.\nstdout: {result.stdout}"
         order = _bundled_item_order(bundle_files[0])
@@ -2119,9 +2196,9 @@ class TestKnownIssueMarkerBundleOrdering:
         itself, and every other field, survives byte-for-byte. Checked by
         checksum, across both a marked and an unmarked bug file."""
         root = two_project_root
-        unmarked = _add_bug_file(root, "project_a", bug_id="BUG-0240", slug="alpha")
+        unmarked = _add_bug_file(root, "project-a", bug_id="BUG-0240", slug="alpha")
         marked = _add_bug_file_with_known_issue_marker(
-            root, "project_a", bug_id="BUG-0241", slug="bravo-marked"
+            root, "project-a", bug_id="BUG-0241", slug="bravo-marked"
         )
 
         before = {
@@ -2129,7 +2206,7 @@ class TestKnownIssueMarkerBundleOrdering:
             marked: marked.read_text(encoding="utf-8"),
         }
 
-        result = _run_discovery(root, "project_a")
+        result = _run_discovery(root, "project-a")
         assert result.returncode == 0, (
             f"stdout: {result.stdout}\nstderr: {result.stderr}"
         )
@@ -2154,20 +2231,20 @@ class TestKnownIssueMarkerBundleOrdering:
         bundle exactly as a marked bug does -- there is one ordering
         decision, not two that could diverge."""
         root = two_project_root
-        _set_max_priorities_per_run(root, "project_a", cap=3)
-        _add_priority_file(root, "project_a", priority_id="PRIORITY-0300", slug="unmarked-one")
+        _set_max_priorities_per_run(root, "project-a", cap=3)
+        _add_priority_file(root, "project-a", priority_id="PRIORITY-0300", slug="unmarked-one")
         _add_priority_file_with_known_issue_marker(
-            root, "project_a", priority_id="PRIORITY-0301", slug="marked"
+            root, "project-a", priority_id="PRIORITY-0301", slug="marked"
         )
-        _add_priority_file(root, "project_a", priority_id="PRIORITY-0302", slug="unmarked-two")
+        _add_priority_file(root, "project-a", priority_id="PRIORITY-0302", slug="unmarked-two")
 
-        result = _run_discovery(root, "project_a")
+        result = _run_discovery(root, "project-a")
         assert result.returncode == 0, (
             f"stdout: {result.stdout}\nstderr: {result.stderr}"
         )
 
         bundle_files = list(
-            _requirements_dir(root, "project_a").glob("*-priority-bundle-*.md")
+            _requirements_dir(root, "project-a").glob("*-priority-bundle-*.md")
         )
         assert bundle_files, f"No priority bundle produced.\nstdout: {result.stdout}"
         order = _bundled_item_order(bundle_files[0])

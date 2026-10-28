@@ -9,7 +9,7 @@ test stands up a temporary kanban tree (via two_project_root), runs real
 flows, and asserts the guarantee holds in the resulting on-disk state.
 
 Coverage:
-  - Multi-project isolation: work in project_a does not bleed into project_b
+  - Multi-project isolation: work in project-a does not bleed into project-b
   - Per-repo lock: the advisory flock prevents concurrent agent runs on the
     same project; a second acquisition attempt while the lock is held is
     detected and back-offed
@@ -187,63 +187,63 @@ class TestMultiProjectIsolation:
     def test_bug_bundle_for_project_a_leaves_project_b_requirements_empty(
         self, two_project_root: pathlib.Path
     ) -> None:
-        """A bug bundled in project_a does not create any file in project_b.
+        """A bug bundled in project-a does not create any file in project-b.
 
-        The discovery pipeline runs per-project.  Bundling a bug in project_a
-        must write a requirements file only inside project_a/requirements/;
-        project_b/requirements/ must remain untouched.
+        The discovery pipeline runs per-project.  Bundling a bug in project-a
+        must write a requirements file only inside project-a/requirements/;
+        project-b/requirements/ must remain untouched.
         """
         root = two_project_root
-        _add_bug_file(root, "project_a", bug_id="BUG-0070", slug="isolation-a-to-b")
+        _add_bug_file(root, "project-a", bug_id="BUG-0070", slug="isolation-a-to-b")
 
-        result = _run_discovery(root, "project_a")
+        result = _run_discovery(root, "project-a")
 
         assert result.returncode == 0, (
             f"Pipeline exited non-zero.\nstdout: {result.stdout}\nstderr: {result.stderr}"
         )
 
-        # project_a must have a bundle
-        req_a = _requirements_dir(root, "project_a")
+        # project-a must have a bundle
+        req_a = _requirements_dir(root, "project-a")
         bundles_a = list(req_a.glob("*-bugfix-bundle-*.md")) if req_a.exists() else []
         assert bundles_a, (
-            f"Expected project_a to produce a bundle.\n"
+            f"Expected project-a to produce a bundle.\n"
             f"req_a contents: {list(req_a.iterdir()) if req_a.exists() else '(missing)'}\n"
             f"stdout: {result.stdout}\nstderr: {result.stderr}"
         )
 
-        # project_b must have no files created
-        req_b = _requirements_dir(root, "project_b")
+        # project-b must have no files created
+        req_b = _requirements_dir(root, "project-b")
         files_in_b = list(req_b.iterdir()) if req_b.exists() else []
         assert not files_in_b, (
-            f"Expected project_b/requirements/ to be empty after project_a pipeline run.\n"
-            f"Found in project_b/requirements/: {files_in_b}"
+            f"Expected project-b/requirements/ to be empty after project-a pipeline run.\n"
+            f"Found in project-b/requirements/: {files_in_b}"
         )
 
     def test_release_state_mutations_are_scoped_per_project(
         self, two_project_root: pathlib.Path
     ) -> None:
-        """Setting an Active RC in project_a does not affect project_b's release state.
+        """Setting an Active RC in project-a does not affect project-b's release state.
 
         Each project has its own release-state.md.  Writing an Active RC to
-        project_a must not alter project_b's release-state.md.
+        project-a must not alter project-b's release-state.md.
         """
         root = two_project_root
 
-        # Record project_b's initial release state content.
+        # Record project-b's initial release state content.
         release_b_before = (
-            root / "projects" / "project_b" / "release-state.md"
+            root / "projects" / "project-b" / "release-state.md"
         ).read_text(encoding="utf-8")
 
-        # Mutate project_a's release state.
-        _set_active_rc(root, "project_a", "v0.1.0")
+        # Mutate project-a's release state.
+        _set_active_rc(root, "project-a", "v0.1.0")
 
-        # project_b's release state must be unchanged.
+        # project-b's release state must be unchanged.
         release_b_after = (
-            root / "projects" / "project_b" / "release-state.md"
+            root / "projects" / "project-b" / "release-state.md"
         ).read_text(encoding="utf-8")
 
         assert release_b_after == release_b_before, (
-            "Setting Active RC in project_a must not alter project_b's release-state.md.\n"
+            "Setting Active RC in project-a must not alter project-b's release-state.md.\n"
             f"Before:\n{release_b_before}\nAfter:\n{release_b_after}"
         )
 
@@ -252,58 +252,58 @@ class TestMultiProjectIsolation:
     ) -> None:
         """Both projects bundle bugs independently, each into its own requirements/.
 
-        Running discovery for project_a and project_b in sequence produces
+        Running discovery for project-a and project-b in sequence produces
         a bundle under each project's own requirements/ directory.  The bundles
         are independent — each project has its own versioning namespace starting
         from v0.0.1 (since last_released defaults to v0.0.0 for both).
         """
         root = two_project_root
-        _add_bug_file(root, "project_a", bug_id="BUG-0071", slug="namespace-a")
-        _add_bug_file(root, "project_b", bug_id="BUG-0072", slug="namespace-b")
+        _add_bug_file(root, "project-a", bug_id="BUG-0071", slug="namespace-a")
+        _add_bug_file(root, "project-b", bug_id="BUG-0072", slug="namespace-b")
 
-        result_a = _run_discovery(root, "project_a")
-        result_b = _run_discovery(root, "project_b")
+        result_a = _run_discovery(root, "project-a")
+        result_b = _run_discovery(root, "project-b")
 
-        assert result_a.returncode == 0, f"project_a pipeline failed: {result_a.stderr}"
-        assert result_b.returncode == 0, f"project_b pipeline failed: {result_b.stderr}"
+        assert result_a.returncode == 0, f"project-a pipeline failed: {result_a.stderr}"
+        assert result_b.returncode == 0, f"project-b pipeline failed: {result_b.stderr}"
 
-        req_a = list(_requirements_dir(root, "project_a").glob("*-bugfix-bundle-*.md"))
-        req_b = list(_requirements_dir(root, "project_b").glob("*-bugfix-bundle-*.md"))
+        req_a = list(_requirements_dir(root, "project-a").glob("*-bugfix-bundle-*.md"))
+        req_b = list(_requirements_dir(root, "project-b").glob("*-bugfix-bundle-*.md"))
 
-        assert req_a, "Expected project_a to produce a bundle"
-        assert req_b, "Expected project_b to produce a bundle"
+        assert req_a, "Expected project-a to produce a bundle"
+        assert req_b, "Expected project-b to produce a bundle"
 
         # The bundle paths must be under different project directories.
-        assert "project_a" in str(req_a[0]), (
-            f"Expected project_a bundle under project_a dir, got: {req_a[0]}"
+        assert "project-a" in str(req_a[0]), (
+            f"Expected project-a bundle under project-a dir, got: {req_a[0]}"
         )
-        assert "project_b" in str(req_b[0]), (
-            f"Expected project_b bundle under project_b dir, got: {req_b[0]}"
+        assert "project-b" in str(req_b[0]), (
+            f"Expected project-b bundle under project-b dir, got: {req_b[0]}"
         )
 
     def test_halt_in_project_a_does_not_affect_project_b_bundling(
         self, two_project_root: pathlib.Path
     ) -> None:
-        """Halting project_a leaves project_b's pipeline operational.
+        """Halting project-a leaves project-b's pipeline operational.
 
-        A per-project HALT file under project_a/HALT halts only project_a.
-        project_b can still bundle bugs on the same discovery iteration.
+        A per-project HALT file under project-a/HALT halts only project-a.
+        project-b can still bundle bugs on the same discovery iteration.
         """
         root = two_project_root
 
-        # Halt project_a.
-        (root / "projects" / "project_a" / "HALT").write_text(
+        # Halt project-a.
+        (root / "projects" / "project-a" / "HALT").write_text(
             "halted for isolation test\n", encoding="utf-8"
         )
-        _add_bug_file(root, "project_b", bug_id="BUG-0073", slug="b-unaffected-by-a-halt")
+        _add_bug_file(root, "project-b", bug_id="BUG-0073", slug="b-unaffected-by-a-halt")
 
-        result_b = _run_discovery(root, "project_b")
+        result_b = _run_discovery(root, "project-b")
 
         assert result_b.returncode == 0
-        req_b = _requirements_dir(root, "project_b")
+        req_b = _requirements_dir(root, "project-b")
         bundles_b = list(req_b.glob("*-bugfix-bundle-*.md")) if req_b.exists() else []
         assert bundles_b, (
-            f"Expected project_b to bundle bugs despite project_a being halted.\n"
+            f"Expected project-b to bundle bugs despite project-a being halted.\n"
             f"req_b contents: {list(req_b.iterdir()) if req_b.exists() else '(missing)'}\n"
             f"stdout: {result_b.stdout}\nstderr: {result_b.stderr}"
         )
@@ -355,7 +355,7 @@ class TestPerRepoLockContention:
         cannot run concurrently for the same project.
         """
         root = two_project_root
-        lock_file = root / "locks" / "repo-wake-project_a.lock"
+        lock_file = root / "locks" / "repo-wake-project-a.lock"
         lock_file.touch()
 
         # Script: hold the lock in the background, wait for a signal, then release.
@@ -444,7 +444,7 @@ class TestPerRepoLockContention:
         permanent lock seizure after an agent crash.
         """
         root = two_project_root
-        lock_file = root / "locks" / "repo-wake-project_a.lock"
+        lock_file = root / "locks" / "repo-wake-project-a.lock"
         lock_file.touch()
 
         # First: hold and immediately release.
@@ -495,7 +495,7 @@ class TestPerRepoLockContention:
         protocol declines to act and returns sentinel 4, preventing OVERWATCH
         from modifying state while an agent is mid-flight.
 
-        Regression coverage: the project used here ("project_a")
+        Regression coverage: the project used here ("project-a")
         is deliberately NOT named "pgai-kanban" — OVERWATCH must resolve the
         SAME lock path (via pp_repo_lock_path, the single shared helper) that
         a wake dispatcher would hold for this project, not a hardcoded
@@ -505,7 +505,7 @@ class TestPerRepoLockContention:
         if the helper and the fixture ever diverge.
         """
         root = two_project_root
-        project_name = "project_a"
+        project_name = "project-a"
 
         # Resolve the lock path the SAME way both wake dispatch and OVERWATCH
         # do: via pp_repo_lock_path. This is the string-compare-equal check
@@ -650,14 +650,14 @@ class TestActiveRCGateBlocksPMDecomposition:
 
         # Place a requirements bundle ready for PM pickup.
         req_file = _add_requirements_file(
-            root, "project_a", version="v0.0.2", slug="blocked-by-active-rc"
+            root, "project-a", version="v0.0.2", slug="blocked-by-active-rc"
         )
 
         # Set an active RC — this triggers the gate.
-        _set_active_rc(root, "project_a", "v0.1.0")
+        _set_active_rc(root, "project-a", "v0.1.0")
 
         # Run the full pipeline.  With an Active RC set, Step 3 must not fire.
-        result = _run_discovery(root, "project_a")
+        result = _run_discovery(root, "project-a")
 
         assert result.returncode == 0, (
             f"Pipeline exited non-zero.\nstdout: {result.stdout}\nstderr: {result.stderr}"
@@ -678,7 +678,7 @@ class TestActiveRCGateBlocksPMDecomposition:
         # check for a PM-prefixed task entry rather than the bare marker so we
         # do not false-positive on the template comment line.
         pm_backlog = (
-            root / "projects" / "project_a" / "tasks" / "queues" / "pm_backlog.md"
+            root / "projects" / "project-a" / "tasks" / "queues" / "pm_backlog.md"
         )
         if pm_backlog.exists():
             backlog_text = pm_backlog.read_text(encoding="utf-8")
@@ -709,7 +709,7 @@ class TestActiveRCGateBlocksPMDecomposition:
         scripts_dir.mkdir(parents=True, exist_ok=True)
 
         task_id = "PM-20260628-001-decompose-v0-0-2-next-rc"
-        pm_tasks_dir = root / "projects" / "project_a" / "tasks"
+        pm_tasks_dir = root / "projects" / "project-a" / "tasks"
         pm_tasks_dir.mkdir(parents=True, exist_ok=True)
 
         stub_pm = scripts_dir / "pm-agent.sh"
@@ -721,7 +721,7 @@ class TestActiveRCGateBlocksPMDecomposition:
                 TASK_DIR="{pm_tasks_dir}/${{TASK_ID}}"
                 mkdir -p "$TASK_DIR"
                 printf '# %s\\n## State\\nBACKLOG\\n' "$TASK_ID" > "$TASK_DIR/status.md"
-                PM_BACKLOG="${{KANBAN_ROOT}}/projects/${{PGAI_PROJECT_NAME:-project_a}}/tasks/queues/pm_backlog.md"
+                PM_BACKLOG="${{KANBAN_ROOT}}/projects/${{PGAI_PROJECT_NAME:-project-a}}/tasks/queues/pm_backlog.md"
                 echo "- [ ] $TASK_ID" >> "$PM_BACKLOG"
                 echo "  Folder   : $TASK_DIR"
             """),
@@ -730,25 +730,25 @@ class TestActiveRCGateBlocksPMDecomposition:
         stub_pm.chmod(0o755)
 
         req_file = _add_requirements_file(
-            root, "project_a", version="v0.0.2", slug="unblocked-after-rc"
+            root, "project-a", version="v0.0.2", slug="unblocked-after-rc"
         )
 
         # Phase 1: RC in flight — PM must NOT be queued.
-        _set_active_rc(root, "project_a", "v0.1.0")
-        _run_discovery(root, "project_a")
+        _set_active_rc(root, "project-a", "v0.1.0")
+        _run_discovery(root, "project-a")
         req_text_while_active = req_file.read_text(encoding="utf-8")
         assert "running" not in req_text_while_active.lower(), (
             "PM must not be queued while Active RC is set."
         )
 
         # Phase 2: RC ships — Active RC clears to 'none'.
-        (root / "projects" / "project_a" / "release-state.md").write_text(
+        (root / "projects" / "project-a" / "release-state.md").write_text(
             "# Release State\n\n## Active RC\nnone\n\n"
             "## RC Opened At\nnone\n\n## RC Opened By Task\nnone\n",
             encoding="utf-8",
         )
 
-        result_after = _run_discovery(root, "project_a")
+        result_after = _run_discovery(root, "project-a")
 
         assert result_after.returncode == 0, (
             f"Pipeline exited non-zero after Active RC cleared.\n"
@@ -767,30 +767,30 @@ class TestActiveRCGateBlocksPMDecomposition:
     def test_active_rc_in_project_a_does_not_block_project_b_bundling(
         self, two_project_root: pathlib.Path
     ) -> None:
-        """An Active RC in project_a does not prevent project_b from bundling bugs.
+        """An Active RC in project-a does not prevent project-b from bundling bugs.
 
-        The Active-RC gate is per-project.  If project_a has an RC in flight,
-        project_b can still bundle bugs in the same cron iteration.
+        The Active-RC gate is per-project.  If project-a has an RC in flight,
+        project-b can still bundle bugs in the same cron iteration.
         """
         root = two_project_root
 
-        # Set project_a to have an Active RC.
-        _set_active_rc(root, "project_a", "v0.1.0")
+        # Set project-a to have an Active RC.
+        _set_active_rc(root, "project-a", "v0.1.0")
 
-        # Add a bug to project_b.
-        _add_bug_file(root, "project_b", bug_id="BUG-0080", slug="b-unblocked-by-a-rc")
+        # Add a bug to project-b.
+        _add_bug_file(root, "project-b", bug_id="BUG-0080", slug="b-unblocked-by-a-rc")
 
-        result_b = _run_discovery(root, "project_b")
+        result_b = _run_discovery(root, "project-b")
 
         assert result_b.returncode == 0, (
-            f"project_b pipeline exited non-zero.\n"
+            f"project-b pipeline exited non-zero.\n"
             f"stdout: {result_b.stdout}\nstderr: {result_b.stderr}"
         )
 
-        req_b = _requirements_dir(root, "project_b")
+        req_b = _requirements_dir(root, "project-b")
         bundles_b = list(req_b.glob("*-bugfix-bundle-*.md")) if req_b.exists() else []
         assert bundles_b, (
-            f"Expected project_b to bundle bugs even when project_a has an Active RC.\n"
+            f"Expected project-b to bundle bugs even when project-a has an Active RC.\n"
             f"req_b contents: {list(req_b.iterdir()) if req_b.exists() else '(missing)'}\n"
             f"stdout: {result_b.stdout}\nstderr: {result_b.stderr}"
         )
@@ -816,17 +816,17 @@ class TestHaltGates:
     ) -> None:
         """A HALT file at the kanban root blocks discovery for every project.
 
-        Both project_a and project_b have bugs ready to bundle.  With a global
+        Both project-a and project-b have bugs ready to bundle.  With a global
         HALT file present, neither project produces a bundle.  Both pipelines
         exit with DISCOVERY_STATUS=blocked.
         """
         root = two_project_root
-        _add_bug_file(root, "project_a", bug_id="BUG-0090", slug="global-halt-a")
-        _add_bug_file(root, "project_b", bug_id="BUG-0091", slug="global-halt-b")
+        _add_bug_file(root, "project-a", bug_id="BUG-0090", slug="global-halt-a")
+        _add_bug_file(root, "project-b", bug_id="BUG-0091", slug="global-halt-b")
 
         (root / "HALT").write_text("global halt for cross-cutting test\n", encoding="utf-8")
 
-        for project_name in ["project_a", "project_b"]:
+        for project_name in ["project-a", "project-b"]:
             result = _run_discovery(root, project_name)
 
             assert result.returncode == 0, (
@@ -849,41 +849,41 @@ class TestHaltGates:
     ) -> None:
         """A HALT file under projects/<name>/HALT blocks only that project.
 
-        project_a is halted; project_b has a bug and must bundle normally.
-        project_a's pipeline exits with DISCOVERY_STATUS=blocked; project_b's
+        project-a is halted; project-b has a bug and must bundle normally.
+        project-a's pipeline exits with DISCOVERY_STATUS=blocked; project-b's
         exits with DISCOVERY_STATUS=produced_work.
         """
         root = two_project_root
 
-        # Halt project_a only.
-        (root / "projects" / "project_a" / "HALT").write_text(
+        # Halt project-a only.
+        (root / "projects" / "project-a" / "HALT").write_text(
             "per-project halt for cross-cutting test\n", encoding="utf-8"
         )
-        _add_bug_file(root, "project_a", bug_id="BUG-0092", slug="per-halt-a-blocked")
-        _add_bug_file(root, "project_b", bug_id="BUG-0093", slug="per-halt-b-unaffected")
+        _add_bug_file(root, "project-a", bug_id="BUG-0092", slug="per-halt-a-blocked")
+        _add_bug_file(root, "project-b", bug_id="BUG-0093", slug="per-halt-b-unaffected")
 
-        # project_a must be blocked.
-        result_a = _run_discovery(root, "project_a")
+        # project-a must be blocked.
+        result_a = _run_discovery(root, "project-a")
         assert result_a.returncode == 0
         assert "DISCOVERY_STATUS=blocked" in result_a.stdout, (
-            f"Expected DISCOVERY_STATUS=blocked for halted project_a.\n"
+            f"Expected DISCOVERY_STATUS=blocked for halted project-a.\n"
             f"stdout: {result_a.stdout}"
         )
-        req_a = _requirements_dir(root, "project_a")
+        req_a = _requirements_dir(root, "project-a")
         assert not list(req_a.glob("*-bugfix-bundle-*.md")), (
-            "Expected no bundle for halted project_a."
+            "Expected no bundle for halted project-a."
         )
 
-        # project_b must proceed normally.
-        result_b = _run_discovery(root, "project_b")
+        # project-b must proceed normally.
+        result_b = _run_discovery(root, "project-b")
         assert result_b.returncode == 0, (
-            f"project_b pipeline exited non-zero.\n"
+            f"project-b pipeline exited non-zero.\n"
             f"stdout: {result_b.stdout}\nstderr: {result_b.stderr}"
         )
-        req_b = _requirements_dir(root, "project_b")
+        req_b = _requirements_dir(root, "project-b")
         bundles_b = list(req_b.glob("*-bugfix-bundle-*.md")) if req_b.exists() else []
         assert bundles_b, (
-            f"Expected project_b to bundle bugs when only project_a is halted.\n"
+            f"Expected project-b to bundle bugs when only project-a is halted.\n"
             f"stdout: {result_b.stdout}\nstderr: {result_b.stderr}"
         )
 
@@ -896,13 +896,13 @@ class TestHaltGates:
         blocked → HALT removed → discovery produces work again.
         """
         root = two_project_root
-        _add_bug_file(root, "project_a", bug_id="BUG-0094", slug="resume-after-global-halt")
+        _add_bug_file(root, "project-a", bug_id="BUG-0094", slug="resume-after-global-halt")
 
         halt_file = root / "HALT"
         halt_file.write_text("temporary halt\n", encoding="utf-8")
 
         # Verify halt blocks.
-        result_blocked = _run_discovery(root, "project_a")
+        result_blocked = _run_discovery(root, "project-a")
         assert "DISCOVERY_STATUS=blocked" in result_blocked.stdout, (
             f"Expected blocked status while HALT is present.\nstdout: {result_blocked.stdout}"
         )
@@ -911,12 +911,12 @@ class TestHaltGates:
         halt_file.unlink()
 
         # Discovery must now produce work.
-        result_resumed = _run_discovery(root, "project_a")
+        result_resumed = _run_discovery(root, "project-a")
         assert result_resumed.returncode == 0
-        req_a = _requirements_dir(root, "project_a")
+        req_a = _requirements_dir(root, "project-a")
         bundles = list(req_a.glob("*-bugfix-bundle-*.md")) if req_a.exists() else []
         assert bundles, (
-            f"Expected project_a to bundle bugs after global HALT is removed.\n"
+            f"Expected project-a to bundle bugs after global HALT is removed.\n"
             f"stdout: {result_resumed.stdout}\nstderr: {result_resumed.stderr}"
         )
 
@@ -929,13 +929,13 @@ class TestHaltGates:
         pipeline produces work again.  The other project is unaffected throughout.
         """
         root = two_project_root
-        _add_bug_file(root, "project_a", bug_id="BUG-0095", slug="resume-after-per-halt")
+        _add_bug_file(root, "project-a", bug_id="BUG-0095", slug="resume-after-per-halt")
 
-        halt_file = root / "projects" / "project_a" / "HALT"
+        halt_file = root / "projects" / "project-a" / "HALT"
         halt_file.write_text("per-project halt\n", encoding="utf-8")
 
         # Verify halt blocks.
-        result_blocked = _run_discovery(root, "project_a")
+        result_blocked = _run_discovery(root, "project-a")
         assert "DISCOVERY_STATUS=blocked" in result_blocked.stdout, (
             f"Expected blocked status while per-project HALT is present.\n"
             f"stdout: {result_blocked.stdout}"
@@ -944,13 +944,13 @@ class TestHaltGates:
         # Remove the per-project HALT.
         halt_file.unlink()
 
-        # Discovery for project_a must now produce work.
-        result_resumed = _run_discovery(root, "project_a")
+        # Discovery for project-a must now produce work.
+        result_resumed = _run_discovery(root, "project-a")
         assert result_resumed.returncode == 0
-        req_a = _requirements_dir(root, "project_a")
+        req_a = _requirements_dir(root, "project-a")
         bundles = list(req_a.glob("*-bugfix-bundle-*.md")) if req_a.exists() else []
         assert bundles, (
-            f"Expected project_a to bundle bugs after per-project HALT is removed.\n"
+            f"Expected project-a to bundle bugs after per-project HALT is removed.\n"
             f"stdout: {result_resumed.stdout}\nstderr: {result_resumed.stderr}"
         )
 
@@ -965,20 +965,20 @@ class TestHaltGates:
         """
         root = two_project_root
         bug_file = _add_bug_file(
-            root, "project_a", bug_id="BUG-0096", slug="halt-no-mutation"
+            root, "project-a", bug_id="BUG-0096", slug="halt-no-mutation"
         )
 
         # Capture the bug file's initial content.
         initial_content = bug_file.read_text(encoding="utf-8")
         initial_req_files = (
-            list(_requirements_dir(root, "project_a").iterdir())
-            if _requirements_dir(root, "project_a").exists()
+            list(_requirements_dir(root, "project-a").iterdir())
+            if _requirements_dir(root, "project-a").exists()
             else []
         )
 
         (root / "HALT").write_text("no-mutation halt\n", encoding="utf-8")
 
-        _run_discovery(root, "project_a")
+        _run_discovery(root, "project-a")
 
         # Bug file content must be unchanged.
         assert bug_file.read_text(encoding="utf-8") == initial_content, (
@@ -987,8 +987,8 @@ class TestHaltGates:
 
         # Requirements directory must remain in the same state as before.
         post_req_files = (
-            list(_requirements_dir(root, "project_a").iterdir())
-            if _requirements_dir(root, "project_a").exists()
+            list(_requirements_dir(root, "project-a").iterdir())
+            if _requirements_dir(root, "project-a").exists()
             else []
         )
         assert post_req_files == initial_req_files, (

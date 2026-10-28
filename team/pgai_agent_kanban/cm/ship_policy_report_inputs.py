@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 ship_policy_report_inputs.py -- the ship-policy matrix's inputs, read from a
-TESTER report.
+TESTER report and from the TESTER task that wrote it.
 
 The CM ship-policy decision matrix (``cm_ship_policy``,
 team/scripts/lib/cm/release_ship_policy.sh, Step 4d) decides from a handful
@@ -14,10 +14,10 @@ What this module adds is only the matrix's own vocabulary on top of the
 parsed fields: which findings count, how several findings merge, and the
 ``none`` / ``unparseable`` tokens the matrix has rows for.
 
-The bash readers ``read_ship_policy_finding_dimensions`` and
-``read_ship_policy_report_values`` (team/scripts/lib/cm/
-release_ship_policy_report.sh) are thin wrappers over this module's CLI,
-run through ``pp_run_ops``.
+The bash readers ``read_ship_policy_finding_dimensions``,
+``read_ship_policy_report_values`` and ``read_ship_policy_tester_lookup``
+(team/scripts/lib/cm/release_ship_policy_report.sh) are thin wrappers over
+this module's CLI, run through ``pp_run_ops``.
 
 Finding dimensions (``dims``)
 -----------------------------
@@ -70,21 +70,67 @@ Prints five ``key=value`` lines, in this order::
   normalized from a decorated line, or could not be parsed, is narrated on
   stderr.
 
+TESTER-task lookup (``lookup``)
+-------------------------------
+Locates the TESTER task for an active RC under a tasks directory in one
+pass, reading only task ``README.md`` / ``status.md`` fields (never a
+report), and prints ``key=value`` lines::
+
+    tester_task_dir=<absolute path, or empty>
+    tester_task_id=<folder basename, or "none">
+    tester_state=<status.md ## State, or "none">
+    tester_report_path=<path to artifacts/report.md when it exists, or empty>
+    tester_task_found=<yes|no>
+    mismatch_field=<Role|Release Version>   (zero or more triples, each in
+    mismatch_raw=<raw field text>             this order)
+    mismatch_path=<README.md path>
+
+- Only a folder holding both ``README.md`` and ``status.md`` is read. Each
+  field is read through ``pgai_agent_kanban.cm.read_state_field`` (whose
+  section comes from ``pgai_agent_kanban.task_status.read_section``); a
+  missing heading or empty value reads as absent.
+- A candidate is a task whose ``## Role`` reads TESTER (its first word,
+  bold markers, backticks and case ignored) and whose ``## Release
+  Version``, reduced by ``pgai_agent_kanban.cm.release_version.version_token``,
+  equals the active RC (compared lowercased). A Release Version reading
+  ``none`` is a task that targets no RC and is skipped silently.
+- A TESTER-role task whose Release Version is present but not
+  version-shaped (``vX.Y.Z`` after normalisation) is never a candidate and
+  is reported as a ``Release Version`` mismatch, whatever the active RC.
+- A candidate whose Role is not exactly ``TESTER``, or whose Release Version
+  is not exactly the active RC as written (surrounding whitespace ignored),
+  is still a candidate, and one ``Role`` / ``Release Version`` mismatch is
+  reported for each such field.
+- Folders are visited in ascending name order, which is creation order for
+  task IDs. The last DONE candidate (``## State`` compared case-insensitively)
+  wins, else the last candidate of any state; a missing State reads
+  ``none``.
+- Every mismatch is narrated on stderr as it is found, naming the task, the
+  field, its raw text and the README path; the stderr lines are flushed
+  before any stdout line, so a caller merging both streams reads the
+  values after the narration. A missing tasks directory finds nothing.
+
 Usage (CLI):
     python3 -m pgai_agent_kanban.cm.ship_policy_report_inputs dims <report>
     python3 -m pgai_agent_kanban.cm.ship_policy_report_inputs values <report>
-    Both modes exit 0 whatever the report holds (a missing or unreadable
-    report included); 2 is a usage error.
+    python3 -m pgai_agent_kanban.cm.ship_policy_report_inputs lookup <tasks_dir> <active_rc>
+    Every mode exits 0 whatever it reads (a missing or unreadable report or
+    tasks directory included); 2 is a usage error.
 
 Usage (import):
     from pgai_agent_kanban.reports.tester_report import parse_report
     from pgai_agent_kanban.cm.ship_policy_report_inputs import finding_dimensions
     regression, integrity = finding_dimensions(parse_report(path))
+
+    from pgai_agent_kanban.cm.ship_policy_report_inputs import tester_task_lookup
+    found = tester_task_lookup("/path/to/tasks", "v1.2.3")
+    found.task_dir, found.state, found.mismatches
 """
 
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import os
 import pathlib
 import re
@@ -103,6 +149,8 @@ if not __package__:
     if _OWN_PACKAGE_ROOT not in sys.path:
         sys.path.insert(0, _OWN_PACKAGE_ROOT)
 
+from pgai_agent_kanban.cm.read_state_field import read_state_field  # noqa: E402
+from pgai_agent_kanban.cm.release_version import VERSION_SHAPE_RE, version_token  # noqa: E402
 from pgai_agent_kanban.reports.tester_report import (  # noqa: E402
     Finding,
     TesterReport,
@@ -111,9 +159,12 @@ from pgai_agent_kanban.reports.tester_report import (  # noqa: E402
 )
 
 __all__ = [
+    "TesterTaskLookup",
     "all_findings",
     "finding_dimensions",
+    "lookup_lines",
     "report_values",
+    "tester_task_lookup",
     "main",
 ]
 
@@ -195,6 +246,135 @@ def report_values(report: TesterReport) -> dict:
     }
 
 
+@dataclasses.dataclass
+class TesterTaskLookup:
+    """What :func:`tester_task_lookup` found.
+
+    ``task_dir`` and ``state`` are None when no candidate matched.
+    ``mismatches`` holds ``(field, raw, readme_path)`` triples in the order
+    found, and ``notes`` the stderr narration lines, one per mismatch, in
+    the same order.
+    """
+
+    task_dir: Optional[str] = None
+    state: Optional[str] = None
+    mismatches: list = dataclasses.field(default_factory=list)
+    notes: list = dataclasses.field(default_factory=list)
+
+    @property
+    def found(self) -> bool:
+        """True when a TESTER task matched (``task_dir`` is set)."""
+        return self.task_dir is not None
+
+
+def _first_word(value: str) -> str:
+    """The first letters-and-dashes word of *value*, lowercased, with
+    underscores read as dashes and trailing dashes dropped."""
+    m = re.match(r"([A-Za-z][A-Za-z_-]*)", value.strip())
+    return m.group(1).lower().replace("_", "-").rstrip("-") if m else ""
+
+
+def _read_task_field(path: str, heading: str) -> Optional[str]:
+    """*heading*'s value in the task file at *path*, or None when the file
+    is missing or the heading has no value (read_state_field's "none")."""
+    value = read_state_field(path, heading)
+    return None if value == "none" else value
+
+
+def tester_task_lookup(tasks_dir: str, active_rc: str) -> TesterTaskLookup:
+    """Locate the TESTER task for *active_rc* under *tasks_dir*; see the
+    module docstring, "TESTER-task lookup", for the selection and mismatch
+    rules. Reads only; never raises for a missing *tasks_dir*."""
+    active_rc_token = active_rc.strip().lower()
+    result = TesterTaskLookup()
+    candidates = []  # (task_dir, state)
+    if os.path.isdir(tasks_dir):
+        for name in sorted(os.listdir(tasks_dir)):
+            task_dir = os.path.join(tasks_dir, name)
+            readme = os.path.join(task_dir, "README.md")
+            status = os.path.join(task_dir, "status.md")
+            if not (os.path.isdir(task_dir) and os.path.isfile(readme) and os.path.isfile(status)):
+                continue
+            role_raw = _read_task_field(readme, "Role")
+            if role_raw is None or _first_word(re.sub(r"[*`]", " ", role_raw)) != "tester":
+                continue
+            version_raw = _read_task_field(readme, "Release Version")
+            if version_raw is None:
+                continue
+            version = version_token(version_raw)
+            if version == "none":
+                continue
+            if not VERSION_SHAPE_RE.match(version):
+                result.mismatches.append(("Release Version", version_raw, readme))
+                result.notes.append(
+                    f"TESTER task {name}: Release Version {version_raw!r} in "
+                    f"{readme} is not version-shaped (expected vX.Y.Z); the task "
+                    f"cannot be tied to any RC and is not a candidate for {active_rc}"
+                )
+                continue
+            if version != active_rc_token:
+                continue
+            if role_raw.strip() != "TESTER":
+                result.mismatches.append(("Role", role_raw, readme))
+                result.notes.append(
+                    f"TESTER task {name}: Role {role_raw!r} in {readme} matched TESTER only after normalization"
+                )
+            if version_raw.strip() != active_rc.strip():
+                result.mismatches.append(("Release Version", version_raw, readme))
+                result.notes.append(
+                    f"TESTER task {name}: Release Version {version_raw!r} in "
+                    f"{readme} matched {active_rc} only after normalization"
+                )
+            state = _read_task_field(status, "State")
+            candidates.append((task_dir, state if state is not None else "none"))
+
+    selected = None
+    for task_dir, state in candidates:
+        if state.strip().lower() == "done":
+            selected = (task_dir, state)
+    if selected is None and candidates:
+        selected = candidates[-1]
+    if selected is not None:
+        result.task_dir, result.state = selected
+    return result
+
+
+def lookup_lines(result: TesterTaskLookup) -> list:
+    """The ``lookup`` mode's stdout lines for *result*, in output order (module
+    docstring, "TESTER-task lookup")."""
+    if not result.found:
+        lines = [
+            "tester_task_dir=",
+            "tester_task_id=none",
+            "tester_state=none",
+            "tester_report_path=",
+            "tester_task_found=no",
+        ]
+    else:
+        report = os.path.join(result.task_dir, "artifacts", "report.md")
+        lines = [
+            f"tester_task_dir={result.task_dir}",
+            f"tester_task_id={os.path.basename(result.task_dir)}",
+            f"tester_state={result.state}",
+            f"tester_report_path={report if os.path.isfile(report) else ''}",
+            "tester_task_found=yes",
+        ]
+    for field, raw, readme in result.mismatches:
+        lines.append(f"mismatch_field={field}")
+        lines.append(f"mismatch_raw={raw}")
+        lines.append(f"mismatch_path={readme}")
+    return lines
+
+
+def _run_lookup(tasks_dir: str, active_rc: str) -> None:
+    result = tester_task_lookup(tasks_dir, active_rc)
+    for note in result.notes:
+        print(note, file=sys.stderr)
+    sys.stderr.flush()
+    for line in lookup_lines(result):
+        print(line)
+
+
 def _load(report_path: str) -> Optional[TesterReport]:
     """The parsed report at *report_path*, or None when it cannot be read."""
     try:
@@ -250,20 +430,32 @@ def main(argv: "list | None" = None) -> int:
     parser = argparse.ArgumentParser(
         prog="python3 -m pgai_agent_kanban.cm.ship_policy_report_inputs",
         description=(
-            "Print the CM ship-policy matrix's inputs read from a TESTER report: "
-            "'dims' prints '<regression> <integrity>' for the systemic_risk=high "
-            "row; 'values' prints the normalized Recommendation and Systemic Risk, "
-            "their raw lines and the large-fix-effort flag. Reads only; exits 0 "
-            "for any report, a missing one included."
+            "Print the CM ship-policy matrix's inputs: 'dims' prints "
+            "'<regression> <integrity>' for the systemic_risk=high row; 'values' "
+            "prints the normalized Recommendation and Systemic Risk, their raw "
+            "lines and the large-fix-effort flag; 'lookup' prints the TESTER task "
+            "found for an RC and any Role / Release Version mismatches. Reads "
+            "only; exits 0 whatever it reads, a missing report or tasks "
+            "directory included."
         ),
     )
-    parser.add_argument("mode", choices=("dims", "values"), help="Which inputs to print.")
-    parser.add_argument("report", help="Path to the TESTER report (artifacts/report.md).")
+    modes = parser.add_subparsers(dest="mode", required=True, metavar="{dims,values,lookup}")
+    for mode, help_text in (
+        ("dims", "Print '<regression> <integrity>' from a TESTER report."),
+        ("values", "Print the report-level values and the large-fix-effort flag."),
+    ):
+        mode_parser = modes.add_parser(mode, help=help_text)
+        mode_parser.add_argument("report", help="Path to the TESTER report (artifacts/report.md).")
+    lookup_parser = modes.add_parser("lookup", help="Print the TESTER task for an RC.")
+    lookup_parser.add_argument("tasks_dir", help="The project's tasks directory.")
+    lookup_parser.add_argument("active_rc", help="The RC being decided (vX.Y.Z).")
     args = parser.parse_args(argv)
     if args.mode == "dims":
         _run_dims(os.fspath(args.report))
-    else:
+    elif args.mode == "values":
         _run_values(os.fspath(args.report))
+    else:
+        _run_lookup(args.tasks_dir, args.active_rc)
     return 0
 
 

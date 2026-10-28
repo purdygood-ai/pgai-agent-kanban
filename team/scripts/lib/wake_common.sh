@@ -43,9 +43,10 @@
 #                               promotion and recheck, and the
 #                               task-liveness primitives the reconciliation
 #                               sweeps read.
-#   6. wake_reconcile_sweeps.sh — reconcile_stale_active and
-#                               reconcile_terminal_worktrees, the two
-#                               once-per-wake, once-per-project
+#   6. wake_reconcile_sweeps.sh — reconcile_stale_active,
+#                               reconcile_terminal_worktrees and
+#                               reconcile_terminal_liveness_records, the
+#                               three once-per-wake, once-per-project
 #                               reconciliation sweeps. Depends on
 #                               wake_task_state.sh's mark_backlog/get_state/
 #                               task_liveness_* primitives, so sourced
@@ -84,8 +85,15 @@
 # This file's own remaining code is the two functions every wake script
 # calls directly -- wake_common_preflight (script-level preflight) and
 # wake_common_run (the HALT check, stagger sleep, and multi-project
-# iteration loop) -- plus wake_stop_file_present, the operator stop-file
-# check both wake_common_run and run_project_chain read. wake_common_run's
+# iteration loop, narrowed to one project when wake-batch.sh started the
+# batch for one: WAKE_BATCH_PROJECT) -- plus wake_stop_file_present, the
+# operator stop-file check both wake_common_run and run_project_chain
+# read. Before each
+# first-pass project wake_common_run sets WAKE_BATCH_PROJECTS_PENDING to
+# the projects still to come after it (_wake_batch_projects_pending), so a
+# project whose repo lock a wake chain holds defers at once while others
+# remain and is waited for only in the retry pass, which sets it to 0, or
+# when it is the last project of the pass. wake_common_run's
 # end-of-iteration retry pass also reports each project that ends the
 # firing still deferred on repo-lock contention to the lock-starvation
 # guard (wlw_starvation_note_deferral, lib/wake_lock_wait.sh -- sourced by
@@ -125,8 +133,9 @@ source "${SCRIPT_DIR}/../lib/wake_readme_meta.sh"
 source "${SCRIPT_DIR}/../lib/wake_task_state.sh"
 
 # --- Source the reconciliation-sweeps stage (reconcile_stale_active,
-# reconcile_terminal_worktrees) -- split out of wake_task_state.sh to keep
-# both files under the engine-decomposition line ceiling. Depends on
+# reconcile_terminal_worktrees, reconcile_terminal_liveness_records) --
+# split out of wake_task_state.sh to keep both files under the
+# engine-decomposition line ceiling. Depends on
 # wake_task_state.sh's mark_backlog/get_state/task_liveness_* primitives,
 # so sourced immediately after it. ---
 # shellcheck source=scripts/lib/wake_reconcile_sweeps.sh
@@ -202,6 +211,29 @@ wake_stop_file_present() {
 }
 
 # ---------------------------------------------------------------------------
+# _wake_batch_projects_pending <index> <project>...
+# Echo how many of the listed projects after position <index> (0-based) the
+# first pass will still enter: enabled in projects.cfg and, for every agent
+# but overwatch, without a per-project HALT -- the same two skips the pass
+# applies. A project that turns out quick, or halts later, costs nothing:
+# the deferred project keeps its whole lock_wait_seconds budget for the
+# retry pass.
+# ---------------------------------------------------------------------------
+_wake_batch_projects_pending() {
+  local _index="$1" _count=0 _name
+  shift
+  for _name in "${@:$(( _index + 2 ))}"; do
+    [[ -n "$_name" ]] || continue
+    projects_cfg_enabled "$_name" || continue
+    if [[ "$AGENT" != "overwatch" ]] && pp_project_halted "$_name" 2>/dev/null; then
+      continue
+    fi
+    _count=$(( _count + 1 ))
+  done
+  printf '%s\n' "$_count"
+}
+
+# ---------------------------------------------------------------------------
 # wake_common_run
 # Main entry point. Runs the agent-aware HALT check, stagger sleep, and
 # multi-project iteration loop.
@@ -273,8 +305,28 @@ wake_common_run() {
   # pass. A project the stop file or a HALT kept from its retry is not:
   # that deferral is the operator's, not the lock's.
   declare -a _LOCK_DEFERRED_PROJECTS=()
+  # The batch's projects, read once so each first-pass call can be told how
+  # many are still to come (WAKE_BATCH_PROJECTS_PENDING, read by
+  # run_project_chain's repo-lock acquisition in lib/wake_driver.sh).
+  # A batch wake-batch.sh started for one project (WAKE_BATCH_PROJECT, set
+  # by wake_bootstrap.sh) iterates that project alone; its contention retry
+  # pass below therefore stays within the batch too. A direct run of a
+  # provider wake script iterates every registered project.
+  declare -a _ITER_PROJECTS=()
+  if [[ -n "${WAKE_BATCH_PROJECT:-}" ]]; then
+    if projects_cfg_has "$WAKE_BATCH_PROJECT" 2>/dev/null; then
+      _ITER_PROJECTS=("$WAKE_BATCH_PROJECT")
+      log "batch scope: project ${WAKE_BATCH_PROJECT} only"
+    else
+      log "batch scope: project ${WAKE_BATCH_PROJECT} is not registered in $(projects_cfg_path) -- iterating no project"
+    fi
+  else
+    mapfile -t _ITER_PROJECTS < <(projects_cfg_list 2>/dev/null)
+  fi
+  _iter_index=-1
 
   while IFS= read -r _iter_project; do
+    _iter_index=$(( _iter_index + 1 ))
     [[ -z "$_iter_project" ]] && continue
 
     # --- Operator stop file: the between-projects boundary ---
@@ -289,10 +341,10 @@ wake_common_run() {
     fi
 
     # --- Disabled project: projects.cfg enabled=false ---
-    # Skipped for every agent, OVERWATCH's daily wake included, before any
-    # HALT stamp, lock, discovery, agent or provider call -- one line per
-    # firing. projects_cfg_enabled (lib/projects.sh) is the one rule;
-    # `why` reads the same one, so it reports this project IDLE.
+    # Skipped for every agent, before any HALT stamp, lock, discovery,
+    # agent or provider call -- one line per firing. projects_cfg_enabled
+    # (lib/projects.sh) is the one rule; `why` reads the same one, so it
+    # reports this project IDLE.
     if ! projects_cfg_enabled "$_iter_project"; then
       log "$(projects_cfg_disabled_skip_line "$_iter_project")"
       continue
@@ -335,6 +387,7 @@ wake_common_run() {
 
     _ITER_PROJECT_COUNT=$(( _ITER_PROJECT_COUNT + 1 ))
     log "project ${_iter_project}: beginning chain (project ${_ITER_PROJECT_COUNT})"
+    WAKE_BATCH_PROJECTS_PENDING="$(_wake_batch_projects_pending "$_iter_index" "${_ITER_PROJECTS[@]}")"
 
     # set +e/-e: run_project_chain returns 3 on repo-lock contention (see
     # its contract comment in lib/wake_driver.sh), and this script runs
@@ -367,7 +420,10 @@ wake_common_run() {
       log "project ${_iter_project}: HALT-AFTER promoted after work loop — halted for next wake"
     fi
 
-  done < <(projects_cfg_list 2>/dev/null)
+  done < <(printf '%s\n' "${_ITER_PROJECTS[@]}")
+  # Nothing is left to go first now: the retry pass waits for a wake-chain
+  # holder within each project's remaining lock_wait_seconds budget.
+  WAKE_BATCH_PROJECTS_PENDING=0
 
   # --- End-of-iteration contention retry pass ---
   # Once means once: exactly one retry attempt per project that
@@ -377,12 +433,14 @@ wake_common_run() {
   # its ordinary turn and the contending holder has had the rest of the
   # iteration to finish. This pass itself never loops, polls, or takes a
   # blocking flock — it calls run_project_chain exactly once per contended
-  # project. That call takes the lock the way the first pass did
-  # (wlw_acquire_chain_lock, lib/wake_lock_wait.sh): non-blocking attempts,
-  # with a backoff wait for a wake-chain holder bounded by what is left of
-  # the project's ONE lock_wait_seconds budget for this firing -- usually
-  # nothing once the first pass waited it out, so the retry is then a
-  # single attempt -- and by the remaining batch runtime budget.
+  # project. That call takes the lock through wlw_acquire_chain_lock
+  # (lib/wake_lock_wait.sh): non-blocking attempts, with a backoff wait for
+  # a wake-chain holder bounded by what is left of the project's ONE
+  # lock_wait_seconds budget for this firing and by the remaining batch
+  # runtime budget. A project the first pass deferred while other projects
+  # remained never waited there, so its whole budget is left for this
+  # wait; one the first pass reached last has usually waited it out, so its
+  # retry is a single attempt.
   if (( ${#_CONTENDED_PROJECTS[@]} > 0 )); then
     _RETRY_ELAPSED=$(( $(date +%s) - WAKE_START_EPOCH ))
     # The operator stop file is a task boundary for the retry pass too: a

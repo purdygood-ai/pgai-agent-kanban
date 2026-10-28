@@ -1,8 +1,12 @@
 """
-projects.py — GET /projects/{name} metadata card endpoint for the pgai-agent-kanban operator API.
+projects.py — per-project reads for the pgai-agent-kanban operator API:
+GET /projects/{name} (the metadata card), GET /projects/{name}/reliability
+(the reliability streaks) and GET /projects/{name}/inbox (the operator
+inbox); see each handler's docstring for the last two.
 
-Returns the full metadata card for a registered project: configuration values from
-projects.cfg and project.cfg, release state, and per-agent queue counts.
+GET /projects/{name} returns the full metadata card for a registered project:
+configuration values from projects.cfg and project.cfg, release state, and
+per-agent queue counts.
 
 Response shape (HTTP 200):
   {
@@ -12,7 +16,7 @@ Response shape (HTTP 200):
     "dev_tree_path":  str,           # absolute path to the git checkout (from project.cfg)
     "git_repo":       str,           # remote URL (from project.cfg; never redacted)
     "priority":       int,           # sort priority from projects.cfg
-    "color":          str,           # #RRGGBB hex string from projects.cfg
+    "color":          str,           # #RRGGBB: dashboard_color, else the palette slot
     "ceilings": {
       "max_major":    int | null,    # ceiling in effect: project.cfg [versioning], or the
       "max_minor":    int | null,    #   documented default (0 / 13 / 21) when absent;
@@ -20,7 +24,8 @@ Response shape (HTTP 200):
     },
     "last_released":  str | null,    # vX.Y.Z from release-state.md ## Last Released; null when none/absent
     "active_rc":      str | null,    # vX.Y.Z from release-state.md ## Active RC; null when none/absent
-    "halt":           bool,          # true when the per-project HALT file is present
+    "halt":           bool,          # the dashboard's HALT flag (project or kanban-wide HALT)
+    "halt_text":      str,           # "" | "HALT" | "HALT-AFTER <event>" (project or kanban-wide)
     "queue_counts": {
       "<AGENT>": {"open": int, "working": int, "done": int},
       ...
@@ -40,14 +45,27 @@ Constraints:
     resolver (which writes to release-state.md via finalize.sh after each release).
   - active_rc is null when release-state.md has "none" or is absent — never the
     string "none".
-  - halt reflects the HALT file presence verbatim.
+  - halt and halt_text are every HALT the dashboard header shows for the
+    project, from
+    pgai_agent_kanban.dashboard.halt_state.effective_halt_flag_and_text:
+    halt is true for a project HALT or, with neither project sentinel, the
+    kanban-wide HALT; a project HALT-AFTER -- or, with no project sentinel
+    and no kanban-wide HALT, a kanban-wide HALT-AFTER -- sets halt_text to
+    "HALT-AFTER <event>" and leaves halt false (the chain keeps running
+    while it drains).
+  - color is pgai_agent_kanban.ops.projects.project_color, the rule
+    projects_cfg_color applies and GET /board shares: the explicit
+    dashboard_color, else the default-palette entry at the project's
+    ordinal in priority order.
   - ceilings resolve through pgai_agent_kanban.lib.version_ceiling, the rule
     every ceiling reader shares. A malformed value is reported null and adds
     one ``warnings`` entry naming the file, key and value; discovery treats
     that project as ceiling-blocked, not unlimited.
-  - queue_counts covers all five agent roles (pm, coder, writer, tester, cm).
-    Counts only include tasks whose status.md was found and readable; tasks with
-    no status.md fall back to the queue marker state.
+  - queue_counts covers all five agent roles (pm, coder, writer, tester, cm),
+    each pgai_agent_kanban.dashboard.task_counts.agent_queue_counts over the
+    agent's backlog: a task's state comes from its status.md, else the queue
+    marker; WORKING counts as working, DONE / WONT-DO as done, anything else
+    as open.
 """
 
 from __future__ import annotations
@@ -59,9 +77,10 @@ from typing import Optional
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 
+from pgai_agent_kanban.dashboard.halt_state import effective_halt_flag_and_text
+from pgai_agent_kanban.dashboard.task_counts import agent_queue_counts
 from pgai_agent_kanban.lib import ini
-from pgai_agent_kanban.lib.terminal_states import is_terminal as _is_terminal_state
-from pgai_agent_kanban.lib.palette import load_default_palette
+from pgai_agent_kanban.lib.branch_prefix import InvalidBranchPrefixError, ini_branch_prefix_from_cfg
 from pgai_agent_kanban.lib.version_ceiling import (
     CEILING_KEYS,
     CeilingValueError,
@@ -71,10 +90,17 @@ from pgai_agent_kanban.lib.version_ceiling import (
 from pgai_agent_kanban.board import (
     get_active_rc_for_project,
     get_last_released_for_project,
-    marker_to_state,
-    parse_queue_line,
-    read_task_state_from_status_md,
 )
+from pgai_agent_kanban.metrics.reliability import reliability_path_for_project
+from pgai_agent_kanban.metrics.reliability_view import PLACEHOLDER_MISSING, load_reliability
+from ..adapter import http_status_for
+from pgai_agent_kanban.lib.error_contract import dual_channel_from_text
+from pgai_agent_kanban.ops import resolve as ops_resolve
+from pgai_agent_kanban.ops.context import OpsContext
+from pgai_agent_kanban.ops.errors import OpsError, cli_exit_code
+from pgai_agent_kanban.ops.projects import project_color
+from pgai_agent_kanban.overwatch import inbox as overwatch_inbox
+from ..component_refusal import _component_refusal
 from ..dependencies import warn_unknown_query_params
 
 __all__ = ["router"]
@@ -155,88 +181,11 @@ def _read_projects_registry(
 
     Each entry contains:
       - priority: int
-      - color: str       (hex string or '' when absent; caller must apply palette)
-      - registration_index: int  (position in projects.cfg for palette assignment)
     """
-    entries = sorted(ini.projects_registry(kanban_root), key=lambda e: e.section_index)
     return {
-        entry.name: {
-            "priority": entry.priority,
-            "color": entry.color,
-            "registration_index": entry.section_index,
-        }
-        for entry in entries
+        entry.name: {"priority": entry.priority}
+        for entry in ini.projects_registry(kanban_root)
     }
-
-
-def _resolve_color(color: str, registration_index: int) -> str:
-    """Return the project color, applying the palette fallback when absent.
-
-    Mirrors the palette-fallback logic in board.py / team/scripts/lib/
-    projects_cfg.sh.  The palette itself is loaded via the shared, cached
-    pgai_agent_kanban.lib.palette helper -- see that module for the single
-    source of truth this mirrors.
-    """
-    if color:
-        return color
-    palette = load_default_palette()
-    return palette[registration_index % len(palette)]
-
-
-# ---------------------------------------------------------------------------
-# Queue count helpers
-# ---------------------------------------------------------------------------
-
-
-def _count_tasks_for_agent(
-    project_dir: pathlib.Path,
-    agent: str,
-) -> dict:
-    """Return {open, working, done} counts from an agent's backlog file.
-
-    Reads ``tasks/queues/<agent>_backlog.md``.  For each task line, the state
-    is read from the task's status.md (when present); falling back to the queue
-    marker character when status.md is absent.
-
-    Terminal-state detection uses ``lib.terminal_states.is_terminal`` so the
-    vocabulary is defined in exactly one place.
-
-    State → counter mapping:
-      WORKING             → working
-      DONE / WONT-DO      → done   (terminal states; detected via is_terminal)
-      BACKLOG/WAITING     → open
-      BLOCKED             → open   (blocked tasks still represent open work)
-    """
-    backlog_path = project_dir / "tasks" / "queues" / f"{agent.lower()}_backlog.md"
-    tasks_dir = project_dir / "tasks"
-
-    counts = {"open": 0, "working": 0, "done": 0}
-
-    if not backlog_path.is_file():
-        return counts
-
-    content = backlog_path.read_text(encoding="utf-8", errors="replace")
-    for line in content.splitlines():
-        parsed = parse_queue_line(line)
-        if not parsed:
-            continue
-        marker, task_id, _date, _seq = parsed
-
-        # Read state from status.md; fall back to queue marker.
-        state = read_task_state_from_status_md(tasks_dir, task_id)
-        if not state:
-            state = marker_to_state(marker)
-
-        s = state.upper()
-        if s == "WORKING":
-            counts["working"] += 1
-        elif _is_terminal_state(state):
-            counts["done"] += 1
-        else:
-            # BACKLOG, WAITING, BLOCKED, unknown
-            counts["open"] += 1
-
-    return counts
 
 
 # ---------------------------------------------------------------------------
@@ -293,8 +242,10 @@ def get_project_metadata(
     - ``dev_tree_path`` — absolute path to the git checkout (from project.cfg).
     - ``git_repo``      — remote repository URL (from project.cfg; never redacted).
     - ``priority``      — sort priority from projects.cfg (lower = higher priority).
-    - ``color``         — hex color string (#RRGGBB) from projects.cfg; palette
-                          fallback when absent.
+    - ``color``         — hex color string (#RRGGBB): ``dashboard_color`` from
+                          projects.cfg, else the default-palette entry at the
+                          project's ordinal in priority order (the colour
+                          GET /board and the dashboard show).
     - ``ceilings``      — version ceiling object with max_major, max_minor,
                           max_patch: each the int ceiling in effect (an absent
                           key reads as its documented default, 0 / 13 / 21),
@@ -305,7 +256,12 @@ def get_project_metadata(
                           null when absent or sentinel "none"/"v0.0.0".
     - ``active_rc``     — vX.Y.Z string from release-state.md ## Active RC;
                           null when absent or sentinel "none".
-    - ``halt``          — true when the per-project HALT file is present.
+    - ``halt``          — the dashboard's HALT flag: true for a project HALT,
+                          or for the kanban-wide HALT when the project has no
+                          HALT / HALT-AFTER of its own.
+    - ``halt_text``     — the dashboard's HALT_TEXT: ``""``, ``"HALT"`` or
+                          ``"HALT-AFTER <event>"`` (a draining project, halt
+                          false).
     - ``queue_counts``  — object keyed by agent role (pm, coder, writer, tester,
                           cm); each value is ``{open, working, done}`` integer counts.
 
@@ -332,20 +288,21 @@ def get_project_metadata(
 
     # --- Core identity fields from project.cfg ---
     workflow_type = _cfg_get(project_cfg, "project", "workflow_type", fallback="release")
-    branch_prefix = _cfg_get(project_cfg, "project", "branch_prefix", fallback="")
-    # Strip surrounding quotes from branch_prefix (config value may use "ai_").
-    branch_prefix = branch_prefix.strip('"')
+    # The same file _read_project_cfg parsed (project.cfg, else PROJECT.cfg),
+    # read as pp_branch_prefix reads it; a value it refuses reports as "",
+    # as an unreadable project.cfg does.
+    try:
+        branch_prefix = ini_branch_prefix_from_cfg(project_cfg_file(project_dir))
+    except InvalidBranchPrefixError:
+        branch_prefix = ""
     dev_tree_path = _cfg_get(project_cfg, "project", "dev_tree_path", fallback="")
     git_repo = _cfg_get(project_cfg, "project", "git_repo_url", fallback="")
 
     # --- Version ceilings in effect (shared rule: lib.version_ceiling) ---
     ceilings, ceiling_warnings = _resolve_ceilings(project_dir)
 
-    # --- Color (with palette fallback) ---
-    color = _resolve_color(
-        reg_entry["color"],
-        reg_entry["registration_index"],
-    )
+    # --- Color: the dashboard's colour rule, shared with GET /board ---
+    color = project_color(kanban_root, name) or ""
 
     # --- Release state ---
     # last_released: read via the canonical pgai_agent_kanban.board helper (same source
@@ -359,13 +316,12 @@ def get_project_metadata(
     active_rc_raw = get_active_rc_for_project(project_dir)
     active_rc: Optional[str] = _normalize_active_rc(active_rc_raw)
 
-    # --- Halt flag ---
-    halt = (project_dir / "HALT").is_file()
+    # --- HALT: the dashboard header's flag and text (project, else kanban-wide) ---
+    halt_flag, halt_text = effective_halt_flag_and_text(project_dir, kanban_root)
 
     # --- Per-agent queue counts ---
-    queue_counts: dict[str, dict] = {}
-    for agent in _AGENT_ROLES:
-        queue_counts[agent.upper()] = _count_tasks_for_agent(project_dir, agent)
+    tasks_dir = project_dir / "tasks"
+    queue_counts = {agent.upper(): agent_queue_counts(tasks_dir, agent) for agent in _AGENT_ROLES}
 
     return JSONResponse(
         content={
@@ -383,9 +339,188 @@ def get_project_metadata(
             },
             "last_released": last_released,
             "active_rc": active_rc,
-            "halt": halt,
+            "halt": halt_flag == "yes",
+            "halt_text": halt_text,
             "queue_counts": queue_counts,
             "warnings": [*warnings, *ceiling_warnings],
         },
+        status_code=200,
+    )
+
+
+# ---------------------------------------------------------------------------
+# GET /projects/{name}/reliability
+# ---------------------------------------------------------------------------
+
+
+def _reliability_refresh_command(kanban_root: pathlib.Path, name: str) -> str:
+    """The command that (re)writes *name*'s reliability.json under *kanban_root*."""
+    return (
+        f"python3 -m pgai_agent_kanban.metrics.reliability refresh --project {name}"
+        f" --kanban-root {kanban_root}"
+    )
+
+
+@router.get(
+    "/projects/{name}/reliability",
+    summary="Project reliability streaks",
+    response_description=(
+        "The project's metrics/reliability.json as stored -- the Hands-off and "
+        "Clean streaks and the last block of each class -- plus ``warnings``."
+    ),
+)
+def get_project_reliability(
+    name: str,
+    request: Request,
+    warnings: list[str] = Depends(warn_unknown_query_params),
+) -> JSONResponse:
+    """Return the reliability streaks of a registered project.
+
+    Path parameter:
+
+    - ``name`` — the registered project name (must match an entry in projects.cfg).
+
+    Read-only: the handler reads
+    ``<kanban_root>/projects/<name>/metrics/reliability.json`` through
+    ``pgai_agent_kanban.metrics.reliability_view.load_reliability`` — the
+    reader ``metrics-report.sh --reliability --format json`` and the
+    rc-metrics pane use — and never computes or writes it. The file is
+    written by ``pgai_agent_kanban.metrics.reliability`` at every block-ledger
+    write and at every RC close.
+
+    Response (HTTP 200): the file's JSON object as stored — ``schema_version``,
+    ``project``, ``computed_at``, ``first_record_at``, ``hands_off`` and
+    ``clean`` (each streak ``{class, status, rcs, hours, since, last_block}``;
+    the schema is in ``pgai_agent_kanban.metrics.reliability``'s module
+    docstring) — with ``warnings`` added.
+
+    HTTP status:
+
+    - 200 when the project is registered and its reliability.json is readable.
+    - 404 ``{"error": "project not found", "name", "warnings"}`` when the name
+      is not registered, as GET /projects/{name} answers.
+    - 404 ``{"error": "reliability not computed", "name", "message", "remedy",
+      "warnings"}`` when the project is registered but has no reliability.json
+      yet; ``remedy`` is the refresh command that writes it.
+    - 422 ``{"error": "reliability unreadable", "name", "message", "remedy",
+      "warnings"}`` when the file does not parse or lacks a streak field the
+      pane needs; ``remedy`` is the same refresh command, which rewrites it.
+    """
+    kanban_root: pathlib.Path = request.app.state.api_cfg.kanban_root
+
+    if name not in _read_projects_registry(kanban_root):
+        return JSONResponse(
+            content={"error": "project not found", "name": name, "warnings": warnings},
+            status_code=404,
+        )
+
+    path = reliability_path_for_project(kanban_root, name)
+    document, placeholder = load_reliability(path)
+    if document is None:
+        missing = placeholder == PLACEHOLDER_MISSING
+        return JSONResponse(
+            content={
+                "error": "reliability not computed" if missing else "reliability unreadable",
+                "name": name,
+                "message": (
+                    f"Project '{name}' has no reliability.json yet at {path}; it is written "
+                    "at the project's first block-ledger write or RC close."
+                    if missing
+                    else f"Project '{name}' has a reliability.json at {path} that does not "
+                    "parse or lacks a streak field."
+                ),
+                "remedy": _reliability_refresh_command(kanban_root, name),
+                "warnings": warnings,
+            },
+            status_code=404 if missing else 422,
+        )
+
+    return JSONResponse(content={**document, "warnings": warnings}, status_code=200)
+
+
+# ---------------------------------------------------------------------------
+# GET /projects/{name}/inbox
+# ---------------------------------------------------------------------------
+
+
+def _inbox_refusal(name: str, exc: OpsError, warnings: list[str]) -> JSONResponse:
+    """Return a refused inbox read as ``{project, error, message, remedy, warnings}``.
+
+    The triple is the refusal's own house-shape block (``str(exc)``) -- the
+    block ``inbox.sh list`` prints for the same call -- and the status is
+    the one every action route maps that refusal to (``http_status_for``).
+    """
+    triple = dual_channel_from_text(
+        str(exc),
+        "inbox.read_refused",
+        f"python3 -m pgai_agent_kanban.overwatch.inbox list --project {name} --all",
+    )
+    return JSONResponse(
+        content={"project": name, **triple, "warnings": warnings},
+        status_code=http_status_for(cli_exit_code(exc), error_key=triple["error"], error=exc),
+    )
+
+
+@router.get(
+    "/projects/{name}/inbox",
+    summary="Project operator inbox",
+    response_description=(
+        "The project's operator inbox: the open questions parked for a human "
+        "answer and the closed ones, each entry with its fields, plus ``warnings``."
+    ),
+)
+def get_project_inbox(
+    name: str,
+    request: Request,
+    warnings: list[str] = Depends(warn_unknown_query_params),
+) -> JSONResponse:
+    """Return every entry in a project's operator inbox, open and closed.
+
+    The REST twin of ``inbox.sh --project NAME list``: both resolve the
+    project the same way and read through
+    ``pgai_agent_kanban.overwatch.inbox.read_inbox``, the module that is the
+    inbox file's only reader and writer. Read-only; a missing inbox file is
+    an empty inbox and is not created. Answering is
+    ``POST /operations/inbox-answer``.
+
+    Path parameter:
+
+    - ``name`` — the project name, resolved as the CLI resolves ``--project``:
+      an exact registered name, else an unambiguous prefix of one.
+
+    Response (HTTP 200)::
+
+        {"project": str,          # the resolved project name
+         "open": [entry, ...],    # ## Open, in file order
+         "done": [entry, ...],    # ## Done, in the order closed
+         "warnings": [str, ...]}
+
+    Each entry: ``{entry_id, status, date, source, question, meanwhile,
+    how_to_answer, answer, answered_at, closed_at, extra}`` -- ``status`` is
+    ``open`` or ``done``; ``answer``, ``answered_at`` and ``closed_at`` are
+    ``""`` until set; ``extra`` lists lines inside the entry the reader did
+    not recognise, kept verbatim.
+
+    A refusal answers ``{project, error, message, remedy, warnings}`` with
+    the triple the CLI prints for the same call: 404
+    ``project_resolve.not_found`` for a name no registered project matches,
+    409 ``project_resolve.ambiguous`` for a prefix two projects share, 404
+    ``inbox.unknown_project`` for a registered project with no directory,
+    422 ``inbox.name_invalid`` for a name that is not one plain path
+    component, 500 ``inbox.read_failed`` for a file that cannot be read.
+    """
+    refused = _component_refusal(request, "inbox", {"name": name}, None, warnings)
+    if refused is not None:
+        return refused
+
+    ctx = OpsContext(kanban_root=request.app.state.api_cfg.kanban_root)
+    try:
+        project = ops_resolve.resolve_project_name(ctx, name)
+        inbox = overwatch_inbox.read_inbox(ctx, project)
+    except OpsError as exc:
+        return _inbox_refusal(name, exc, warnings)
+
+    return JSONResponse(
+        content={"project": project, **inbox.to_dict(), "warnings": warnings},
         status_code=200,
     )

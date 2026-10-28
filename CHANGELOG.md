@@ -6,6 +6,33 @@
 
 ---
 
+## v3.0.0 — 2026-10-28
+
+### Implemented
+- **Releases ship by default.** The three ship-policy triggers that used to halt a project now ship the release with a status of NON-FUNCTIONAL or KNOWN-BUGS, record an auto-ship event and file a bug. Set `ship_posture = matrix` in `kanban.cfg` or a project's `project.cfg` to restore the halts. A lane that pushes to a remote also needs `ship_posture_confirm_remote = true`, otherwise it keeps the matrix behaviour.
+- **Verification that cannot run is retried once, then the release ships anyway.** A blocked or missing tester report requeues verification. If it fails again the release ships NON-FUNCTIONAL and writes an inbox entry. A release run that arrives while the requeued verification is still pending waits for it instead of shipping unverified.
+- **Mechanical release failures resolve without a halt.** A squash conflict cancels and rebundles the release candidate and names the conflicting paths in the inbox. A refused push ships locally and records a push-lag event. The push-lag check pushes main and the tag once the remote accepts them, and deletes the leftover release-candidate branch it recorded. A tag already on the remote writes an inbox entry and changes nothing locally. The hook, squash-pollution, fidelity and version gates still halt, and now write their reason to the inbox as well.
+- **A blocked task parks only itself.** Independent tasks in the same batch keep running, as do other projects. Only tasks that name the blocked one as a prerequisite wait.
+- **Provider errors retry instead of parking.** A run cut short by a transient provider error (rate limit, overload, a safeguard abort) is recorded with its own reason code, matched against one shared signature table, whether the wake saw the error or the agent reported the block itself. The task requeues on a timed ladder up to `[wake] transient_retry_cap` before it reaches the inbox. A blocked planner, tester or release task, which the chain cannot continue without, requeues on a ladder of its own before any inbox entry. Ladder retries do not count as repeats for the runaway detector.
+- **OVERWATCH decision wake.** The hourly sweep runs a decision wake for every project. Anything it can resolve with an operator verb, it resolves. Anything that needs a human answer but does not endanger the pipeline goes to the inbox. Runaway detection stops a project when releases, release-candidate cycles, identical blocks or inbox entries exceed configured rates in a window. Design decisions, version changes, provider changes, operator halts and code edits stay human-only.
+- **Operator inbox.** One file per project holds the open questions and their answers. `scripts/inbox.sh --project <name> list | answer --id <ID> --answer <text> | close --id <ID>`. The dashboard shows one line per entry and the newest question on the attention pane.
+- **Bug convergence.** A bug that needs an operator answer is marked `needs-operator` and excluded from bundling, ship-time promotion and tester re-filing until the inbox entry is answered. Intake refuses a draft that reports the same defect as an open bug and names that bug. A loop detector closes remaining duplicates. Bounded deferral opens a bugfix bundle when deferred bugs grow too many or too old, even while requirements are queued. Ride-along lets the planner attach a capped number of deferred bugs to a requirement release.
+- **Per-project test runners.** Each project names its own targeted and pre-merge test commands under `[testing]` in `project.cfg`. The planner writes exactly those commands into ticket acceptance criteria, whatever shape the runner's option list takes. A project with none set gets no runner criteria.
+- **Reliability streaks.** One ledger records every block with its class, cause and reason. Each project shows two streaks, hands-off and clean, as releases and hours, on the metrics pane, in `metrics-report.sh --reliability` and over a read-only REST route. `scripts/reliability-backfill.sh` reconstructs the ledger from existing evidence.
+- **Task-liveness records.** Every dispatched task leaves a record naming its process, so the kanban can tell a live task from a dead one. Records are removed when the task ends and leftovers are swept by cleanup.
+- **Release lifecycle hooks on every project.** The pre-squash, pre-tag and post-tag hook points resolve through a config key, a kanban-side hooks folder, or a file travelling in the repository, in that order. A failing hook now stops the release with an inbox entry rather than a bare halt.
+- **Template drift notice.** Install and upgrade report when the project README template changed since a project was seeded and print the diff command.
+
+### Fixed
+None
+
+### Known Issues
+None
+
+*Details: [release-notes/v3.0.0.md](release-notes/v3.0.0.md)*
+
+---
+
 ## v2.42.0 — 2026-10-15
 
 ### Implemented
@@ -15,7 +42,8 @@ None.
 None
 
 ### Known Issues
-None
+KI-2.42.0.1 — `team/verification/verify_script_exec_bits.sh` skips every committed `.sh` file whose path contains whitespace, so a script such as `team/scripts/has space.sh` committed at mode 100644 is never reported and the script prints "OK — all .sh files have mode 100755" and exits 0; affects v2.42.0 · fixed in v3.0.0
+KI-2.42.0.2 — `team/verification/verify_quarantine_visibility.sh` exits 1 with no FAIL line, no SUMMARY and no error contract when the Step C helper script it runs exits non-zero, because the capture `QUARANTINE_RESULT="$(bash "$_SUBSHELL_SCRIPT" 2>&1)"` runs under `set -euo pipefail` and aborts the whole script; affects v2.42.0 · fixed in v3.0.0
 
 *Details: [release-notes/v2.42.0.md](release-notes/v2.42.0.md)*
 

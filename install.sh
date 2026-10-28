@@ -145,7 +145,12 @@ Seeded intake templates:
   installed templates/project/<workflow_type>/ set (relevant with --force
   over an existing install). A copy that differs is kept as
   <file>.<UTC timestamp>.bak beside itself, then overwritten, with one line
-  naming the project and file. Nothing else under projects/ is touched.
+  naming the project and file. The one other file written under projects/
+  is each project's README template snapshot,
+  projects/<name>/.readme-template.md: stored when missing; when it differs
+  from the installed templates/project/README-TEMPLATE.md, moved aside as
+  .readme-template.<UTC timestamp>.md and replaced, with one notice line.
+  The project README.md itself is never written.
 
 Version-targeted install:
   Pass an optional positional VERSION argument to lay down a specific
@@ -590,9 +595,16 @@ if ! command -v python3 >/dev/null 2>&1; then
   exit 1
 fi
 
-PY_VERSION=$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
-PY_MAJOR=$(echo "$PY_VERSION" | cut -d. -f1)
-PY_MINOR=$(echo "$PY_VERSION" | cut -d. -f2)
+# The version is read from `python3 --version` ("Python X.Y.Z", a suffix
+# after Z ignored), as lib/wake_bootstrap.sh reads it; output with no X.Y in
+# it reads as 0.0.
+PY_MAJOR=0
+PY_MINOR=0
+if [[ "$(python3 --version 2>&1)" =~ ([0-9]+)\.([0-9]+) ]]; then
+  PY_MAJOR="${BASH_REMATCH[1]}"
+  PY_MINOR="${BASH_REMATCH[2]}"
+fi
+PY_VERSION="${PY_MAJOR}.${PY_MINOR}"
 
 if [[ "$PY_MAJOR" -lt 3 ]] || [[ "$PY_MAJOR" -eq 3 && "$PY_MINOR" -lt 12 ]]; then
   warn "Python $PY_VERSION detected — version 3.12+ is required"
@@ -620,7 +632,10 @@ if ! python3 -m pytest --version >/dev/null 2>&1; then
   warn "Install it with: pip install pytest --break-system-packages"
 fi
 
-if ! python3 -c 'import yaml' >/dev/null 2>&1; then
+# Whether yaml imports is asked of the module probe beside this script (its
+# own tree, whatever tree a version-targeted install lays down).
+if ! PYTHONPATH="${_INSTALL_SCRIPT_DIR}/team${PYTHONPATH:+:${PYTHONPATH}}" \
+    python3 -m pgai_agent_kanban.lib.module_probe yaml >/dev/null 2>&1; then
   warn "pyyaml not found — workflow YAML support requires it"
   warn "Install it with: pip install pyyaml --break-system-packages"
 else
@@ -937,31 +952,29 @@ if [[ "$DRY_RUN" != "true" ]]; then
   # so it is not overwritten by install.sh -- but we ensure it exists here so
   # all subsystems can assume it is present after install.
   #
-  # Compute the path from the two [paths] keys (tmp_root / tmp_subdir) that
-  # kanban.cfg_example defines and that were just seeded into kanban.cfg above.
-  # Falls back to /tmp/pgai_kanban_tmp if the config is unreadable or either
-  # key is absent, matching the resolver's own last-resort fallback.
-  _tmp_ini_lib="${SCRIPT_DIR}/team/scripts/lib/ini_parser.sh"
+  # The path is the resolver's answer for the kanban.cfg just seeded above:
+  # temp.sh's pgai_configured_temp_root in its explicit-config form, so
+  # install creates exactly the root every wake's load_config later exports
+  # (per-key [paths] defaults, the filesystem-root invariant and the
+  # last-resort fallback all come from the resolver, none from here). The
+  # configured form ignores PGAI_AGENT_KANBAN_TEMP_DIR: install prepares the
+  # root kanban.cfg names, not a per-shell override.
+  _tmp_lib="${SCRIPT_DIR}/team/scripts/lib/temp.sh"
   _tmp_cfg="${KANBAN_ROOT}/kanban.cfg"
-  if [[ -f "$_tmp_ini_lib" ]] && [[ -f "$_tmp_cfg" ]]; then
-    # shellcheck source=team/scripts/lib/ini_parser.sh
-    source "$_tmp_ini_lib"
-    _tmp_root="$(read_ini "$_tmp_cfg" paths tmp_root "/tmp")"
-    _tmp_subdir="$(read_ini "$_tmp_cfg" paths tmp_subdir "pgai_kanban_tmp")"
-    # Guard against blank values (should not happen, but be safe).
-    _tmp_root="${_tmp_root:-/tmp}"
-    _tmp_subdir="${_tmp_subdir:-pgai_kanban_tmp}"
-  else
-    _tmp_root="/tmp"
-    _tmp_subdir="pgai_kanban_tmp"
+  PGAI_TEMP_DIR=""
+  if [[ -r "$_tmp_lib" ]]; then
+    # shellcheck source=team/scripts/lib/temp.sh
+    source "$_tmp_lib"
+    PGAI_TEMP_DIR="$(pgai_configured_temp_root "$_tmp_cfg")"
   fi
-  PGAI_TEMP_DIR="${_tmp_root}/${_tmp_subdir}"
-  if mkdir -p "$PGAI_TEMP_DIR" 2>/dev/null; then
+  if [[ -z "$PGAI_TEMP_DIR" ]]; then
+    warn "Source missing (skipping framework temp directory): $_tmp_lib — the first wake creates it"
+  elif mkdir -p "$PGAI_TEMP_DIR" 2>/dev/null; then
     ok "Ensured framework temp directory: $PGAI_TEMP_DIR"
   else
     warn "Could not create framework temp directory: $PGAI_TEMP_DIR (check permissions)"
   fi
-  unset PGAI_TEMP_DIR _tmp_ini_lib _tmp_cfg _tmp_root _tmp_subdir
+  unset PGAI_TEMP_DIR _tmp_lib _tmp_cfg
 
   # Make scripts executable
   chmod +x "$KANBAN_ROOT/scripts/"*.sh 2>/dev/null || true
@@ -1128,9 +1141,11 @@ fi
 
 # --- Seed per-project log subdirs for all registered projects ---
 # Creates projects/<name>/logs/debug/archive/ and projects/<name>/logs/training/
-# for every project listed in projects.cfg (INI format: [project:<name>] sections).
+# for every project listed in projects.cfg, INI or colon-legacy.
 # Constraints:
 #   - Only seeds dirs for projects already in projects.cfg; never invents names.
+#   - Names come from projects_cfg_list (this source tree's
+#     team/scripts/lib/projects.sh), so the registry reads as the wake reads it.
 #   - mkdir -p is idempotent — safe to re-run on an existing install.
 #   - DRY_RUN=true prints intentions without touching the filesystem.
 #   - projects/<name>/logs/ is assumed to already exist (seeded by create-project.sh);
@@ -1138,7 +1153,17 @@ fi
 #   - logs/training/<role>/ receives each finished task's reasoning trace
 #     (written by the wake when tracing is on); this pass only creates it.
 _projects_cfg_file="${KANBAN_ROOT}/projects.cfg"
+_install_projects_lib="${_INSTALL_SCRIPT_DIR}/team/scripts/lib/projects.sh"
 if [[ -f "$_projects_cfg_file" ]]; then
+  _pnames=""
+  if [[ -f "$_install_projects_lib" ]]; then
+    # shellcheck source=team/scripts/lib/projects.sh
+    source "$_install_projects_lib"
+    # A registry with no projects lists nothing; that is not an error here.
+    _pnames="$(projects_cfg_list --registration-order 2>/dev/null)" || _pnames=""
+  else
+    warn "Registry reader not found at ${_install_projects_lib} — per-project log subdir seeding skipped"
+  fi
   while IFS= read -r _pname; do
     [[ -z "$_pname" ]] && continue
     _plog_dir="${KANBAN_ROOT}/projects/${_pname}/logs"
@@ -1150,13 +1175,7 @@ if [[ -f "$_projects_cfg_file" ]]; then
       mkdir -p "${_plog_dir}/training"
       ok "Ensured per-project log subdirs: projects/${_pname}/logs/debug/archive/ and logs/training/"
     fi
-  done < <(awk '
-    /^[[:space:]]*#/ { next }
-    /^[[:space:]]*$/ { next }
-    /^\[project:[a-zA-Z0-9_-]+\]$/ {
-      sub(/^\[project:/, ""); sub(/\]$/, ""); print
-    }
-  ' "$_projects_cfg_file")
+  done <<< "$_pnames"
 else
   if [[ "$DRY_RUN" == "true" ]]; then
     info "[dry-run] projects.cfg not found — per-project log subdir seeding skipped"
@@ -1164,7 +1183,7 @@ else
     info "projects.cfg not found — per-project log subdir seeding skipped (run create-project.sh to register a project)"
   fi
 fi
-unset _projects_cfg_file _pname _plog_dir
+unset _projects_cfg_file _install_projects_lib _pnames _pname _plog_dir
 
 # --- Refresh registered projects' seeded intake templates ---
 # Every registered project's bugs/templates/BUG-TEMPLATE.md,
@@ -1179,7 +1198,11 @@ unset _projects_cfg_file _pname _plog_dir
 #     which the refresh cannot tell apart -- is kept beside it as
 #     <file>.<UTC timestamp>.bak, then overwritten; one line names the
 #     project, the file and the backup.
-#   - Nothing else under projects/ is written.
+#   - The one other file written under projects/ is each project's README
+#     template snapshot, projects/<name>/.readme-template.md: stored when
+#     missing; when it differs from templates/project/README-TEMPLATE.md,
+#     moved aside as .readme-template.<UTC timestamp>.md and replaced, with a
+#     one-line notice. The project README.md itself is never written.
 # The installed scripts/lib/pp_run_ops.sh runs the installed
 # pgai_agent_kanban.ops module with PYTHONPATH cleared, so templates are read
 # from $KANBAN_ROOT only, never from this source tree. A failure warns and the
@@ -1501,6 +1524,11 @@ info ""
 _kanban_root_real="$(readlink -m "$KANBAN_ROOT" 2>/dev/null || echo "$KANBAN_ROOT")"
 _system_tmp_real="$(readlink -m "${TMPDIR:-/tmp}" 2>/dev/null || echo "${TMPDIR:-/tmp}")"
 _pgai_temp_real=""
+# Guard read, not a temp-root resolution: this asks only whether the target
+# sits under THIS invocation's override (the sandbox a test harness exports),
+# so the raw value is compared and nothing is resolved or created. The
+# default temp root lies under /tmp, which the system-temp check below
+# already covers.
 if [[ -n "${PGAI_AGENT_KANBAN_TEMP_DIR:-}" ]]; then
   _pgai_temp_real="$(readlink -m "$PGAI_AGENT_KANBAN_TEMP_DIR" 2>/dev/null || echo "$PGAI_AGENT_KANBAN_TEMP_DIR")"
 fi

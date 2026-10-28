@@ -21,16 +21,16 @@ As a plain function (any test file):
 
     root = build_two_project_root(tmp_path)
     # root is a pathlib.Path with:
-    #   root/projects.cfg        — registers project_a (priority 1) and
-    #                              project_b (priority 2)
-    #   root/projects/project_a/ — full project tree
-    #   root/projects/project_b/ — full project tree
+    #   root/projects.cfg        — registers project-a (priority 1) and
+    #                              project-b (priority 2)
+    #   root/projects/project-a/ — full project tree
+    #   root/projects/project-b/ — full project tree
 
 As a pytest fixture (request in a test):
 
     def test_isolation(two_project_root):
         root = two_project_root
-        # manipulate project_a without touching project_b
+        # manipulate project-a without touching project-b
 
 WHAT "FULL PROJECT TREE" MEANS
 -------------------------------
@@ -48,7 +48,7 @@ Each project directory contains:
 
 The kanban root also receives:
     kanban.cfg              — minimal INI config
-    projects.cfg            — two-section INI registering project_a and project_b
+    projects.cfg            — two-section INI registering project-a and project-b
     logs/                   — kanban-root log dir
     locks/                  — kanban-root lock dir
     workflows/              — plugin dirs: release/, document/ (with pipeline.yaml)
@@ -60,7 +60,7 @@ WHAT THIS HELPER DOES NOT DO
 - It does not create a dev tree or set env vars.  Callers that need env vars
   (PGAI_AGENT_KANBAN_ROOT_PATH, PGAI_TASKS_DIR) should set them via monkeypatch
   or the conftest autouse _block_live_kanban_writes fixture.
-- Project names are fixed as "project_a" and "project_b" for determinism.
+- Project names are fixed as "project-a" and "project-b" for determinism.
   Tests that need custom names should call the lower-level helpers directly.
 """
 
@@ -84,8 +84,8 @@ _REAL_WORKFLOWS_DIR = _TEAM_DIR / "workflows"
 _WORKFLOW_PLUGIN_DIRS = ["release", "document"]
 
 # Fixed project names — deterministic, recognisable in logs.
-PROJECT_A = "project_a"
-PROJECT_B = "project_b"
+PROJECT_A = "project-a"
+PROJECT_B = "project-b"
 
 # Per-agent backlog filenames (mirrors install.sh queue-initialisation block)
 _QUEUE_FILES = [
@@ -190,8 +190,8 @@ def build_two_project_root(
     """Build a kanban root containing two registered projects.
 
     Creates a complete kanban root under *parent/<subdir>/* with two
-    projects registered in projects.cfg (project_a at priority 1,
-    project_b at priority 2).  Each project has the full directory
+    projects registered in projects.cfg (project-a at priority 1,
+    project-b at priority 2).  Each project has the full directory
     structure expected by wake scripts, the discovery pipeline, and
     the dashboard.
 
@@ -207,10 +207,10 @@ def build_two_project_root(
     Directory layout:
         <parent>/<subdir>/
             kanban.cfg
-            projects.cfg        — registers project_a (p=1) and project_b (p=2)
+            projects.cfg        — registers project-a (p=1) and project-b (p=2)
             projects/
-                project_a/      — full project tree (see _build_project_dir)
-                project_b/      — full project tree (see _build_project_dir)
+                project-a/      — full project tree (see _build_project_dir)
+                project-b/      — full project tree (see _build_project_dir)
             logs/               — kanban-root logs
             logs/agents/        — per-firing wake-batch logs
             logs/debug/archive/ — debug log rotation target
@@ -289,6 +289,22 @@ def build_two_project_root(
     return root
 
 
+def add_registered_project(root: pathlib.Path, project_name: str, priority: int = 3) -> pathlib.Path:
+    """Add one more project, with the same full tree, to a root built by
+    :func:`build_two_project_root`, and register it in projects.cfg.
+
+    For tests that need a project name the operator inbox accepts
+    (lower-case letters, digits and ``-``), which ``project-a`` is not.
+
+    Returns:
+        pathlib.Path — the new project directory.
+    """
+    project_dir = _build_project_dir(root / "projects", project_name)
+    with (root / "projects.cfg").open("a", encoding="utf-8") as cfg:
+        cfg.write(f"\n[project:{project_name}]\npriority={priority}\nenabled=true\n")
+    return project_dir
+
+
 # ---------------------------------------------------------------------------
 # pytest fixture
 # ---------------------------------------------------------------------------
@@ -298,9 +314,9 @@ def build_two_project_root(
 def two_project_root(tmp_path: pathlib.Path) -> pathlib.Path:
     """Pytest fixture: return a kanban root containing two registered projects.
 
-    The root contains project_a (priority 1) and project_b (priority 2),
+    The root contains project-a (priority 1) and project-b (priority 2),
     each with a full project tree.  The two projects are isolated from each
-    other — modifying project_a's release state does not affect project_b's.
+    other — modifying project-a's release state does not affect project-b's.
 
     Composes with conftest.py's _block_live_kanban_writes autouse fixture.
     Callers that need env vars (PGAI_AGENT_KANBAN_ROOT_PATH, etc.) to point

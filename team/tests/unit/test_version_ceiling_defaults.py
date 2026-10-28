@@ -36,7 +36,7 @@ from tests.fixtures.scrubbed_subprocess_env import build_scrubbed_env
 from tests.unit.shell_harness import run_bash
 
 _TEAM_DIR = pathlib.Path(__file__).resolve().parents[2]
-_PROJECT = "project_a"
+_PROJECT = "project-a"
 _V1_BLOCKED_LOG = "PM not queued for v1.0.0: major version 1 exceeds max_major=0"
 
 
@@ -50,7 +50,7 @@ def _project(root: pathlib.Path) -> pathlib.Path:
 
 
 def _set_versioning(root: pathlib.Path, body: "str | None") -> pathlib.Path:
-    """Rewrite project_a's project.cfg with *body* as its [versioning] lines
+    """Rewrite project-a's project.cfg with *body* as its [versioning] lines
     (None drops the section entirely). Returns the cfg path."""
     cfg = _project(root) / "project.cfg"
     text = cfg.read_text(encoding="utf-8")
@@ -176,7 +176,7 @@ def test_cli_prints_a_default_and_refuses_an_unknown_key(tmp_path: pathlib.Path)
 
 _ACCESSORS = (
     'for f in pp_max_patch pp_max_minor pp_max_major; do\n'
-    '  if v="$($f project_a)"; then echo "$f=[$v]"; else echo "$f FAILED"; fi\n'
+    '  if v="$($f project-a)"; then echo "$f=[$v]"; else echo "$f FAILED"; fi\n'
     'done\n'
 )
 
@@ -200,7 +200,7 @@ def test_none_reads_as_no_ceiling_and_quotes_are_stripped(two_project_root, tmp_
     _set_versioning(two_project_root, 'max_patch = "5"\nmax_minor = None\nmax_major = none\n')
     result = _run(
         two_project_root, tmp_path,
-        _ACCESSORS + 'pp_version_within_ceiling project_a v9.99.5 && echo WITHIN\n',
+        _ACCESSORS + 'pp_version_within_ceiling project-a v9.99.5 && echo WITHIN\n',
     )
     assert result.returncode == 0, result.stderr
     assert result.stdout.splitlines() == [
@@ -212,8 +212,8 @@ def test_version_within_ceiling_applies_the_default_major_zero(two_project_root,
     _set_versioning(two_project_root, "max_patch = 21\nmax_minor = 13\n")
     result = _run(
         two_project_root, tmp_path,
-        'pp_version_within_ceiling project_a v0.13.21 && echo V0-WITHIN\n'
-        'pp_version_within_ceiling project_a v1.0.0 || echo V1-EXCEEDS\n',
+        'pp_version_within_ceiling project-a v0.13.21 && echo V0-WITHIN\n'
+        'pp_version_within_ceiling project-a v1.0.0 || echo V1-EXCEEDS\n',
     )
     assert result.returncode == 0, result.stderr
     assert result.stdout.splitlines() == ["V0-WITHIN", "V1-EXCEEDS"]
@@ -239,12 +239,12 @@ def test_absent_max_major_blocks_v1_in_the_bash_discovery_path(two_project_root,
 
     result = _run(
         two_project_root, tmp_path,
-        'discovery_run_pipeline project_a\necho "DISCOVERY_STATUS=${DISCOVERY_LAST_STATUS}"\n',
+        'discovery_run_pipeline project-a\necho "DISCOVERY_STATUS=${DISCOVERY_LAST_STATUS}"\n',
     )
 
     assert result.returncode == 0, result.stderr
     assert _V1_BLOCKED_LOG in result.stderr
-    assert "active ceilings for project_a: max_major=0, max_minor=13, max_patch=21" in result.stderr
+    assert "active ceilings for project-a: max_major=0, max_minor=13, max_patch=21" in result.stderr
     assert "DISCOVERY_STATUS=idle" in result.stdout
     assert "## Status\nopen" in req.read_text(encoding="utf-8")
 
@@ -282,9 +282,9 @@ def test_max_major_none_makes_v1_eligible(two_project_root, tmp_path) -> None:
 
     result = _run(
         two_project_root, tmp_path,
-        'req_dir="$(pp_requirements_dir project_a)"\n'
+        'req_dir="$(pp_requirements_dir project-a)"\n'
         '_disc_list_all_eligible_requirements "$req_dir" v0.0.0 '
-        '"$(pp_max_minor project_a)" "$(pp_max_major project_a)" "$(pp_max_patch project_a)" semver\n',
+        '"$(pp_max_minor project-a)" "$(pp_max_major project-a)" "$(pp_max_patch project-a)" semver\n',
     )
 
     assert result.returncode == 0, result.stderr
@@ -295,9 +295,9 @@ def test_max_major_none_makes_v1_eligible(two_project_root, tmp_path) -> None:
 @pytest.mark.parametrize(
     "body",
     [
-        pytest.param('discovery_run_pipeline project_a\necho "DISCOVERY_STATUS=${DISCOVERY_LAST_STATUS}"\n',
+        pytest.param('discovery_run_pipeline project-a\necho "DISCOVERY_STATUS=${DISCOVERY_LAST_STATUS}"\n',
                      id="pipeline"),
-        pytest.param('discovery_step_requirements project_a || echo "STEP_RC=$?"\n', id="step-3-direct"),
+        pytest.param('discovery_step_requirements project-a || echo "STEP_RC=$?"\n', id="step-3-direct"),
     ],
 )
 def test_malformed_max_major_queues_nothing_and_narrates_one_line(two_project_root, tmp_path, body) -> None:
@@ -327,7 +327,7 @@ def test_malformed_ceiling_blocks_the_auto_version_check(two_project_root, tmp_p
     _set_versioning(two_project_root, "max_patch = x\n")
     result = _run(
         two_project_root, tmp_path,
-        '_disc_check_ceiling_and_log project_a v0.0.1 test || echo "CHECK_RC=$?"\n',
+        '_disc_check_ceiling_and_log project-a v0.0.1 test || echo "CHECK_RC=$?"\n',
     )
     assert result.returncode == 0, result.stderr
     assert "CHECK_RC=1" in result.stdout

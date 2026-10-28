@@ -16,8 +16,10 @@
 #   AC#4  — After a full suite run with tmp_root=$HOME/tmp, zero files or
 #           dirs under /tmp match 'pgai_kanban'
 #           (ls -A /tmp | grep -E 'pgai_kanban' | wc -l == 0).
-#   AC#5  — grep for the hardcoded fallback literal in team/scripts/ and team/tests/
-#           (excluding temp.sh and lint_test_anti_patterns) returns zero matches.
+#   AC#5  — the anti-pattern lint's AP3 check (the hardcoded fallback literal
+#           outside the temp root resolvers, per-instance opt-outs honoured)
+#           reports zero findings over team/tests/, the runtime script
+#           directories and the Python package.
 #   AC#6  — With kanban.cfg unreadable AND no PGAI_AGENT_KANBAN_TEMP_DIR env var,
 #           pgai_temp_dir returns the documented hard fallback path (never empty).
 # anti-pattern-allowlist: 2 (justification: diagnostic literal in header docs; this is the verification tool itself, not a caller bypassing the resolver)
@@ -337,26 +339,20 @@ else
 fi
 echo ""
 
-# AC#5 — zero inline literals outside temp.sh and lint script
-# anti-pattern-allowlist: 2 (justification: this script IS the verification tool; the literal below is the grep pattern being checked, not a caller site)
-echo "--- AC#5: zero inline /tmp/pgai_kanban_tmp literals in scripts/tests (outside temp.sh+lint) ---"
-AC5_MATCHES=""
-AC5_MATCHES=$(
-    grep -rnE "/tmp/pgai_kanban_tmp" \
-        "${DEV_TREE}/team/scripts/" \
-        "${DEV_TREE}/team/tests/" \
-        2>/dev/null \
-    | grep -v 'temp\.sh' \
-    | grep -v 'lint_test_anti_patterns' \
-    | grep -v 'verify-temp-root-relocation\.sh' \
-    || true
+# AC#5 — the AP3 check (lint_test_anti_patterns.py) reports no literal temp
+# root outside the resolvers. The lint owns the rule -- which files may carry
+# the literal, and the per-instance opt-out -- so this step asks it rather
+# than repeating the rule as a grep.
+echo "--- AC#5: AP3 (literal temp root outside the resolvers) reports nothing ---"
+AC5_FINDINGS=""
+AC5_FINDINGS=$(
+    cd "${DEV_TREE}/team" && python3 scripts/lint_test_anti_patterns.py 2>&1 | grep -F '[AP3]' || true
 )
-# anti-pattern-allowlist: 2 (justification: string literals in pass/fail messages document the pattern being checked; not caller sites)
-if [[ -z "$AC5_MATCHES" ]]; then
-    pass "AC#5: no inline /tmp/pgai_kanban_tmp literals found outside resolver and lint guard"
+if [[ -z "$AC5_FINDINGS" ]]; then
+    pass "AC#5: AP3 reports no literal temp root outside the resolvers"
 else
-    fail "AC#5: found inline /tmp/pgai_kanban_tmp literals — consolidation is incomplete:"
-    echo "$AC5_MATCHES" | head -30 | while read -r line; do echo "  $line"; done
+    fail "AC#5: AP3 reports a literal temp root outside the resolvers -- consolidation is incomplete:"
+    echo "$AC5_FINDINGS" | head -30 | while read -r line; do echo "  $line"; done
 fi
 echo ""
 

@@ -203,21 +203,21 @@ class TestIconTruthInCfgTierState:
         self, two_project_root: pathlib.Path
     ) -> None:
         root = two_project_root
-        _set_defer_posture(root, "project_a", deferred_bugs=True, deferred_bug_level="low")
+        _set_defer_posture(root, "project-a", deferred_bugs=True, deferred_bug_level="low")
         held_back = [
-            _add_bug_file(root, "project_a", "BUG-0001", "low-a", "low"),
-            _add_bug_file(root, "project_a", "BUG-0002", "low-b", "low"),
-            _add_bug_file(root, "project_a", "BUG-0003", "low-c", "low"),
+            _add_bug_file(root, "project-a", "BUG-0001", "low-a", "low"),
+            _add_bug_file(root, "project-a", "BUG-0002", "low-b", "low"),
+            _add_bug_file(root, "project-a", "BUG-0003", "low-c", "low"),
         ]
-        _add_requirements_file(root, "project_a")
+        _add_requirements_file(root, "project-a")
 
-        disc_result = _run_discovery(root, "project_a")
+        disc_result = _run_discovery(root, "project-a")
         assert disc_result.returncode == 0, disc_result.stderr
-        assert not _bundle_files(root, "project_a"), disc_result.stderr
+        assert not _bundle_files(root, "project-a"), disc_result.stderr
         for bug_file in held_back:
             assert _bug_status(bug_file) == "open", bug_file
 
-        status_result = _run_status_bottom(root, "project_a", no_color=True)
+        status_result = _run_status_bottom(root, "project-a", no_color=True)
         assert status_result.returncode == 0, status_result.stderr
         segment = _parse_defer_segment(status_result.stdout)
         assert segment is not None, (
@@ -242,22 +242,22 @@ class TestIconTruthInCampaignFileTierState:
         self, two_project_root: pathlib.Path
     ) -> None:
         root = two_project_root
-        campaign_file = root / "projects" / "project_a" / "DEFER-LOW-BUGS"
+        campaign_file = root / "projects" / "project-a" / "DEFER-LOW-BUGS"
         campaign_file.write_text("until=v3.0.0\n", encoding="utf-8")
 
         held_back = [
-            _add_bug_file(root, "project_a", "BUG-0001", "low-a", "low"),
-            _add_bug_file(root, "project_a", "BUG-0002", "low-b", "low"),
+            _add_bug_file(root, "project-a", "BUG-0001", "low-a", "low"),
+            _add_bug_file(root, "project-a", "BUG-0002", "low-b", "low"),
         ]
-        _add_requirements_file(root, "project_a")
+        _add_requirements_file(root, "project-a")
 
-        disc_result = _run_discovery(root, "project_a")
+        disc_result = _run_discovery(root, "project-a")
         assert disc_result.returncode == 0, disc_result.stderr
-        assert not _bundle_files(root, "project_a"), disc_result.stderr
+        assert not _bundle_files(root, "project-a"), disc_result.stderr
         for bug_file in held_back:
             assert _bug_status(bug_file) == "open", bug_file
 
-        status_result = _run_status_bottom(root, "project_a", no_color=True)
+        status_result = _run_status_bottom(root, "project-a", no_color=True)
         assert status_result.returncode == 0, status_result.stderr
         segment = _parse_defer_segment(status_result.stdout)
         assert segment is not None, (
@@ -283,11 +283,11 @@ class TestIconTruthInMalformedFileState:
         self, two_project_root: pathlib.Path
     ) -> None:
         root = two_project_root
-        campaign_file = root / "projects" / "project_a" / "DEFER-LOW-BUGS"
+        campaign_file = root / "projects" / "project-a" / "DEFER-LOW-BUGS"
         campaign_file.write_text("until=not-a-version\n", encoding="utf-8")
 
         # rich mode: the warning glyph and the exact offending path.
-        rich_result = _run_status_bottom(root, "project_a", no_color=False)
+        rich_result = _run_status_bottom(root, "project-a", no_color=False)
         assert rich_result.returncode == 0, rich_result.stderr
         assert "⚠" in rich_result.stdout, (
             f"Expected the warning glyph in rich mode.\nstdout: {rich_result.stdout!r}"
@@ -301,7 +301,7 @@ class TestIconTruthInMalformedFileState:
         )
 
         # NO_COLOR mode: the same path, in plain text, no glyph.
-        plain_result = _run_status_bottom(root, "project_a", no_color=True)
+        plain_result = _run_status_bottom(root, "project-a", no_color=True)
         assert plain_result.returncode == 0, plain_result.stderr
         assert f"DEFER CONFIG UNREADABLE: {campaign_file}" in plain_result.stdout, (
             f"Expected the plain-text warning naming the offending path.\n"
@@ -312,9 +312,9 @@ class TestIconTruthInMalformedFileState:
         # Agreement: discovery itself never quietly bundles anything while
         # the posture is unresolvable -- the surface's refusal to guess
         # matches discovery's own inability to decide.
-        _add_bug_file(root, "project_a", "BUG-0001", "low-a", "low")
-        disc_result = _run_discovery(root, "project_a")
-        assert not _bundle_files(root, "project_a"), (
+        _add_bug_file(root, "project-a", "BUG-0001", "low-a", "low")
+        disc_result = _run_discovery(root, "project-a")
+        assert not _bundle_files(root, "project-a"), (
             "Discovery must not bundle anything while the campaign file is "
             f"malformed -- the status bar's warning and discovery's own "
             f"behaviour must agree.\nstderr:\n{disc_result.stderr}"

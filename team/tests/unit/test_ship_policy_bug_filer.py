@@ -17,6 +17,12 @@ Coverage:
     bug is still open or running cites it and files no duplicate; a bug
     whose Status is done no longer suppresses; a different field or a
     different source path is a fresh filing.
+  - A needs-operator bug for the same input is cited like an open one:
+    the CLI prints its ID and nothing is filed.
+  - A hand-filed open or running bug the shared same-defect rule matches
+    (an ordinal-variant slug, or a report that cites it as its defect) is
+    cited although the input key does not match it; closed bugs (done,
+    wont-do, duplicate) matching by key or slug never suppress a filing.
   - An unknown kind is refused, never filed.
   - The CLI prints outcome/bug_id/bug_path lines and exits 0; it exits 1
     with a reason on stderr when nothing could be filed.
@@ -41,10 +47,11 @@ from pgai_agent_kanban.cm.ship_policy_bug_filer import (
     KIND_REPORT_VALUE,
     FilingResult,
     file_or_cite_input_bug,
-    find_existing_bug_for_input,
     input_key,
     main,
 )
+from pgai_agent_kanban.lib.bug_filing import find_existing_bug
+from tests.fixtures.hand_filed_bug import CLOSED_STATUSES, write_hand_filed_bug
 
 
 def _file(bugs_dir: pathlib.Path, **overrides) -> FilingResult:
@@ -146,9 +153,9 @@ def test_a_different_field_or_source_path_is_a_fresh_filing(tmp_path):
     assert len({r.bug_id for r in (other_field, other_path)}) == 2
 
 
-def test_find_existing_bug_for_input_returns_none_when_bugs_dir_absent(tmp_path):
+def test_input_lookup_returns_none_when_bugs_dir_absent(tmp_path):
     key = input_key(KIND_REPORT_VALUE, "Recommendation", "/nowhere/report.md")
-    assert find_existing_bug_for_input(str(tmp_path / "missing"), key) is None
+    assert find_existing_bug(str(tmp_path / "missing"), "Ship-Policy Input", key) is None
 
 
 def test_unknown_kind_is_refused_and_nothing_is_filed(tmp_path):
@@ -190,3 +197,66 @@ def test_cli_exits_one_with_a_reason_when_nothing_can_be_filed(tmp_path, capsys)
     assert rc == 1
     assert "nothing filed" in captured.err
     assert captured.out == ""
+
+
+# ---------------------------------------------------------------------------
+# Live statuses and the shared same-defect rule
+# ---------------------------------------------------------------------------
+
+
+def test_needs_operator_bug_for_the_same_input_is_cited_and_nothing_is_filed(tmp_path, capsys):
+    bugs_dir = tmp_path / "bugs"
+    first = _file(bugs_dir)
+    _set_status(pathlib.Path(first.bug_path), "needs-operator")
+
+    rc = main([
+        str(bugs_dir), "demo", "v1.2.4", KIND_REPORT_VALUE, "Recommendation",
+        "Recommendation: SHIPP-WITH-CONCERNZ",
+        "/kanban/projects/demo/tasks/TESTER-20260601-001-verify/artifacts/report.md",
+    ])
+    out = capsys.readouterr().out.splitlines()
+
+    assert rc == 0
+    assert out == ["outcome=duplicate", f"bug_id={first.bug_id}", "bug_path="]
+    assert sorted(bugs_dir.glob("BUG-*.md")) == [pathlib.Path(first.bug_path)]
+
+
+@pytest.mark.parametrize("status", ["open", "running"])
+def test_live_bug_with_an_ordinal_variant_slug_is_cited_and_nothing_is_filed(tmp_path, status):
+    bugs_dir = tmp_path / "bugs"
+    hand_filed = write_hand_filed_bug(
+        bugs_dir, "BUG-9201", "unparseable-recommendation-value-again", status=status
+    )
+
+    result = _file(bugs_dir)
+
+    assert find_existing_bug(str(bugs_dir), "Ship-Policy Input", result.key) is None
+    assert result.outcome == "duplicate"
+    assert result.bug_id == "BUG-9201"
+    assert result.bug_path is None
+    assert sorted(bugs_dir.glob("BUG-*.md")) == [hand_filed]
+
+
+def test_live_bug_the_drafted_report_cites_as_its_defect_is_cited(tmp_path):
+    bugs_dir = tmp_path / "bugs"
+    write_hand_filed_bug(bugs_dir, "BUG-9202", "release-step-misreads-report")
+
+    result = _file(bugs_dir, raw_value="same defect as BUG-9202")
+
+    assert result.outcome == "duplicate"
+    assert result.bug_id == "BUG-9202"
+    assert len(list(bugs_dir.glob("BUG-*.md"))) == 1
+
+
+@pytest.mark.parametrize("status", CLOSED_STATUSES)
+def test_closed_bugs_matching_by_key_or_slug_do_not_suppress_a_fresh_filing(tmp_path, status):
+    bugs_dir = tmp_path / "bugs"
+    same_key = _file(bugs_dir)
+    _set_status(pathlib.Path(same_key.bug_path), status)
+    write_hand_filed_bug(bugs_dir, "BUG-9203", "unparseable-recommendation-value-again", status=status)
+
+    result = _file(bugs_dir)
+
+    assert result.outcome == "filed"
+    assert result.bug_id not in (same_key.bug_id, "BUG-9203")
+    assert len(list(bugs_dir.glob("BUG-*.md"))) == 3

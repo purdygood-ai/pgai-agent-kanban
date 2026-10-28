@@ -248,12 +248,12 @@ class TestCampaignFileSpendArc:
         self, two_project_root: pathlib.Path
     ) -> None:
         root = two_project_root
-        project_root = root / "projects" / "project_a"
+        project_root = root / "projects" / "project-a"
         release_state = project_root / "release-state.md"
         campaign_file = project_root / "DEFER-LOW-BUGS"
 
         # --- Armed: defer.sh writes a real campaign file. ---
-        arm_result = _run_defer(root, "project_a", "v0.1.0")
+        arm_result = _run_defer(root, "project-a", "v0.1.0")
         assert arm_result.returncode == 0, arm_result.stderr
         assert campaign_file.exists(), "defer.sh should have written the campaign file"
         assert "until=v0.1.0" in campaign_file.read_text(encoding="utf-8")
@@ -264,18 +264,18 @@ class TestCampaignFileSpendArc:
         #     this run isolates "deferral is honoured" from "the sweep
         #     also bundles the litter" -- the sweep path is covered by
         #     test_discovery_bug_deferral_gate.py. ---
-        bug = _add_bug_file(root, "project_a", bug_id="BUG-0001", slug="low-one", severity="low")
-        _add_requirements_file(root, "project_a", version="v0.0.5", slug="unrelated")
-        disc_result = _run_discovery(root, "project_a")
+        bug = _add_bug_file(root, "project-a", bug_id="BUG-0001", slug="low-one", severity="low")
+        _add_requirements_file(root, "project-a", version="v0.0.5", slug="unrelated")
+        disc_result = _run_discovery(root, "project-a")
         assert disc_result.returncode == 0, disc_result.stderr
-        assert not _bundle_files(root, "project_a"), (
+        assert not _bundle_files(root, "project-a"), (
             f"The armed campaign should defer the low bug -- no bundle expected.\n"
             f"stderr:\n{disc_result.stderr}"
         )
         assert _bug_status(bug) == "open"
 
-        why_before = _run_why(root, "project_a")
-        # project_a has no non-terminal task in this fixture, so the
+        why_before = _run_why(root, "project-a")
+        # project-a has no non-terminal task in this fixture, so the
         # resolved verdict is legitimately IDLE (exit 2) -- --details exits
         # with that verdict's own code rather than always 0; != 1 is the
         # correct check since a rendering refusal, not a specific verdict,
@@ -288,7 +288,7 @@ class TestCampaignFileSpendArc:
         # --- Spent: ship a release at or past the until target through
         #     the real production spend entry point. ---
         spend_result = _spend_campaign_file(
-            root, "project_a", "v0.1.0", project_root, release_state
+            root, "project-a", "v0.1.0", project_root, release_state
         )
         assert spend_result.returncode == 0, spend_result.stderr
         assert not campaign_file.exists(), "a qualifying ship should remove the campaign file"
@@ -302,7 +302,7 @@ class TestCampaignFileSpendArc:
         #     carries no [release] section in this fixture, so the cfg
         #     tier IS the built-in default -- the why verb must say so
         #     rather than still claiming "campaign file". ---
-        why_after = _run_why(root, "project_a")
+        why_after = _run_why(root, "project-a")
         # See the why_before comment above: this fixture's project has no
         # non-terminal task, so IDLE (exit 2) is the legitimate verdict.
         assert why_after.returncode != 1, why_after.stderr
@@ -322,33 +322,33 @@ class TestUndeferLiftsDeferralEarly:
         self, two_project_root: pathlib.Path
     ) -> None:
         root = two_project_root
-        campaign_file = root / "projects" / "project_a" / "DEFER-LOW-BUGS"
+        campaign_file = root / "projects" / "project-a" / "DEFER-LOW-BUGS"
 
-        arm_result = _run_defer(root, "project_a", "v9.9.9")
+        arm_result = _run_defer(root, "project-a", "v9.9.9")
         assert arm_result.returncode == 0, arm_result.stderr
         assert campaign_file.exists()
 
-        bug = _add_bug_file(root, "project_a", bug_id="BUG-0001", slug="low-one", severity="low")
+        bug = _add_bug_file(root, "project-a", bug_id="BUG-0001", slug="low-one", severity="low")
         # A pending requirements file withholds the hygiene sweep, isolating
         # "deferral is honoured" from "the sweep also bundles the litter" --
         # the sweep path is covered by test_discovery_bug_deferral_gate.py.
-        _add_requirements_file(root, "project_a", version="v0.0.5", slug="unrelated")
+        _add_requirements_file(root, "project-a", version="v0.0.5", slug="unrelated")
 
-        honoured_result = _run_discovery(root, "project_a")
+        honoured_result = _run_discovery(root, "project-a")
         assert honoured_result.returncode == 0, honoured_result.stderr
-        assert not _bundle_files(root, "project_a"), (
+        assert not _bundle_files(root, "project-a"), (
             f"The armed campaign should defer the low bug before undefer.\n"
             f"stderr:\n{honoured_result.stderr}"
         )
         assert _bug_status(bug) == "open"
 
-        undefer_result = _run_undefer(root, "project_a")
+        undefer_result = _run_undefer(root, "project-a")
         assert undefer_result.returncode == 0, undefer_result.stderr
         assert not campaign_file.exists(), "undefer.sh should have removed the campaign file"
 
-        lifted_result = _run_discovery(root, "project_a")
+        lifted_result = _run_discovery(root, "project-a")
         assert lifted_result.returncode == 0, lifted_result.stderr
-        bundles = _bundle_files(root, "project_a")
+        bundles = _bundle_files(root, "project-a")
         assert bundles, (
             f"Once undefer clears the campaign, project.cfg carries no explicit "
             f"[release] deferral -- deferred_bugs falls back to its default "

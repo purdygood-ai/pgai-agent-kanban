@@ -13,10 +13,22 @@ count), the bundle requirements file's own ## Status is promoted from
 'running' to 'done' unconditionally.
 
 What happens to a carried item: it stays at 'running', and once this bundle
-is 'done' no open bundle lists it, so the next discovery pass offers it as a
-bundling candidate again (pgai_agent_kanban.lib.bundle_items decides which
-'running' items were carried; discovery's item scan and the bug-backlog
-cache both read it). Nothing here rewrites the item's status.
+is 'done' no open bundle lists it, so the next discovery pass converts it to
+'needs-operator' with an operator-inbox question rather than bundling it
+again (pgai_agent_kanban.lib.bundle_items decides which 'running' items were
+carried; pgai_agent_kanban.discovery.carried converts them). Nothing here
+rewrites the item's status.
+
+A needs-operator item is never promoted: an enumerated item at
+'needs-operator' (the PM left it out of every ticket with a question for the
+operator) is left exactly as it is, narrated as left for the operator, and
+named in neither section of the post-ship report. The derivation path reads
+only 'running' bugs, so it never touches one either.
+
+Ride-alongs: a requirement RC's ride-along bugs are listed in the
+requirement's own ## Bundled Items (pgai_agent_kanban.ops.write.ride_along_item
+writes them there when the plan is materialized), so they are promoted, or
+carried, exactly as bundle items are.
 
 What a README claims: an identifier counts when at least one clause of the
 README names it without saying it is outside the task. A clause that names
@@ -86,13 +98,16 @@ Exit codes:
 
 Invariants:
     - Only files whose ## Status is currently "running" are promoted. Files
-      already at "done" (or "open" or any other value) are skipped silently.
+      already at "done" (or "open" or any other value) are skipped silently;
+      an enumerated item at "needs-operator" is skipped with a
+      "left for the operator" line and counted apart (needs_operator_items).
     - An enumerated ## Bundled Items entry at 'running' is promoted ONLY when
       tasks_dir is supplied AND some DONE task of the shipped version claims
       that item's BUG-NNNN / PRIORITY-NNNN identifier in its README. Absent that claim -- including
       when tasks_dir itself is omitted -- the item is left at 'running' and
-      named in the post-ship report as carried; discovery re-offers it once
-      this bundle is 'done'. The gate fails toward "leave it," never toward
+      named in the post-ship report as carried; once this bundle is
+      'done', discovery converts it to 'needs-operator' with an
+      operator-inbox question. The gate fails toward "leave it," never toward
       "close it."
     - If a referenced item path does not exist on disk, a WARN is emitted and
       that item is skipped; the remaining items and the bundle file itself are
@@ -129,13 +144,32 @@ if not __package__:
         sys.path.insert(0, _OWN_PACKAGE_ROOT)
 
 from pgai_agent_kanban.cm.release_version import release_version_of, task_release_version  # noqa: E402
-from pgai_agent_kanban.lib.bundle_items import parse_bundled_item_paths  # noqa: E402
-from pgai_agent_kanban.task_status import read_state  # noqa: E402
+from pgai_agent_kanban.lib.bundle_items import (  # noqa: E402
+    has_bundled_items_section as has_bundled_items_section_in,
+    parse_bundled_item_paths,
+)
+from pgai_agent_kanban.lib.terminal_states import NEEDS_OPERATOR_STATE, canonical_state  # noqa: E402
+from pgai_agent_kanban.task_status import read_section, read_state, section_regex  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
 # Core promotion helper
 # ---------------------------------------------------------------------------
+
+def _status_token(text: str) -> str | None:
+    """Return the first word of *text*'s ``## Status`` section.
+
+    The section is read by ``task_status.read_section`` with the intake-file
+    reading (``end_at_subheading``: any ``##`` line, ``###`` included, ends
+    it). Returns None when the heading is absent and ``""`` when the section
+    holds no value; an empty section never reads the heading or text of the
+    section after it.
+    """
+    body = read_section(text, "Status", end_at_subheading=True)
+    if body is None:
+        return None
+    return body.split(None, 1)[0] if body else ""
+
 
 def promote_status_running_to_done(p: pathlib.Path) -> bool:
     """Promote ## Status: running -> done in file p.
@@ -152,11 +186,9 @@ def promote_status_running_to_done(p: pathlib.Path) -> bool:
         re.MULTILINE | re.IGNORECASE,
     )
     if not status_m:
-        has_status = re.search(r'^##\s+Status\s*$', content, re.MULTILINE | re.IGNORECASE)
-        if has_status:
-            cur_m = re.search(r'^##\s+Status\s*\n\s*(\S+)', content, re.MULTILINE | re.IGNORECASE)
-            cur_val = cur_m.group(1) if cur_m else "unknown"
-            print(f"  skip (status={cur_val}): {p.name}", flush=True)
+        cur_val = _status_token(content)
+        if cur_val is not None:
+            print(f"  skip (status={cur_val or 'unknown'}): {p.name}", flush=True)
         else:
             print(f"  skip (no ## Status field): {p.name}", flush=True)
         return False
@@ -179,13 +211,13 @@ def read_status_value(p: pathlib.Path) -> str | None:
     Used by the ## Bundled Items enumeration path to decide, before writing,
     whether an item is even eligible for promotion -- distinct from
     promote_status_running_to_done()'s own check, which performs the write.
+    An empty ## Status section also reads as None.
     """
     try:
         content = p.read_text(encoding="utf-8")
     except OSError:
         return None
-    m = re.search(r'^##\s+Status\s*\n\s*(\S+)', content, re.MULTILINE | re.IGNORECASE)
-    return m.group(1) if m else None
+    return _status_token(content) or None
 
 
 # ---------------------------------------------------------------------------
@@ -398,12 +430,8 @@ def find_running_bugs_in_dir(bugs_dir: pathlib.Path) -> list[pathlib.Path]:
             text = bug_file.read_text(encoding="utf-8")
         except OSError:
             continue
-        status_m = re.search(
-            r'^##\s+Status\s*\n\s*(\S+)',
-            text,
-            re.MULTILINE | re.IGNORECASE,
-        )
-        if status_m and status_m.group(1).strip().lower() == "running":
+        status = _status_token(text)
+        if status and status.lower() == "running":
             running.append(bug_file)
 
     return running
@@ -505,8 +533,9 @@ def emit_post_ship_report(
                                 'running' because no DONE task README claims
                                 a fix for them this release. Not closed:
                                 once the bundle is 'done', the next
-                                discovery pass offers each as a candidate
-                                for the next bundle.
+                                discovery pass converts each to
+                                'needs-operator' with an operator-inbox
+                                question.
       2. cannot_auto_promote — bugs at ## Status: running the task-scanning
                                 derivation path could not confirm shipped.
     """
@@ -520,7 +549,8 @@ def emit_post_ship_report(
             "  The following ## Bundled Items entries stay at ## Status: running"
             " — no DONE task README claims a fix for them this release, so"
             " they are not closed. Once this bundle is done, the next"
-            " discovery pass offers each as a candidate for the next bundle:",
+            " discovery pass converts each to needs-operator with an"
+            " operator-inbox question:",
             flush=True,
         )
         for name in sorted(carried_items):
@@ -578,6 +608,7 @@ def promote_bundle(
         skipped_missing:                int
         carried:                        int         (enumerated, left running)
         carried_items:                  list[str]
+        needs_operator_items:           list[str]   (enumerated, at needs-operator, untouched)
         bundle_file_promoted:           bool
         derived_promoted:               int   (0 when derivation path not used)
         derived_skipped_not_running:    int
@@ -589,9 +620,7 @@ def promote_bundle(
     """
     text = bundle_file.read_text(encoding="utf-8")
 
-    has_bundled_items_section = bool(
-        re.search(r'^\s*##\s+Bundled Items\s*$', text, re.MULTILINE | re.IGNORECASE)
-    )
+    has_bundled_items_section = has_bundled_items_section_in(text)
 
     item_paths = parse_bundled_item_paths(text)
 
@@ -600,6 +629,7 @@ def promote_bundle(
     skipped_missing = 0
     carried = 0
     carried_items: list[str] = []
+    needs_operator_items: list[str] = []
     # Track which bug paths this path already disposed of -- promoted OR
     # carried -- so the derivation path below skips them rather than
     # re-listing a carried item a second time as merely "cannot auto-promote".
@@ -630,6 +660,13 @@ def promote_bundle(
                 continue
 
             current_status = read_status_value(p)
+            if current_status is not None and canonical_state(current_status) == NEEDS_OPERATOR_STATE:
+                # Waiting on an operator answer: never promoted, never
+                # carried. Answering the question sets it back to 'open'.
+                print(f"  left for the operator (needs-operator): {p.name}", flush=True)
+                needs_operator_items.append(p.name)
+                bundled_handled_paths.add(p.resolve())
+                continue
             if current_status is None or current_status.strip().lower() != "running":
                 # Not eligible for promotion regardless of the DONE-reference
                 # gate below -- delegate to promote_status_running_to_done()
@@ -676,11 +713,15 @@ def promote_bundle(
                 flush=True,
             )
         else:
+            waiting = (
+                f", {len(needs_operator_items)} needs-operator (left for the operator)"
+                if needs_operator_items else ""
+            )
             print(
                 f"  Bundled items: {promoted} promoted,"
                 f" {skipped_not_running} skipped (not running),"
                 f" {skipped_missing} missing,"
-                f" {carried} carried (unfixed)",
+                f" {carried} carried (unfixed){waiting}",
                 flush=True,
             )
     else:
@@ -740,6 +781,7 @@ def promote_bundle(
         "skipped_missing": skipped_missing,
         "carried": carried,
         "carried_items": carried_items,
+        "needs_operator_items": needs_operator_items,
         "bundle_file_promoted": bundle_file_promoted,
         "derived_promoted": derived_promoted,
         "derived_skipped_not_running": derived_skipped_not_running,
@@ -752,14 +794,17 @@ def promote_bundle(
 # Document-workflow requirement promotion helpers
 # ---------------------------------------------------------------------------
 
-# Pattern for ## Target Version section: group 2 is the body, the lines
-# after the heading up to the next line starting with "##" (or end of file).
-# Body lines never start with "##", so an empty section reads as empty rather
-# than as the heading and text of the section after it.
-_TARGET_VERSION_SECTION_RE = re.compile(
-    r'(^##[^\S\n]*Target[^\S\n]*Version[^\S\n]*)((?:\n(?!##)[^\n]*)*?)(\n+##|\n*\Z)',
-    re.IGNORECASE | re.MULTILINE,
-)
+# How ## Target Version is read through task_status.read_section: any run of
+# blanks (none included) around "##" and between the words, any letter case,
+# and a body ending at the next line starting with "##" (or end of file), so
+# an empty section reads as empty rather than as the heading and text of the
+# section after it.
+_TARGET_VERSION_HEADING = "Target Version"
+_TARGET_VERSION_READING = {"free_spacing": True, "end_at_subheading": True}
+# The same reading as one compiled pattern (group 2 is the body), as the
+# reader itself compiles it; it names the section boundary for checks that
+# compare it with the other readers' boundary.
+_TARGET_VERSION_SECTION_RE = section_regex(_TARGET_VERSION_HEADING, **_TARGET_VERSION_READING)
 
 
 def find_requirement_by_version(
@@ -769,8 +814,10 @@ def find_requirement_by_version(
     """Scan req_dir for a requirements file whose ## Target Version matches semver.
 
     The match is an exact, case-insensitive, whitespace-tolerant comparison
-    against each line in the ## Target Version section body.  The semver is
-    normalised to always have a 'v' prefix before comparison.
+    against each line in the ## Target Version section body: the heading and
+    the version value both ignore letter case, so a body line ``V1.2.4``
+    matches ``v1.2.4``.  The semver is normalised to always have a 'v' prefix
+    (either case) before comparison.
 
     Returns the path of the first matching file (sorted lexicographically for
     determinism), or None when no match is found.
@@ -779,12 +826,13 @@ def find_requirement_by_version(
     """
     # Normalise: ensure v-prefix.
     target = semver.strip()
-    if not target.startswith("v"):
+    if not target.lower().startswith("v"):
         target = "v" + target
-    # Regex for an exact full-line match (liberal whitespace on both sides).
+    # Regex for an exact full-line match (liberal whitespace on both sides,
+    # letter case ignored).
     version_pattern = re.compile(
         r'^\s*' + re.escape(target) + r'\s*$',
-        re.MULTILINE,
+        re.MULTILINE | re.IGNORECASE,
     )
 
     if not req_dir.is_dir():
@@ -797,10 +845,9 @@ def find_requirement_by_version(
             text = md_file.read_text(encoding="utf-8")
         except OSError:
             continue
-        m = _TARGET_VERSION_SECTION_RE.search(text)
-        if not m:
+        body = read_section(text, _TARGET_VERSION_HEADING, **_TARGET_VERSION_READING)
+        if body is None:
             continue
-        body = m.group(2)
         if version_pattern.search(body):
             return md_file
 

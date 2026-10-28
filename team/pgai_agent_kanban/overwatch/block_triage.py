@@ -4,7 +4,10 @@ decision about a blocked task into the writes OVERWATCH may make.
 
 The sweep check ``team/scripts/lib/overwatch-checks/check-block-triage.sh``
 and the overwatch wake (which runs that check before it takes the project's
-repo lock) are the two callers; both reach this module through its CLI.
+repo lock) reach this module through its CLI; the decision executor
+(:mod:`pgai_agent_kanban.overwatch.decision_executor`) calls ``apply_task``
+with ``escalate=False`` and parks what would escalate in the operator inbox
+instead.
 
 Division of labour
 ------------------
@@ -76,8 +79,9 @@ Outcomes
 
 Requeue classes
 ---------------
-``requeue_owner`` is performed for three reason codes (handlers are looked
-up as ``<action>:<reason_code>`` first, then ``<action>``):
+``requeue_owner`` is performed for five reason codes and the pipeline
+ladder (handlers are looked up as ``<action>:<reason_code>`` first, then
+``<action>``):
 
 ``per_task_timeout``
     The commits the feature branch holds ahead of the source branch are
@@ -94,6 +98,21 @@ up as ``<action>:<reason_code>`` first, then ``<action>``):
     or a usage limit).
 ``zero_progress``
     The owner is requeued with a note. Once.
+``agent_unclassified`` and ``agent_transient_provider_error``
+    An agent's own block — without a reason code, or on a transient
+    provider error. After the row's first cool-down the owner is requeued
+    with a note quoting the block's ``## Blockers`` (the ``{blockers}``
+    fact, :func:`blockers_quote`); the window grows 15 -> 30 -> 60 min
+    between attempts, at most 3, and only then does the row's decision
+    (the operator inbox) apply. The rows name no verification, so a
+    re-block keeps the epoch and its ``attempts``.
+the pipeline ladder
+    A PM, TESTER or CM block on a decision-only row (the table's
+    ``pipeline_ladder``; the classifier marks such a decision
+    ``pipeline_ladder``): the owner is requeued on the same 15 -> 30 -> 60
+    min ladder with a note naming the reason code and quoting
+    ``## Blockers``, looked up as ``requeue_owner:pipeline_ladder``
+    (:func:`handler_code`); spent, the row's own decision applies.
 
 Gate and worktree classes
 -------------------------
@@ -213,11 +232,37 @@ for one reason reaches its row's own ceiling exactly as before. ``recompute_gate
 closes a task rather than requeueing it, so it is never refused by the
 budget and never counted.
 
+Blocked ledger
+--------------
+Each triage outcome is recorded on the project's block ledger
+(:mod:`pgai_agent_kanban.metrics.blocked_ledger`) for source
+``task:<TASK-ID>``, through the shared stamps in
+:mod:`pgai_agent_kanban.task_status`:
+
+* every evidence-file write (``record``, ``escalate``, ``act``) opens a
+  block-start with the Block Record's reason_code, class any, cause chain,
+  at the record's ``last_blocked_at`` (the decision time when that does not
+  parse or is later), under the project's Active RC or the ledger's no-RC
+  version -- unless the task already has an open block, as it does when
+  its Block Record write opened one;
+* an ``act`` whose mutation is ``promote`` (the task goes back to its
+  owner) closes that block, class any, reason_code ``requeue``; a
+  ``transition:DONE`` closes it through the Block Record's removal instead;
+* an ``escalate`` (a refused handler's included) appends one
+  block-escalate line for the open block, under the version it was opened
+  with, so it reads class human from then on; no earlier line changes, and
+  a block that already reads human gets nothing.
+
+``skip`` and ``defer`` write no evidence and stamp nothing. Every stamp is
+best-effort -- CENSUS CLASS CONVERT (docs/blocking-site-census.md): a
+ledger failure prints at most one stderr warning and never changes the
+outcome, an evidence write or the mutation the check performs.
+
 Swim lane
 ---------
 This module never commits, merges, checks out, pushes or deletes a branch,
 and never resets a task: it reads files, writes the task's status.md,
-README.md and evidence files, runs an allowlisted verb with validated
+README.md and evidence files and the project's block ledger (above), runs an allowlisted verb with validated
 typed arguments, hands a ship-policy block to the resolution stage, and
 prints. Every git call goes through
 :mod:`pgai_agent_kanban.overwatch.readonly_git`, which refuses anything but
@@ -285,7 +330,12 @@ if not __package__:
 
 from pgai_agent_kanban.lib.atomic_write import atomic_write  # noqa: E402
 from pgai_agent_kanban.lib.error_contract import emit_error_contract  # noqa: E402
-from pgai_agent_kanban.lib.timeutil import format_iso, try_parse_iso  # noqa: E402
+from pgai_agent_kanban.lib.timeutil import (  # noqa: E402
+    compact_utc_stamp,
+    format_iso,
+    moment_or_now,
+    try_parse_iso,
+)
 from pgai_agent_kanban.overwatch.allowlisted_verbs import (  # noqa: E402
     VerbRefused,
     VerbRun,
@@ -296,6 +346,7 @@ from pgai_agent_kanban.overwatch.allowlisted_verbs import (  # noqa: E402
 from pgai_agent_kanban.overwatch.block_classifier import (  # noqa: E402
     ESCALATE,
     NOT_YET,
+    REQUEUE_FREE_ACTIONS,
     WHY_ALWAYS_HUMAN,
     WHY_ATTEMPTS_EXHAUSTED,
     WHY_PRECONDITION_UNMET,
@@ -347,12 +398,16 @@ from pgai_agent_kanban.overwatch.block_stage_deferral import (  # noqa: E402
     defer_to_stage,
     ship_policy_halt_state,
 )
+from pgai_agent_kanban.overwatch.halt_provenance import installed_script_command  # noqa: E402
 from pgai_agent_kanban.overwatch.worktree_residue import ResidueError, clear_residue, residue_facts  # noqa: E402
 from pgai_agent_kanban.task_status import (  # noqa: E402
     TaskStatusError,
     read_section,
     section_value,
     set_or_append_section,
+    stamp_ledger_block_end,
+    stamp_ledger_block_start,
+    task_ledger_source,
 )
 
 # ---------------------------------------------------------------------------
@@ -384,6 +439,10 @@ EVIDENCE_DIR = Path("artifacts") / "block-evidence"
 
 #: The reason_code token used when a record names none.
 NO_CODE = "none"
+
+#: The reason_code of the blocked-ledger block-end a requeue to the owner
+#: writes.
+REQUEUE_LEDGER_REASON_CODE = "requeue"
 
 #: A key may name a task folder only when it matches this shape (no path
 #: separators, no leading dot). The caller's ``--id-pattern`` narrows it.
@@ -440,16 +499,43 @@ _ALWAYS_HUMAN_GUIDANCE: dict[str, tuple[str, str]] = {
         "check the source branch history in the dev tree for the task's merge, then mark the task DONE "
         "or return it to its owner",
     ),
-    "agent_unclassified": (
-        "the agent blocked its own task without naming a reason code; ## Blockers holds its explanation",
-        "read ## Blockers in status.md and supply what the agent asked for",
-    ),
 }
 
 _DEFAULT_OPTION = "read ## Blockers and the evidence named above, and resolve the cause"
 
+#: An agent's own block codes that block triage retries on a ladder before
+#: the row's decision applies; their requeue note quotes ``## Blockers``.
+AGENT_LADDER_CODES: tuple[str, ...] = ("agent_transient_provider_error", "agent_unclassified")
+
 #: The reason codes whose requeue_owner action this executor performs.
-REQUEUE_CLASSES: tuple[str, ...] = ("per_task_timeout", "provider_refusal", "zero_progress")
+REQUEUE_CLASSES: tuple[str, ...] = ("per_task_timeout", "provider_refusal", "zero_progress") + AGENT_LADDER_CODES
+
+#: The handler key a pipeline-ladder decision is looked up under, in place
+#: of its decision-only row's reason_code (see :func:`handler_code`).
+PIPELINE_LADDER_HANDLER = "pipeline_ladder"
+
+#: The note fact that carries the block's ``## Blockers`` text.
+BLOCKERS_FACT = "blockers"
+
+#: The longest ``## Blockers`` quote a note carries; longer text is cut
+#: with an ellipsis (the full text stays in status.md).
+BLOCKERS_QUOTE_MAX = 500
+
+# Why an agent's ladder ended with a human, and the first option its
+# diagnosis names.
+_LADDER_GUIDANCE: dict[str, tuple[str, str]] = {
+    "agent_unclassified": (
+        "the agent blocked its own task without naming a reason code and blocked again after every retry; "
+        "## Blockers holds its explanation",
+        "read ## Blockers in status.md and supply what the agent asked for",
+    ),
+    "agent_transient_provider_error": (
+        "the agent blocked its own task on a transient provider error and blocked again after every retry, "
+        "so the provider may be in a sustained outage",
+        "check the active provider's status for a sustained outage and the error quoted in ## Blockers; "
+        "return the task once the provider is healthy",
+    ),
+}
 
 #: The reason code whose requeue belongs to the transient-error handlers.
 TRANSIENT_CODE = "transient_api_error"
@@ -493,11 +579,6 @@ _CLASS_OPTIONS: dict[str, str] = {
         "run 'git worktree list' in the dev tree; put any commits the stale worktree holds on a branch, remove "
         "that worktree and run 'git worktree prune', or open the missing source branch, then return the task"
     ),
-    "agent_operator_data_action": (
-        "run the operator data action the agent asked for by hand once its arguments and targets are right "
-        "(for a restamp, see 'team/scripts/restamp-fixed-in.sh --help'), or correct the typed action arguments "
-        "in the Block Record evidence, then return the task"
-    ),
     "ship_policy_halt": (
         "read the resolution stage's decision in the project's overwatch/actions.log and the ## OVERWATCH "
         "Decision events in release-state.md, resolve the ship-policy HALT as roles/CM.md describes, then "
@@ -515,10 +596,6 @@ _FACT_CONTEXT: tuple[tuple[str, str], ...] = (
 
 #: The reason code whose action is an allowlisted operator data verb.
 OPERATOR_DATA_ACTION = "agent_operator_data_action"
-
-#: Actions that close a task rather than return it to its owner: the
-#: requeue budget never refuses them and never counts them.
-REQUEUE_FREE_ACTIONS: tuple[str, ...] = ("recompute_gate",)
 
 # The first option a diagnosis names when the requeue budget is spent.
 _BUDGET_OPTION = (
@@ -712,7 +789,7 @@ def _kanban_root_of(task_dir: Path) -> Path:
 
 def _write_verb_evidence(ctx: TriageContext, runs: "tuple[VerbRun, ...]") -> Path:
     """Write the verb's run(s) to ``verb-<verb>-<UTC>.txt`` (never overwriting)."""
-    base = f"verb-{runs[0].verb}-{_compact_stamp(ctx.now)}"
+    base = f"verb-{runs[0].verb}-{compact_utc_stamp(ctx.now)}"
     target = ctx.evidence_dir / f"{base}.txt"
     n = 2
     while target.exists():
@@ -764,11 +841,14 @@ def _run_verb(ctx: TriageContext) -> HandlerResult:
 
 #: Handlers, keyed ``<action>:<reason_code>`` (one class) or ``<action>``
 #: (every class choosing that action); :func:`handler_for` tries the first
-#: form, then the second. An action the classifier decides with no handler
-#: here is not performed: it escalates (or, on a task whose Needs Human is
-#: no, is left to the handler that recorded the block).
+#: form, then the second. A decision made on the pipeline ladder is looked
+#: up as ``<action>:pipeline_ladder`` (:func:`handler_code`), whatever its
+#: decision-only row's reason_code. An action the classifier decides with
+#: no handler here is not performed: it escalates (or, on a task whose
+#: Needs Human is no, is left to the handler that recorded the block).
 ACTION_HANDLERS: dict[str, ActionHandler] = {
     **{f"requeue_owner:{code}": _requeue_owner for code in REQUEUE_CLASSES},
+    f"requeue_owner:{PIPELINE_LADDER_HANDLER}": _requeue_owner,
     "recompute_gate:gate_merge_not_found": _recompute_gate,
     "requeue_owner:gate_merge_not_found": _requeue_owner,
     "requeue_owner:gate_dirty_worktree": _requeue_owner,
@@ -781,6 +861,12 @@ ACTION_HANDLERS: dict[str, ActionHandler] = {
 def handler_for(handlers: Mapping[str, ActionHandler], action: str, reason_code: str) -> Optional[ActionHandler]:
     """The handler for *action* on a *reason_code* block, or None."""
     return handlers.get(f"{action}:{reason_code}") or handlers.get(action)
+
+
+def handler_code(decision: Optional[Decision], reason_code: str) -> str:
+    """The code a handler is looked up under: :data:`PIPELINE_LADDER_HANDLER`
+    for a decision made on the pipeline ladder, else *reason_code*."""
+    return PIPELINE_LADDER_HANDLER if decision is not None and decision.pipeline_ladder else reason_code
 
 
 # ---------------------------------------------------------------------------
@@ -880,6 +966,14 @@ def _escalation_cause(
         return _ALWAYS_HUMAN_GUIDANCE[code][0]
     if decision.why == WHY_ATTEMPTS_EXHAUSTED and code == PROVIDER_REFUSAL:
         return f"{_fleet_cause(record, record.attempts if record is not None else 0)} ({decision.detail})"
+    if decision.why == WHY_ATTEMPTS_EXHAUSTED and code in _LADDER_GUIDANCE:
+        return f"{_LADDER_GUIDANCE[code][0]} ({decision.detail})"
+    if decision.why == WHY_ATTEMPTS_EXHAUSTED and decision.pipeline_ladder:
+        owner = record.owner_role if record is not None else "pipeline"
+        cause = f"the {owner} task blocked again after every retry on the pipeline ladder"
+        if code in _ALWAYS_HUMAN_GUIDANCE:
+            cause += f"; {_ALWAYS_HUMAN_GUIDANCE[code][0]}"
+        return f"{cause} ({decision.detail})"
     if decision.why == WHY_PRECONDITION_UNMET and facts:
         context = [f"{label}: {facts[key]}" for key, label in _FACT_CONTEXT if isinstance(facts.get(key), str)]
         if context:
@@ -911,11 +1005,16 @@ def _retry_allowed(pending: PendingCheck, record: BlockRecord) -> bool:
     )
 
 
-def _facts(
+def classifier_facts(
     code: str, text: str, record: Optional[BlockRecord], task_dir: Path, worktree_base: Optional[Path] = None
 ) -> dict:
     """What the classifier needs and the record does not carry: precondition
-    facts read from the repository (read-only git) and note placeholder values."""
+    facts read from the repository (read-only git) and note placeholder values.
+
+    *code* is the record's reason_code, *text* the task's status.md, and
+    *task_dir* its folder. Shared with the decision wake
+    (:mod:`pgai_agent_kanban.overwatch.decision_wake`), which hands the same
+    facts to ``decide``."""
     if code == "per_task_timeout":
         seconds = timeout_seconds(text, record, task_dir)
         return {
@@ -929,7 +1028,22 @@ def _facts(
         return residue_facts(task_dir, record, worktree_base)
     if code == OPERATOR_DATA_ACTION:
         return _operator_action_facts(record, task_dir)
-    return {}
+    # An agent self-block's ladder note, and the pipeline ladder's note for
+    # a block on a decision-only row (the table decides whether it is
+    # laddered), quote ## Blockers.
+    return {BLOCKERS_FACT: blockers_quote(text)}
+
+
+def blockers_quote(status_text: str) -> str:
+    """The task's ``## Blockers`` text as one line for a note to quote:
+    whitespace collapsed, cut at ``BLOCKERS_QUOTE_MAX`` characters with an
+    ellipsis, ``none recorded`` when the section is absent or empty."""
+    text = _clean(read_section(status_text, "Blockers") or "")
+    if not text:
+        return "none recorded"
+    if len(text) > BLOCKERS_QUOTE_MAX:
+        return text[: BLOCKERS_QUOTE_MAX - 1].rstrip() + "\u2026"
+    return text
 
 
 def _operator_action_facts(record: Optional[BlockRecord], task_dir: Path) -> dict:
@@ -976,10 +1090,30 @@ def _budget_cause(record: BlockRecord, budget: int, code: str) -> str:
     return cause
 
 
-def _option_for(code: str) -> str:
-    """The first option an escalation's diagnosis names for *code*."""
+def _operator_data_action_option(kanban_root: "Path | str") -> str:
+    """The first option for an operator data action that ends with a human.
+
+    Names the installed restamp script under *kanban_root*
+    (``<kanban root>/scripts/restamp-fixed-in.sh``), shell-quoted, so the
+    help command runs as printed from any directory.
+    """
+    restamp_help = installed_script_command(kanban_root, "restamp-fixed-in.sh", "--help")
+    return (
+        "run the operator data action the agent asked for by hand once its arguments and targets are right "
+        f"(for a restamp, see `{restamp_help}`), or correct the typed action arguments "
+        "in the Block Record evidence, then return the task"
+    )
+
+
+def _option_for(code: str, kanban_root: "Path | str") -> str:
+    """The first option an escalation's diagnosis names for *code*; a script
+    it names is the one installed under *kanban_root*."""
     if code in _ALWAYS_HUMAN_GUIDANCE:
         return _ALWAYS_HUMAN_GUIDANCE[code][1]
+    if code in _LADDER_GUIDANCE:
+        return _LADDER_GUIDANCE[code][1]
+    if code == OPERATOR_DATA_ACTION:
+        return _operator_data_action_option(kanban_root)
     return _CLASS_OPTIONS.get(code, _DEFAULT_OPTION)
 
 
@@ -1075,7 +1209,7 @@ def plan_task(
                 cause = _verification_cause(pending, verdict, record)
                 return Plan(task_id, path, OUTCOME_ESCALATE, code, ESCALATE, cause, cause=cause, **common)
 
-    facts = _facts(code, text, record, path.parent, Path(worktree_base) if worktree_base else None)
+    facts = classifier_facts(code, text, record, path.parent, Path(worktree_base) if worktree_base else None)
     decision = classify(text, now=now, table_path=table_path, status_file=path, facts=facts)
     common["decision"] = decision
 
@@ -1112,7 +1246,7 @@ def plan_task(
     if decision.action == DEFER_ACTION:
         return _plan_deferral(task_id, path, code, decision, triage_enabled, common)
 
-    if handler_for(handlers, decision.action, code) is None:
+    if handler_for(handlers, decision.action, handler_code(decision, code)) is None:
         if needs_human == "no":
             return Plan(
                 task_id, path, OUTCOME_SKIP, code, decision.action,
@@ -1237,10 +1371,6 @@ def _write_keeping_mode(path: Path, text: str) -> None:
         path.chmod(mode)
 
 
-def _compact_stamp(moment: datetime.datetime) -> str:
-    return moment.astimezone(datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-
-
 def write_evidence(
     task_dir: Path,
     plan: Plan,
@@ -1257,7 +1387,7 @@ def write_evidence(
     """
     evidence_dir = task_dir / EVIDENCE_DIR
     evidence_dir.mkdir(parents=True, exist_ok=True)
-    base = f"triage-{_compact_stamp(now)}-{plan.outcome}"
+    base = f"triage-{compact_utc_stamp(now)}-{plan.outcome}"
     target = evidence_dir / f"{base}.json"
     n = 2
     while target.exists():
@@ -1303,7 +1433,7 @@ def render_diagnosis(
     attempts = record.attempts if record is not None else 0
     evidence_line = record.evidence if record is not None else "unreadable"
     cause = (plan.cause or plan.detail).rstrip(".")
-    option = plan.option or _option_for(plan.reason_code)
+    option = plan.option or _option_for(plan.reason_code, kanban_root)
     tool = f"bash {shlex.quote(str(Path(kanban_root) / 'scripts' / 'task-status.sh'))}"
     target = f"--project {shlex.quote(project)} --key {shlex.quote(plan.task_id)}"
     backup_text = "; ".join(f"{name} backup {path}" for name, path in sorted(backups.items()) if path) or "no backup"
@@ -1363,26 +1493,117 @@ def _refuse(error_key: str, message: str, remedy: str) -> "TriageError":
     return TriageError(error_key=error_key, message=message, remedy=remedy)
 
 
+# ---------------------------------------------------------------------------
+# Blocked-ledger stamps (best-effort, never raise; see "Blocked ledger" in
+# the module docstring)
+# ---------------------------------------------------------------------------
+
+
+def _ledger_reason_code(plan: Plan) -> Optional[str]:
+    """The Block Record's reason_code as the ledger records it; None when
+    the record names none."""
+    return plan.reason_code if plan.reason_code and plan.reason_code != NO_CODE else None
+
+
+def _ledger_block_began(plan: Plan, moment: datetime.datetime) -> str:
+    """When the block began: the record's ``last_blocked_at`` when it parses
+    and is not after *moment*, otherwise *moment*."""
+    began = plan.record.last_blocked_at if plan.record is not None else ""
+    parsed = try_parse_iso(str(began)) if began else None
+    if parsed is not None and parsed <= moment:
+        return format_iso(parsed)
+    return format_iso(moment)
+
+
+def _stamp_ledger_opened(plan: Plan, *, project: str, kanban_root: "Path | str", moment: datetime.datetime) -> None:
+    """Open the task's block on the blocked ledger beside an evidence write,
+    with the record's reason_code, unless one is already open."""
+    try:
+        stamp_ledger_block_start(
+            kanban_root, project, task_ledger_source(plan.task_id),
+            reason_code=_ledger_reason_code(plan), timestamp=_ledger_block_began(plan, moment),
+        )
+    except Exception as exc:  # noqa: BLE001 - the shared stamp never raises; belt and braces
+        _warn_ledger("block-start", project, plan.task_id, exc)
+
+
+def _stamp_ledger_requeued(plan: Plan, *, project: str, kanban_root: "Path | str", moment: datetime.datetime) -> None:
+    """Close the task's open block, class any: triage returned it to its
+    owner without a human."""
+    try:
+        stamp_ledger_block_end(
+            kanban_root, project, task_ledger_source(plan.task_id),
+            block_class="any", reason_code=REQUEUE_LEDGER_REASON_CODE, timestamp=format_iso(moment),
+        )
+    except Exception as exc:  # noqa: BLE001 - the shared stamp never raises; belt and braces
+        _warn_ledger("block-end", project, plan.task_id, exc)
+
+
+def _stamp_ledger_escalated(plan: Plan, *, project: str, kanban_root: "Path | str", moment: datetime.datetime) -> None:
+    """Mark the task's open block escalated (class human) by appending one
+    block-escalate line under the version it was opened with; a block that
+    already reads human, or none open, writes nothing."""
+    from pgai_agent_kanban.metrics.blocked_ledger import (
+        CLASS_HUMAN,
+        ERROR_NO_OP,
+        LedgerError,
+        block_intervals,
+        ledger_path_for_project,
+        mark_block_escalated,
+    )
+
+    source = task_ledger_source(plan.task_id)
+    try:
+        ledger = ledger_path_for_project(str(kanban_root), project)
+        for block in block_intervals(ledger):
+            if block["source"] != source or block["end"] is not None or block["class"] == CLASS_HUMAN:
+                continue
+            mark_block_escalated(
+                ledger, block["version"], source, format_iso(moment), reason_code=_ledger_reason_code(plan)
+            )
+    except LedgerError as exc:
+        if exc.error != ERROR_NO_OP:
+            _warn_ledger("block-escalate", project, plan.task_id, exc)
+    except Exception as exc:  # noqa: BLE001 - best-effort stamp, never a gate
+        _warn_ledger("block-escalate", project, plan.task_id, exc)
+
+
+def _warn_ledger(kind: str, project: str, task_id: str, exc: BaseException) -> None:
+    """One stderr line for a ledger stamp that genuinely failed. CENSUS CLASS
+    CONVERT (docs/blocking-site-census.md): the triage write it rides beside
+    stands and its outcome never changes."""
+    detail = " ".join(str(exc).split())
+    try:
+        print(
+            f"[block-triage] WARNING: blocked-ledger {kind} for task:{task_id} in project {project} was not "
+            f"recorded ({type(exc).__name__}: {detail}); the triage outcome stands. Check that {project}'s "
+            "metrics/ directory is writable and its blocked-intervals.jsonl parses.",
+            file=sys.stderr,
+        )
+    except Exception:  # noqa: BLE001 - a closed stderr must not fail triage either
+        pass
+
+
 def _escalate(
     plan: Plan, status_file: Path, *, project: str, kanban_root: "Path | str", evidence_file: Path,
-    backups: Mapping[str, str],
+    backups: Mapping[str, str], moment: datetime.datetime, escalate: bool = True,
 ) -> ApplyResult:
     rel = _relative_to_task(evidence_file, status_file.parent)
+    if not escalate:
+        # The caller parks the question itself (the decision executor's
+        # inbox): no Needs Human, no Diagnosis, no block-escalate line.
+        return ApplyResult(
+            OUTCOME_ESCALATE, plan.reason_code, ESCALATE, MUTATION_NONE,
+            f"not carried out: {plan.cause or plan.detail}; evidence {rel}", str(evidence_file),
+        )
     body = render_diagnosis(plan, project=project, kanban_root=kanban_root, evidence_file=rel, backups=backups)
     write_diagnosis(status_file, body)
+    _stamp_ledger_escalated(plan, project=project, kanban_root=kanban_root, moment=moment)
     return ApplyResult(
         OUTCOME_ESCALATE, plan.reason_code, ESCALATE, MUTATION_NONE,
         f"escalated: Needs Human yes, OVERWATCH Diagnosis written ({plan.cause or plan.detail}); evidence {rel}",
         str(evidence_file),
     )
-
-
-def _moment(now: "datetime.datetime | str | None") -> datetime.datetime:
-    """*now* as an aware datetime; the current UTC time when None or unparseable."""
-    if isinstance(now, datetime.datetime):
-        return now if now.tzinfo is not None else now.replace(tzinfo=datetime.timezone.utc)
-    parsed = try_parse_iso(now) if isinstance(now, str) else None
-    return parsed or datetime.datetime.now(datetime.timezone.utc)
 
 
 def _relative_to_task(path: Path, task_dir: Path) -> str:
@@ -1407,6 +1628,7 @@ def apply_task(
     defer_only: bool = False,
     stage_runner: Optional[StageRunner] = None,
     requeue_budget: Optional[int] = None,
+    escalate: bool = True,
 ) -> ApplyResult:
     """Re-plan one task and make its writes (see the module docstring).
 
@@ -1418,7 +1640,12 @@ def apply_task(
     outcome reported. With *defer_only*, any other plan writes nothing and
     reports ``skip`` (the caller took no backup). *requeue_budget* is
     ``[overwatch] requeue_budget``; None reads it from the project's config
-    (see :func:`plan_task`).
+    (see :func:`plan_task`). With *escalate* false, an outcome that would
+    escalate (the plan's, or a handler refused at execution time) writes
+    its evidence file but no ``## Needs Human``, no OVERWATCH Diagnosis and
+    no block-escalate ledger line, and is reported as ``escalate`` with
+    DETAIL ``not carried out: <cause>`` for the caller to park in the
+    operator inbox (the decision executor does).
 
     Raises:
         TriageError: the task folder or a file it needs cannot be read or
@@ -1429,7 +1656,7 @@ def apply_task(
     """
     path = Path(status_file)
     handlers = ACTION_HANDLERS if handlers is None else handlers
-    moment = _moment(now)
+    moment = moment_or_now(now)
     backups = dict(backups or {})
     base = Path(worktree_base) if worktree_base else None
     plan = plan_task(
@@ -1451,6 +1678,7 @@ def apply_task(
     task_dir = path.parent
     try:
         evidence_file = write_evidence(task_dir, plan, now=moment, triage_enabled=triage_enabled, backups=backups)
+        _stamp_ledger_opened(plan, project=project, kanban_root=kanban_root, moment=moment)
         if plan.pending_index is not None and plan.verdict is not None:
             settle_entry(evidence_file.parent, plan.pending_index, plan.verdict.status, plan.verdict.detail, now=moment)
         if plan.restart_epoch:
@@ -1462,13 +1690,14 @@ def apply_task(
             )
         if plan.outcome == OUTCOME_ESCALATE:
             return _escalate(
-                plan, path, project=project, kanban_root=kanban_root, evidence_file=evidence_file, backups=backups
+                plan, path, project=project, kanban_root=kanban_root, evidence_file=evidence_file, backups=backups,
+                moment=moment, escalate=escalate,
             )
-        handler = handler_for(handlers, plan.action, plan.reason_code)
+        handler = handler_for(handlers, plan.action, handler_code(plan.decision, plan.reason_code))
         assert handler is not None  # an act plan is only made when a handler exists
         return _act(
             plan, path, Path(queue_file), handler, moment, evidence_file,
-            project=project, kanban_root=kanban_root, backups=backups, worktree_base=base,
+            project=project, kanban_root=kanban_root, backups=backups, worktree_base=base, escalate=escalate,
         )
     except (OSError, UnicodeDecodeError, BlockRecordError, ValueError) as exc:
         raise _refuse(
@@ -1482,7 +1711,7 @@ def apply_task(
 def _act(
     plan: Plan, status_file: Path, queue_file: Path, handler: ActionHandler, moment: datetime.datetime,
     evidence_file: Path, *, project: str, kanban_root: "Path | str", backups: Mapping[str, str],
-    worktree_base: Optional[Path] = None,
+    worktree_base: Optional[Path] = None, escalate: bool = True,
 ) -> ApplyResult:
     decision = plan.decision
     record = plan.record
@@ -1501,7 +1730,7 @@ def _act(
         )
         return _escalate(
             refused, status_file, project=project, kanban_root=kanban_root, evidence_file=evidence_file,
-            backups=backups,
+            backups=backups, moment=moment, escalate=escalate,
         )
     mutation = result.mutation
     if mutation != MUTATION_PROMOTE and not mutation.startswith(MUTATION_TRANSITION_PREFIX):
@@ -1544,6 +1773,8 @@ def _act(
             ),
         ),
     )
+    if mutation == MUTATION_PROMOTE:
+        _stamp_ledger_requeued(plan, project=project, kanban_root=kanban_root, moment=moment)
     cleared = f"OVERWATCH block triage {plan.reason_code} {decision.action}, attempt {attempt}: {note}"
     return ApplyResult(OUTCOME_ACT, plan.reason_code, decision.action, mutation, cleared, str(evidence_file))
 
@@ -1553,7 +1784,10 @@ def _act(
 # ---------------------------------------------------------------------------
 
 
-def _bool_arg(value: str) -> bool:
+def true_false_arg(value: str) -> bool:
+    """An argparse ``type`` for a ``true|false`` option (spacing and case
+    tolerated); anything else is a usage error. Shared with the decision
+    wake's CLI."""
     lowered = value.strip().lower()
     if lowered not in ("true", "false"):
         raise argparse.ArgumentTypeError(f"{value!r} is not true or false")
@@ -1577,7 +1811,7 @@ def _parser() -> argparse.ArgumentParser:
         p.add_argument("--kanban-root", required=True, metavar="DIR", help="the kanban root holding projects/")
         p.add_argument("--project", required=True, metavar="NAME", help="the project whose tasks are triaged")
         p.add_argument(
-            "--triage-enabled", type=_bool_arg, default=True, metavar="true|false",
+            "--triage-enabled", type=true_false_arg, default=True, metavar="true|false",
             help="the resolved [overwatch] block_triage value; false keeps triage to records and diagnoses "
             "(default: true)",
         )

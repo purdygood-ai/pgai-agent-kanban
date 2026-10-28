@@ -249,7 +249,7 @@ class TestResetForceWorktreeCleanup:
         """
         root = two_project_root
         task_id = "CODER-20260722-T100-stale-bare-warn"
-        task_dir = _build_task_folder(root, "project_a", task_id, state="DONE")
+        task_dir = _build_task_folder(root, "project-a", task_id, state="DONE")
 
         dev_tree = _init_git_dev_tree(tmp_path, "dev_tree_bare_warn")
 
@@ -267,7 +267,7 @@ class TestResetForceWorktreeCleanup:
         )
 
         _patch_project_cfg_dev_tree(
-            root / "projects" / "project_a",
+            root / "projects" / "project-a",
             dev_tree,
         )
 
@@ -275,7 +275,7 @@ class TestResetForceWorktreeCleanup:
 
         result = _run_operator(
             _RESET_SCRIPT,
-            ["--project", "project_a", "--key", task_id],
+            ["--project", "project-a", "--key", task_id],
             root,
             extra_env={"PGAI_WORKTREE_BASE": str(wt_base)},
         )
@@ -327,11 +327,11 @@ class TestResetForceWorktreeCleanup:
         """
         root = two_project_root
         task_id = "CODER-20260722-T101-stale-force-clears"
-        _build_task_folder(root, "project_a", task_id, state="DONE")
+        _build_task_folder(root, "project-a", task_id, state="DONE")
 
         # Pre-condition: flip backlog marker to [x] to simulate a prior close.
         backlog_file = (
-            root / "projects" / "project_a" / "tasks" / "queues" / "coder_backlog.md"
+            root / "projects" / "project-a" / "tasks" / "queues" / "coder_backlog.md"
         )
         if backlog_file.exists():
             text = backlog_file.read_text(encoding="utf-8")
@@ -356,13 +356,13 @@ class TestResetForceWorktreeCleanup:
         )
 
         _patch_project_cfg_dev_tree(
-            root / "projects" / "project_a",
+            root / "projects" / "project-a",
             dev_tree,
         )
 
         result = _run_operator(
             _RESET_SCRIPT,
-            ["--project", "project_a", "--key", task_id, "--force"],
+            ["--project", "project-a", "--key", task_id, "--force"],
             root,
             extra_env={"PGAI_WORKTREE_BASE": str(wt_base)},
         )
@@ -387,14 +387,14 @@ class TestResetForceWorktreeCleanup:
         )
 
         # status.md must be regenerated to BACKLOG.
-        task_dir = root / "projects" / "project_a" / "tasks" / task_id
+        task_dir = root / "projects" / "project-a" / "tasks" / task_id
         assert _read_status_state(task_dir) == "BACKLOG", (
             f"Expected status.md ## State to be BACKLOG after reset --force.\n"
             f"status.md:\n{(task_dir / 'status.md').read_text(encoding='utf-8')}"
         )
 
         # Backlog marker must be flipped to open.
-        marker = _read_backlog_marker(root, "project_a", task_id)
+        marker = _read_backlog_marker(root, "project-a", task_id)
         assert marker == "" or marker == " ", (
             f"Expected backlog marker to be open (space or empty) after reset --force; "
             f"got {marker!r}.\n"
@@ -422,8 +422,8 @@ class TestResetForceWorktreeCleanup:
         # Two tasks — one reset with --force, one without — both should land in BACKLOG.
         task_id_force = "CODER-20260722-T102-clean-force-result"
         task_id_bare = "CODER-20260722-T102-clean-bare-result"
-        task_dir_force = _build_task_folder(root, "project_a", task_id_force, state="DONE")
-        task_dir_bare = _build_task_folder(root, "project_a", task_id_bare, state="DONE")
+        task_dir_force = _build_task_folder(root, "project-a", task_id_force, state="DONE")
+        task_dir_bare = _build_task_folder(root, "project-a", task_id_bare, state="DONE")
 
         dev_tree = _init_git_dev_tree(tmp_path, "dev_tree_clean_force")
 
@@ -432,20 +432,20 @@ class TestResetForceWorktreeCleanup:
         wt_base.mkdir(parents=True, exist_ok=True)
 
         _patch_project_cfg_dev_tree(
-            root / "projects" / "project_a",
+            root / "projects" / "project-a",
             dev_tree,
         )
 
         result_force = _run_operator(
             _RESET_SCRIPT,
-            ["--project", "project_a", "--key", task_id_force, "--force"],
+            ["--project", "project-a", "--key", task_id_force, "--force"],
             root,
             extra_env={"PGAI_WORKTREE_BASE": str(wt_base)},
         )
 
         result_bare = _run_operator(
             _RESET_SCRIPT,
-            ["--project", "project_a", "--key", task_id_bare],
+            ["--project", "project-a", "--key", task_id_bare],
             root,
             extra_env={"PGAI_WORKTREE_BASE": str(wt_base)},
         )
@@ -471,8 +471,8 @@ class TestResetForceWorktreeCleanup:
         )
 
         # Both backlog markers must be open.
-        marker_force = _read_backlog_marker(root, "project_a", task_id_force)
-        marker_bare = _read_backlog_marker(root, "project_a", task_id_bare)
+        marker_force = _read_backlog_marker(root, "project-a", task_id_force)
+        marker_bare = _read_backlog_marker(root, "project-a", task_id_bare)
         assert marker_force == "" or marker_force == " ", (
             f"Expected --force task backlog marker to be open; got {marker_force!r}."
         )
@@ -508,7 +508,7 @@ class TestResetForceWorktreeCleanup:
         """
         root = two_project_root
         task_id = "CODER-20260722-T103-mount-pinned-fails"
-        task_dir = _build_task_folder(root, "project_a", task_id, state="DONE")
+        task_dir = _build_task_folder(root, "project-a", task_id, state="DONE")
 
         dev_tree = _init_git_dev_tree(tmp_path, "dev_tree_mount_pinned")
 
@@ -542,7 +542,7 @@ class TestResetForceWorktreeCleanup:
             )
 
             _patch_project_cfg_dev_tree(
-                root / "projects" / "project_a",
+                root / "projects" / "project-a",
                 dev_tree,
             )
 
@@ -550,7 +550,7 @@ class TestResetForceWorktreeCleanup:
 
             result = _run_operator(
                 _RESET_SCRIPT,
-                ["--project", "project_a", "--key", task_id, "--force"],
+                ["--project", "project-a", "--key", task_id, "--force"],
                 root,
                 extra_env={"PGAI_WORKTREE_BASE": str(wt_base)},
             )
@@ -580,3 +580,85 @@ class TestResetForceWorktreeCleanup:
                 ["umount", str(wt_path)],
                 capture_output=True,
             )
+
+
+# ---------------------------------------------------------------------------
+# The default worktree base, end to end through reset.sh
+# ---------------------------------------------------------------------------
+
+
+_ON_DISK_PATH_RE = re.compile(r"On-disk path:\s+(\S+)")
+
+
+class TestResetStaleWorktreeDefaultBase:
+    """With PGAI_WORKTREE_BASE unset, reset.sh looks for the stale worktree
+    under the framework temp root: the PGAI_AGENT_KANBAN_TEMP_DIR override
+    when set, else kanban.cfg [paths] tmp_root/tmp_subdir."""
+
+    def _refused_path(
+        self,
+        root: pathlib.Path,
+        tmp_path: pathlib.Path,
+        monkeypatch: pytest.MonkeyPatch,
+        extra_env: dict,
+    ) -> pathlib.Path:
+        """Seed a stale registration, run a bare reset, and return the
+        on-disk worktree path the refusal names."""
+        task_id = "CODER-20260722-T104-default-base"
+        _build_task_folder(root, "project-a", task_id, state="DONE")
+        dev_tree = _init_git_dev_tree(tmp_path, "dev_tree_default_base")
+        _seed_stale_registration_only(
+            dev_tree, task_id, feature_branch=f"feature/{task_id}",
+            worktree_path=tmp_path / "registered-elsewhere" / task_id,
+        )
+        _patch_project_cfg_dev_tree(root / "projects" / "project-a", dev_tree)
+        for name in (
+            "PGAI_WORKTREE_BASE", "PGAI_AGENT_KANBAN_TEMP_DIR", "PGAI_TASKS_DIR", "PGAI_PROJECT_ROOT",
+            "PP_project_name",
+        ):
+            monkeypatch.delenv(name, raising=False)
+        monkeypatch.setenv("KANBAN_ROOT", str(root))
+
+        result = _run_operator(
+            _RESET_SCRIPT, ["--project", "project-a", "--key", task_id], root, extra_env=extra_env,
+        )
+
+        assert result.returncode == 2, (
+            f"Expected the stale-worktree refusal (exit 2), got {result.returncode}.\n"
+            f"stdout: {result.stdout}\nstderr: {result.stderr}"
+        )
+        match = _ON_DISK_PATH_RE.search(result.stderr)
+        assert match, f"The refusal names no on-disk path.\nstderr: {result.stderr}"
+        named = pathlib.Path(match.group(1))
+        assert named.name == task_id and named.parent.name == "worktrees", named
+        return named
+
+    def test_default_base_is_under_the_temp_dir_override(
+        self,
+        two_project_root: pathlib.Path,
+        tmp_path: pathlib.Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        sandbox = tmp_path / "temp-dir-override"
+        named = self._refused_path(
+            two_project_root, tmp_path, monkeypatch, {"PGAI_AGENT_KANBAN_TEMP_DIR": str(sandbox)},
+        )
+        assert sandbox in named.parents, f"{named} is not under the override {sandbox}"
+
+    def test_default_base_is_under_configured_paths_without_an_override(
+        self,
+        two_project_root: pathlib.Path,
+        tmp_path: pathlib.Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        configured = tmp_path / "configured-root"
+        cfg = two_project_root / "kanban.cfg"
+        cfg.write_text(
+            cfg.read_text(encoding="utf-8").replace(
+                "[paths]\n", f"[paths]\ntmp_root = {configured}\ntmp_subdir = kanban-scratch\n", 1,
+            ),
+            encoding="utf-8",
+        )
+        named = self._refused_path(two_project_root, tmp_path, monkeypatch, {})
+        expected_root = configured / "kanban-scratch"
+        assert expected_root in named.parents, f"{named} is not under the configured root {expected_root}"

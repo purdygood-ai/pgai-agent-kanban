@@ -28,6 +28,9 @@ Usage:
 
     project_dir = ctx.project_root("pgai-agent-kanban")
     tasks_path  = ctx.tasks_dir("pgai-agent-kanban")
+
+    # or from a path inside the layout (a project root, or its bugs/ dir):
+    ctx, project = context_for_project(Path(".../projects/pgai-agent-kanban/bugs"), intake_dir=True)
 """
 
 from __future__ import annotations
@@ -37,6 +40,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from pgai_agent_kanban.env import resolve_kanban_root
+from pgai_agent_kanban.ops.errors import OpsError
 
 
 @dataclass
@@ -194,3 +198,39 @@ class OpsContext:
             ``<kanban_root>/projects/<project>/tasks/queues/<agent>_backlog.md``
         """
         return self.tasks_dir(project) / "queues" / f"{agent}_backlog.md"
+
+
+def context_for_project(path: Path, *, intake_dir: bool = False) -> tuple[OpsContext, str]:
+    """``(ctx, project)`` for the project a path in the kanban layout names.
+
+    *path* is a project root, ``<kanban_root>/projects/<project>/``; with
+    *intake_dir* it is instead a directory directly inside one (``bugs/``,
+    ``priority/``), and its parent is the project root. The path is
+    resolved first, so a relative path or a symlink is read as what it
+    points to. The kanban root of the returned context is the directory
+    holding ``projects/``.
+
+    Args:
+        path:       The project root, or with *intake_dir* a directory
+                    directly inside it.
+        intake_dir: True when *path* is a directory inside the project
+                    root rather than the root itself.
+
+    Returns:
+        Tuple of (OpsContext, project_name).
+
+    Raises:
+        OpsError: When the project root's parent directory is not named
+            ``projects``, so the path is outside the kanban layout.
+    """
+    project_root = Path(path).resolve()
+    if intake_dir:
+        project_root = project_root.parent
+    project_name = project_root.name
+    ctx = OpsContext(kanban_root=project_root.parent.parent)
+    if ctx.project_root(project_name).resolve() != project_root:
+        raise OpsError(
+            f"cannot derive project from path {project_root} "
+            f"(expected layout <kanban_root>/projects/<project>/)"
+        )
+    return ctx, project_name

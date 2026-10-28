@@ -52,6 +52,8 @@ _FILES = (
     "scripts/dashboard/lib/version.sh",
     "scripts/init-project-git-repo.sh",
     "scripts/lib/cm/release_preflight.sh",
+    "scripts/lib/discovery_guards.sh",
+    "scripts/lib/wake_autonomous_scan.sh",
     "scripts/lib/cm/release_origin_summary.sh",
     "scripts/cm/finalize-release.sh",
     "scripts/cm/cancel-rc.sh",
@@ -126,7 +128,7 @@ def test_no_remote_operation_spells_origin(relative: str) -> None:
 
 
 def test_resolvers_keep_origin_as_their_one_fallback() -> None:
-    bash = (_TEAM_DIR / "scripts/lib/project_paths.sh").read_text(encoding="utf-8")
+    bash = (_TEAM_DIR / "scripts/lib/git_remote_default.sh").read_text(encoding="utf-8")
     python = (_TEAM_DIR / "pgai_agent_kanban/lib/git_remote.py").read_text(encoding="utf-8")
     assert 'PP_GIT_REMOTE_NAME_DEFAULT="origin"' in bash
     assert 'DEFAULT_REMOTE_NAME = "origin"' in python

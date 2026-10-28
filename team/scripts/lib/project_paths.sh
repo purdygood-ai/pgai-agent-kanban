@@ -5,8 +5,9 @@
 # Source this file to get the pp_* functions in your shell:
 #   source "$(dirname "${BASH_SOURCE[0]}")/project_paths.sh"
 #
-# All functions require KANBAN_ROOT to be set in the environment (or passed
-# implicitly — they read the exported variable, not an argument).
+# All functions read the kanban root from the environment, not an argument:
+# KANBAN_ROOT, else PGAI_AGENT_KANBAN_ROOT_PATH, else they fail closed (see
+# _pp_kanban_root for the full resolution order).
 #
 # Layout: each project lives at:
 #   $KANBAN_ROOT/projects/<name>/
@@ -61,6 +62,13 @@
 #                               default 'false' when absent
 #   pp_training_agents [name] — echoes comma-separated agents list from [training] training_agents;
 #                               default '' (empty string) when absent
+#   pp_targeted_test_command [name] — echoes [testing] targeted_test_command, the
+#                               command template the PM materializer turns into a
+#                               CODER/WRITER ticket's targeted-run criterion;
+#                               default '' (no criterion) when absent
+#   pp_pre_merge_command [name] — echoes [testing] pre_merge_command, the command
+#                               behind a ticket's pre-merge criterion;
+#                               default '' (no criterion) when absent
 #   pp_workflow_type  [name]  — echoes the workflow type string from [project] workflow_type;
 #                               default 'release' when absent or empty
 #   pp_branch_prefix  [name]  — optional branch name prefix from [project] branch_prefix;
@@ -158,12 +166,20 @@
 #                               or "always": project.cfg [release]
 #                               ship_posture override when present, else
 #                               kanban.cfg [release] ship_posture, else
-#                               "matrix". An unrecognized value resolves to
+#                               "always". An unrecognized value resolves to
 #                               "matrix" with one stderr warning line. On a
 #                               push_to_remote = true lane, "always" also
 #                               needs [release] ship_posture_confirm_remote
-#                               = true (same chain), else "matrix" with one
-#                               warning line. Never a refusal: status 0.
+#                               = true (same chain), else "matrix" — with
+#                               one warning line when a cfg file set
+#                               "always", silently when it is only the
+#                               built-in default. Never a refusal: status 0.
+#   pp_resolve_tiered_cfg_value [--with-tier] [--no-legacy] <kanban_root>
+#                               <project_root> <section> <key> [default]
+#                               — [section] key from the project's config,
+#                               else kanban.cfg, else <default>; the first
+#                               non-blank value wins. No validation. See the
+#                               function's own header for the full rules.
 #
 # Key Registry
 # ------------
@@ -180,9 +196,12 @@
 # pp_stale_lock_reap_after_wake_periods above for the one [locks] key,
 # pp_block_triage above for [overwatch] block_triage,
 # resolve_requeue_budget() in team/pgai_agent_kanban/overwatch/
-# block_requeue.py for [overwatch] requeue_budget, and
+# block_requeue.py for [overwatch] requeue_budget,
+# resolve_thresholds() and resolve_halt_after_auto_resume() in
+# team/pgai_agent_kanban/overwatch/runaway.py for the four [overwatch]
+# runaway_* thresholds and halt_after_auto_resume, and
 # resolve_archive_count() in team/pgai_agent_kanban/archive/config.py for
-# the one [archive] key (the last two read in Python; no pp_* accessor).
+# the one [archive] key (the last three read in Python; no pp_* accessor).
 # The whole read set, shared sections included, is PROJECT_CFG_KEYS in
 # team/pgai_agent_kanban/ops/projects.py; the project.cfg template
 # (team/config/project.cfg_example) documents every key in it, and every
@@ -251,6 +270,13 @@
 # [training]
 #   reasoning_trace         OPTIONAL  false
 #   training_agents         OPTIONAL  ""
+#
+# [testing]
+#   targeted_test_command   OPTIONAL  ""
+#   pre_merge_command       OPTIONAL  ""
+#                           (the project's own runner commands; kanban.cfg's
+#                            [testing] keys are a different, kanban-wide set
+#                            and neither file overrides the other's)
 
 # ---------------------------------------------------------------------------
 # Source the INI parser (read_ini) once when this library is loaded.
@@ -259,6 +285,8 @@
 _PP_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=ini_parser.sh
 source "${_PP_LIB_DIR}/ini_parser.sh"
+# shellcheck source=git_remote_default.sh
+source "${_PP_LIB_DIR}/git_remote_default.sh"
 # shellcheck source=temp.sh
 if ! declare -F pgai_temp_dir >/dev/null 2>&1; then
     source "${_PP_LIB_DIR}/temp.sh"
@@ -269,14 +297,37 @@ if ! declare -F pgai_emit_error_contract >/dev/null 2>&1; then
 fi
 
 # ---------------------------------------------------------------------------
-# Internal: resolve the kanban root, abort loudly if unset.
+# Internal: resolve the kanban root and echo it; fail closed when neither
+# root name is set.
+#
+# Resolution order (first non-empty wins):
+#   1. $KANBAN_ROOT                  -- always wins when set, even when
+#                                       PGAI_AGENT_KANBAN_ROOT_PATH names a
+#                                       different root (callers that must
+#                                       refuse a disagreement, such as
+#                                       cleanup.sh's root_mismatch guard,
+#                                       check it themselves).
+#   2. $PGAI_AGENT_KANBAN_ROOT_PATH  -- the name env_bootstrap.sh resolves
+#                                       and exports for every entry point,
+#                                       so a verb run from a plain shell
+#                                       resolves without a stderr line.
+#   3. FAIL -- print "project_paths.sh: KANBAN_ROOT is not set ..." on
+#      stderr and return 1. There is deliberately no $HOME default.
+#
+# Echoes only; it exports nothing, so a child process sees exactly the
+# environment its parent had.
 # ---------------------------------------------------------------------------
 _pp_kanban_root() {
-    if [[ -z "${KANBAN_ROOT:-}" ]]; then
-        echo "project_paths.sh: KANBAN_ROOT is not set" >&2
-        return 1
+    if [[ -n "${KANBAN_ROOT:-}" ]]; then
+        echo "$KANBAN_ROOT"
+        return 0
     fi
-    echo "$KANBAN_ROOT"
+    if [[ -n "${PGAI_AGENT_KANBAN_ROOT_PATH:-}" ]]; then
+        echo "$PGAI_AGENT_KANBAN_ROOT_PATH"
+        return 0
+    fi
+    echo "project_paths.sh: KANBAN_ROOT is not set and PGAI_AGENT_KANBAN_ROOT_PATH is not set either; export PGAI_AGENT_KANBAN_ROOT_PATH (or KANBAN_ROOT) to the kanban root and re-run" >&2
+    return 1
 }
 
 # ---------------------------------------------------------------------------
@@ -342,6 +393,86 @@ _pp_read_cfg_key() {
 }
 
 # ---------------------------------------------------------------------------
+# pp_resolve_tiered_cfg_value [--with-tier] [--no-legacy] <kanban_root>
+#                             <project_root> <section> <key> [default]
+# Resolve [section] key through the project's config, then kanban.cfg, then
+# <default>. The bash twin of resolve_tiered_cfg_value in
+# team/pgai_agent_kanban/lib/project_cfg.py; both answer identically for
+# the same files.
+#
+# Precedence, highest first, the first non-blank value winning:
+#   1. <project_root>/project.cfg, or a legacy <project_root>/PROJECT.cfg
+#      when project.cfg is absent (read by _pp_read_cfg_key)
+#   2. <kanban_root>/kanban.cfg (read by read_ini)
+#   3. <default> (empty when omitted)
+#
+# A tier whose file is missing or unreadable (read_ini warns on stderr),
+# whose section or key is absent, or whose value is blank ("key =") passes
+# to the next tier; a lower tier is never read once a higher one answers,
+# and status stays 0 under a caller's set -e. An empty
+# <project_root> skips tier 1 (root-only). Values follow the read_ini rules:
+# an inline comment is stripped, the key is matched exactly, CRLF reads as
+# LF.
+#
+# Options (before the positional arguments):
+#   --with-tier  print three lines -- the value, the tier that answered
+#                ("project.cfg", "kanban.cfg" or "default") and the file
+#                it came from (empty for the default) -- for
+#                `mapfile -t`. Without it only the value is printed, with
+#                no trailing newline, for `$(...)`.
+#   --no-legacy  read only project.cfg at tier 1; a lone PROJECT.cfg is
+#                ignored. The tier is "project.cfg" for either file name.
+#
+# No validation: the caller checks the winning value and names the file
+# (--with-tier) in its own refusal. Always returns 0.
+#
+# Example:
+#   periods="$(pp_resolve_tiered_cfg_value "$KANBAN_ROOT" "$(pp_project_root demo)" \
+#       locks stale_lock_reap_after_wake_periods 3)"
+#   mapfile -t r < <(pp_resolve_tiered_cfg_value --with-tier "$KANBAN_ROOT" "" release deep_verify weekly)
+#   # r[0]=value  r[1]=tier  r[2]=source file
+# ---------------------------------------------------------------------------
+pp_resolve_tiered_cfg_value() {
+    local with_tier=false legacy=true
+    while [[ "${1:-}" == --* ]]; do
+        case "$1" in
+            --with-tier) with_tier=true ;;
+            --no-legacy) legacy=false ;;
+            --) shift; break ;;
+            *) break ;;
+        esac
+        shift
+    done
+    local kanban_root="${1:-}" project_root="${2:-}" section="${3:-}" key="${4:-}" default="${5:-}"
+
+    local value="" tier="default" src="" cfg_file=""
+    if [[ -n "$project_root" ]]; then
+        if [[ "$legacy" == true ]]; then
+            cfg_file="$(_pp_project_cfg_file "${project_root%/}")"
+        else
+            cfg_file="${project_root%/}/project.cfg"
+        fi
+        if [[ -n "$cfg_file" ]]; then
+            value="$(_pp_read_cfg_key "$cfg_file" "$section" "$key" "")" || value=""
+            [[ -n "$value" ]] && tier="project.cfg" && src="$cfg_file"
+        fi
+    fi
+    if [[ -z "$value" ]]; then
+        local kanban_cfg="${kanban_root%/}/kanban.cfg"
+        value="$(read_ini "$kanban_cfg" "$section" "$key" "")" || value=""
+        [[ -n "$value" ]] && tier="kanban.cfg" && src="$kanban_cfg"
+    fi
+    [[ -z "$value" ]] && value="$default"
+
+    if [[ "$with_tier" == true ]]; then
+        printf '%s\n%s\n%s\n' "$value" "$tier" "$src"
+    else
+        printf '%s' "$value"
+    fi
+    return 0
+}
+
+# ---------------------------------------------------------------------------
 # pp_require_project_context [name]
 # Resolves the active project name from the following sources, in order:
 #   1. The first positional argument $1 (when non-empty)
@@ -385,6 +516,25 @@ pp_project_root() {
 }
 
 # ---------------------------------------------------------------------------
+# pp_dev_tree_path [name]
+# Echoes the project's [project] dev_tree_path from its project.cfg (or the
+# bare key in a legacy PROJECT.cfg), or nothing when the project has no
+# config file or the key is unset.
+#
+# Project name resolution: explicit argument, then PGAI_PROJECT_NAME, then
+# error. Returns 1 when no project name or kanban root (KANBAN_ROOT, else
+# PGAI_AGENT_KANBAN_ROOT_PATH) can be resolved.
+# ---------------------------------------------------------------------------
+pp_dev_tree_path() {
+    local project_root cfg_file
+    project_root="$(pp_project_root "${1:-}")" || return 1
+    cfg_file="$(_pp_project_cfg_file "$project_root")"
+    [[ -n "$cfg_file" ]] || return 0
+    # Source: project.cfg [project] dev_tree_path
+    _pp_read_cfg_key "$cfg_file" project dev_tree_path ""
+}
+
+# ---------------------------------------------------------------------------
 # Project Name Resolution (prefix matching against the projects.cfg registry)
 # ---------------------------------------------------------------------------
 #
@@ -403,42 +553,41 @@ pp_project_root() {
 
 # ---------------------------------------------------------------------------
 # _pp_registered_project_names <projects_cfg_path>
-# Internal helper. Echoes every registered project name, one per line, from
-# either projects.cfg format (INI `[project:NAME]` sections, or the legacy
-# `name:priority[:color]` colon form) — the same two formats
-# lib/projects.sh's projects_cfg_list already parses. This helper is
-# self-contained (no dependency on lib/projects.sh) specifically because
-# lib/projects.sh's own header requires it be sourced AFTER this file
-# (projects_cfg_active needs pp_project_halted); sourcing it from here would
-# invert that ordering constraint. Order does not matter for the caller —
-# pp_resolve_project_name only needs the set of names, not registration
-# order or priority.
+# Internal helper. Echoes every project registered in <projects_cfg_path>,
+# one per line, read by projects_cfg_list (lib/projects.sh) -- the one bash
+# registry reader, which applies the [project:NAME] header rule
+# (PROJECTS_CFG_AWK_HEADER) to an INI registry and also reads the legacy
+# `name:priority[:color]` colon form. Order does not matter to the caller:
+# pp_resolve_project_name only needs the set of names.
+#
+# lib/projects.sh must be sourced AFTER this file (projects_cfg_active
+# needs pp_project_halted), so it is sourced here lazily, on first use and
+# only when projects_cfg_list is not already loaded, inside a subshell --
+# lib/projects.sh sets a readonly palette and cannot be sourced twice.
+# Returns 1, naming the missing path on stderr, when lib/projects.sh is
+# absent or does not define projects_cfg_list.
 # ---------------------------------------------------------------------------
 _pp_registered_project_names() {
     local cfg="$1"
     [[ -f "$cfg" ]] || return 0
-    awk '
-        /^[[:space:]]*#/ { next }
-        /^[[:space:]]*$/ { next }
-        /^\[project:[a-zA-Z0-9_-]+\]$/ {
-            print substr($0, 10, length($0) - 10)
-            next
-        }
-        /^[[:space:]]*\[/ { next }
-        {
-            # Colon-legacy: name:priority[:color]. Lines with no ':' (e.g.
-            # INI key=value fields like "priority=1") split to a single
-            # field and are silently skipped — this awk block runs
-            # unconditionally over both formats rather than branching on a
-            # detected format string.
-            n = split($0, f, ":")
-            if (n >= 2) {
-                name = f[1]
-                gsub(/^[[:space:]]+|[[:space:]]+$/, "", name)
-                if (name != "") print name
+    (
+        if ! declare -F projects_cfg_list >/dev/null 2>&1; then
+            local _ppr_lib="${_PP_LIB_DIR}/projects.sh"
+            if [[ ! -f "$_ppr_lib" ]]; then
+                echo "project_paths.sh: ${_ppr_lib} not found; reinstall the kanban so lib/projects.sh is present" >&2
+                exit 1
+            fi
+            # A missing dashboard palette makes the source report failure
+            # but leaves the registry readers defined.
+            # shellcheck source=./projects.sh
+            source "$_ppr_lib" 2>/dev/null || true
+            declare -F projects_cfg_list >/dev/null 2>&1 || {
+                echo "project_paths.sh: ${_ppr_lib} did not define projects_cfg_list" >&2
+                exit 1
             }
-        }
-    ' "$cfg"
+        fi
+        KANBAN_ROOT="$(dirname "$cfg")" projects_cfg_list --registration-order 2>/dev/null
+    )
 }
 
 # ---------------------------------------------------------------------------
@@ -458,6 +607,27 @@ _pp_join_names() {
         fi
     done
     echo "$_pjn_out"
+}
+
+# ---------------------------------------------------------------------------
+# _pp_shell_quote <word>
+# Internal helper. Echoes <word> quoted for a POSIX shell exactly as
+# Python's shlex.quote does -- unchanged when every character is in
+# [A-Za-z0-9_@%+=:,./-], otherwise wrapped in single quotes with each
+# embedded ' written as '"'"' -- so a remedy the bash resolver prints is
+# byte-identical to the one its Python twin
+# (pgai_agent_kanban.ops.resolve.resolve_project_name) builds. Scripts that
+# source this lib use it for the same reason: halt-after.sh quotes its
+# remedy commands with it so they match the REST route's shlex.quote text.
+# ---------------------------------------------------------------------------
+_pp_shell_quote() {
+    # The C locale keeps the character class ASCII-only, as shlex's is.
+    local _psq_word="$1" LC_ALL=C
+    if [[ -n "$_psq_word" && "$_psq_word" =~ ^[A-Za-z0-9_@%+=:,./-]+$ ]]; then
+        printf '%s' "$_psq_word"
+    else
+        printf "'%s'" "${_psq_word//\'/\'\"\'\"\'}"
+    fi
 }
 
 # ---------------------------------------------------------------------------
@@ -555,7 +725,7 @@ pp_resolve_project_name() {
             # No project is registered at all — naming the (empty) list
             # gives the reader nothing to act on, so point at the verb
             # that registers one instead.
-            _pp_remedy="No project is registered in ${cfg}. Register one first: team/scripts/add-project.sh --project ${candidate}."
+            _pp_remedy="No project is registered in ${cfg}. Register one first: $(_pp_shell_quote "${root}/scripts/add-project.sh") --project $(_pp_shell_quote "${candidate}")."
         else
             _pp_remedy="Check the project name against projects.cfg (registered: $(_pp_join_names "${_pp_names[@]}"))."
         fi
@@ -1383,9 +1553,14 @@ pp_block_triage() {
 #
 # Project name resolution: explicit argument, then PGAI_PROJECT_NAME, then error.
 #
-# Source (checked in this order):
+# Source (checked in this order, by pp_resolve_tiered_cfg_value):
 #   1. project.cfg [locks] stale_lock_reap_after_wake_periods
 #   2. kanban.cfg  [locks] stale_lock_reap_after_wake_periods (kanban root, shipped default 3)
+#
+# Python counterpart: stale_lock_reap_periods() in
+# team/pgai_agent_kanban/ops/locks.py reads the same chain through
+# lib/project_cfg.py resolve_tiered_cfg_value(), but reads an invalid value
+# as the default instead of refusing.
 #
 # Validation: must be a positive integer in whichever source supplies it.
 # An invalid (non-integer or zero) value is a fail-loud non-zero return
@@ -1403,41 +1578,27 @@ pp_stale_lock_reap_after_wake_periods() {
 
     local kroot
     kroot="$(_pp_kanban_root)" || return 1
-    local kanban_cfg="${kroot}/kanban.cfg"
 
-    local project_root cfg_file
-    project_root="${kroot}/projects/${name}"
-    cfg_file="$(_pp_project_cfg_file "$project_root")"
+    # Tiers 1 and 2 through the shared resolver; tier 3 is the shipped
+    # default -- absence in both files is the ordinary, expected state for
+    # every project that never touches this key.
+    local -a resolved
+    mapfile -t resolved < <(pp_resolve_tiered_cfg_value --with-tier "$kroot" \
+        "${kroot}/projects/${name}" locks stale_lock_reap_after_wake_periods 3)
+    local value="${resolved[0]:-3}" tier="${resolved[1]:-default}" source_file="${resolved[2]:-}"
 
-    # Tier 1: project.cfg override.
-    local project_raw=""
-    if [[ -n "$cfg_file" ]]; then
-        project_raw="$(_pp_read_cfg_key "$cfg_file" locks stale_lock_reap_after_wake_periods "")"
+    if ! [[ "$value" =~ ^[0-9]+$ ]] || [[ "$value" -eq 0 ]]; then
+        case "$tier" in
+            project.cfg)
+                echo "project_paths.sh: pp_stale_lock_reap_after_wake_periods: invalid value '${value}' for project '${name}' in ${source_file} [locks] stale_lock_reap_after_wake_periods (expected a positive integer)" >&2
+                ;;
+            *)
+                echo "project_paths.sh: pp_stale_lock_reap_after_wake_periods: invalid value '${value}' in ${source_file} [locks] stale_lock_reap_after_wake_periods (expected a positive integer)" >&2
+                ;;
+        esac
+        return 1
     fi
-    if [[ -n "$project_raw" ]]; then
-        if ! [[ "$project_raw" =~ ^[0-9]+$ ]] || [[ "$project_raw" -eq 0 ]]; then
-            echo "project_paths.sh: pp_stale_lock_reap_after_wake_periods: invalid value '${project_raw}' for project '${name}' in ${cfg_file} [locks] stale_lock_reap_after_wake_periods (expected a positive integer)" >&2
-            return 1
-        fi
-        echo "$project_raw"
-        return 0
-    fi
-
-    # Tier 2: kanban.cfg default.
-    local kanban_raw
-    kanban_raw="$(read_ini "$kanban_cfg" locks stale_lock_reap_after_wake_periods "")"
-    if [[ -n "$kanban_raw" ]]; then
-        if ! [[ "$kanban_raw" =~ ^[0-9]+$ ]] || [[ "$kanban_raw" -eq 0 ]]; then
-            echo "project_paths.sh: pp_stale_lock_reap_after_wake_periods: invalid value '${kanban_raw}' in ${kanban_cfg} [locks] stale_lock_reap_after_wake_periods (expected a positive integer)" >&2
-            return 1
-        fi
-        echo "$kanban_raw"
-        return 0
-    fi
-
-    # Tier 3: shipped default -- absence in both files is the ordinary,
-    # expected state for every project that never touches this key.
-    echo 3
+    echo "$value"
     return 0
 }
 
@@ -1486,8 +1647,8 @@ _pp_release_key_chain() {
 #
 # Source (first non-blank wins), the same chain as pp_max_rc_retries:
 #   1. project.cfg [release] ship_posture  (or bare key in legacy PROJECT.cfg)
-#   2. kanban.cfg  [release] ship_posture  (kanban root, shipped value matrix)
-#   3. "matrix" when both are absent or blank
+#   2. kanban.cfg  [release] ship_posture  (kanban root, shipped value always)
+#   3. "always", the built-in default, when both are absent or blank
 #
 # Accepted values: matrix | always, matched exactly. Any other value
 # resolves to "matrix" and prints ONE warning line on stderr naming the file
@@ -1500,21 +1661,29 @@ _pp_release_key_chain() {
 # fails safe and agrees with the Python resolver),
 # "always" takes effect only when [release] ship_posture_confirm_remote is
 # exactly "true", read through the same project.cfg-then-kanban.cfg chain.
-# Anything short of that (absent, blank, "false", a typo) resolves to
-# "matrix" and prints ONE warning line on stderr — the guard fails safe, so
-# a lane that publishes to origin never drifts into "always" by accident.
-# Like the unrecognized-value fallback, it is not a HALT and not a refusal:
-# return status 0. On a push_to_remote = false lane the confirm key is not
+# This holds for the built-in default too. Anything short of that (absent,
+# blank, "false", a typo) resolves to "matrix" — the guard fails safe, so a
+# lane that publishes to origin never drifts into "always" by accident.
+# When a cfg file set "always" the guard prints ONE warning line on stderr,
+# since an operator asked for a posture the lane does not get; when
+# "always" is only the built-in default it resolves to "matrix" silently,
+# because nobody chose anything for the warning to correct. Like the
+# unrecognized-value fallback, it is not a HALT and not a refusal: return
+# status 0. On a push_to_remote = false lane the confirm key is not
 # consulted.
 #
 # Project name resolution: explicit argument, then PGAI_PROJECT_NAME, then
-# error (the only non-zero return, alongside an unset KANBAN_ROOT).
+# error (the only non-zero return, alongside an unresolvable kanban root --
+# see _pp_kanban_root).
 #
 # Example:
-#   pp_ship_posture "pgai-agent-kanban"      # -> matrix (key unset anywhere)
-#   pp_ship_posture "local-only-project"     # -> always (ship_posture = always,
+#   pp_ship_posture "local-only-project"     # -> always (key unset anywhere,
 #                                            #    push_to_remote = false)
-#   pp_ship_posture "published-project"      # -> matrix + warning (always set,
+#   pp_ship_posture "checked-project"        # -> matrix (ship_posture = matrix
+#                                            #    in its project.cfg)
+#   pp_ship_posture "published-project"      # -> matrix, silent (key unset,
+#                                            #    push_to_remote = true, no confirm)
+#   pp_ship_posture "opted-in-project"       # -> matrix + warning (always set,
 #                                            #    push_to_remote = true, no confirm)
 # ---------------------------------------------------------------------------
 pp_ship_posture() {
@@ -1536,11 +1705,11 @@ pp_ship_posture() {
     source_file="${chain[1]:-}"
 
     case "$raw" in
-        ""|matrix)
+        matrix)
             echo "matrix"
             return 0
             ;;
-        always)
+        ""|always)
             ;;
         *)
             echo "project_paths.sh: pp_ship_posture: WARNING: unrecognized value '${raw}' for project '${name}' in ${source_file} [release] ship_posture (accepted: matrix|always); resolving to 'matrix'." >&2
@@ -1560,6 +1729,13 @@ pp_ship_posture() {
     confirm_source="${chain[1]:-}"
     if [[ "$confirm_raw" == "true" ]]; then
         echo "always"
+        return 0
+    fi
+
+    # "always" came from the built-in default, not a cfg file: the guard
+    # still keeps the remote lane on matrix, with nothing to warn about.
+    if [[ -z "$source_file" ]]; then
+        echo "matrix"
         return 0
     fi
 
@@ -1770,6 +1946,79 @@ pp_training_agents() {
 }
 
 # ---------------------------------------------------------------------------
+# pp_targeted_test_command [name]
+# Echoes the project's targeted-run command template from [testing]
+# targeted_test_command in project.cfg, or '' when absent or empty.
+#
+# The PM materializer writes it into each CODER and WRITER ticket's
+# acceptance criteria and constraints, and rewrites a plan criterion that
+# names a configured runner without its targeted flag to it
+# (team/pm-agent/lib/acceptance_policy.py has the template rules: {files}
+# marks the test file list, several runners join with &&). Empty means the
+# project's tickets get no targeted-run criterion and no rewrite; nothing
+# falls back to kanban.cfg or to another project's value.
+#
+# Project name resolution: explicit argument, then PGAI_PROJECT_NAME, then error.
+#
+# Default when absent or empty: '' (empty string — no criterion).
+#
+# Source in project.cfg: [testing] targeted_test_command
+# Python twin: resolve_test_runner_config in team/pm-agent/pm_materialize.py.
+#
+# Example:
+#   pp_targeted_test_command "my-project"
+#   # -> 'scripts/run-unit-tests.sh {files}' (when configured)
+# ---------------------------------------------------------------------------
+pp_targeted_test_command() {
+    local name
+    name="$(pp_require_project_context "${1:-}")" || { echo ""; return 0; }
+    local project_root cfg_file
+    project_root="$(pp_project_root "$name" 2>/dev/null)" || { echo ""; return 0; }
+    cfg_file="$(_pp_project_cfg_file "$project_root")"
+
+    [[ -n "$cfg_file" ]] || { echo ""; return 0; }
+
+    # Source: project.cfg [testing] targeted_test_command
+    _pp_read_cfg_key "$cfg_file" testing targeted_test_command ""
+    echo
+}
+
+# ---------------------------------------------------------------------------
+# pp_pre_merge_command [name]
+# Echoes the project's pre-merge command from [testing] pre_merge_command in
+# project.cfg, or '' when absent or empty.
+#
+# The PM materializer closes each CODER and WRITER ticket's acceptance
+# criteria with "`<command>` exits 0 before merging." Empty means the
+# project's tickets get no pre-merge criterion; nothing falls back to
+# kanban.cfg or to another project's value.
+#
+# Project name resolution: explicit argument, then PGAI_PROJECT_NAME, then error.
+#
+# Default when absent or empty: '' (empty string — no criterion).
+#
+# Source in project.cfg: [testing] pre_merge_command
+# Python twin: resolve_test_runner_config in team/pm-agent/pm_materialize.py.
+#
+# Example:
+#   pp_pre_merge_command "my-project"
+#   # -> 'scripts/check-all.sh --quick' (when configured)
+# ---------------------------------------------------------------------------
+pp_pre_merge_command() {
+    local name
+    name="$(pp_require_project_context "${1:-}")" || { echo ""; return 0; }
+    local project_root cfg_file
+    project_root="$(pp_project_root "$name" 2>/dev/null)" || { echo ""; return 0; }
+    cfg_file="$(_pp_project_cfg_file "$project_root")"
+
+    [[ -n "$cfg_file" ]] || { echo ""; return 0; }
+
+    # Source: project.cfg [testing] pre_merge_command
+    _pp_read_cfg_key "$cfg_file" testing pre_merge_command ""
+    echo
+}
+
+# ---------------------------------------------------------------------------
 # validate_branch_prefix <value>
 # Validates the candidate branch_prefix string against the allowed character
 # class: letters (a-z, A-Z), digits (0-9), underscore (_), hyphen (-).
@@ -1893,7 +2142,8 @@ _pp_load_push_decision() {
 #     stripped from each side before the comparison.
 #   - Resolved project, push_to_remote = false -> 'false'.
 #   - Unresolved project (unregistered, no project config, no dev_tree_path),
-#     no project context, unset KANBAN_ROOT, or a resolver that cannot run
+#     no project context, no resolvable kanban root (_pp_kanban_root), or a
+#     resolver that cannot run
 #     -> 'false'. Never 'true' by default.
 #
 # Quiet: prints only the answer. A site that must also log why an
@@ -2073,9 +2323,9 @@ pp_strip_prefix_from_tag() {
 # ---------------------------------------------------------------------------
 # PP_GIT_REMOTE_NAME_DEFAULT
 # The remote pp_git_remote_name answers when [project] git_remote_name is
-# absent or blank, or the project has no config file at all.
+# absent or blank, or the project has no config file at all. Defined once,
+# in git_remote_default.sh, which this library sources when it loads.
 # ---------------------------------------------------------------------------
-PP_GIT_REMOTE_NAME_DEFAULT="origin"
 
 # ---------------------------------------------------------------------------
 # validate_git_remote_name <value>
@@ -2695,7 +2945,7 @@ _pp_warn_release_key_misplaced() {
 #
 # Python counterpart: _read_deep_verify_mode_raw() and
 # get_deep_verify_status() in team/pgai_agent_kanban/ops/read.py read the
-# same chain through resolution_matrix._release_key_chain().
+# same chain through lib/project_cfg.py resolve_tiered_cfg_value().
 #
 # Example:
 #   pp_deep_verify_mode "pgai-agent-kanban"    # -> "weekly" (unset in both files)

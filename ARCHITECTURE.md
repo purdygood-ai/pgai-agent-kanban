@@ -49,7 +49,7 @@ Seven role files ship under `team/roles/`. Six are the pipeline that advances a 
 | `WRITER` | Wake script (`writer` queue) | Standalone documents: guides, role files, SOPs, release notes, long-form prose. Same git contract as CODER. |
 | `TESTER` | Wake script (`tester` queue) | Verifies the RC against requirements. Files findings to `bugs/` and a structured report. Observation-only — never creates kanban tickets. Halts the chain only on pre-flight failure. |
 | `CM` | Wake script (`cm` queue) | Branch/merge/tag mechanics. Applies ship/no-ship policy. The sole agent that touches origin. |
-| `OVERWATCH` | Wake script (`overwatch`), plus a separate sweep runner | Horizontal self-monitor outside the RC pipeline. Tier 1 is a deterministic bash sweep over every registered project; Tier 2 is an LLM deep-clean that files quality bugs for anything outside the auto-fix whitelist. An on-BLOCK trigger wakes it when any task transitions to `BLOCKED`. It never advances a release. |
+| `OVERWATCH` | Sweep runner (`scripts/overwatch-sweep.sh`): hourly cron, plus the on-BLOCK nudge | Horizontal self-monitor outside the RC pipeline, with no queue and no model wake. One hourly deterministic bash sweep runs the whitelist checks over every registered project; its block-triage check runs the decision wake, which decides each stop once. An on-BLOCK nudge runs the sweep's block triage within seconds when a wake chain blocks a task. It never advances a release. |
 
 PO is the only agent an operator starts by hand. Once requirements docs exist, the rest of the pipeline is autonomous.
 
@@ -173,7 +173,7 @@ projects/<name>/hooks/
 └── cm-release-post-tag.sh     # after tag, before the tag is pushed
 ```
 
-A pre-squash or pre-tag hook that fails — or that exists but is not executable — HALTs the release. A post-tag hook failure is a logged warning only and does not block: the tag already exists locally by then. Projects without a `hooks/` directory behave as the framework default.
+A pre-squash hook that fails HALTs the release. A pre-tag hook that fails stops the release before the tag with an operator inbox entry and no HALT; the squash to main stands. A hook that exists but is not executable HALTs in either phase. A post-tag hook failure is a logged warning only and does not block: the tag already exists locally by then. Projects without a `hooks/` directory behave as the framework default.
 
 ---
 
@@ -209,13 +209,15 @@ The loader carries its own Key Registry — the accepted section/key set with ea
 
 ### Temp root resolution
 
-A single resolver (`temp.sh`) provides the temp directory for all transient output, routed through one set of `pgai_temp_*` helpers rather than scattered `mktemp`/`/tmp` calls. Resolution order, highest precedence first:
+One Python function resolves the temp directory for all transient output: `resolve_temp_root` in the library module `pgai_agent_kanban.lib.temp_root` (under `team/`), the one place the precedence and the last-resort constant `FALLBACK_TEMP_ROOT` are defined. `team/scripts/lib/temp.sh` is its bash wrapper: `pgai_temp_dir` and the `pgai_mktemp*` / `pgai_temp_*` helpers built on it give bash callers the same answer, so no caller carries its own `mktemp`/`/tmp` logic.
 
-1. `PGAI_AGENT_KANBAN_TEMP_DIR` — if already set in the environment, used as-is.
-2. `${tmp_root}/${tmp_subdir}` from `kanban.cfg [paths]`, located through `PGAI_AGENT_KANBAN_ROOT_PATH`, or by the library self-locating its own install root when that variable is unset.
-3. A last-resort fallback, used only when the config is unreadable.
+temp.sh keeps the rule in bash rather than starting an interpreter on every call, so a rule change is made in both files. `team/tests/unit/test_temp_root_parity.py` runs both against one case table, `team/tests/fixtures/temp_root_cases.json`, and fails on any difference. Resolution order, highest precedence first:
 
-The resolver never returns empty or `/`. When `pp_load_config` has run for a project, `PP_TEMP_DIR` holds that project's own temp path and the project-aware helpers place files there. The result: the framework's temp footprint is configurable and relocatable, and transient files stay out of shared `/tmp`.
+1. `PGAI_AGENT_KANBAN_TEMP_DIR` — when set and not blank, used with surrounding whitespace dropped.
+2. `${tmp_root}/${tmp_subdir}` from `kanban.cfg [paths]`, each key taking its own default when absent or blank (`tmp_root` `/tmp`, `tmp_subdir` `pgai_kanban_tmp`), so a lone `tmp_root` gives `<tmp_root>/pgai_kanban_tmp`. The `kanban.cfg` read is the one under the kanban root the caller passes; without one, the one under `PGAI_AGENT_KANBAN_ROOT_PATH`, then the one in the install the resolver itself sits in.
+3. `FALLBACK_TEMP_ROOT` (`/tmp/pgai_kanban_tmp`, the two defaults joined), when no `kanban.cfg` is readable.
+
+The resolver never returns empty or `/`: a value that canonicalises to the filesystem root is replaced by the fallback on every tier, the override included. When `pp_load_config` has run for a project, `PP_TEMP_DIR` holds that project's own temp path and the project-aware helpers place files there. The result: the framework's temp footprint is configurable and relocatable, and transient files stay out of shared `/tmp`.
 
 **TMPDIR bridge**: the config loader exports `TMPDIR` derived from the resolved temp root, so standard tooling — `mktemp`, Python's `tempfile`, anything POSIX — lands in the framework temp root by default rather than bare `/tmp`. The bridge is a downstream consumer of the single resolver, not a second resolution site: `kanban.cfg [paths] tmp_root + tmp_subdir` remains the only place the value is configured.
 
@@ -426,7 +428,7 @@ The same per-RC rollups under `projects/<name>/metrics/rc/` are the source the m
 
 Two interchangeable schedulers drive the continuous mode:
 
-- **System cron** — the default. The installed crontab fires each pipeline agent every two minutes on a sub-minute stagger: PM, CM, and TESTER on even minutes (`--sleep=0/21/42`), CODER and WRITER on odd minutes (`--sleep=0/21`). OVERWATCH gets two lines of its own — an hourly Tier-1 sweep and a daily Tier-2 wake — plus separate cleanup entries. The annotated template is `team/templates/install/crontab.example`; `install-crontab.sh` installs it.
+- **System cron** — the default. The installed crontab fires each pipeline agent every two minutes on a sub-minute stagger: PM, CM, and TESTER on even minutes (`--sleep=0/21/42`), CODER and WRITER on odd minutes (`--sleep=0/21`). OVERWATCH gets one line of its own — the hourly deterministic sweep — plus separate cleanup entries; its on-BLOCK nudge fires from the wake chain, not from cron. The annotated template is `team/templates/install/crontab.example`; `install-crontab.sh` installs it.
 - **Pseudocron** — a self-contained scheduler for hosts without usable cron (containers, restricted environments), installed via `install-pseudocron.sh` with small/medium/large tier templates and parity with the system-cron tiers.
 
 ---

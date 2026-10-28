@@ -80,26 +80,26 @@ def test_two_project_root_isolates_projects_from_each_other(
 ) -> None:
     """two_project_root fixture creates independent project directories.
 
-    Writing to project_a's release state must not affect project_b's release
+    Writing to project-a's release state must not affect project-b's release
     state, demonstrating the per-project isolation that single-project fixtures
     cannot verify (TESTING.md failure mode 3).
     """
-    project_a_state = two_project_root / "projects" / "project_a" / "release-state.md"
-    project_b_state = two_project_root / "projects" / "project_b" / "release-state.md"
+    project_a_state = two_project_root / "projects" / "project-a" / "release-state.md"
+    project_b_state = two_project_root / "projects" / "project-b" / "release-state.md"
 
-    assert project_a_state.exists(), "project_a must have release-state.md"
-    assert project_b_state.exists(), "project_b must have release-state.md"
+    assert project_a_state.exists(), "project-a must have release-state.md"
+    assert project_b_state.exists(), "project-b must have release-state.md"
 
-    # Mutate project_a's state.
+    # Mutate project-a's state.
     project_a_state.write_text(
         "# Release State\n\n## Active RC\nrc/v9.9.9\n",
         encoding="utf-8",
     )
 
-    # project_b's state must be unchanged.
+    # project-b's state must be unchanged.
     b_content = project_b_state.read_text(encoding="utf-8")
     assert "rc/v9.9.9" not in b_content, (
-        "Mutating project_a's release state must not affect project_b's state"
+        "Mutating project-a's release state must not affect project-b's state"
     )
 
 

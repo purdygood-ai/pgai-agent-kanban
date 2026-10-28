@@ -64,14 +64,14 @@ _RGT_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # --- Source optional config files ---
 [[ -f "$TEAM_ROOT/bashrc" ]] && source "$TEAM_ROOT/bashrc"
 [[ -f "$TEAM_ROOT/env" ]] && source "$TEAM_ROOT/env"
-[[ -f "$HOME/.config/pgai-kanban.cfg" ]] && source "$HOME/.config/pgai-kanban.cfg"
+# Operator user config, then [chain] pm_mode (config_loader.sh).
+# shellcheck source=lib/config_loader.sh
+source "${_RGT_SCRIPT_DIR}/lib/config_loader.sh"
+config_startup_prelude "$TEAM_ROOT"
 # shellcheck source=lib/ini_parser.sh
 [[ -f "${_RGT_SCRIPT_DIR}/lib/ini_parser.sh" ]] && source "${_RGT_SCRIPT_DIR}/lib/ini_parser.sh"
 # shellcheck source=lib/dev_tree.sh
 source "${_RGT_SCRIPT_DIR}/lib/dev_tree.sh"
-if [[ -f "$TEAM_ROOT/kanban.cfg" ]]; then
-    export PGAI_KANBAN_PM_MODE="${PGAI_KANBAN_PM_MODE:-$(read_ini "$TEAM_ROOT/kanban.cfg" chain pm_mode automatic)}"
-fi
 # shellcheck source=lib/temp.sh
 [[ -f "${_RGT_SCRIPT_DIR}/lib/temp.sh" ]] && source "${_RGT_SCRIPT_DIR}/lib/temp.sh"
 # shellcheck source=lib/gated_runner_lint.sh

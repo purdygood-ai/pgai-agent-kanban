@@ -57,6 +57,10 @@ source "${SCRIPT_DIR}/../lib/projects.sh"
 source "${SCRIPT_DIR}/../lib/dev_tree.sh"
 # shellcheck source=lib/script_common.sh
 source "${SCRIPT_DIR}/../lib/script_common.sh"
+# pp_run_ops: the renderer below runs from this tree's own pgai_agent_kanban
+# package.
+# shellcheck source=../lib/pp_run_ops.sh
+source "${SCRIPT_DIR}/../lib/pp_run_ops.sh"
 
 # --- Pass through args ---
 DATA_ARGS=("$@")
@@ -73,11 +77,10 @@ while [[ $_i -lt ${#_args[@]} ]]; do
   fi
   _i=$(( _i + 1 ))
 done
-# Source: kanban.cfg [chain/paths] — INI format replaces legacy config.cfg
-# read_ini available via project_paths.sh (sourced above).
-if [[ -f "${KANBAN_ROOT}/kanban.cfg" ]]; then
-    export PGAI_KANBAN_PM_MODE="${PGAI_KANBAN_PM_MODE:-$(read_ini "${KANBAN_ROOT}/kanban.cfg" chain pm_mode automatic)}"
-fi
+# Operator user config, then [chain] pm_mode (config_loader.sh).
+# shellcheck source=../lib/config_loader.sh
+source "${SCRIPT_DIR}/../lib/config_loader.sh"
+config_startup_prelude "$KANBAN_ROOT"
 export PGAI_DEV_TREE_PATH="${PGAI_DEV_TREE_PATH:-$(resolve_global_dev_tree)}"
 
 set -euo pipefail
@@ -105,12 +108,14 @@ else
 fi
 echo ""
 
-# --- Render blocked tasks via python ---
+# --- Render blocked tasks ---
 # Iterate all registered projects (iterate-all).
-# The Python renderer is called once per project so blocked tasks from every
+# The renderer is called once per project so blocked tasks from every
 # registered project are shown.  On a single-project install the loop runs
 # once and behaviour is unchanged.  When no projects are registered the
-# renderer receives "" and shows "(no blocked tasks — system running normally)".
+# renderer receives "" for the tasks directory.  task_panes reads every ##
+# section through pgai_agent_kanban.task_status in one interpreter per
+# project, where a read_md_field call per status.md would start one per task.
 _sha_task_roots=()
 while IFS= read -r _sha_project; do
     [[ -z "$_sha_project" ]] && continue
@@ -121,121 +126,7 @@ if [[ ${#_sha_task_roots[@]} -eq 0 ]]; then
     _sha_task_roots=("")
 fi
 for _sha_tasks_dir in "${_sha_task_roots[@]}"; do
-python3 - "${_sha_tasks_dir}" "$USE_COLOR" \
-    "$RESET" "$C_RED" "$C_BOLD" "$C_DIM" "$C_CYAN" "$C_YELLOW" \
-    <<'PY'
-import os, re, sys, pathlib, time
-
-tasks_root = pathlib.Path(sys.argv[1])
-use_color  = sys.argv[2].lower() == "true"
-
-# RESET/C_RED/C_BOLD/C_DIM/C_CYAN/C_YEL are already the single-sourced
-# escapes (or "" in NO_COLOR mode) computed by the bash caller via
-# ansi_code() (team/scripts/lib/script_common.sh) -- threaded through argv
-# rather than a second hand-transcribed copy of the same escape table.
-RESET, C_RED, C_BOLD, C_DIM, C_CYAN, C_YEL = sys.argv[3:9]
-ARROW  = "\u25b6" if use_color else ">"
-
-def read_field(text, heading):
-    """Return first non-blank content line after '## heading'."""
-    pat = re.compile(r'^##\s+' + re.escape(heading) + r'\s*$', re.M | re.I)
-    m = pat.search(text)
-    if not m:
-        return ""
-    rest = text[m.end():]
-    for line in rest.splitlines():
-        stripped = line.strip()
-        if stripped.startswith("## "):
-            break
-        if stripped:
-            return stripped
-    return ""
-
-def read_section(text, heading, max_lines=5):
-    """Return up to max_lines content lines from a ## section."""
-    pat = re.compile(r'^##\s+' + re.escape(heading) + r'\s*$', re.M | re.I)
-    m = pat.search(text)
-    if not m:
-        return []
-    rest = text[m.end():]
-    lines = []
-    for line in rest.splitlines():
-        stripped = line.strip()
-        if stripped.startswith("## "):
-            break
-        if stripped:
-            lines.append(stripped)
-            if len(lines) >= max_lines:
-                break
-    return lines
-
-def format_elapsed(secs):
-    if secs < 60:
-        return f"{secs}s"
-    elif secs < 3600:
-        return f"{secs // 60}m ago"
-    else:
-        hrs = secs // 3600
-        mins = (secs % 3600) // 60
-        return f"{hrs}h {mins}m ago"
-
-found_any = False
-now = int(time.time())
-
-if tasks_root.is_dir():
-    for task_dir in sorted(tasks_root.iterdir()):
-        if not task_dir.is_dir():
-            continue
-        task_id = task_dir.name
-        if task_id in {"archive", "queues", "plans"}:
-            continue
-        status_file = task_dir / "status.md"
-        if not status_file.is_file():
-            continue
-        try:
-            status_text = status_file.read_text(errors="replace")
-        except OSError:
-            continue
-
-        state = read_field(status_text, "State").upper()
-        if state != "BLOCKED":
-            continue
-
-        found_any = True
-
-        # Get mtime for "blocked since"
-        try:
-            mtime = int(status_file.stat().st_mtime)
-            elapsed_secs = now - mtime
-            from datetime import datetime
-            blocked_since = datetime.fromtimestamp(mtime).strftime("%H:%M:%S")
-            elapsed_str = format_elapsed(elapsed_secs)
-        except (OSError, OverflowError):
-            blocked_since = "unknown"
-            elapsed_str = ""
-
-        # Extract reason and next step
-        reason_lines = read_section(status_text, "Blocked Reason", max_lines=3)
-        if not reason_lines:
-            reason_lines = read_section(status_text, "Blockers", max_lines=3)
-        next_step_lines = read_section(status_text, "Next Recommended Step", max_lines=3)
-
-        # Render the blocked task block
-        print(f"{ARROW} {C_RED}{C_BOLD}{task_id}{RESET}")
-        if blocked_since != "unknown":
-            print(f"  Blocked since: {C_DIM}{blocked_since} ({elapsed_str}){RESET}")
-        if reason_lines:
-            print(f"  {C_YEL}Reason:{RESET}")
-            for line in reason_lines:
-                print(f"    {line}")
-        if next_step_lines:
-            print(f"  {C_CYAN}Recommended next step:{RESET}")
-            for line in next_step_lines:
-                print(f"    {line}")
-        print("")
-
-if not found_any:
-    print(f"  {C_DIM}(no blocked tasks \u2014 system running normally){RESET}")
-    print("")
-PY
+  pp_run_ops pgai_agent_kanban.dashboard.task_panes attention-blocked "${_sha_tasks_dir}" \
+    --use-color "$USE_COLOR" --reset "$RESET" --red "$C_RED" --bold "$C_BOLD" \
+    --dim "$C_DIM" --cyan "$C_CYAN" --yellow "$C_YELLOW"
 done

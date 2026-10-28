@@ -14,6 +14,7 @@ the REST routes and the operator scripts print the same bytes:
     metrics-report.sh --format jsonl rc_rollups_jsonl()             history
     dashboard/costs.sh              cost_block(), rc_label(),       costs_pane
                                     sum_amounts()
+    dashboard/metrics.sh            metrics_pane_lines()            metrics_pane
     GET /agent-metrics,             compute_agent_averages()        lib.agent_metrics
     agent-metrics.sh                (rendered by agents.main())     (agents)
 
@@ -32,6 +33,7 @@ from .common import TextResult, color_enabled
 from .costs import cost_report
 from .costs_pane import cost_block, rc_label, render_cost_block, sum_amounts
 from .history import history_csv, rc_rollups_jsonl, read_history_csv, show_metrics
+from .metrics_pane import metrics_pane_lines
 from .rows import costs_rows_for_scope, metrics_rows_for_project
 
 __all__ = [
@@ -42,6 +44,7 @@ __all__ = [
     "cost_report",
     "costs_rows_for_scope",
     "history_csv",
+    "metrics_pane_lines",
     "metrics_rows_for_project",
     "rc_label",
     "rc_rollups_jsonl",

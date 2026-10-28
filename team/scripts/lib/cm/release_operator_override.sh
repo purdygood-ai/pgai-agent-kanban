@@ -23,16 +23,15 @@
 # ---------------------------------
 # release.sh's --force / --reason flags (parsed and refused-if-invalid in
 # release.sh itself, before this file or release_ship_policy.sh ever runs)
-# pass exactly three named ship-policy matrix stops, enumerated at each of
-# release_ship_policy.sh's call sites: trigger-1 (TESTER BLOCKED), trigger-2
-# (systemic_risk=high), and trigger-3 (SHIP-WITH-SERIOUS-CONCERNS + a
-# large-fix finding) — the matrix's own judgement calls about THIS release's
-# findings. Everything else the matrix can HALT on is explicitly OUT of
-# --force's reach, by default and by enumeration at those same call sites:
-#   - the found-but-unrecognized-TESTER-state row and the "no known matrix
-#     row matched" catch-all (a data-integrity guard, not a judgement call —
-#     a HALT here means the inputs themselves are untrustworthy, which an
-#     operator's opinion about severity cannot fix);
+# pass exactly two named ship-policy matrix stops, enumerated at
+# release_ship_policy.sh's call sites: trigger-2 (systemic_risk=high) and
+# trigger-3 (SHIP-WITH-SERIOUS-CONCERNS + a large-fix finding) — the
+# matrix's own judgement calls about THIS release's findings, and its only
+# rows left that HALT. A TESTER report problem (a BLOCKED TESTER task, a
+# missing report, an unrecognized TESTER state, the "no known matrix row
+# matched" catch-all) never HALTs (release_verification_retry.sh), so
+# --force has nothing to pass there. Everything else is explicitly OUT of
+# --force's reach:
 #   - Step 4c's last-3-RCs-NON-FUNCTIONAL pattern guard (trigger-8) — a
 #     deliberate design decision: this guard fires on a PATTERN across
 #     several releases (the autonomous chain repeatedly failing to

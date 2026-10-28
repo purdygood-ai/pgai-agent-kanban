@@ -12,11 +12,17 @@ task on disk is involved -- cm_ship_policy is a pure string-in/string-out
 function by design (see its own header doc in release_ship_policy.sh).
 
 Coverage:
-  - Every row of the ship-policy matrix (team/roles/CM.md, "Ship policy"),
-    including the fail-loud rows this file's production change does not
-    alter: TESTER state BLOCKED, low/medium-risk recommendations, no
-    TESTER task found at all, and a found TESTER task in an unrecognized
-    state.
+  - Every row of the ship-policy matrix (team/roles/CM.md, "Ship policy"):
+    low/medium-risk recommendations, no TESTER task found at all, a found
+    TESTER task in an unrecognized state (the SHIP-WITH-CONCERNS row, never
+    HALT), and verification that did not run -- TESTER state BLOCKED, or a
+    DONE task with no report -- which decides REQUEUE-VERIFICATION while
+    the RC's one requeue is available and SHIP-NON-FUNCTIONAL once it is
+    spent (cm_verification_case names which case it was).
+  - A requeued TESTER task that has not finished yet (BACKLOG, WORKING or
+    WAITING once the RC's requeue is spent) decides VERIFICATION-PENDING:
+    no release notes, no second requeue, and the stage narrates it through
+    the dual-channel notice without calling the requeue module.
   - The systemic_risk=high row this task narrows: a regression, integrity
     damage, or a large fix effort on the high-risk finding each still
     halts; a pre-existing, non-integrity-damaging, small-fix finding now
@@ -89,9 +95,10 @@ def _ship_policy(*args: str) -> str:
 @pytest.mark.parametrize(
     "args, expected",
     [
-        # Row 1: TESTER state BLOCKED halts regardless of every other field.
-        (("blocked", "high", "pass", "no", "yes", "no", "none"), "HALT"),
-        (("blocked", "low", "ship-with-concerns", "no", "yes", "no", "none"), "HALT"),
+        # Row 1: TESTER state BLOCKED is verification that did not run:
+        # requeued once (the retry defaults to available), never HALT.
+        (("blocked", "high", "pass", "no", "yes", "no", "none"), "REQUEUE-VERIFICATION"),
+        (("blocked", "low", "ship-with-concerns", "no", "yes", "no", "none"), "REQUEUE-VERIFICATION"),
         # Row 3: DONE, low/medium risk, PASS -> SHIP-FUNCTIONAL.
         (("done", "low", "pass", "no", "yes", "no", "none"), "SHIP-FUNCTIONAL"),
         (("done", "medium", "pass", "no", "yes", "no", "none"), "SHIP-FUNCTIONAL"),
@@ -107,15 +114,153 @@ def _ship_policy(*args: str) -> str:
         # "no report, Test Required: false" row).
         (("none", "none", "none", "no", "no", "no", "none"), "SHIP-FUNCTIONAL"),
         # Row 8: a TESTER task was found but its state is neither BLOCKED
-        # nor DONE -> HALT ("unrecognized values" row).
-        (("working", "none", "none", "no", "yes", "no", "none"), "HALT"),
-        (("wont-do", "none", "none", "no", "yes", "no", "none"), "HALT"),
+        # nor DONE -> the SHIP-WITH-CONCERNS row ("unrecognized values"),
+        # never HALT and never the test-not-required SHIP-FUNCTIONAL row.
+        (("working", "none", "none", "no", "yes", "no", "none"), "SHIP-KNOWN-BUGS"),
+        (("wont-do", "none", "none", "no", "yes", "no", "none"), "SHIP-KNOWN-BUGS"),
     ],
 )
 def test_fail_loud_and_unaffected_rows_unchanged(tmp_path, args, expected):
     result = run_bash(tmp_path, _ship_policy(*args))
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == expected
+
+
+# ---------------------------------------------------------------------------
+# Verification that did not run: requeued once per RC, then shipped
+# NON-FUNCTIONAL. Arguments 8 and 9 are report_found and verification_retry.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "args, expected",
+    [
+        # BLOCKED, retry available -> requeue; spent -> NON-FUNCTIONAL.
+        (("blocked", "none", "none", "no", "yes", "unknown", "unknown", "yes", "available"), "REQUEUE-VERIFICATION"),
+        (("blocked", "none", "none", "no", "yes", "unknown", "unknown", "yes", "spent"), "SHIP-NON-FUNCTIONAL"),
+        # DONE with no report (verification ordered, report missing): same pair.
+        (("done", "none", "none", "no", "yes", "unknown", "unknown", "no", "available"), "REQUEUE-VERIFICATION"),
+        (("done", "none", "none", "no", "yes", "unknown", "unknown", "no", "spent"), "SHIP-NON-FUNCTIONAL"),
+        # Even a high-risk value never turns a missing report into a HALT.
+        (("done", "high", "pass", "yes", "yes", "yes", "breakage", "no", "available"), "REQUEUE-VERIFICATION"),
+        # A DONE task whose report exists reads the ordinary rows, spent or not.
+        (("done", "low", "pass", "no", "yes", "no", "none", "yes", "spent"), "SHIP-FUNCTIONAL"),
+        # After the requeue, an unrecognised state (the decision wake's
+        # WONT-DO close) is verification that did not run.
+        (("wont-do", "none", "none", "no", "yes", "unknown", "unknown", "no", "spent"), "SHIP-NON-FUNCTIONAL"),
+        (("w0rking", "none", "none", "no", "yes", "unknown", "unknown", "no", "available"), "SHIP-KNOWN-BUGS"),
+        # No TESTER task at all: verification was not ordered, nothing to requeue.
+        (("none", "none", "none", "no", "no", "unknown", "unknown", "yes", "available"), "SHIP-FUNCTIONAL"),
+    ],
+)
+def test_verification_that_did_not_run_requeues_once_then_ships_non_functional(tmp_path, args, expected):
+    result = run_bash(tmp_path, _ship_policy(*args))
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == expected
+
+
+@pytest.mark.parametrize(
+    "halt_key, decision",
+    [
+        # The no-row-matched catch-all and any other non-2/3 row floor to
+        # the SHIP-WITH-CONCERNS row; triggers 2 and 3 stay HALTs.
+        ("cm-release.ship-policy.halt", "SHIP-KNOWN-BUGS"),
+        ("cm-release.ship-policy.tester-state-unrecognized", "SHIP-KNOWN-BUGS"),
+        ("cm-release.trigger-1.tester-blocked", "SHIP-KNOWN-BUGS"),
+        ("cm-release.trigger-2.systemic-risk-high", "HALT"),
+        ("cm-release.trigger-3.serious-concerns-large-fix", "HALT"),
+    ],
+)
+def test_a_halt_on_no_named_row_floors_to_known_bugs_and_triggers_two_three_stay(tmp_path, halt_key, decision):
+    # Under decide-only the floor files nothing and records nothing, so the
+    # probe needs no bugs directory or registered project.
+    script = (
+        f"source {_LIB} && source scripts/lib/error_contract.sh && "
+        "source scripts/lib/cm/release_decide_only.sh && _CM_DECIDE_ONLY=true && "
+        f"_SHIP_DECISION=HALT _SHIP_HALT_KEY='{halt_key}' _TESTER_STATUS=done _TESTER_SYSTEMIC_RISK=HIGH "
+        f"_TESTER_RECOMMENDATION=pass _TESTER_TASK_ID=TESTER-20260101-001-verify _CM_PROJECT_ROOT='{tmp_path}' "
+        "ACTIVE_RC=v1.2.3 PROJECT_NAME=demo && cm_verification_floor_unreadable_halt >/dev/null && "
+        'echo "decision=$_SHIP_DECISION"'
+    )
+    result = run_bash(tmp_path, script)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == f"decision={decision}"
+    if decision == "SHIP-KNOWN-BUGS":
+        assert f"error:   {halt_key}" in result.stderr, result.stderr
+
+
+@pytest.mark.parametrize(
+    "state, task_found, report, spent, expected",
+    [
+        ("BLOCKED", "yes", "", "available", "tester-blocked"),
+        ("done", "yes", "", "available", "report-missing"),
+        ("done", "yes", "REPORT", "available", ""),
+        ("WONT-DO", "yes", "", "spent", "tester-blocked"),
+        ("WONT-DO", "yes", "", "available", ""),
+        ("none", "no", "", "available", ""),
+        # After the requeue, a task that has not finished yet is pending.
+        ("BACKLOG", "yes", "", "spent", "verification-pending"),
+        ("WORKING", "yes", "", "spent", "verification-pending"),
+        ("waiting", "yes", "", "spent", "verification-pending"),
+        (" Working ", "yes", "", "spent", "verification-pending"),
+        ("WORKING", "yes", "", "available", ""),
+        ("w0rking", "yes", "", "spent", "tester-blocked"),
+    ],
+)
+def test_verification_case_names_which_verification_did_not_run(tmp_path, state, task_found, report, spent, expected):
+    report_path = ""
+    if report:
+        report_file = tmp_path / "report.md"
+        report_file.write_text("# report\n", encoding="utf-8")
+        report_path = str(report_file)
+    script = (
+        f"source {_LIB} && _VERIFICATION_RETRY='{spent}' && "
+        f"cm_verification_case '{state}' '{task_found}' '{report_path}'"
+    )
+    result = run_bash(tmp_path, script)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == expected
+
+
+@pytest.mark.parametrize("state", ["backlog", "WORKING", "Waiting"])
+def test_a_requeued_task_not_finished_yet_decides_pending_never_a_ship(tmp_path, state):
+    spent = (state, "none", "none", "no", "yes", "unknown", "unknown", "no", "spent")
+    result = run_bash(tmp_path, _ship_policy(*spent))
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "VERIFICATION-PENDING"
+    # The same state before the requeue is spent keeps its own row.
+    available = spent[:-1] + ("available",)
+    result = run_bash(tmp_path, _ship_policy(*available))
+    assert result.stdout.strip() == "SHIP-KNOWN-BUGS"
+
+
+def test_a_pending_decision_stamps_no_release_notes_status(tmp_path):
+    script = f"source {_LIB} && echo \"[$(cm_ship_policy_notes_status VERIFICATION-PENDING)]\""
+    result = run_bash(tmp_path, script)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "[]"
+
+
+def test_the_pending_stage_narrates_and_never_calls_the_requeue_module(tmp_path):
+    calls = tmp_path / "pp_run_ops.calls"
+    script = (
+        f"source {_LIB} && "
+        f"pp_run_ops() {{ echo \"$*\" >> '{calls}'; }} && "
+        'pgai_emit_error_contract() { echo "error:   $1" >&2; } && '
+        "_VERIFICATION_RETRY=spent _SHIP_DECISION=VERIFICATION-PENDING _TESTER_STATUS=WORKING "
+        "_TESTER_TASK_FOUND=yes _TESTER_REPORT_PATH='' _TESTER_TASK_ID=TESTER-20260101-001-verify "
+        f"_CM_PROJECT_ROOT='{tmp_path}' ACTIVE_RC=v1.2.3 PROJECT_NAME=demo KANBAN_ROOT='{tmp_path}' && "
+        "unset PGAI_TASK_ID && cm_verification_retry_apply_decision && "
+        'echo "decision=$_SHIP_DECISION case=$_VERIFICATION_CASE requeued=$_VERIFICATION_REQUEUED '
+        'unverified=$_VERIFICATION_UNVERIFIED"'
+    )
+    result = run_bash(tmp_path, script)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip().splitlines()[-1] == (
+        "decision=VERIFICATION-PENDING case=verification-pending requeued=no unverified=no"
+    )
+    assert "error:   cm-release.verification-pending" in result.stderr, result.stderr
+    assert not calls.exists(), f"no requeue, cause or inbox call is made: {calls.read_text()}"
 
 
 # ---------------------------------------------------------------------------

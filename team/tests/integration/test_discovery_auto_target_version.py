@@ -39,7 +39,7 @@ from tests.fixtures.scrubbed_subprocess_env import build_scrubbed_env
 _TEAM_DIR = pathlib.Path(__file__).parent.parent.parent  # team/
 _LIB = _TEAM_DIR / "scripts" / "lib"
 _PM_AGENT = _TEAM_DIR / "scripts" / "pm-agent.sh"
-_PROJECT = "project_a"
+_PROJECT = "project-a"
 _REQ_NAME = "v2.5.1-auto-feature.md"
 
 
@@ -267,7 +267,7 @@ def test_manual_pm_agent_refuses_a_sentinel_and_queues_nothing(lane, tmp_path, t
     refusal = parse_error_contract(result.stderr[result.stderr.find("error:"):])
     assert refusal is not None, result.stderr
     assert refusal["error"] == "pm-agent.target-version-not-explicit"
-    assert "--auto --project project_a" in refusal["remedy"]
+    assert "--auto --project project-a" in refusal["remedy"]
     assert "<" not in refusal["remedy"]
     assert _pm_tickets(root) == []
     assert _pm_backlog_entries(root) == []

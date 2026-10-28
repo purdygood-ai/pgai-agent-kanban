@@ -43,6 +43,7 @@ import sys
 import pytest
 
 from tests.fixtures.scrubbed_subprocess_env import build_scrubbed_env
+from tests.fixtures.section_reader_modules import copy_section_reader_modules
 
 _TEAM_DIR = pathlib.Path(__file__).parent.parent.parent
 _SCRIPTS_DIR = _TEAM_DIR / "scripts"
@@ -82,6 +83,7 @@ _GATE_PY_SCRIPTS = [
     "lint_gate_census_compliance.py",
     "lint_block_record_sites.py",
     "lint_inline_python.py",
+    "lint_section_parsers.py",
     "lint_docker_helper_path.py",
     "lint_python_duplicates.py",
     "lint_api_route_impl.py",
@@ -90,6 +92,7 @@ _GATE_PY_SCRIPTS = [
     "dashboard/generate_window_docs.py",
     "dashboard/lint_tmux_format_jobs.py",
     "generate_operator_verb_docs.py",
+    "generate_measured_pace_docs.py",
     "check_docs_citations.py",
 ]
 _GATE_SH_SCRIPTS = ["lint_skip_bug_gate.sh", "lint_governance_byte_budgets.sh"]
@@ -187,11 +190,21 @@ class _Sandbox:
         shutil.copy2(_SCRIPTS_DIR / runner_name, scripts / runner_name)
         shutil.copytree(_SCRIPTS_DIR / "lib", scripts / "lib")
         # The ledger reads Active RC through the one release-state reader,
-        # which lives in the package beside scripts/.
+        # and reads and appends the ledger file through the green-ledger
+        # module (whose main() comes from lib/subcommand_cli); all live in
+        # the package beside scripts/.
         package = _SCRIPTS_DIR.parent / "pgai_agent_kanban"
-        for rel in ("__init__.py", "cm/__init__.py", "cm/read_state_field.py"):
+        for rel in (
+            "__init__.py",
+            "cm/__init__.py",
+            "cm/read_state_field.py",
+            "lib/subcommand_cli.py",
+            "testing/__init__.py",
+            "testing/green_ledger.py",
+        ):
             (self.team / "pgai_agent_kanban" / rel).parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(package / rel, self.team / "pgai_agent_kanban" / rel)
+        copy_section_reader_modules(self.team / "pgai_agent_kanban")
         for name in _GATE_PY_SCRIPTS + _GATE_SH_SCRIPTS:
             _write_gate_stub(scripts / name, name)
         for rel in _RUNNER_CONFIG[runner_name]["test_dirs"]:

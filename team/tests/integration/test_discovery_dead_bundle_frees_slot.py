@@ -31,7 +31,7 @@ from pgai_agent_kanban.lib.error_contract import parse_error_contract
 
 _TEAM_DIR = pathlib.Path(__file__).resolve().parents[2]
 _SCRIPTS_LIB = _TEAM_DIR / "scripts" / "lib"
-_PROJECT = "project_a"
+_PROJECT = "project-a"
 _PM_TASK = "PM-20260101-001-decompose-v0-0-1-bugfix-bundle"
 _SUPERSEDED = "v0.0.1-bugfix-bundle-20260101.SUPERSEDED-on-cancel-2026-01-02T00:00:00+00:00.md"
 

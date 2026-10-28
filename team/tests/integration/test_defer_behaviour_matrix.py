@@ -385,22 +385,22 @@ class TestLevelLowMediumBugPiggybackTrue:
     ) -> None:
         root = two_project_root
         _set_defer_posture(
-            root, "project_a", deferred_bugs=True, deferred_bug_level="low", defer_piggyback=True
+            root, "project-a", deferred_bugs=True, deferred_bug_level="low", defer_piggyback=True
         )
-        trigger = _add_bug_file(root, "project_a", bug_id="BUG-0001", slug="trigger", severity="medium")
+        trigger = _add_bug_file(root, "project-a", bug_id="BUG-0001", slug="trigger", severity="medium")
         low_bugs = [
-            _add_bug_file(root, "project_a", bug_id="BUG-0002", slug="low-a", severity="low"),
-            _add_bug_file(root, "project_a", bug_id="BUG-0003", slug="low-b", severity="low"),
-            _add_bug_file(root, "project_a", bug_id="BUG-0004", slug="low-c", severity="low"),
+            _add_bug_file(root, "project-a", bug_id="BUG-0002", slug="low-a", severity="low"),
+            _add_bug_file(root, "project-a", bug_id="BUG-0003", slug="low-b", severity="low"),
+            _add_bug_file(root, "project-a", bug_id="BUG-0004", slug="low-c", severity="low"),
         ]
-        req_file = _add_requirements_file(root, "project_a", version="v0.0.5", slug="unrelated")
-        _install_pm_agent_stub(root, "project_a")
+        req_file = _add_requirements_file(root, "project-a", version="v0.0.5", slug="unrelated")
+        _install_pm_agent_stub(root, "project-a")
         finder_stdout = root / "finder-stdout.log"
 
-        result = _run_discovery(root, "project_a", finder_stdout_capture=finder_stdout)
+        result = _run_discovery(root, "project-a", finder_stdout_capture=finder_stdout)
 
         assert result.returncode == 0, result.stderr
-        bundles = _bundle_files(root, "project_a")
+        bundles = _bundle_files(root, "project-a")
         finder_stdout_text = (
             finder_stdout.read_text(encoding="utf-8") if finder_stdout.exists() else ""
         )
@@ -438,7 +438,7 @@ class TestLevelLowMediumBugPiggybackTrue:
         for low_bug in low_bugs:
             assert _bug_status(low_bug) == "running", low_bug
 
-        _run_discovery_until_requirements_decompose(root, "project_a", req_file)
+        _run_discovery_until_requirements_decompose(root, "project-a", req_file)
         _assert_requirements_file_still_decomposes(req_file, "low+medium+piggyback=true")
 
 
@@ -455,20 +455,20 @@ class TestLevelLowMediumBugPiggybackFalse:
     ) -> None:
         root = two_project_root
         _set_defer_posture(
-            root, "project_a", deferred_bugs=True, deferred_bug_level="low", defer_piggyback=False
+            root, "project-a", deferred_bugs=True, deferred_bug_level="low", defer_piggyback=False
         )
-        _add_bug_file(root, "project_a", bug_id="BUG-0001", slug="trigger", severity="medium")
+        _add_bug_file(root, "project-a", bug_id="BUG-0001", slug="trigger", severity="medium")
         low_bugs = [
-            _add_bug_file(root, "project_a", bug_id="BUG-0002", slug="low-a", severity="low"),
-            _add_bug_file(root, "project_a", bug_id="BUG-0003", slug="low-b", severity="low"),
+            _add_bug_file(root, "project-a", bug_id="BUG-0002", slug="low-a", severity="low"),
+            _add_bug_file(root, "project-a", bug_id="BUG-0003", slug="low-b", severity="low"),
         ]
-        req_file = _add_requirements_file(root, "project_a", version="v0.0.5", slug="unrelated")
-        _install_pm_agent_stub(root, "project_a")
+        req_file = _add_requirements_file(root, "project-a", version="v0.0.5", slug="unrelated")
+        _install_pm_agent_stub(root, "project-a")
 
-        result = _run_discovery(root, "project_a")
+        result = _run_discovery(root, "project-a")
 
         assert result.returncode == 0, result.stderr
-        bundles = _bundle_files(root, "project_a")
+        bundles = _bundle_files(root, "project-a")
         assert bundles, f"Expected a bundle for the trigger bug alone.\nstderr:\n{result.stderr}"
         item_ids = parse_bundled_item_basenames(str(bundles[0]))
         assert any("BUG-0001" in i for i in item_ids), item_ids
@@ -479,7 +479,7 @@ class TestLevelLowMediumBugPiggybackFalse:
             )
 
         backlog_text = (
-            root / "projects" / "project_a" / "tasks" / "queues" / "bug_backlog.md"
+            root / "projects" / "project-a" / "tasks" / "queues" / "bug_backlog.md"
         ).read_text(encoding="utf-8")
         for low_bug in low_bugs:
             assert _bug_status(low_bug) == "open", low_bug
@@ -488,7 +488,7 @@ class TestLevelLowMediumBugPiggybackFalse:
                 f"{item_id} must remain uncached in bug_backlog.md while deferred.\n{backlog_text}"
             )
 
-        _run_discovery_until_requirements_decompose(root, "project_a", req_file)
+        _run_discovery_until_requirements_decompose(root, "project-a", req_file)
         _assert_requirements_file_still_decomposes(req_file, "low+medium+piggyback=false")
 
 
@@ -500,15 +500,15 @@ class TestLevelLowMediumBugPiggybackFalse:
 class TestLevelMediumMediumBug:
     def test_medium_bug_defers_and_opens_no_bundle(self, two_project_root: pathlib.Path) -> None:
         root = two_project_root
-        _set_defer_posture(root, "project_a", deferred_bugs=True, deferred_bug_level="medium")
-        bug = _add_bug_file(root, "project_a", bug_id="BUG-0001", slug="one", severity="medium")
-        req_file = _add_requirements_file(root, "project_a", version="v0.0.5", slug="unrelated")
-        _install_pm_agent_stub(root, "project_a")
+        _set_defer_posture(root, "project-a", deferred_bugs=True, deferred_bug_level="medium")
+        bug = _add_bug_file(root, "project-a", bug_id="BUG-0001", slug="one", severity="medium")
+        req_file = _add_requirements_file(root, "project-a", version="v0.0.5", slug="unrelated")
+        _install_pm_agent_stub(root, "project-a")
 
-        result = _run_discovery(root, "project_a")
+        result = _run_discovery(root, "project-a")
 
         assert result.returncode == 0, result.stderr
-        assert not _bundle_files(root, "project_a"), (
+        assert not _bundle_files(root, "project-a"), (
             f"level=medium with a medium bug must open no bundle.\nstderr:\n{result.stderr}"
         )
         assert _bug_status(bug) == "open"
@@ -524,15 +524,15 @@ class TestLevelMediumMediumBug:
 class TestLevelHighAnyBug:
     def test_high_severity_bug_defers_and_opens_no_bundle(self, two_project_root: pathlib.Path) -> None:
         root = two_project_root
-        _set_defer_posture(root, "project_a", deferred_bugs=True, deferred_bug_level="high")
-        bug = _add_bug_file(root, "project_a", bug_id="BUG-0001", slug="one", severity="high")
-        req_file = _add_requirements_file(root, "project_a", version="v0.0.5", slug="unrelated")
-        _install_pm_agent_stub(root, "project_a")
+        _set_defer_posture(root, "project-a", deferred_bugs=True, deferred_bug_level="high")
+        bug = _add_bug_file(root, "project-a", bug_id="BUG-0001", slug="one", severity="high")
+        req_file = _add_requirements_file(root, "project-a", version="v0.0.5", slug="unrelated")
+        _install_pm_agent_stub(root, "project-a")
 
-        result = _run_discovery(root, "project_a")
+        result = _run_discovery(root, "project-a")
 
         assert result.returncode == 0, result.stderr
-        assert not _bundle_files(root, "project_a"), (
+        assert not _bundle_files(root, "project-a"), (
             f"level=high defers every bug -- no bundle should open.\nstderr:\n{result.stderr}"
         )
         assert _bug_status(bug) == "open"
@@ -544,15 +544,15 @@ class TestLevelHighAnyBug:
         'operator-knows-best' consequence documented beside the key.
         """
         root = two_project_root
-        _set_defer_posture(root, "project_a", deferred_bugs=True, deferred_bug_level="high")
-        bug = _add_bug_file(root, "project_a", bug_id="BUG-0002", slug="two", severity="low")
-        req_file = _add_requirements_file(root, "project_a", version="v0.0.6", slug="unrelated")
-        _install_pm_agent_stub(root, "project_a")
+        _set_defer_posture(root, "project-a", deferred_bugs=True, deferred_bug_level="high")
+        bug = _add_bug_file(root, "project-a", bug_id="BUG-0002", slug="two", severity="low")
+        req_file = _add_requirements_file(root, "project-a", version="v0.0.6", slug="unrelated")
+        _install_pm_agent_stub(root, "project-a")
 
-        result = _run_discovery(root, "project_a")
+        result = _run_discovery(root, "project-a")
 
         assert result.returncode == 0, result.stderr
-        assert not _bundle_files(root, "project_a"), result.stderr
+        assert not _bundle_files(root, "project-a"), result.stderr
         assert _bug_status(bug) == "open"
 
         _assert_requirements_file_still_decomposes(req_file, "high+low")

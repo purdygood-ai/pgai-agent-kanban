@@ -48,6 +48,8 @@
 # Environment:
 #   TERM=dumb  — disables ANSI codes
 #   NO_COLOR=1 — disables ANSI codes
+#   PGAI_CRONTAB_CMD — command run as "<cmd> -l" to read the crontab;
+#                      unset or empty means 'crontab'
 
 # shellcheck source=../lib/env_bootstrap.sh
 source "$(dirname "${BASH_SOURCE[0]}")/../lib/env_bootstrap.sh"
@@ -82,6 +84,10 @@ source "${SCRIPT_DIR}/../lib/cm/common.sh"
 # Note: lib/version.sh lives at dashboard/lib/version.sh (SCRIPT_DIR/lib/), not ../lib/.
 # shellcheck source=lib/version.sh
 source "${SCRIPT_DIR}/lib/version.sh"
+# pp_run_ops: the next-cron-firings line runs from this tree's own
+# pgai_agent_kanban package.
+# shellcheck source=../lib/pp_run_ops.sh
+source "${SCRIPT_DIR}/../lib/pp_run_ops.sh"
 
 # --- Parse args ---
 MODE="header"
@@ -110,10 +116,13 @@ while [[ $# -gt 0 ]]; do
 done
 
 KANBAN_ROOT="${KANBAN_ROOT_ARG:-${PGAI_AGENT_KANBAN_ROOT_PATH}}"
+# Operator user config, then [chain] pm_mode (config_loader.sh).
+# shellcheck source=../lib/config_loader.sh
+source "${SCRIPT_DIR}/../lib/config_loader.sh"
+config_startup_prelude "$KANBAN_ROOT"
 # Source config — INI format (kanban.cfg) replaces legacy config.cfg
 # read_ini available via project_paths.sh (sourced above).
 if [[ -f "$KANBAN_ROOT/kanban.cfg" ]]; then
-    export PGAI_KANBAN_PM_MODE="${PGAI_KANBAN_PM_MODE:-$(read_ini "$KANBAN_ROOT/kanban.cfg" chain pm_mode automatic)}"
     export PGAI_DASHBOARD_COLOR_HEADER="${PGAI_DASHBOARD_COLOR_HEADER:-$(read_ini "$KANBAN_ROOT/kanban.cfg" dashboard color_header cyan)}"
     export PGAI_DASHBOARD_COLOR_HALT="${PGAI_DASHBOARD_COLOR_HALT:-$(read_ini "$KANBAN_ROOT/kanban.cfg" dashboard color_halt red)}"
     export PGAI_DASHBOARD_COLOR_OK="${PGAI_DASHBOARD_COLOR_OK:-$(read_ini "$KANBAN_ROOT/kanban.cfg" dashboard color_ok green)}"
@@ -245,7 +254,7 @@ case "$MODE" in
     done
 
     # Cron firings (global, rendered once at the bottom)
-    CRONTAB_TEXT="$(crontab -l 2>/dev/null || true)"
+    CRONTAB_TEXT="$("${PGAI_CRONTAB_CMD:-crontab}" -l 2>/dev/null || true)"
     if [[ -n "$CRONTAB_TEXT" ]]; then
       # cron_parser.py is resolved from the live-install anchor only.
       # The dev tree is DATA to the live runtime; executing python code under
@@ -253,33 +262,10 @@ case "$MODE" in
       CRON_PARSER="${KANBAN_ROOT}/pm-agent/lib/cron_parser.py"
       if [[ -f "$CRON_PARSER" ]]; then
         printf '%sNext cron firings:%s ' "$C_HEADER" "$RESET"
-        python3 - "$CRONTAB_TEXT" "$CRON_PARSER" <<'PY' 2>/dev/null || echo ""
-import sys, importlib.util, pathlib
-crontab_text = sys.argv[1]
-parser_path = pathlib.Path(sys.argv[2])
-spec = importlib.util.spec_from_file_location("cron_parser", parser_path)
-mod = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(mod)
-result = mod.next_firings(crontab_text)
-# Roster comes from the schedule source itself — iterating result.items()
-# preserves crontab line order, never a literal agent tuple that can go
-# stale as the installed schedule grows.
-parts = []
-for agent, val in result.items():
-    if val is None:
-        continue
-    if isinstance(val, int):
-        if val <= 0:
-            s = "now"
-        elif val == 1:
-            s = "in 1 min"
-        else:
-            s = f"in {val} min"
-    else:
-        s = str(val)
-    parts.append(f"{agent}: {s}")
-print("   ".join(parts))
-PY
+        # The entries in crontab line order; on any failure the label is
+        # followed by an empty line.
+        pp_run_ops pgai_agent_kanban.dashboard.cron_firings --line \
+          "$CRONTAB_TEXT" "$CRON_PARSER" 2>/dev/null || echo ""
       fi
     fi
     ;;

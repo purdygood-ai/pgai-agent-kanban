@@ -117,7 +117,7 @@ from pgai_agent_kanban.lib import md_fields, semver
 from pgai_agent_kanban.lib.bundle_items import CLOSED_BUNDLE_STATUSES, bundle_listings, running_items
 from pgai_agent_kanban.lib.released_version import last_released_version
 from pgai_agent_kanban.lib.terminal_states import CLOSED_STATES, canonical_state
-from pgai_agent_kanban.task_status import read_state
+from pgai_agent_kanban.task_status import read_section, read_state
 
 __all__ = [
     "ACTIVE_RC_UNKNOWN",
@@ -145,8 +145,9 @@ PathLike = Union[str, "os.PathLike[str]"]
 # ---------------------------------------------------------------------------
 
 #: ``## Status`` values (canonical, lower-case) that make each intake item
-#: finished. Bugs add the two triage closures to the shared closed states.
-_BUG_FINISHED = frozenset((*CLOSED_STATES, "duplicate", "rejected"))
+#: finished. Bugs add the triage closure ``rejected`` to the shared closed
+#: states (which include ``duplicate``).
+_BUG_FINISHED = frozenset((*CLOSED_STATES, "rejected"))
 _PRIORITY_FINISHED = frozenset(CLOSED_STATES)
 _REQUIREMENT_FINISHED = frozenset(("done", "shipped"))
 #: Task ``## State`` values, compared after ``canonical_state``.
@@ -508,7 +509,7 @@ def _parse_prerequisites(readme_text: str) -> tuple[str, ...]:
     word on a line that has the canonical task-ID shape counts, so a
     prerequisite written with a trailing note still protects its task.
     """
-    body = md_fields.section_body(readme_text, "Prerequisites")
+    body = read_section(readme_text, "Prerequisites", end_at_subheading=True)
     if not body:
         return ()
     found = []

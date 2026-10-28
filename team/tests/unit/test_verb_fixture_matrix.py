@@ -530,6 +530,9 @@ _DUAL_CHANNEL_SCENARIOS: dict[str, "DualChannelCase | NotApplicable"] = {
     "archive": DualChannelCase(
         error_key="project_resolve.not_found", extra_args=("--dry-run",)
     ),
+    # inbox.sh resolves --project through pp_resolve_project_name before
+    # the inbox module is reached.
+    "inbox": DualChannelCase(error_key="project_resolve.not_found", extra_args=("list",)),
 }
 
 
@@ -617,6 +620,58 @@ def test_kanban_root_missing_refusal_negative_control_without_project_name(
             f"halt-global.sh must not create {absent_root} even without "
             "PGAI_PROJECT_NAME set"
         )
+
+
+# ---------------------------------------------------------------------------
+# halt-global / unhalt-global: the sentinel-write refusal's remedy re-runs
+# the script as install.sh lays it out -- <kanban root>/scripts/<script> --
+# and the command survives a kanban root holding a space.
+# ---------------------------------------------------------------------------
+
+
+def _bash_words(command: str) -> list[str]:
+    """The words bash splits *command* into, one per printf line."""
+    run = subprocess.run(
+        ["bash", "-c", f"printf '%s\\n' {command}"], capture_output=True, text=True, timeout=30
+    )
+    assert run.returncode == 0, f"command does not parse in bash: {command!r}\n{run.stderr}"
+    return run.stdout.splitlines()
+
+
+@pytest.mark.parametrize(
+    "script_name, error_key, setup",
+    [
+        ("halt-global.sh", "halt_global.sentinel_create_failed", _dual_channel_setup_halt_global),
+        ("unhalt-global.sh", "unhalt_global.sentinel_remove_failed", _dual_channel_setup_unhalt_global),
+    ],
+)
+@pytest.mark.parametrize("root_name", ["kanban_root", "kanban root"])
+def test_sentinel_write_refusal_remedy_reruns_the_installed_script(
+    tmp_path: pathlib.Path,
+    root_name: str,
+    script_name: str,
+    error_key: str,
+    setup: Callable[[pathlib.Path], None],
+) -> None:
+    root = tmp_path / root_name
+    root.mkdir()
+    setup(root)
+
+    result = _run(_SCRIPTS_DIR / script_name, [], root)
+
+    assert result.returncode == 1, (
+        f"{script_name} exited {result.returncode} on a read-only KANBAN_ROOT "
+        f"(expected 1).\nstdout: {result.stdout}\nstderr: {result.stderr}"
+    )
+    fields = _extract_dual_channel(result.stderr)
+    assert fields is not None, f"no dual-channel fields in stderr: {result.stderr}"
+    assert fields["error"] == error_key
+    _, sep, command = fields["remedy"].partition("then re-run ")
+    assert sep, f"remedy names no command to re-run: {fields['remedy']!r}"
+    assert _bash_words(command.removesuffix(".")) == [str(root / "scripts" / script_name)], (
+        f"{script_name}'s remedy must re-run the installed script under the "
+        f"kanban root, runnable as printed: {fields['remedy']!r}"
+    )
 
 
 _NO_IDEMPOTENCE_DECLARED = (
@@ -959,6 +1014,11 @@ _REST_PARITY_SCENARIOS: dict[str, "RestParityCase | NotApplicable"] = {
     "archive": RestParityCase(
         method="POST", route="/operations/archive",
         extra_args=("--dry-run",), rest_fields={"dry_run": True},
+    ),
+    "inbox": RestParityCase(
+        method="POST", route="/operations/inbox-answer",
+        extra_args=("answer", "--id", "INBOX-0001", "--answer", "keep"),
+        rest_fields={"id": "INBOX-0001", "answer": "keep"},
     ),
 }
 

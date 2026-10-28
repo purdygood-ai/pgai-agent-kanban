@@ -156,7 +156,7 @@ if [[ -z "${_rs_project_raw}" ]]; then
     # BLOCK-WORTHY (docs/blocking-site-census.md): with no project named there
     # is no bug ledger to resolve, and guessing one could stamp the wrong
     # project's bugs.
-    _rs_example="team/scripts/restamp-fixed-in.sh --project pgai-agent-kanban --version v1.4.0 BUG-0101"  # example invocation
+    _rs_example="$(printf '%q' "${KANBAN_ROOT}/scripts/restamp-fixed-in.sh") --project pgai-agent-kanban --version v1.4.0 BUG-0101"  # example invocation
     pgai_emit_error_contract \
         "fixed_in_restamp.project_required" \
         "restamp-fixed-in.sh: no project named -- the bug ledger to stamp is always one project's." \

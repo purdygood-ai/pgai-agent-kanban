@@ -62,7 +62,12 @@ Usage::
     from pgai_agent_kanban.lib.palette import load_default_palette
 
     palette = load_default_palette()
-    color = palette[registration_index % len(palette)]
+    color = palette[priority_ordinal % len(palette)]
+
+``priority_ordinal`` is the project's position in priority order (ascending
+``priority``, file order breaking ties), not its registration order; the
+one colour rule, explicit ``dashboard_color`` included, is
+``pgai_agent_kanban.ops.projects.project_color``.
 """
 
 from __future__ import annotations

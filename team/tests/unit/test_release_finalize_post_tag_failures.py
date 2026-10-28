@@ -12,30 +12,58 @@ a local repository with no remote, with two programs replaced by stubs:
 - Step 12's release-state writer (write_rc_state.py release-state) exits 1:
   finalize raises the project HALT through cm_halt with the
   cm-release.release-state-write-failed key, and its remedy carries the
-  exact write_rc_state.py release-state command that closes the RC. The
-  HALT's closing footer names the tag and never says the release was not
-  shipped; a HALT raised before the tag still says it was not.
+  exact write_rc_state.py release-state command that closes the RC, then
+  the installed unhalt script under the kanban root; cm_halt's resume line
+  names that same script. The HALT's closing footer names the tag and never
+  says the release was not shipped; a HALT raised before the tag still
+  says it was not.
+- A remote that refuses every push (a pre-receive hook on a bare fixture
+  repository): Step 10's RC-branch delete and Step 14's main and tag push
+  reach the remote and its hook rejects them, and the release still exits
+  0 with no HALT, the cm-release.trigger-6.push-lag notice and one Push Lag
+  Event in release-state.md naming all three refs.
+- The release tag already on the remote and not local: Step 13 writes one
+  operator inbox entry naming the tag and exits 6 with no HALT, no local
+  tag and no release-state write.
 
 The stage is sourced through a scratch scripts tree whose lib/ entries link
 back to this tree's own files, so the Step 13c lookup (anchored to the stage
 file's own location) finds the stub; every library is this tree's own. Steps 16b and
 16c are replaced by marker functions after sourcing -- they prove the step
 was reached, not what it does (their own suites cover that).
+
+Every git command and the release run itself start from the inherited
+environment with the agent-scoped names removed (_AGENT_GIT_NAMES and
+scrub_agent_scoped_env), so inside an agent wake the release's pushes reach
+the fixture remote instead of being refused by the git boundary guard, and
+the guard records nothing in the running task's folder.
 """
 
 from __future__ import annotations
 
+import os
 import pathlib
 import subprocess
 
 import pytest
 
 from tests.fixtures.binary_guard import require_binary
+from tests.fixtures.scrubbed_subprocess_env import scrub_agent_scoped_env
 from tests.unit.shell_harness import run_bash
 
 _TEAM = pathlib.Path(__file__).resolve().parents[2]
 _PROJECT = "finalize-lane"
 _VERSION = "v1.4.0"
+
+# Names that route the fixture's git through the agent guard (which refuses
+# the release's pushes before they reach the fixture remote) or point a
+# script at the running task.
+_AGENT_GIT_NAMES = (
+    "PGAI_AGENT_ROLE",
+    "PGAI_GIT_BOUNDARY_GUARD_EVIDENCE_FILE",
+    "PGAI_GIT_LOCAL_ONLY",
+    "PGAI_TASK_ID",
+)
 
 _REAL_LIBS = (
     "scripts/lib/error_contract.sh",
@@ -72,8 +100,16 @@ def _q(value) -> str:
     return "'" + str(value).replace("'", "'\\''") + "'"
 
 
+def _base_env() -> dict:
+    """The inherited environment without the agent-scoped names."""
+    env = dict(os.environ)
+    for name in _AGENT_GIT_NAMES:
+        env.pop(name, None)
+    return scrub_agent_scoped_env(env)
+
+
 def _run(*args: str, cwd: pathlib.Path) -> None:
-    subprocess.run(list(args), cwd=cwd, check=True, capture_output=True, text=True)
+    subprocess.run(list(args), cwd=cwd, check=True, capture_output=True, text=True, env=_base_env())
 
 
 def _build(tmp_path: pathlib.Path):
@@ -121,10 +157,38 @@ def _build(tmp_path: pathlib.Path):
     return root, project_root, stage_dir, repo
 
 
+def _add_remote(tmp_path: pathlib.Path, repo: pathlib.Path, shape: str) -> pathlib.Path:
+    """A bare fixture remote named origin holding main and the RC branch.
+
+    *shape* ``reject``: a pre-receive hook refuses every later push, and
+    local main carries the release's own commit the remote lacks, so the
+    main push has something to send and the hook rejects it.
+    ``tag``: the remote already holds the release tag, the local repository does not.
+    """
+    bare = tmp_path / "remote.git"
+    _run("git", "init", "-q", "--bare", str(bare), cwd=tmp_path)
+    _run("git", "remote", "add", "origin", str(bare), cwd=repo)
+    _run("git", "push", "-q", "origin", "main", f"rc/{_VERSION}", cwd=repo)
+    _run("git", "fetch", "-q", "origin", cwd=repo)
+    if shape == "reject":
+        (repo / "CHANGELOG.md").write_text(f"# {_VERSION}\n", encoding="utf-8")
+        _run("git", "add", "-A", cwd=repo)
+        _run("git", "commit", "-q", "-m", f"release {_VERSION}", cwd=repo)
+        hook = bare / "hooks" / "pre-receive"
+        hook.write_text("#!/bin/sh\necho 'fixture remote: rejected' >&2\nexit 1\n", encoding="utf-8")
+        hook.chmod(0o755)
+    elif shape == "tag":
+        _run("git", "push", "-q", "origin", f"main:refs/tags/{_VERSION}", cwd=repo)
+    return bare
+
+
 def _finalize(
-    tmp_path: pathlib.Path, *, release_state_rc: int = 0, promote_rc: int = 0, pre_tag_divergence: bool = False
+    tmp_path: pathlib.Path, *, release_state_rc: int = 0, promote_rc: int = 0, pre_tag_divergence: bool = False,
+    remote: str = "",
 ):
     root, project_root, stage_dir, repo = _build(tmp_path)
+    if remote:
+        _add_remote(tmp_path, repo, remote)
     if pre_tag_divergence:
         # The release tag already exists on the parent of main's HEAD.
         (repo / "later.txt").write_text("later\n", encoding="utf-8")
@@ -144,7 +208,8 @@ def _finalize(
         f"PROJECT_NAME={_q(_PROJECT)} ACTIVE_RC={_q(_VERSION)} REPO_ROOT={_q(repo)}",
         f"MAIN_BRANCH=main RC_BRANCH=rc/{_VERSION} _CM_PROJECT_ROOT={_q(project_root)}",
         "RELEASE_STATE=\"$_CM_PROJECT_ROOT/release-state.md\" PROJECT_HALT_FILE=\"$_CM_PROJECT_ROOT/HALT\"",
-        "PROJECT_HOOKS_DIR=\"$_CM_PROJECT_ROOT/hooks\" _CM_PUSH_TO_REMOTE=false _CM_AUTORESOLVE_LOG=''",
+        f"PROJECT_HOOKS_DIR=\"$_CM_PROJECT_ROOT/hooks\" _CM_PUSH_TO_REMOTE={'true' if remote else 'false'}"
+        " _CM_AUTORESOLVE_LOG=''",
         f"_CLEAN_RELEASE_VERSION={_q(_VERSION)}",
         "cm_release_finalize _noop_hook_step _noop_hook_step",
     ])
@@ -157,8 +222,10 @@ def _finalize(
         "STUB_RELEASE_STATE_RC": str(release_state_rc),
         "STUB_PROMOTE_RC": str(promote_rc),
     }
-    result = run_bash(tmp_path, script, extra_env=env, timeout=120)
+    result = run_bash(tmp_path, script, base_env=_base_env(), extra_env=env, timeout=120)
     calls = log.read_text(encoding="utf-8") if log.exists() else ""
+    if remote:
+        return result, project_root, calls, repo
     return result, project_root, calls
 
 
@@ -193,8 +260,13 @@ def test_failed_release_state_write_halts_with_the_write_as_remedy(tmp_path, _gi
         f"--rc-opened-at none --rc-opened-by-task none --last-released {_VERSION}"
     )
     assert expected_remedy in halt_text, halt_text
+    # The remedy then lifts the HALT through the installed script under the
+    # kanban root (install.sh puts it in <root>/scripts/).
+    unhalt = f"{project_root.parent.parent / 'scripts' / 'unhalt.sh'} --project {_PROJECT}"
+    assert f"--last-released {_VERSION} && {unhalt}" in halt_text, halt_text
     assert "cm-release.release-state-write-failed" in result.stderr, _diag(result, calls)
     assert expected_remedy in result.stderr, _diag(result, calls)
+    assert f"Resolve the issue above, then run: {unhalt} (removes" in result.stderr, _diag(result, calls)
     assert "promote " not in calls, "nothing after the failed write runs\n" + _diag(result, calls)
     assert "STEP-16B-RAN" not in result.stdout
     assert "NOT been shipped" not in result.stderr, _diag(result, calls)
@@ -220,3 +292,38 @@ def test_successful_steps_record_release_state_and_promotion(tmp_path, _git):
     assert "promote " in calls
     assert "WARNING: promote_bundled_items.py exited" not in result.stderr
     assert not (project_root / "HALT").exists()
+
+
+def test_a_refused_push_after_the_tag_is_push_lag_not_a_halt(tmp_path, _git):
+    result, project_root, calls, repo = _finalize(tmp_path, remote="reject")
+
+    assert result.returncode == 0, _diag(result, calls)
+    assert not (project_root / "HALT").exists(), _diag(result, calls)
+    assert "Local release preparation complete." in result.stdout, _diag(result, calls)
+    assert "cm-release.trigger-6.push-lag" in result.stderr, _diag(result, calls)
+    # The refusal is the fixture remote's own hook, not the agent git guard.
+    assert "fixture remote: rejected" in result.stderr, _diag(result, calls)
+    state = (project_root / "release-state.md").read_text(encoding="utf-8")
+    assert state.count("## Push Lag Event") == 1, state
+    for lagging in ("main (push failed)", f"refs/tags/{_VERSION} (push failed)",
+                    f"rc/{_VERSION} (still on origin; deletion failed)"):
+        assert f"  - {lagging}" in state, state
+    assert f"push-watchdog.sh --project {_PROJECT}" in state, state
+    assert f"rc/{_VERSION} still on origin (its deletion was refused" in result.stdout, _diag(result, calls)
+    assert "write_rc_state release-state " in calls, "Step 12 still closes the RC\n" + _diag(result, calls)
+    assert "STEP-16C-RAN" in result.stdout
+
+
+def test_a_release_tag_already_on_the_remote_is_an_inbox_entry_not_a_halt(tmp_path, _git):
+    result, project_root, calls, repo = _finalize(tmp_path, remote="tag")
+
+    assert result.returncode == 6, _diag(result, calls)
+    assert not (project_root / "HALT").exists(), _diag(result, calls)
+    assert "cm-release.trigger-7.tag-exists-on-remote" in result.stderr, _diag(result, calls)
+    inbox = (project_root / "operator-inbox.md").read_text(encoding="utf-8")
+    assert inbox.count("### INBOX-") == 1, inbox
+    assert f"Release tag {_VERSION} is already on origin" in inbox, inbox
+    tags = subprocess.run(["git", "tag", "--list"], cwd=repo, capture_output=True, text=True, check=True).stdout
+    assert tags.strip() == "", "no local tag is cut"
+    assert "write_rc_state" not in calls, "release-state is never written\n" + _diag(result, calls)
+    assert "HALT Event" not in (project_root / "release-state.md").read_text(encoding="utf-8")

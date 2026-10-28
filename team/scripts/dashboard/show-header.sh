@@ -27,6 +27,8 @@
 # Environment:
 #   TERM=dumb  — disables all ANSI codes
 #   NO_COLOR=1 — disables all ANSI codes
+#   PGAI_CRONTAB_CMD — command run as "<cmd> -l" to read the crontab;
+#                      unset or empty means 'crontab'
 
 # shellcheck source=../lib/header_help.sh
 source "$(dirname "${BASH_SOURCE[0]}")/../lib/header_help.sh"
@@ -107,11 +109,10 @@ for cfg_arg in "$@"; do
     break
   fi
 done
-# Source: kanban.cfg [chain/paths] — INI format replaces legacy config.cfg
-# read_ini available via project_paths.sh (sourced above).
-if [[ -f "${KANBAN_ROOT}/kanban.cfg" ]]; then
-    export PGAI_KANBAN_PM_MODE="${PGAI_KANBAN_PM_MODE:-$(read_ini "${KANBAN_ROOT}/kanban.cfg" chain pm_mode automatic)}"
-fi
+# Operator user config, then [chain] pm_mode (config_loader.sh).
+# shellcheck source=../lib/config_loader.sh
+source "${SCRIPT_DIR}/../lib/config_loader.sh"
+config_startup_prelude "$KANBAN_ROOT"
 export PGAI_DEV_TREE_PATH="${PGAI_DEV_TREE_PATH:-$(resolve_global_dev_tree)}"
 
 # Ignore SIGPIPE so that piping show-header.sh output to an early-closing reader
@@ -245,7 +246,7 @@ NOW_TS="${SHOW_HEADER_NOW:-$(date +%s)}"
 # never a second copy of this parsing.
 CRON_FIRINGS_AVAILABLE=false
 CRON_ERROR=false
-CRONTAB_TEXT="$(crontab -l 2>/dev/null || true)"
+CRONTAB_TEXT="$("${PGAI_CRONTAB_CMD:-crontab}" -l 2>/dev/null || true)"
 if [[ -n "$CRONTAB_TEXT" ]]; then
   # cron_parser.py is resolved from the live-install anchor only.
   # The dev tree is DATA to the live runtime; executing python code under

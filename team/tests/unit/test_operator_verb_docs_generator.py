@@ -37,6 +37,7 @@ written, by this test module. Every generator invocation passes BOTH
 from __future__ import annotations
 
 import importlib.util
+import os
 import pathlib
 import subprocess
 import sys
@@ -127,7 +128,7 @@ def _outside_section(content: str, name: str) -> tuple[str, str]:
 
 def test_render_covers_every_active_verb(docs: dict[str, pathlib.Path]) -> None:
     active_names = [v.name for v in _active_verbs()]
-    assert len(active_names) == 33, (
+    assert len(active_names) == 34, (
         "this suite's expected count has drifted from the census's actual "
         f"active-verb count ({len(active_names)}); update the assertion to match"
     )
@@ -577,3 +578,101 @@ def test_capture_help_succeeds_for_a_real_active_verb() -> None:
     assert capture.ok is True
     assert capture.reason is None
     assert "Usage:" in capture.text
+
+
+# ---------------------------------------------------------------------------
+# Shell verbs cannot answer --help without the kanban root variable: the
+# generator refuses once, up front, instead of reporting every shell verb's
+# block as drifted (or, rendering, overwriting each with a stub).
+# ---------------------------------------------------------------------------
+
+
+def _env_without_root(**extra: str) -> dict[str, str]:
+    env = {k: v for k, v in os.environ.items() if k != "PGAI_AGENT_KANBAN_ROOT_PATH"}
+    env.update(extra)
+    return env
+
+
+def test_check_without_root_path_refuses_once_with_no_drift_lines(
+    docs: dict[str, pathlib.Path]
+) -> None:
+    result = subprocess.run(
+        [
+            sys.executable, str(_GENERATOR), "--check",
+            "--doc", str(docs["doc"]), "--api-doc", str(docs["api_doc"]),
+        ],
+        cwd=str(_TEAM_DIR), capture_output=True, text=True, timeout=120,
+        env=_env_without_root(),
+    )
+    output = result.stdout + result.stderr
+    assert result.returncode != 0, output
+    assert output.count("error:   operator-verb-docs.root-path-unset") == 1, output
+    assert "PGAI_AGENT_KANBAN_ROOT_PATH" in result.stderr, output
+    assert "DRIFT" not in output, output
+    assert "verb=" not in output, output
+
+
+def test_first_shell_capture_refusing_for_root_path_stops_the_run(
+    tmp_path: pathlib.Path, docs: dict[str, pathlib.Path]
+) -> None:
+    # A fixture team dir whose shell verbs fail --help the way env_bootstrap.sh
+    # does, while the variable itself is set: the first refusal ends the run.
+    team_dir = tmp_path / "team"
+    (team_dir / "scripts").mkdir(parents=True)
+    calls = tmp_path / "calls.log"
+    for name in ("halt", "unhalt"):
+        script = team_dir / "scripts" / f"{name}.sh"
+        script.write_text(
+            "#!/usr/bin/env bash\n"
+            f'echo "{name}" >> "{calls}"\n'
+            "echo 'PGAI_AGENT_KANBAN_ROOT_PATH not set — shell-env missing or broken at /x/shell-env' >&2\n"
+            "exit 1\n",
+            encoding="utf-8",
+        )
+    manifest = tmp_path / "operator_verbs.manifest"
+    rows = [
+        line for line in _REAL_MANIFEST.read_text(encoding="utf-8").splitlines()
+        if line.startswith(("V\thalt\t", "V\tunhalt\t"))
+    ]
+    assert len(rows) == 2, rows
+    manifest.write_text("\n".join(rows) + "\n", encoding="utf-8")
+    before = docs["doc"].read_text(encoding="utf-8")
+
+    result = _run(docs, "--team-dir", str(team_dir), "--manifest", str(manifest))
+    output = result.stdout + result.stderr
+    assert result.returncode != 0, output
+    assert output.count("error:   operator-verb-docs.root-path-unset") == 1, output
+    assert "PGAI_AGENT_KANBAN_ROOT_PATH" in result.stderr, output
+    assert calls.read_text(encoding="utf-8").split() == ["halt"], "capture went on past the refusal"
+    assert docs["doc"].read_text(encoding="utf-8") == before, "a refused render must write nothing"
+
+
+@pytest.mark.parametrize("mode", [("--check",), ()], ids=["check", "render"])
+def test_root_path_naming_a_missing_directory_refuses_once_and_writes_nothing(
+    tmp_path: pathlib.Path, docs: dict[str, pathlib.Path], mode: tuple[str, ...]
+) -> None:
+    # The variable is set, but to a directory that does not exist: the verbs
+    # that check it refuse their --help, so the run must refuse up front
+    # rather than report those verbs as drifted or render their refusal.
+    missing_root = tmp_path / "no-such-kanban-root"
+    before = {name: path.read_text(encoding="utf-8") for name, path in docs.items()}
+
+    result = subprocess.run(
+        [
+            sys.executable, str(_GENERATOR), *mode,
+            "--doc", str(docs["doc"]), "--api-doc", str(docs["api_doc"]),
+        ],
+        cwd=str(_TEAM_DIR), capture_output=True, text=True, timeout=120,
+        env=_env_without_root(PGAI_AGENT_KANBAN_ROOT_PATH=str(missing_root)),
+    )
+    output = result.stdout + result.stderr
+    assert result.returncode != 0, output
+    assert output.count("error:") == 1, output
+    assert "error:   operator-verb-docs.root-path-missing" in result.stderr, output
+    assert "PGAI_AGENT_KANBAN_ROOT_PATH" in result.stderr, output
+    assert str(missing_root) in result.stderr, output
+    assert "DRIFT" not in output, output
+    assert "verb=" not in output, output
+    assert "commit the result" not in output, output
+    after = {name: path.read_text(encoding="utf-8") for name, path in docs.items()}
+    assert after == before, "a refused run must write nothing"

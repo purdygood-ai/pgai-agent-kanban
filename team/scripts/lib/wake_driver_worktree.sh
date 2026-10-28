@@ -105,6 +105,11 @@
 # it. Teardown timing, not never-checking-out-the-RC, is therefore the
 # correct fix.
 
+# The ## Resume Mode read goes through read_md_field (md_field.sh, loaded
+# from beside this file unless the caller already defines it).
+# shellcheck source=md_field.sh
+declare -F read_md_field >/dev/null || source "$(dirname "${BASH_SOURCE[0]}")/md_field.sh"
+
 wd_setup_task_worktree() {
   if [[ "$SUBAGENT" == "coder" || "$SUBAGENT" == "writer" ]]; then
     local _fb_exit=0
@@ -286,7 +291,7 @@ wd_setup_task_worktree() {
       elif [[ "$_resume_mode" == "none" ]]; then
         local _rs_body="" _rs_rest="" _rs_exit=0
         set +e
-        _rs_body="$(pp_run_ops pgai_agent_kanban.task_status read "$task_status" --section="Resume Mode" --raw)"
+        _rs_body="$(read_md_field "$task_status" "Resume Mode")"
         _rs_exit=$?
         set -e
         read -r _rs_body _rs_rest <<< "${_rs_body,,}" || true

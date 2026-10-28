@@ -12,7 +12,9 @@ Covered:
     defaults to max_runtime_seconds, an invalid llm_thinking_enabled fails,
     [paths] dev_tree_path is the last-resort dev tree after project.cfg and
     PGAI_DEV_TREE_PATH, and the ai_auth_mode block has no orphaned line.
-  - The commented ship_posture_confirm_remote line shows its default (false).
+  - [release] ship_posture ships as always and its comment states
+    "Default: always"; the commented ship_posture_confirm_remote line shows
+    its default (false).
   - No line carries a release-version tag.
   - [release] carries a commented deep_verify_offhours_window at its default.
   - [models.claude] / [models.codex] ship a provider default with every
@@ -152,6 +154,16 @@ def test_ai_auth_mode_comment_block_has_no_orphaned_continuation_line() -> None:
         if text.startswith(" ") and not text.startswith("  ") and text.strip():
             assert text.strip()[0].isupper(), f"orphaned line in the ai_auth_mode block: {line!r}"
     assert any("Accepted: oauth|apikey" in line for line in block), block
+
+
+def test_ship_posture_ships_always_and_states_always_as_its_default() -> None:
+    index, value = _find_key("release", "ship_posture", commented=False)
+    assert value == "always"
+    block = _comment_block_above(index)
+    default_lines = [line for line in block if re.match(r"^#\s*.*\bDefault:", line)]
+    assert default_lines and "Default: always" in default_lines[-1], block
+    text = " ".join(block)
+    assert "ship_posture = matrix" in text and "ship_posture_confirm_remote" in text, text
 
 
 def test_ship_posture_confirm_remote_example_line_shows_its_default() -> None:

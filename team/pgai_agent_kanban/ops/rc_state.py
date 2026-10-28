@@ -57,13 +57,17 @@ from typing import Callable, Iterable, Iterator, Mapping, Optional, TextIO
 from pgai_agent_kanban.archive.lookup import archived_task_ids
 from pgai_agent_kanban.cm.read_state_field import read_state_field, validate_release_state_fields
 from pgai_agent_kanban.lib import ini, semver
+from pgai_agent_kanban.lib.branch_prefix import branch_prefix_from_cfg
 from pgai_agent_kanban.lib.error_contract import format_error_contract
+from pgai_agent_kanban.lib.git_remote import DEFAULT_REMOTE_NAME, InvalidRemoteName, remote_name_from_cfg
 from pgai_agent_kanban.lib.project_cfg import project_cfg_file, read_cfg_key
 from pgai_agent_kanban.lib.released_version import last_released_version
 from pgai_agent_kanban.ops.context import OpsContext
 from pgai_agent_kanban.ops.errors import Ambiguous, NotFound, OpsError
 from pgai_agent_kanban.ops.read import ReadOutput
 from pgai_agent_kanban.ops.resolve import resolve_project_name
+from pgai_agent_kanban.overwatch.halt_provenance import installed_script_command
+from pgai_agent_kanban.task_status import read_section
 
 __all__ = ["CLI_VERBS", "verify_rc_state"]
 
@@ -172,20 +176,32 @@ def _queue_entries(queue_files: Iterable[pathlib.Path]) -> Iterator[tuple[str, s
 
 
 def _state_line(status_file: pathlib.Path) -> Optional[str]:
-    """The first non-blank, non-``#`` line after an exact ``## State`` line."""
-    in_state = False
-    for line in status_file.read_text().splitlines():
-        if line.strip() == '## State':
-            in_state = True
-            continue
-        if in_state:
-            value = line.strip()
-            if value and not value.startswith('#'):
-                return value
+    """The first non-blank, non-``#`` line of the ``## State`` section, stripped.
+
+    The section is read by :func:`task_status.read_section` and ends at the
+    next level-2 heading. None when the heading is absent or its section
+    holds no such line.
+    """
+    for line in (read_section(status_file.read_text(), "State") or "").split("\n"):
+        value = line.strip()
+        if value and not value.startswith('#'):
+            return value
     return None
 
 
-def _check_a(report: _Report, kanban_root: pathlib.Path, project: str, release_state: pathlib.Path) -> None:
+def _remote_main_ref(project: str, cfg: Optional[pathlib.Path]) -> str:
+    """``<remote>/<prefix>main`` for *project*: its configured git remote
+    (``lib/git_remote.py``; the default when the value is refused, since
+    this names the ref in a warning only) and its branch prefix."""
+    try:
+        remote = remote_name_from_cfg(cfg, project)
+    except InvalidRemoteName:
+        remote = DEFAULT_REMOTE_NAME
+    return f"{remote}/{branch_prefix_from_cfg(cfg)}main"
+
+
+def _check_a(report: _Report, kanban_root: pathlib.Path, project: str, release_state: pathlib.Path,
+             main_ref: str = f"{DEFAULT_REMOTE_NAME}/main") -> None:
     report.heading("Check a: release-state.md consistency")
     if not release_state.is_file():
         report.error(f"release-state.md not found: {release_state}")
@@ -220,7 +236,7 @@ def _check_a(report: _Report, kanban_root: pathlib.Path, project: str, release_s
         if latest_tag == "v0.0.0":
             report.warn(
                 f"release-state.md: could not determine latest git tag to validate Last Released "
-                f"'{last_released}' — git may be unavailable or no tags exist on origin/main"
+                f"'{last_released}' — git may be unavailable or no tags exist on {main_ref}"
             )
         elif semver.eq(last_released, latest_tag):
             report.ok(f"Last Released matches most-recent git tag: {last_released}")
@@ -228,7 +244,7 @@ def _check_a(report: _Report, kanban_root: pathlib.Path, project: str, release_s
             report.warn(
                 f"release-state.md: Last Released '{last_released}' does not match most-recent git tag "
                 f"'{latest_tag}' — file: {release_state} (may be intentional if tag not yet squash-merged "
-                f"to origin/main)"
+                f"to {main_ref})"
             )
 
 
@@ -369,15 +385,8 @@ def _prerequisite_findings(tasks_dir: pathlib.Path) -> Iterator[tuple[str, str]]
         readme = d / 'README.md'
         if not readme.is_file():
             continue
-        in_prereqs = False
-        for line in readme.read_text().splitlines():
-            if line.strip() == '## Prerequisites':
-                in_prereqs = True
-                continue
-            if not in_prereqs:
-                continue
-            if line.startswith('## '):
-                break
+        prereqs = read_section(readme.read_text(), "Prerequisites") or ""
+        for line in prereqs.split("\n"):
             for m in _PREREQ_ID_PAT.finditer(line.strip().rstrip('.,')):
                 prereq_id = m.group(1).rstrip('.,')
                 if prereq_id in task_folders:
@@ -450,9 +459,7 @@ def _git_branches(repo: str, pattern: str) -> list[str]:
 
 def _branch_prefix(project: str, cfg: pathlib.Path, err: TextIO) -> str:
     """The project's configured branch prefix; an invalid one stops the run with exit 1."""
-    raw = read_cfg_key(cfg, "project", "branch_prefix")
-    raw = raw[:-1] if raw.endswith('"') else raw
-    raw = raw[1:] if raw.startswith('"') else raw
+    raw = branch_prefix_from_cfg(cfg)
     if raw and not _BRANCH_PREFIX_RE.match(raw):
         err.write(
             f"project_paths.sh: validate_branch_prefix: invalid branch_prefix '{raw}' (allowed characters: "
@@ -510,17 +517,13 @@ def _check_e(report: _Report, project: str, cfg: pathlib.Path, release_state: pa
 
 
 def _bundled_ids(req_file: pathlib.Path) -> list[str]:
-    """The BUG-/PRIORITY- ids under ``## Bundled Items``, first match per line, deduplicated."""
+    """The BUG-/PRIORITY- ids under ``## Bundled Items``, first match per line, deduplicated.
+
+    The section is read by :func:`task_status.read_section`: it ends at the
+    next level-2 heading, and a ``###`` subheading stays inside it.
+    """
     ids: list[str] = []
-    in_section = False
-    for line in req_file.read_text().splitlines():
-        if line.strip() == '## Bundled Items':
-            in_section = True
-            continue
-        if not in_section:
-            continue
-        if line.startswith('## '):
-            break
+    for line in (read_section(req_file.read_text(), "Bundled Items") or "").split("\n"):
         m = _BUNDLE_REF_PAT.search(line)
         if m:
             ident = m.group(1)
@@ -626,8 +629,8 @@ def _run(ctx: OpsContext, project_arg: str, verbose: bool, env: Mapping[str, str
         # than checking a directory that does not exist.
         _refuse(err, "verify_rc_state.project_directory_missing",
                 f"{_SCRIPT}: project directory not found: {project_root}.",
-                f"Check the project name against projects.cfg, or create it first with "
-                f"team/scripts/create-project.sh --project {project}.")
+                "Check the project name against projects.cfg, or create it first with "
+                f"{installed_script_command(kanban_root, 'create-project.sh', '--project', project)}.")
         # CENSUS-ANCHOR: verify-rc-state-project-directory-missing-01
         return 2
 
@@ -663,7 +666,7 @@ def _run(ctx: OpsContext, project_arg: str, verbose: bool, env: Mapping[str, str
 
     report = _Report(out, verbose)
     try:
-        _check_a(report, kanban_root, project, release_state)
+        _check_a(report, kanban_root, project, release_state, _remote_main_ref(project, cfg))
         _check_b(report, tasks_dir, err)
         _check_c(report, tasks_dir, err)
         _check_d(report, tasks_dir, err)

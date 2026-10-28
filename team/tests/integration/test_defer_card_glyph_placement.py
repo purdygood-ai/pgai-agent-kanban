@@ -153,15 +153,15 @@ class TestDeferredCardGlyphIsATrailingSuffix:
     ) -> None:
         root = two_project_root
         _set_defer_posture(
-            root, "project_a", deferred_bugs=True, deferred_bug_level="low"
+            root, "project-a", deferred_bugs=True, deferred_bug_level="low"
         )
         # Low severity at level "low" is held back (deferred); high severity
         # is kept -- the same severity/level comparison discovery itself
         # applies (team/scripts/lib/discovery_defer.sh).
-        _add_bug_file(root, "project_a", "BUG-0001", "low-a", "low")
-        _add_bug_file(root, "project_a", "BUG-0002", "high-a", "high")
+        _add_bug_file(root, "project-a", "BUG-0001", "low-a", "low")
+        _add_bug_file(root, "project-a", "BUG-0002", "high-a", "high")
 
-        bugs_dir = root / "projects" / "project_a" / "bugs"
+        bugs_dir = root / "projects" / "project-a" / "bugs"
         result = _run_column_render(root, bugs_dir, no_color=False)
         assert result.returncode == 0, result.stderr
 
@@ -190,11 +190,11 @@ class TestDeferredCardGlyphIsATrailingSuffix:
     ) -> None:
         root = two_project_root
         _set_defer_posture(
-            root, "project_a", deferred_bugs=True, deferred_bug_level="low"
+            root, "project-a", deferred_bugs=True, deferred_bug_level="low"
         )
-        _add_bug_file(root, "project_a", "BUG-0001", "low-a", "low")
+        _add_bug_file(root, "project-a", "BUG-0001", "low-a", "low")
 
-        bugs_dir = root / "projects" / "project_a" / "bugs"
+        bugs_dir = root / "projects" / "project-a" / "bugs"
         result = _run_column_render(root, bugs_dir, no_color=True)
         assert result.returncode == 0, result.stderr
 

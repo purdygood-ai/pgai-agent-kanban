@@ -7,8 +7,9 @@ API reference, ``docs/operator-api.md``, and that the reference's list of
 routes that start a process matches the operator verb census.
 
 The routes are read from the API's own source, never from a list kept
-beside it: every ``@app.get``/``@app.post`` and ``@router.get``/
-``@router.post`` handler in ``team/pgai_agent_kanban/api/app.py``,
+beside it: every ``@app``/``@router`` method decorator (``get``, ``post``,
+``put``, ``patch``, ``delete``, ...), ``api_route`` decorator and
+``add_api_route`` call in ``team/pgai_agent_kanban/api/app.py``,
 ``reads.py`` and ``routers/*.py``, with each router file's ``prefix=``
 applied. The router scan is ``lint_api_route_impl.py``'s, imported.
 
@@ -217,7 +218,12 @@ def _matches(route: Route, method: Optional[str], doc_path: str) -> bool:
 def scan_app_routes(team_dir: Path, root: Path) -> tuple[list[Route], list[Finding]]:
     """Every route the API declares: app.py's own handlers plus every router file's.
 
-    Handlers nested inside a function (``create_app``'s ``@app.get``) count.
+    A route is any registration form FastAPI serves: a method decorator
+    (``@router.get``/``post``/``put``/``patch``/``delete``/...), an
+    ``@router.api_route(path, methods=[...])`` decorator, or a
+    ``router.add_api_route(path, endpoint, methods=[...])`` call, on a router
+    or on the app. Handlers nested inside a function (``create_app``'s
+    ``@app.get``) count.
     A file that does not parse is a finding naming it; its routes are not
     checked.
     """
@@ -240,14 +246,18 @@ def scan_app_routes(team_dir: Path, root: Path) -> tuple[list[Route], list[Findi
             ))
             continue
         prefix = _route_scan._router_prefix(tree)
+        declared: list[tuple[str, str, int]] = []
         for node in ast.walk(tree):
-            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                continue
-            for method, sub in _route_scan._route_decorations(node):
-                key = (method, prefix + sub)
-                if key not in seen:
-                    seen.add(key)
-                    routes.append(Route(method, prefix + sub, rel, node.lineno))
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                declared.extend(
+                    (method, sub, node.lineno) for method, sub in _route_scan._route_decorations(node)
+                )
+        declared.extend(_route_scan.route_registration_calls(tree))
+        for method, sub, line in declared:
+            key = (method, prefix + sub)
+            if key not in seen:
+                seen.add(key)
+                routes.append(Route(method, prefix + sub, rel, line))
     routes.sort(key=lambda r: (r.path, r.method))
     return routes, findings
 

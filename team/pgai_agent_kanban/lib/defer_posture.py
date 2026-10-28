@@ -16,14 +16,18 @@ Precedence (highest wins), the same chain ``resolve_defer_posture`` in
 The campaign file is project-scoped over root-scoped
 (``<kanban_root>/projects/<project>/DEFER-LOW-BUGS`` wins over
 ``<kanban_root>/DEFER-LOW-BUGS``), as HALT is. While one is in force it forces
-``deferred_bugs=true`` and ``deferred_bug_level=low``; ``defer_piggyback``
-governs consolidation rather than which bugs wait, so it always resolves
+``deferred_bugs=true`` and ``deferred_bug_level=low``. ``defer_piggyback``,
+the two deferral bounds (``deferred_max_age_days``, ``deferred_max_count``)
+and the bundle-mixing pair (``bundle_mixing``, ``ride_along_max``) govern how
+deferred bugs are carried rather than which bugs wait, so they always resolve
 through the cfg chain.
 
-Both resolvers answer identically for the same tree: the INI tiers are read
-with :func:`pgai_agent_kanban.lib.ini.read_line_value`, the line-for-line twin
-of bash ``read_ini``, and every refusal carries the same machine key, message
-and remedy text the bash resolver prints. A unit test drives both against the
+Both resolvers answer identically for the same tree: the three cfg tiers are
+walked by the shared resolver
+:func:`pgai_agent_kanban.lib.project_cfg.resolve_tiered_cfg_value` (only
+``project.cfg``, never a legacy ``PROJECT.cfg``), which reads by the bash
+``read_ini`` line rules, and every refusal carries the same machine key,
+message and remedy text the bash resolver prints. A unit test drives both against the
 same fixtures.
 
 Public API
@@ -71,10 +75,11 @@ import pathlib
 import re
 from typing import Optional, Union
 
-from pgai_agent_kanban.lib import ini
 from pgai_agent_kanban.lib.error_contract import format_error_contract
+from pgai_agent_kanban.lib.project_cfg import resolve_tiered_cfg_value
 
 __all__ = [
+    "ACCEPTED_BUNDLE_MIXING",
     "ACCEPTED_LEVELS",
     "CAMPAIGN_FILE_NAME",
     "DEFAULTS",
@@ -113,11 +118,16 @@ TIER_DEFAULT = "default"
 #: Tier of ``until`` and ``campaign_file`` when no campaign file is in force.
 TIER_NONE = "none"
 
-#: Built-in defaults for the three ``[release]`` keys.
+#: Built-in defaults for the ``[release]`` posture keys. An empty default
+#: means "unset": for the two deferral bounds, no bound.
 DEFAULTS = {
     "deferred_bugs": "false",
     "deferred_bug_level": "low",
     "defer_piggyback": "true",
+    "deferred_max_age_days": "",
+    "deferred_max_count": "",
+    "bundle_mixing": "separate",
+    "ride_along_max": "3",
 }
 
 #: Values ``deferred_bug_level`` accepts. ``critical`` is deliberately absent:
@@ -126,6 +136,15 @@ DEFAULTS = {
 ACCEPTED_LEVELS = ("low", "medium", "high")
 
 _BOOLEAN_KEYS = ("deferred_bugs", "defer_piggyback")
+
+#: Keys that take a non-negative whole number (ASCII digits only).
+_WHOLE_NUMBER_KEYS = ("deferred_max_age_days", "deferred_max_count", "ride_along_max")
+
+#: Values ``bundle_mixing`` accepts: ``separate`` keeps deferred bugs out of
+#: requirement RCs; ``ride-along`` lets the PM add up to ``ride_along_max``.
+ACCEPTED_BUNDLE_MIXING = ("separate", "ride-along")
+
+_WHOLE_NUMBER_RE = re.compile(r"[0-9]+")
 
 #: Bug severity rungs, weakest first; index + 1 is the rank. Wider than
 #: ACCEPTED_LEVELS by ``critical``, which outranks every settable level.
@@ -164,6 +183,10 @@ class DeferPosture:
     defer_piggyback: PostureValue
     until: PostureValue
     campaign_file: PostureValue
+    deferred_max_age_days: PostureValue
+    deferred_max_count: PostureValue
+    bundle_mixing: PostureValue
+    ride_along_max: PostureValue
 
     @property
     def deferring(self) -> bool:
@@ -171,13 +194,17 @@ class DeferPosture:
         return self.deferred_bugs.value == "true"
 
     def resolver_lines(self) -> str:
-        """Return the five ``<field>=<value>|<tier>`` lines the bash resolver prints."""
+        """Return the nine ``<field>=<value>|<tier>`` lines the bash resolver prints."""
         fields = (
             ("deferred_bugs", self.deferred_bugs),
             ("deferred_bug_level", self.deferred_bug_level),
             ("defer_piggyback", self.defer_piggyback),
             ("until", self.until),
             ("campaign_file", self.campaign_file),
+            ("deferred_max_age_days", self.deferred_max_age_days),
+            ("deferred_max_count", self.deferred_max_count),
+            ("bundle_mixing", self.bundle_mixing),
+            ("ride_along_max", self.ride_along_max),
         )
         return "".join(f"{name}={field.value}|{field.tier}\n" for name, field in fields)
 
@@ -303,6 +330,33 @@ def _validate(key: str, value: str, cfg: str) -> None:
             f"Set [release] {key} to 'true' or 'false' in {cfg} (accepted: true|false; 'on'/'off' are not accepted spellings).",
             cfg,
         )
+    if key in _WHOLE_NUMBER_KEYS:
+        if _WHOLE_NUMBER_RE.fullmatch(value):
+            return
+        unset = "for no bound" if DEFAULTS[key] == "" else f"for the default {DEFAULTS[key]}"
+        # BLOCK-WORTHY (docs/blocking-site-census.md): a bound or cap that is
+        # not a whole number cannot be compared against a count or an age;
+        # refused rather than read as unset or guessed.
+        # CENSUS-ANCHOR: defer-posture-invalid-whole-number-01
+        raise DeferPostureError(
+            f"defer_posture.invalid_{key}",
+            f"defer_posture: resolve_defer_posture: [release] {key}='{value}' in {cfg} is not an accepted value.",
+            f"Set [release] {key} to a non-negative whole number in {cfg}, or delete the line {unset} (accepted: 0, 1, 2, ...).",
+            cfg,
+        )
+    if key == "bundle_mixing":
+        if value in ACCEPTED_BUNDLE_MIXING:
+            return
+        # BLOCK-WORTHY (docs/blocking-site-census.md): an unrecognised mixing
+        # mode -- 'on'/'off' included -- is refused rather than guessed into
+        # a mode nobody asked for.
+        # CENSUS-ANCHOR: defer-posture-invalid-bundle-mixing-01
+        raise DeferPostureError(
+            "defer_posture.invalid_bundle_mixing",
+            f"defer_posture: resolve_defer_posture: [release] bundle_mixing='{value}' in {cfg} is not an accepted value.",
+            f"Set [release] bundle_mixing to one of separate|ride-along in {cfg}.",
+            cfg,
+        )
     if value in ACCEPTED_LEVELS:
         return
     # BLOCK-WORTHY (docs/blocking-site-census.md): an unrecognised level --
@@ -317,21 +371,25 @@ def _validate(key: str, value: str, cfg: str) -> None:
     )
 
 
-def _tiered_value(key: str, project_cfg: str, kanban_cfg: str) -> PostureValue:
-    """Walk project.cfg > kanban.cfg > default for one ``[release]`` key.
+def _tiered_value(
+    key: str, root: str, project_root: str, project_cfg: str, kanban_cfg: str
+) -> PostureValue:
+    """Resolve one ``[release]`` key through project.cfg > kanban.cfg > default.
 
-    An empty *project_cfg* means root-only. A tier whose value is blank or
-    absent passes to the next; the first non-blank value is validated and
-    used, and a lower tier is never consulted after it.
+    The walk is the shared resolver's; this module only validates the
+    winning value. An empty *project_root* means root-only. The first
+    non-blank value is validated against the file it came from (named as
+    *project_cfg* or *kanban_cfg*, the paths refusals print), and a lower
+    tier is never consulted after it.
     """
-    for cfg, tier in ((project_cfg, TIER_PROJECT_CFG), (kanban_cfg, TIER_KANBAN_CFG)):
-        if not cfg:
-            continue
-        value = ini.read_line_value(cfg, "release", key)
-        if value:
-            _validate(key, value, cfg)
-            return PostureValue(value, tier)
-    return PostureValue(DEFAULTS[key], TIER_DEFAULT)
+    found = resolve_tiered_cfg_value(
+        root, project_root, "release", key, DEFAULTS[key], legacy=False
+    )
+    if found.tier == TIER_PROJECT_CFG:
+        _validate(key, found.value, project_cfg)
+    elif found.tier == TIER_KANBAN_CFG:
+        _validate(key, found.value, kanban_cfg)
+    return PostureValue(found.value, found.tier)
 
 
 # ---------------------------------------------------------------------------
@@ -353,11 +411,13 @@ def resolve_defer_posture(kanban_root: PathLike, project: Optional[str] = None) 
     """
     root = os.fspath(kanban_root)
     kanban_cfg = f"{root}/kanban.cfg"
+    project_root = ""
     project_cfg = ""
     project_campaign = ""
     if project:
-        project_cfg = f"{root}/projects/{project}/project.cfg"
-        project_campaign = f"{root}/projects/{project}/{CAMPAIGN_FILE_NAME}"
+        project_root = f"{root}/projects/{project}"
+        project_cfg = f"{project_root}/project.cfg"
+        project_campaign = f"{project_root}/{CAMPAIGN_FILE_NAME}"
     root_campaign = f"{root}/{CAMPAIGN_FILE_NAME}"
 
     campaign_file = ""
@@ -374,16 +434,25 @@ def resolve_defer_posture(kanban_root: PathLike, project: Optional[str] = None) 
     else:
         until = PostureValue("", TIER_NONE)
         campaign = PostureValue("", TIER_NONE)
-        deferred_bugs = _tiered_value("deferred_bugs", project_cfg, kanban_cfg)
-        level = _tiered_value("deferred_bug_level", project_cfg, kanban_cfg)
+        deferred_bugs = _tiered_value("deferred_bugs", root, project_root, project_cfg, kanban_cfg)
+        level = _tiered_value("deferred_bug_level", root, project_root, project_cfg, kanban_cfg)
 
-    piggyback = _tiered_value("defer_piggyback", project_cfg, kanban_cfg)
+    # Carry and mixing keys: never touched by a campaign file.
+    piggyback = _tiered_value("defer_piggyback", root, project_root, project_cfg, kanban_cfg)
+    max_age_days = _tiered_value("deferred_max_age_days", root, project_root, project_cfg, kanban_cfg)
+    max_count = _tiered_value("deferred_max_count", root, project_root, project_cfg, kanban_cfg)
+    bundle_mixing = _tiered_value("bundle_mixing", root, project_root, project_cfg, kanban_cfg)
+    ride_along_max = _tiered_value("ride_along_max", root, project_root, project_cfg, kanban_cfg)
     return DeferPosture(
         deferred_bugs=deferred_bugs,
         deferred_bug_level=level,
         defer_piggyback=piggyback,
         until=until,
         campaign_file=campaign,
+        deferred_max_age_days=max_age_days,
+        deferred_max_count=max_count,
+        bundle_mixing=bundle_mixing,
+        ride_along_max=ride_along_max,
     )
 
 

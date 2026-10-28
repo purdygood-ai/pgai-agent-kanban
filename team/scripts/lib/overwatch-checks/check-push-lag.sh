@@ -82,6 +82,10 @@
 #
 # --dry-run: scans and logs findings but does NOT push to origin.
 
+# overwatch_registered_projects: the shared projects.cfg reader.
+# shellcheck source=../overwatch_config.sh
+source "$(dirname "${BASH_SOURCE[0]}")/../overwatch_config.sh"
+
 # ---------------------------------------------------------------------------
 # _cpl_resolve_env
 # Resolve KANBAN_ROOT, OVERWATCH_PROJECT, and the push decision.
@@ -112,14 +116,9 @@ _cpl_resolve_env() {
         # On a multi-project install the caller MUST set OVERWATCH_PROJECT; this
         # path is only safe for single-project installs.
         local _all_projects=""
-        if declare -f projects_cfg_list >/dev/null 2>&1; then
-            _all_projects="$(projects_cfg_list 2>/dev/null)"
-        else
-            local _cfg="${KANBAN_ROOT}/projects.cfg"
-            _all_projects="$(awk '/^\[project:[a-zA-Z0-9_-]+\]/{match($0,/\[project:([a-zA-Z0-9_-]+)\]/,a);print a[1]}' "$_cfg" 2>/dev/null)"
-        fi
+        _all_projects="$(overwatch_registered_projects)"
         local _project_count
-        _project_count="$(echo "${_all_projects}" | grep -c '[^[:space:]]' 2>/dev/null || echo 0)"
+        _project_count="$(echo "${_all_projects}" | grep -c '[^[:space:]]' 2>/dev/null)" || _project_count=0
         if [[ "${_project_count}" -gt 1 ]]; then
             echo "check-push-lag: ERROR: OVERWATCH_PROJECT is not set and multiple projects are registered." >&2
             echo "  Set OVERWATCH_PROJECT to the target project name before running this check." >&2
@@ -433,7 +432,7 @@ overwatch_check_push_lag() {
     fi
 
     if [[ -n "${unpushed_tags}" ]]; then
-        tag_count="$(echo "${unpushed_tags}" | grep -c '.' 2>/dev/null || echo 0)"
+        tag_count="$(printf '%s\n' "${unpushed_tags}" | grep -c '.' 2>/dev/null)" || tag_count=0
         echo "check-push-lag: ${tag_count} unpushed local tag(s) detected" >&2
         local tag
         while IFS= read -r tag; do

@@ -4,7 +4,8 @@ test_lint_inline_python.py — Unit tests for team/scripts/lint_inline_python.py
 Every test builds its own fixture tree under pytest's ``tmp_path``: a
 ``team/scripts`` directory holding fixture ``.sh`` files and a
 ``team/config/inline-python-allowlist.txt``. The lint is pointed at it with
-``--root``, so nothing here reads this dev tree's own scripts or allowlist.
+``--root``, so nothing here reads this dev tree's own scripts. The tests in
+section 5 alone read the checked-in allowlist, and never write to it.
 
 Coverage:
 
@@ -20,6 +21,8 @@ Coverage:
   4. The exact wiring block both gated runners carry, run against a seeded
      fixture tree with the real ``gated_runner_lint.sh``, puts the seeded
      finding into the runner's findings output and returns 0.
+  5. The checked-in allowlist lists no files, and the lint run against it
+     reports a newly seeded inline block in a tmp scan directory.
 """
 
 from __future__ import annotations
@@ -40,6 +43,7 @@ from tests.fixtures.scrubbed_subprocess_env import build_scrubbed_env
 _THIS_FILE = Path(__file__).resolve()
 _TEAM_DIR = _THIS_FILE.parent.parent.parent
 _LINT_SCRIPT = _TEAM_DIR / "scripts" / "lint_inline_python.py"
+_CHECKED_IN_ALLOWLIST = _TEAM_DIR / "config" / "inline-python-allowlist.txt"
 _GATED_RUNNER_LIB = _TEAM_DIR / "scripts" / "lib" / "gated_runner_lint.sh"
 _RUNNERS = (
     _TEAM_DIR / "scripts" / "run-unit-tests.sh",
@@ -89,11 +93,22 @@ def _make_tree(tmp_path: Path, scripts: dict[str, str], allowlist: str = "") -> 
     return root
 
 
-def _run(root: Path, tmp_path: Path) -> tuple[int, str, list[dict]]:
-    """Run the lint against *root*; return (exit code, stdout, findings)."""
+def _run(root: Path, tmp_path: Path, *extra_args: str) -> tuple[int, str, list[dict]]:
+    """Run the lint against *root*; return (exit code, stdout, findings).
+
+    *extra_args* are appended to the command line (``--allowlist PATH``).
+    """
     findings_file = tmp_path / "findings.json"
     proc = subprocess.run(
-        [sys.executable, str(_LINT_SCRIPT), "--root", str(root), "--findings-file", str(findings_file)],
+        [
+            sys.executable,
+            str(_LINT_SCRIPT),
+            "--root",
+            str(root),
+            "--findings-file",
+            str(findings_file),
+            *extra_args,
+        ],
         capture_output=True,
         text=True,
         timeout=60,
@@ -273,6 +288,27 @@ def test_python_heredoc_body_containing_dash_c_text_counts_once():
     assert [(b.kind, b.python_lines) for b in blocks] == [("heredoc", 1)]
 
 
+def test_a_new_python_dash_c_in_install_sh_is_a_finding(tmp_path):
+    """install.sh, at the repository root outside team/scripts, is in the
+    default scan: a new python3 -c probe there is reported."""
+    root = _make_tree(tmp_path, {"clean.sh": "#!/usr/bin/env bash\necho ok\n"})
+    (root / "install.sh").write_text(
+        "#!/usr/bin/env bash\nPY=$(python3 -c 'import sys; print(sys.version)')\n", encoding="utf-8"
+    )
+    rc, out, findings = _run(root, tmp_path)
+    assert rc == 0
+    assert _kinds(findings) == [("unlisted", "install.sh")], findings
+    assert findings[0]["line"] == 2
+    assert "[unlisted]" in out
+
+
+def test_the_shipped_install_sh_carries_no_inline_python():
+    """The repository's own install.sh probes Python without python3 -c."""
+    install = _TEAM_DIR.parent / "install.sh"
+    blocks = lint_inline_python.scan_text(install.read_text(encoding="utf-8"))
+    assert blocks == [], blocks
+
+
 def test_files_under_test_directories_are_not_scanned(tmp_path):
     root = _make_tree(
         tmp_path,
@@ -357,3 +393,38 @@ def test_runner_wiring_records_a_seeded_finding_and_returns_zero(tmp_path, runne
     data = json.loads(out_file.read_text(encoding="utf-8"))
     ours = [f for f in data["findings"] if f.get("lint") == "inline_python"]
     assert [(f["kind"], f["file"]) for f in ours] == [("unlisted", "team/scripts/seeded.sh")]
+
+
+# ---------------------------------------------------------------------------
+# 5. The checked-in allowlist
+# ---------------------------------------------------------------------------
+
+
+def test_checked_in_allowlist_lists_no_files():
+    """Every script under team/scripts is held to zero inline Python.
+
+    The file stays, holding only its header comment: the lint reads it by
+    default and the coding standard cites it.
+    """
+    assert _CHECKED_IN_ALLOWLIST.is_file(), f"missing {_CHECKED_IN_ALLOWLIST}"
+    entries, findings = lint_inline_python.load_allowlist(_CHECKED_IN_ALLOWLIST)
+    assert findings == [], [f.summary for f in findings]
+    assert entries == {}, (
+        f"{_CHECKED_IN_ALLOWLIST} must list no files; move the inline Python into a "
+        f"module instead of allowlisting it: {sorted(entries)}"
+    )
+
+
+def test_seeded_heredoc_is_reported_against_the_checked_in_allowlist(tmp_path):
+    """One new Python heredoc in a tmp scan directory is exactly one finding.
+
+    Negative proof for the zero allowlist: with the checked-in file as the
+    record, the seeded script is reported as unlisted and nothing else is.
+    """
+    root = _make_tree(tmp_path, {"seeded.sh": ONE_HEREDOC})
+    rc, out, findings = _run(root, tmp_path, "--allowlist", str(_CHECKED_IN_ALLOWLIST))
+    assert rc == 0
+    assert _kinds(findings) == [("unlisted", "team/scripts/seeded.sh")], findings
+    assert findings[0]["line"] == 2
+    assert "team/scripts/seeded.sh" in findings[0]["summary"]
+    assert "totals: 1 file(s) scanned, 1 block(s) (1 heredoc, 0 python3 -c), 2 python line(s); 1 finding(s)" in out

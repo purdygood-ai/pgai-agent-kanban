@@ -42,6 +42,7 @@ import sys
 import pytest
 from tests.fixtures.binary_guard import require_binary
 from tests.fixtures.scrubbed_subprocess_env import build_scrubbed_env
+from tests.fixtures.section_reader_modules import copy_section_reader_modules
 
 from pgai_agent_kanban.cm.read_state_field import load_release_state
 from pgai_agent_kanban.cm.write_rc_state import (
@@ -486,6 +487,7 @@ def _build_kanban_root(tmp_path: pathlib.Path, repo: pathlib.Path) -> pathlib.Pa
     cm_dir.mkdir(parents=True)
     for src in _CM_PY_SRC.glob("*.py"):
         (cm_dir / src.name).write_text(src.read_text(encoding="utf-8"), encoding="utf-8")
+    copy_section_reader_modules(cm_dir.parent)
     return root
 
 

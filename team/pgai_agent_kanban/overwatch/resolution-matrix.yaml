@@ -8,17 +8,19 @@
 # Row shape — every row is a mapping with exactly these seven keys, six
 # facts plus the prescribed resolution:
 #
-#   trigger_class                — string. The only value the shipped
-#                                   extraction layer currently produces that
-#                                   is eligible for resolution is
-#                                   "ship-policy-halt" (a HALT file whose
-#                                   header identifies CM as the creator, per
-#                                   the "# HALT created by CM at ..." format
-#                                   in team/roles/CM.md's HALT procedure).
-#                                   Other observed values are "operator-halt"
-#                                   (a HALT file without that header — an
-#                                   operator-placed HALT is inviolate) and
-#                                   "unknown" (no HALT file, or unreadable).
+#   trigger_class                — string. The values eligible for
+#                                   resolution are "ship-policy-halt" (a HALT
+#                                   file whose header identifies CM as the
+#                                   creator, per the "# HALT created by CM
+#                                   at ..." format in team/roles/CM.md's HALT
+#                                   procedure) and "squash-conflict" (the
+#                                   release's squash into main conflicted;
+#                                   cm/release.sh asks before it writes any
+#                                   HALT). Other observed values are
+#                                   "operator-halt" (a HALT file without that
+#                                   header — an operator-placed HALT is
+#                                   inviolate) and "unknown" (no HALT file,
+#                                   or unreadable).
 #   findings_all_filed            — bool. True only when every TESTER
 #                                   finding in the block's report carries a
 #                                   non-empty "Filed As" value (Path C).
@@ -64,8 +66,54 @@
 #
 # Operator extensibility: add new rows below, or replace this whole file at
 # $PGAI_AGENT_KANBAN_ROOT_PATH/resolution-matrix.yaml to override the shipped
-# defaults entirely without editing the dev tree. The shipped default is
-# exactly the one CANCEL-AND-REBUNDLE row below — no other rows ship.
+# defaults entirely without editing the dev tree. The shipped rows are all
+# CANCEL-AND-REBUNDLE: one for a ship-policy HALT, and four for a squash
+# conflict. The squash-conflict rows accept either value of
+# findings_all_filed and operator_commits_in_lineage: the rebundled RC is
+# verified again, and the cancelled RC's tip commit is named in the
+# operator inbox entry the release writes, so a commit made directly on the
+# RC branch stays recoverable. An override without the squash-conflict rows
+# makes every squash conflict a trigger 5 HALT again.
+#
+# triggers — one row per CM trigger number (team/roles/CM.md, "The nine
+# triggers", plus the numbers cm/release.sh's trigger-N error keys add:
+# 5b, 10, 11). Read by load_trigger_rows() for a chain HALT whose
+# provenance block names writer cm-release and a trigger number
+# (pgai_agent_kanban.overwatch.halt_provenance). Every row has exactly
+# these four keys:
+#
+#   trigger     — the CM trigger number, a letter suffix kept (5b).
+#   name        — a short label used in narration.
+#   clears_on   — cause checks; the resolution stage clears the HALT
+#                 (backup, ops.write unhalt, a Decision event) as soon as
+#                 any one passes. An empty list means the stage never
+#                 clears that trigger's HALT. The checks:
+#                   rc-cancelled        the HALTed RC was cancelled after
+#                                       the HALT was written, Active RC is
+#                                       none, and none of its cargo still
+#                                       reads running (it was rebundled)
+#                   task-reset          the RC's latest TESTER task reads
+#                                       BACKLOG or WAITING again
+#                   notes-status-green  the RC branch's release notes carry
+#                                       a Status heading the release stamp
+#                                       applies to (trigger 9 re-checked)
+#   while_open  — what the stage does while no check passes: "matrix"
+#                 consults the fact rows above and the three lanes, as for
+#                 any ship-policy HALT; "wait" leaves the HALT for the
+#                 operator and narrates.
+#
+# A CM HALT that names no trigger number, or a number with no row here,
+# takes the "matrix" path and is never cleared by a trigger check. An
+# override file without a triggers key behaves the same way for every
+# trigger. Triggers after the squash (5b, 6, 7, 11) and the cross-release
+# pattern (8) clear on nothing: cancelling the RC does not undo them. The
+# release writes no HALT for trigger 6 (a failed push leaves push lag for
+# the push-lag check) or trigger 7 (a tag already on the remote is an
+# operator inbox entry); their rows read a HALT an earlier release wrote.
+# The same holds for trigger 1: the release writes no trigger-1 HALT since
+# verification is requeued, so that row too reads an earlier release's HALT.
+# A trigger 5 HALT is written only when the squash-conflict rows above do
+# not match (an approval gate, the retry ceiling, or a failed cancel).
 
 rows:
   - trigger_class: ship-policy-halt
@@ -75,3 +123,81 @@ rows:
     operator_commits_in_lineage: false
     attempts_below_ceiling: true
     resolution: CANCEL-AND-REBUNDLE
+  - trigger_class: squash-conflict
+    findings_all_filed: true
+    shipped_or_tagged: false
+    approval_gate_present: false
+    operator_commits_in_lineage: false
+    attempts_below_ceiling: true
+    resolution: CANCEL-AND-REBUNDLE
+  - trigger_class: squash-conflict
+    findings_all_filed: true
+    shipped_or_tagged: false
+    approval_gate_present: false
+    operator_commits_in_lineage: true
+    attempts_below_ceiling: true
+    resolution: CANCEL-AND-REBUNDLE
+  - trigger_class: squash-conflict
+    findings_all_filed: false
+    shipped_or_tagged: false
+    approval_gate_present: false
+    operator_commits_in_lineage: false
+    attempts_below_ceiling: true
+    resolution: CANCEL-AND-REBUNDLE
+  - trigger_class: squash-conflict
+    findings_all_filed: false
+    shipped_or_tagged: false
+    approval_gate_present: false
+    operator_commits_in_lineage: true
+    attempts_below_ceiling: true
+    resolution: CANCEL-AND-REBUNDLE
+
+triggers:
+  - trigger: "1"
+    name: tester-blocked
+    clears_on: [rc-cancelled, task-reset]
+    while_open: matrix
+  - trigger: "2"
+    name: systemic-risk-high
+    clears_on: [rc-cancelled]
+    while_open: matrix
+  - trigger: "3"
+    name: serious-concerns-large-fix
+    clears_on: [rc-cancelled]
+    while_open: matrix
+  - trigger: "4"
+    name: pre-squash-hook-failed
+    clears_on: [rc-cancelled]
+    while_open: wait
+  - trigger: "5"
+    name: squash-conflict
+    clears_on: [rc-cancelled]
+    while_open: wait
+  - trigger: "5b"
+    name: tag-points-at-wrong-commit
+    clears_on: []
+    while_open: wait
+  - trigger: "6"
+    name: push-failed-after-retries
+    clears_on: []
+    while_open: wait
+  - trigger: "7"
+    name: tag-exists-on-origin
+    clears_on: []
+    while_open: wait
+  - trigger: "8"
+    name: three-non-functional-releases
+    clears_on: []
+    while_open: wait
+  - trigger: "9"
+    name: notes-status-stamp-failed
+    clears_on: [rc-cancelled, notes-status-green]
+    while_open: wait
+  - trigger: "10"
+    name: pollution-guard-strict
+    clears_on: [rc-cancelled]
+    while_open: wait
+  - trigger: "11"
+    name: fidelity-gate-divergence
+    clears_on: []
+    while_open: wait

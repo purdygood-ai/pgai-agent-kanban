@@ -4,24 +4,18 @@ read_state_field.py — Read and validate release-state.md's named fields.
 
 This module is the one reader behind the release-state field reads the
 cm/*.sh scripts (team/scripts/cm/release.sh, team/scripts/cm/open-rc.sh,
-team/scripts/cm/cancel-rc.sh) and their Python callers share. Its scanning
-walk is defined by the three boundary/skip rules named below; change heading
-matching or whitespace stripping only together with the tests that pin them.
-
-Section boundaries: a field's section ends at the next heading — any line whose
-stripped text starts with '##' — or at a horizontal rule ('---', three or more
-dashes on its own line). A heading with no value before that boundary has no
-value: it never reads the value of the field after it, and a markdown '---'
-rule is never returned as the field value. A single '#' line is a comment and
-is skipped, not a boundary.
-
-HTML-comment handling: an HTML comment block (``<!-- ... -->``, on one line or
-spanning several) between the heading and its value is skipped exactly as a
-``#`` comment line is, and an inline ``<!-- ... -->`` on the value line itself is
-removed before the value is taken.  Agent-facing templates carry an "allowed
-values" HTML comment directly under a heading; a file that keeps the comment
-must still yield the value the author wrote below it, never the comment's own
-first line.
+team/scripts/cm/cancel-rc.sh) and their Python callers share. The section
+itself is read by ``pgai_agent_kanban.task_status.read_section``, the one
+section reader, with its ``exact_heading`` and ``comments`` readings; the
+reader's docstring carries the section rules (where a heading matches and
+where its section ends). The value is ``task_status.first_value_line`` over
+that body: blank lines, single-``#`` comment lines and HTML comment blocks
+are skipped, and a ``---`` horizontal rule ends the field with no value, so
+a heading with no value never reads the value of the field after it and a
+template's "allowed values" comment is never the value. This module adds
+the "none" folding and the schema validation below. Shell callers reach the
+same reading through ``read_md_field --value --exact-heading --comments``
+(team/scripts/lib/md_field.sh).
 
 A TESTER verification report is not read through this module: its
 Recommendation, Systemic Risk and finding fields come from the one report
@@ -44,9 +38,6 @@ Usage (import):
     from pgai_agent_kanban.cm.read_state_field import read_release_state_field
     value = read_release_state_field("team/release-state.md", "Active RC")
 
-    from pgai_agent_kanban.cm.read_state_field import read_state_section
-    value = read_state_section("team/release-state.md", "Active RC")  # None, "" or the value
-
 Both forms return/print the first non-blank, non-comment line after the
 "## <heading>" marker in the file, or the literal string "none" when:
   - the file does not exist, or
@@ -66,9 +57,11 @@ Changing that return contract would silently break every one of those
 callers, which is exactly the kind of regression this module's own docstring
 already warns against.
 
-So this module is **widened, not wrapped**: the scanning walk is factored
-into one private helper (``_scan_field_raw``) that ``read_state_field()``,
-``read_state_section()`` and the validating API below all call, and a schema-
+So this module is **widened, not wrapped**: every reader here takes its
+section from ``task_status.read_section`` and its value from one value
+step (``_first_value``, over ``task_status.first_value_line``) —
+``read_state_field()`` and the validating API below through
+``_scan_field_raw``, the ``--section`` command line directly — and a schema-
 driven validating layer is added beside the raw reader rather than folded
 into it. ``read_state_field()`` keeps its "none" collapse; the validating
 API is what distinguishes the three collapsed cases:
@@ -113,9 +106,23 @@ import re
 import sys
 from typing import Optional
 
+# Run by file path (``python3 .../read_state_field.py``) or loaded from a file
+# outside its package, this module has no parent package and the interpreter
+# puts only its own directory on sys.path, so the package import below would
+# not resolve. Put this file's own package root -- the directory holding the
+# pgai_agent_kanban/ this file sits in -- at the front of sys.path so the
+# import resolves from the same tree, never another. Imported as a package
+# member, sys.path is left untouched.
+if not __package__:
+    _OWN_PACKAGE_ROOT = str(pathlib.Path(__file__).resolve().parents[2])
+    if _OWN_PACKAGE_ROOT not in sys.path:
+        sys.path.insert(0, _OWN_PACKAGE_ROOT)
+
+from pgai_agent_kanban import task_status  # noqa: E402
+
 # ---------------------------------------------------------------------------
-# Raw scanning — shared by read_state_field(), read_state_section() and the
-# validating API below, so they can never disagree about what counts as
+# Raw scanning — shared by read_state_field(), the --section command line and
+# the validating API below, so they can never disagree about what counts as
 # "a value follows this heading".
 # ---------------------------------------------------------------------------
 
@@ -125,22 +132,23 @@ from typing import Optional
 _ABSENT = object()
 _EMPTY = object()
 
-# HTML comment delimiters. A block opening on one line and closing on a later
-# one is skipped as a unit; a complete "<!-- ... -->" inside a single line is
-# removed from that line before its remainder is considered as a value.
-_HTML_COMMENT_OPEN = "<!--"
-_HTML_COMMENT_CLOSE = "-->"
-_HTML_COMMENT_INLINE_RE = re.compile(r"<!--.*?-->", re.DOTALL)
+# How this module reads a section through ``task_status.read_section``:
+# ``exact_heading`` — the heading line is exactly "## <heading>" once
+# stripped, and any stripped line starting "##" ends the section;
+# ``comments`` — a "##" line inside an HTML comment block neither starts nor
+# ends a section.
+_SECTION_READING = {"exact_heading": True, "comments": True}
 
 
-def _is_horizontal_rule(line: str) -> bool:
-    """Return True when *line* is a markdown horizontal rule (three or more dashes).
+def _first_value(body: str):
+    """Return the first value line of a section *body*, or ``_EMPTY``.
 
-    Matches a stripped line composed entirely of three or more dash characters,
-    optionally interspersed with spaces (CommonMark HR syntax).  Used by
-    read_state_field to treat '---' as a section boundary.
+    The value step is ``task_status.first_value_line``: blank lines,
+    single-``#`` comment lines and HTML comment blocks are skipped, an
+    inline ``<!-- ... -->`` is dropped from a value line, and a horizontal
+    rule ends the field without a value.
     """
-    return bool(re.fullmatch(r"-{3,}", line))
+    return task_status.first_value_line(body) or _EMPTY
 
 
 def _scan_field_raw(text: str, heading: str):
@@ -156,44 +164,21 @@ def _scan_field_raw(text: str, heading: str):
         any part of an HTML ``<!-- ... -->`` block;
       - the module sentinel ``_ABSENT`` when "## <heading>" is never found.
 
-    Every reader in this module calls this one walk, so the validating API
+    Every reader in this module reads through the same section reader and
+    value step, so the validating API
     can tell "no heading" apart from "heading with no value" apart from
     "heading holding the literal value 'none'" — the distinction
     ``read_state_field()``'s own collapsed "none" sentinel cannot express —
     and no reader ever takes a value from the section after the field's own.
+
+    The heading and the ``##`` end of the section come from
+    ``task_status.read_section``; :func:`_first_value` is the value step
+    over that body.
     """
-    lines = text.splitlines()
-    for i, line in enumerate(lines):
-        if line.strip() == f"## {heading}":
-            in_html_comment = False
-            for follow in lines[i + 1:]:
-                v = follow.strip()
-                # An HTML comment block is skipped whole, however many lines
-                # it spans; an inline "<!-- ... -->" is dropped from a value
-                # line so the text beside it is still read as the value.
-                if in_html_comment:
-                    if _HTML_COMMENT_CLOSE in v:
-                        in_html_comment = False
-                        v = v.split(_HTML_COMMENT_CLOSE, 1)[1].strip()
-                    else:
-                        continue
-                v = _HTML_COMMENT_INLINE_RE.sub("", v).strip()
-                if v.startswith(_HTML_COMMENT_OPEN):
-                    in_html_comment = True
-                    continue
-                # A horizontal rule ('---', three or more dashes) is treated as
-                # a section boundary.  Stop here without returning a
-                # value rather than returning '---' as the field value.
-                if v and _is_horizontal_rule(v):
-                    break
-                # The next '##' heading (any depth) ends the section, so an
-                # empty field never reads the value of the field after it.
-                if v.startswith("##"):
-                    break
-                if v and not v.startswith("#"):
-                    return v
-            return _EMPTY
-    return _ABSENT
+    body = task_status.read_section(text, heading, **_SECTION_READING)
+    if body is None:
+        return _ABSENT
+    return _first_value(body)
 
 
 def read_state_field(filepath: str, heading: str) -> str:
@@ -213,8 +198,8 @@ def read_state_field(filepath: str, heading: str) -> str:
     skipped, not treated as boundaries, so a template's "allowed values"
     comment under a heading never becomes the value.
 
-    The walk is shared with ``read_state_section``; the two differ only in
-    that this one folds the absent and empty cases into ``"none"``.
+    The walk is shared with the ``--section`` command line; the two differ
+    only in that this one folds the absent and empty cases into ``"none"``.
 
     Args:
         filepath: Path to the markdown file (string or path-like).
@@ -230,32 +215,6 @@ def read_state_field(filepath: str, heading: str) -> str:
     result = _scan_field_raw(text, heading)
     if result is _ABSENT or result is _EMPTY:
         return "none"
-    return result
-
-
-def read_state_section(filepath: str, heading: str) -> Optional[str]:
-    """Read a named field as a section that ends at the next ``##`` heading.
-
-    The same walk as ``read_state_field`` (blank, ``#`` comment and HTML
-    comment lines skipped; the next ``##`` heading or a horizontal rule ends
-    the section, so a field with no value never reads the value of the
-    field after it), except that the three cases ``read_state_field`` folds
-    into ``"none"`` stay apart:
-
-    Returns:
-        ``None`` when the file does not exist or the heading is absent;
-        ``""`` when the heading is present with no value before the next
-        ``##`` heading, a horizontal rule, or EOF; otherwise the value as a
-        stripped string (which may be the literal ``"none"``).
-    """
-    p = pathlib.Path(filepath)
-    if not p.exists():
-        return None
-    result = _scan_field_raw(p.read_text(encoding="utf-8"), heading)
-    if result is _ABSENT:
-        return None
-    if result is _EMPTY:
-        return ""
     return result
 
 
@@ -607,7 +566,8 @@ def main() -> None:
 
       python3 -m pgai_agent_kanban.cm.read_state_field --section <filepath> <heading> [<heading> ...]
           Read each heading as a section that ends at the next '##'
-          heading (read_state_section). Prints one line per heading: the
+          heading (task_status.read_section with this module's reading,
+          then its first value line). Prints one line per heading: the
           value, or an empty line when the heading has no value or is
           absent. Exits 1 with no output when the file does not exist, and
           exits 1 after printing every line when any heading is absent;
@@ -676,10 +636,11 @@ def main() -> None:
     if args.section:
         if not pathlib.Path(args.filepath).exists():
             sys.exit(1)
-        values = [read_state_section(args.filepath, h) for h in args.heading]
-        for value in values:
-            print(value or "")
-        sys.exit(1 if any(value is None for value in values) else 0)
+        text = pathlib.Path(args.filepath).read_text(encoding="utf-8")
+        bodies = [task_status.read_section(text, h, **_SECTION_READING) for h in args.heading]
+        for body in bodies:
+            print(task_status.first_value_line(body or ""))
+        sys.exit(1 if any(body is None for body in bodies) else 0)
 
     for heading in args.heading:
         print(read_state_field(args.filepath, heading))

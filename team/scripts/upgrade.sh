@@ -151,7 +151,12 @@
 #   from. Identical copies are left alone; missing ones are seeded; a copy that
 #   differs (an older release's template or an operator edit) is kept beside
 #   itself as <file>.<UTC timestamp>.bak and then overwritten, with one line
-#   naming the project, file and backup. No other project file is written.
+#   naming the project, file and backup. The one other project file written
+#   is the README template snapshot, projects/<name>/.readme-template.md:
+#   stored when missing; when it differs from the installed
+#   templates/project/README-TEMPLATE.md, moved aside as
+#   .readme-template.<UTC timestamp>.md and replaced, with a one-line notice.
+#   The project README.md itself is never written.
 #
 # ORPHAN SWEEP (after the deposit and the retirement step):
 #   Phase 2 lists every file under the directories it deposited into (the
@@ -236,7 +241,11 @@ fi
 # Source optional config files.
 [[ -f "$KANBAN_ROOT/bashrc"     ]] && source "$KANBAN_ROOT/bashrc"
 [[ -f "$KANBAN_ROOT/env"        ]] && source "$KANBAN_ROOT/env"
-[[ -f "$HOME/.config/pgai-kanban.cfg" ]] && source "$HOME/.config/pgai-kanban.cfg"
+# Operator user config, then [chain] pm_mode. config_loader.sh is
+# self-located: in phase 2 the installed root's lib may predate it.
+# shellcheck source=lib/config_loader.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/config_loader.sh"
+config_startup_prelude "$KANBAN_ROOT"
 
 # Source INI parser for kanban.cfg access.
 _UPG_INI_SH="${KANBAN_ROOT}/scripts/lib/ini_parser.sh"
@@ -249,6 +258,17 @@ unset _UPG_INI_SH
 # Source library helpers (project_paths, temp).
 [[ -f "$KANBAN_ROOT/scripts/lib/project_paths.sh" ]] && source "$KANBAN_ROOT/scripts/lib/project_paths.sh"
 [[ -f "$KANBAN_ROOT/scripts/lib/temp.sh"          ]] && source "$KANBAN_ROOT/scripts/lib/temp.sh"
+# Registry reader (projects_cfg_*), after project_paths.sh as it requires.
+# Self-located like config_loader.sh: _upg_resolve_branch_prefix needs
+# projects_cfg_list --registration-order, which an installed lib may predate.
+# Optional, as that resolver is: a missing or failing copy leaves the
+# prefix "" rather than stopping the upgrade.
+_UPG_PROJECTS_SH="$(dirname "${BASH_SOURCE[0]}")/lib/projects.sh"
+if [[ -f "$_UPG_PROJECTS_SH" ]]; then
+  # shellcheck source=lib/projects.sh
+  source "$_UPG_PROJECTS_SH" || true
+fi
+unset _UPG_PROJECTS_SH
 
 # ---------------------------------------------------------------------------
 # Source the shared argument parser.
@@ -296,22 +316,25 @@ err()   { echo "${C_RED}[upgrade]${C_RESET} $*" >&2; }
 # ---------------------------------------------------------------------------
 # _upg_resolve_branch_prefix
 #
-# Echoes the registered project's [project] branch_prefix from projects.cfg
-# / project.cfg (via pp_branch_prefix), or "" when no project is registered,
-# the helper is unavailable, or lookup fails for any reason. Single
-# definition shared by the version-targeted-upgrade tag resolution block and
-# the VERSION_DETAIL git-describe advisory further down, so the two call
-# sites cannot drift on how the prefix is derived.
+# Echoes the [project] branch_prefix (via pp_branch_prefix) of the first
+# project registered in an INI projects.cfg -- the first [project:NAME]
+# section in file order (projects_cfg_list --registration-order), not the
+# highest priority -- or "" when no project is registered, projects.cfg is
+# colon-legacy, a helper is unavailable, or lookup fails for any reason.
+# Single definition shared by the version-targeted-upgrade tag resolution
+# block and the VERSION_DETAIL git-describe advisory further down, so the
+# two call sites cannot drift on how the prefix is derived.
 # ---------------------------------------------------------------------------
 _upg_resolve_branch_prefix() {
   local prefix=""
-  if declare -f pp_branch_prefix >/dev/null 2>&1; then
-    local projects_cfg="${KANBAN_ROOT}/projects.cfg"
-    if [[ -f "$projects_cfg" ]]; then
-      local project_name
-      project_name="$(awk \
-        '/^\[project:[a-zA-Z0-9_-]+\]/{match($0,/\[project:([a-zA-Z0-9_-]+)\]/,a);print a[1];exit}' \
-        "$projects_cfg" 2>/dev/null || true)"
+  if declare -f pp_branch_prefix >/dev/null 2>&1 \
+      && declare -f projects_cfg_list >/dev/null 2>&1; then
+    local projects_cfg
+    projects_cfg="$(projects_cfg_path)"
+    if [[ -f "$projects_cfg" && "$(projects_cfg_format "$projects_cfg")" == "ini" ]]; then
+      local names project_name
+      names="$(projects_cfg_list --registration-order 2>/dev/null)" || names=""
+      project_name="${names%%$'\n'*}"
       if [[ -n "$project_name" ]]; then
         prefix="$(KANBAN_ROOT="$KANBAN_ROOT" pp_branch_prefix "$project_name" 2>/dev/null || true)"
       fi
@@ -1617,22 +1640,25 @@ done
 unset _log_role _rdir
 
 # Seed per-project log subdirs for all registered projects (idempotent).
+# Names come from projects_cfg_list (lib/projects.sh beside this script,
+# sourced above), so an INI and a colon-legacy registry both seed.
 _projects_cfg_file="${KANBAN_ROOT}/projects.cfg"
 if [[ -f "$_projects_cfg_file" ]]; then
+  _pnames=""
+  if declare -F projects_cfg_list >/dev/null 2>&1; then
+    # A registry with no projects lists nothing; that is not an error here.
+    _pnames="$(projects_cfg_list --registration-order 2>/dev/null)" || _pnames=""
+  else
+    warn "Registry reader (lib/projects.sh beside upgrade.sh) not loaded — per-project log subdir seeding skipped"
+  fi
   while IFS= read -r _pname; do
     [[ -z "$_pname" ]] && continue
     _plog_dir="${KANBAN_ROOT}/projects/${_pname}/logs"
     mkdir -p "${_plog_dir}/debug/archive"
     mkdir -p "${_plog_dir}/training"
-  done < <(awk '
-    /^[[:space:]]*#/ { next }
-    /^[[:space:]]*$/ { next }
-    /^\[project:[a-zA-Z0-9_-]+\]$/ {
-      sub(/^\[project:/, ""); sub(/\]$/, ""); print
-    }
-  ' "$_projects_cfg_file")
+  done <<< "$_pnames"
 fi
-unset _projects_cfg_file _pname _plog_dir
+unset _projects_cfg_file _pnames _pname _plog_dir
 
 # ---------------------------------------------------------------------------
 # Refresh registered projects' seeded intake templates (see SEEDED INTAKE
@@ -1967,6 +1993,11 @@ _is_temp_root=false
 if [[ "$_kanban_root_real" == "${_system_tmp_real}"/* || "$_kanban_root_real" == "${_system_tmp_real}" ]]; then
   _is_temp_root=true
 fi
+# Guard read, not a temp-root resolution: this asks only whether the target
+# sits under THIS invocation's override (the sandbox a test harness exports),
+# so the raw value is compared and nothing is resolved or created. The
+# default temp root lies under /tmp, which the system-temp check above
+# already covers.
 if [[ -n "${PGAI_AGENT_KANBAN_TEMP_DIR:-}" ]]; then
   _pgai_temp_real="$(readlink -m "$PGAI_AGENT_KANBAN_TEMP_DIR" 2>/dev/null || echo "$PGAI_AGENT_KANBAN_TEMP_DIR")"
   if [[ "$_kanban_root_real" == "${_pgai_temp_real}"/* || "$_kanban_root_real" == "$_pgai_temp_real" ]]; then

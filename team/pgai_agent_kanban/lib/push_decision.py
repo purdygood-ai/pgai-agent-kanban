@@ -60,7 +60,6 @@ from __future__ import annotations
 import argparse
 import dataclasses
 import pathlib
-import re
 import sys
 from typing import Optional, Sequence, Union
 
@@ -77,6 +76,7 @@ if not __package__:
         sys.path.insert(0, _OWN_PACKAGE_ROOT)
 
 from pgai_agent_kanban.lib import ini, project_cfg  # noqa: E402
+from pgai_agent_kanban.lib.text import breaks_to_spaces  # noqa: E402
 
 __all__ = [
     "PUSH",
@@ -104,11 +104,6 @@ SKIP_STATUS = "skipped-unresolved-project"
 MISSING_REGISTRATION = "registration"
 MISSING_PROJECT_CFG = "project-cfg"
 MISSING_DEV_TREE_PATH = "dev-tree-path"
-
-# A project name a registry section can carry; anything else (a path
-# separator, "..", whitespace) can never name a registered project.
-_PROJECT_NAME_RE = re.compile(r"[A-Za-z0-9_-]+")
-
 
 @dataclasses.dataclass(frozen=True)
 class PushDecision:
@@ -148,11 +143,7 @@ class PushDecision:
             ("missing", self.missing),
             ("status_line", self.status_line),
         )
-        return [f"{key}={_one_line(value)}" for key, value in fields]
-
-
-def _one_line(value: str) -> str:
-    return value.replace("\r", " ").replace("\n", " ")
+        return [f"{key}={breaks_to_spaces(value)}" for key, value in fields]
 
 
 def _unresolved(project: str, missing: str, detail: str, cfg_file: str = "") -> PushDecision:
@@ -194,14 +185,21 @@ def resolve_push_decision(kanban_root: PathLike, project: str) -> PushDecision:
 
     Returns:
         A :class:`PushDecision`. Never raises for a missing or unreadable
-        file: every such case is an ``unresolved`` decision naming it.
+        project file: every such case is an ``unresolved`` decision naming it.
+
+    Raises:
+        ini.ProjectNameRuleError: This tree's own project-name rule cannot be
+            loaded (an unusable build; the registry readers raise it too).
     """
     name = project or ""
-    if not _PROJECT_NAME_RE.fullmatch(name):
+    # The project-name rule (ini.project_name_rule): the registry readers
+    # list no other name, so anything else -- a path separator, "..",
+    # whitespace, '_' or a capital -- can never name a registered project.
+    if not ini.is_project_name(name):
         return _unresolved(
             name,
             MISSING_REGISTRATION,
-            f"{name!r} is not a project name a registry can hold (letters, digits, '_' and '-' only)",
+            f"{name!r} is not a project name (the project-name rule is {ini.project_name_rule().pattern})",
         )
 
     root = pathlib.Path(kanban_root)

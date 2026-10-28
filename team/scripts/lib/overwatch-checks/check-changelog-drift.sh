@@ -4,6 +4,15 @@
 # OVERWATCH Tier-1 detection module: detect CHANGELOG.md drift on the main
 # branch and regenerate-and-commit when drift is present.
 #
+# OVERWATCH-CHECK-SCOPE: kanban-only
+# Scope: the kanban's own project only. The regeneration runs the kanban's
+# changelog_writer from <dev_tree>/team, which only the kanban source has, so
+# overwatch-sweep.sh runs this check only for the project whose dev tree is
+# the kanban source (install.sh and team/pgai_agent_kanban/ at its root);
+# every other project gets one check-not-applicable row from the sweep
+# instead, never a changelog-drift-regen-error. Called directly, the check
+# acts on whichever project OVERWATCH_PROJECT names.
+#
 # Drift definition: the checked-in CHANGELOG.md at the dev tree root differs
 # from a fresh regeneration produced by changelog_writer.py against the current
 # bug ledger.  This drift occurs when new bug files are filed on ai_main after
@@ -66,7 +75,10 @@
 #
 # Optional:
 #   PGAI_DEV_TREE_PATH            — fallback dev tree path
-#   PGAI_AGENT_KANBAN_TEMP_DIR    — temp root for changelog regen buffer
+#   PGAI_AGENT_KANBAN_TEMP_DIR    — overrides the framework temp root the
+#                                   regeneration buffer goes under
+#                                   (<root>/changelog_drift/, resolved by
+#                                   lib/temp.sh pgai_temp_subdir)
 #
 # Usage (standalone):
 #   bash check-changelog-drift.sh [--dry-run]
@@ -76,6 +88,11 @@
 #   1 — internal error (missing libraries or unresolvable environment)
 #
 # --dry-run: detects drift but does NOT modify CHANGELOG.md or commit.
+
+# overwatch_registered_projects and overwatch_branch_prefix: the shared
+# projects.cfg and branch_prefix readers.
+# shellcheck source=../overwatch_config.sh
+source "$(dirname "${BASH_SOURCE[0]}")/../overwatch_config.sh"
 
 # ---------------------------------------------------------------------------
 # _ccd_resolve_env
@@ -94,14 +111,9 @@ _ccd_resolve_env() {
 
     if [[ -z "${OVERWATCH_PROJECT:-}" ]]; then
         local _all_projects=""
-        if declare -f projects_cfg_list >/dev/null 2>&1; then
-            _all_projects="$(projects_cfg_list 2>/dev/null)"
-        else
-            local _cfg="${KANBAN_ROOT}/projects.cfg"
-            _all_projects="$(awk '/^\[project:[a-zA-Z0-9_-]+\]/{match($0,/\[project:([a-zA-Z0-9_-]+)\]/,a);print a[1]}' "${_cfg}" 2>/dev/null)"
-        fi
+        _all_projects="$(overwatch_registered_projects)"
         local _project_count
-        _project_count="$(echo "${_all_projects}" | grep -c '[^[:space:]]' 2>/dev/null || echo 0)"
+        _project_count="$(echo "${_all_projects}" | grep -c '[^[:space:]]' 2>/dev/null)" || _project_count=0
         if [[ "${_project_count}" -gt 1 ]]; then
             echo "check-changelog-drift: ERROR: OVERWATCH_PROJECT is not set and multiple projects are registered." >&2
             echo "  Set OVERWATCH_PROJECT to the target project name before running this check." >&2
@@ -129,11 +141,7 @@ _ccd_resolve_env() {
         _CCD_DEV_TREE="$(grep -E '^[[:space:]]*dev_tree_path[[:space:]]*=' "${_cfg_file}" \
             | head -n1 \
             | sed 's|^[^=]*=[[:space:]]*||; s|[[:space:]]*$||; s|^["'"'"']||; s|["'"'"']$||')"
-        local _raw_prefix
-        _raw_prefix="$(grep -E '^[[:space:]]*branch_prefix[[:space:]]*=' "${_cfg_file}" \
-            | head -n1 \
-            | sed 's|^[^=]*=[[:space:]]*||; s|[[:space:]]*$||; s|^["'"'"']||; s|["'"'"']$||')"
-        _CCD_BRANCH_PREFIX="${_raw_prefix:-}"
+        _CCD_BRANCH_PREFIX="$(overwatch_branch_prefix "${OVERWATCH_PROJECT}")" || return 1
     fi
 
     if [[ -z "${_CCD_DEV_TREE}" ]] && [[ -n "${PGAI_DEV_TREE_PATH:-}" ]]; then
@@ -160,6 +168,34 @@ if ! declare -F pgai_emit_error_contract >/dev/null 2>&1; then
     # shellcheck source=../error_contract.sh
     source "$(dirname "${BASH_SOURCE[0]}")/../error_contract.sh"
 fi
+# The regeneration buffer goes under the framework temp root, resolved by the
+# shared wrapper one directory up (scripts/lib/temp.sh in the repo and the
+# installed layout alike). The sweep sources this file, so a missing copy is
+# not an exit here: overwatch_check_changelog_drift refuses when it runs,
+# naming the path (_ccd_require_temp_wrapper).
+_CCD_TEMP_SH="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/temp.sh"
+if [[ -f "${_CCD_TEMP_SH}" ]]; then
+    # shellcheck source=../temp.sh
+    source "${_CCD_TEMP_SH}"
+fi
+
+# ---------------------------------------------------------------------------
+# _ccd_require_temp_wrapper
+# Return 0 when lib/temp.sh's pgai_temp_subdir is loaded. Otherwise emit the
+# dual-channel refusal naming the missing wrapper and return 1 -- the
+# module's internal-error code for a missing required library.
+# ---------------------------------------------------------------------------
+_ccd_require_temp_wrapper() {
+    declare -F pgai_temp_subdir >/dev/null 2>&1 && return 0
+    # BLOCK-WORTHY: without the wrapper there is no resolved temp root for
+    # the regeneration buffer; nothing has been read or changed yet. The
+    # sweep records the check as an error and runs the remaining checks.
+    pgai_emit_error_contract "overwatch.changelog-drift.temp-sh-missing" \
+        "check-changelog-drift: the temp-root wrapper at ${_CCD_TEMP_SH} does not exist or did not load; the drift check did not run and nothing was changed." \
+        "ls -l '${_CCD_TEMP_SH}'"
+    # CENSUS-ANCHOR: check-changelog-drift-temp-sh-missing-01
+    return 1
+}
 
 # ---------------------------------------------------------------------------
 # _ccd_read_active_rc <release_state_file>
@@ -254,6 +290,7 @@ overwatch_check_changelog_drift() {
 
     # Resolve environment.
     _ccd_resolve_env || return 1
+    _ccd_require_temp_wrapper || return 1
 
     local dev_tree="${_CCD_DEV_TREE}"
     local branch_prefix="${_CCD_BRANCH_PREFIX}"
@@ -288,12 +325,11 @@ overwatch_check_changelog_drift() {
         return 0
     fi
 
-    # Resolve temp root for the regeneration buffer.
-    # anti-pattern-allowlist: 2 (justification: the literal is the resolver's
-    # documented last-resort fallback, mirroring the behaviour of temp.sh's
-    # pgai_temp_dir(); callers should set PGAI_AGENT_KANBAN_TEMP_DIR)
+    # Resolve temp root for the regeneration buffer: <framework temp root>/
+    # changelog_drift (pgai_temp_subdir: PGAI_AGENT_KANBAN_TEMP_DIR, then
+    # kanban.cfg [paths], then the wrapper's own fallback).
     local temp_root
-    temp_root="${PGAI_AGENT_KANBAN_TEMP_DIR:-/tmp/pgai_kanban_tmp}/changelog_drift"
+    temp_root="$(pgai_temp_subdir changelog_drift)"
 
     # Regenerate CHANGELOG.md to a temp file.
     local regen_file=""

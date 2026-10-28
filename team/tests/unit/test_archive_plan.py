@@ -318,11 +318,8 @@ def test_priority_finished_statuses(sandbox) -> None:
 
     result = plan(sandbox.project, 1, kanban_root=sandbox.root)
 
-    assert result.ids_in("priority") == ("PRIORITY-0001", "PRIORITY-0002")
-    assert _held_codes(result, "priority") == {
-        "PRIORITY-0003": HOLD_UNFINISHED,
-        "PRIORITY-0004": HOLD_UNFINISHED,
-    }
+    assert result.ids_in("priority") == ("PRIORITY-0001", "PRIORITY-0002", "PRIORITY-0003")
+    assert _held_codes(result, "priority") == {"PRIORITY-0004": HOLD_UNFINISHED}
 
 
 def test_requirement_selected_only_when_done_or_shipped_and_released(tmp_path: pathlib.Path) -> None:

@@ -32,9 +32,9 @@
 #
 # Other functions in this file (cm_halt, write_halt_file,
 # append_halt_event_to_release_state, append_autoresolve_note_to_release_state,
-# _cm_record_operator_override_event, read_md_field,
-# _cm_autoresolve_ud_conflicts, cm_release_cleanup_on_exit -- plus
-# read_field, which this file sources from lib/cm/common.sh) are shared
+# _cm_record_operator_override_event, _cm_autoresolve_ud_conflicts,
+# cm_release_cleanup_on_exit -- plus read_field and read_md_field, which
+# this file sources from lib/cm/common.sh and lib/md_field.sh) are shared
 # primitives, not private helpers of cm_release_preflight alone — cm_halt in
 # particular is called throughout the rest of release.sh (Steps 5-16) and
 # from team/scripts/lib/cm/release_ship_policy.sh (which also calls
@@ -128,15 +128,9 @@ cm_release_cleanup_on_exit() {
 # RELEASE_STATE, or "none" (lib/cm/common.sh).
 # shellcheck source=common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
-
-# Helper: read a named field from an arbitrary markdown file.
-# Usage: read_md_field <filepath> <heading>
-# Returns the first non-blank non-comment line after "## <heading>", or "none".
-read_md_field() {
-  local filepath="$1"
-  local heading="$2"
-  python3 "$KANBAN_ROOT/pgai_agent_kanban/cm/read_state_field.py" "$filepath" "$heading"
-}
+# cm_release_stop_inbox_entry, which cm_halt --inbox calls (release_stop_inbox.sh).
+# shellcheck source=release_stop_inbox.sh
+source "$(dirname "${BASH_SOURCE[0]}")/release_stop_inbox.sh"
 
 # Helper: write the HALT file with a structured comment header.
 # Usage: write_halt_file <error_key> <message> <remedy>
@@ -144,7 +138,13 @@ read_md_field() {
 # $KANBAN_ROOT/projects/<name>/HALT) with a timestamp and the dual-channel
 # error contract (error/message/remedy — see team/scripts/lib/error_contract.sh)
 # so an operator reading the HALT file alone, with no ledger open, sees what
-# stopped, why, and what to do next. Deliberately project-scoped, not global:
+# stopped, why, and what to do next. Under the header it writes the
+# provenance block (pgai_agent_kanban.overwatch.halt_provenance) that marks
+# the HALT as the chain's: "# halt-writer: cm-release", "# halt-reason:
+# <error_key>", and "# halt-trigger: <n>" when the key names a trigger
+# (cm_ship_policy_trigger_number, release_ship_posture.sh; omitted when that
+# helper is not loaded -- the reader then takes the number from the key).
+# Deliberately project-scoped, not global:
 # a release failure for this project must not freeze sibling projects' chains.
 # Does NOT create the HALT file if it already exists (preserves earlier halt reason).
 write_halt_file() {
@@ -160,10 +160,18 @@ write_halt_file() {
     cat "$halt_file" >&2
     return 0
   fi
-  local contract
+  local contract trigger="none"
   contract="$(pgai_format_error_contract "$error_key" "$message" "$remedy")"
+  if declare -F cm_ship_policy_trigger_number >/dev/null; then
+    trigger="$(cm_ship_policy_trigger_number "$error_key")"
+  fi
   {
     echo "# HALT created by CM at ${timestamp}"
+    echo "# halt-writer: cm-release"
+    echo "# halt-reason: ${error_key}"
+    if [[ "$trigger" != "none" ]]; then
+      echo "# halt-trigger: ${trigger}"
+    fi
     # Comment-prefix every line of the house-shape block so the file stays a
     # readable shell/markdown comment block, matching the pre-existing
     # "# Reason: ..." convention this replaces.
@@ -202,13 +210,16 @@ EOF
 }
 
 # Helper: full HALT procedure — write halt file, append event to release-state, exit 1.
-# Usage: cm_halt <error_key> <message> <remedy>
+# Usage: cm_halt <error_key> <message> <remedy> [--inbox]
 #   error_key — stable machine key matching the trigger/gate/check id documented
 #               in team/roles/CM.md "HALT triggers" (greppable, resolution-matrix-
 #               addressable; e.g. "cm-release.trigger-5.squash-conflict").
 #   message   — what stopped and why, in a stranger's words (no bare internal
 #               identifier without a plain-language explanation).
 #   remedy    — what to do next, verbatim-runnable where possible.
+#   --inbox   — after the HALT file and HALT Event, also write the triple to
+#               the operator inbox (release_stop_inbox.sh). The integrity stops
+#               pass it; every other HALT writes no entry.
 # This is the single exit point for all HALT conditions. Emits the dual-channel
 # error contract (team/scripts/lib/error_contract.sh) to stderr, the HALT file,
 # and the release-state.md HALT Event — all three carry the same triple.
@@ -221,6 +232,7 @@ cm_halt() {
   local error_key="$1"
   local message="$2"
   local remedy="$3"
+  local inbox="${4:-}"
   # A decide-only run reports the HALT and exits 3 before anything below
   # writes (release_decide_only.sh).
   if [[ "${_CM_DECIDE_ONLY:-false}" == "true" ]]; then
@@ -231,6 +243,9 @@ cm_halt() {
   pgai_emit_error_contract "$error_key" "$message" "$remedy"
   write_halt_file "$error_key" "$message" "$remedy"
   append_halt_event_to_release_state "$error_key" "$message" "$remedy"
+  if [[ "$inbox" == "--inbox" ]]; then
+    cm_release_stop_inbox_entry "$error_key" "$message" "$remedy" yes
+  fi
   echo "" >&2
   if [[ "${_CM_VERIFICATION_COMPLETE:-0}" == "1" && -n "${RELEASE_TAG:-}" ]]; then
     echo "HALT: scripts/cm/release.sh stopped after tagging. The release IS tagged (${RELEASE_TAG}); do not cancel it — finish it with the remedy above." >&2
@@ -239,7 +254,7 @@ cm_halt() {
     echo "HALT: scripts/cm/release.sh stopped. The release has NOT been shipped." >&2
     echo "The dev tree, branches, and RC state are unchanged for operator inspection." >&2
   fi
-  echo "Resolve the issue above, then run: team/scripts/unhalt.sh --project $PROJECT_NAME (removes $PROJECT_HALT_FILE and resumes this project's chain)." >&2
+  echo "Resolve the issue above, then run: $(printf '%q' "${KANBAN_ROOT}/scripts/unhalt.sh") --project $(printf '%q' "$PROJECT_NAME") (removes $PROJECT_HALT_FILE and resumes this project's chain)." >&2
   echo "(This HALT is scoped to project '$PROJECT_NAME' only; sibling projects' chains are unaffected.)" >&2
   # BLOCK-WORTHY: the shared project-scoped HALT dispatcher every named
   # cm/release.sh HALT trigger routes through -- error_key varies per
@@ -278,9 +293,9 @@ EOF
 # project-scoped release-state.md AFTER release_finalize.sh's Step 12
 # rewrites that file wholesale ('cat > $RELEASE_STATE').
 # Usage: _cm_record_operator_override_event <version> <stop_error_key> <reason>
-# Called only from team/scripts/lib/cm/release_ship_policy.sh's
+# Called only from team/scripts/lib/cm/release_operator_override.sh's
 # _cm_apply_matrix_trigger, when cm/release.sh --force passes one of the
-# three named ship-policy matrix stops it is scoped to. This is one of the
+# two overridable ship-policy matrix stops (triggers 2 and 3). This is one of the
 # override's two permanent records — the release-notes ## Status stamp
 # (SHIPPED-BY-OPERATOR-OVERRIDE) is the other.
 #
@@ -300,7 +315,7 @@ EOF
 # can never prematurely terminate a heredoc body. It is always the last
 # field of the last event appended to the file, so even a reason line that
 # looks exactly like a real heading can never be mistaken for one:
-# read_state_field()/read_md_field() both return the value following the
+# read_state_field() and read_md_field both return the value following the
 # FIRST "## <heading>" occurrence in the file, and every real
 # release-state.md schema heading is rewritten by Step 12 before this event
 # is ever appended. A multi-line reason simply renders as a multi-line
@@ -330,8 +345,9 @@ _cm_record_operator_override_event() {
 #
 # Returns:
 #   0  — all conflicts were UD/DU and have been resolved; caller may proceed with commit.
-#   1  — one or more UU (content) conflicts found; caller MUST halt.
-#   2  — unexpected conflict type or git status parsing failure; caller MUST halt.
+#   1  — one or more UU (content) conflicts found; caller MUST NOT commit
+#        (release_squash.sh backs the squash out: trigger 5).
+#   2  — unexpected conflict type or git status parsing failure; caller MUST NOT commit.
 #
 # Side effects on exit 0:
 #   - All UD/DU paths have been staged (git rm or git add as appropriate).
@@ -407,7 +423,7 @@ _cm_autoresolve_ud_conflicts() {
   # If any UU (or unresolvable) conflicts exist, caller must halt.
   # Do NOT apply any UD resolutions into a partial commit.
   if [[ $has_uu -eq 1 ]]; then
-    echo "[cm-release] UU content conflict(s) detected; Trigger 5 HALT required." >&2
+    echo "[cm-release] UU content conflict(s) detected; Trigger 5: the squash is backed out, never merged by hand." >&2
     echo "[cm-release] UD/DU paths (if any) will NOT be auto-resolved into a partial commit." >&2
     return 1
   fi

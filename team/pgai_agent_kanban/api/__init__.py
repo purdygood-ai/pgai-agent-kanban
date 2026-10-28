@@ -7,6 +7,8 @@ one its CLI script reaches through ``pp_run_ops``) in process and returns the
 result in a JSON envelope.  Only four routes start a process:
 
   GET  /dashboard/{pane}           runs the pane's dashboard render script
+                                   (metrics, attention, header, status-window;
+                                   the input and queue panes render in process)
   POST /operations/wake-now        runs wake-now.sh
   POST /operations/deep-verify     launches deep-verify.sh detached
   POST /operations/cold-build-now  launches cold-build-now.sh detached

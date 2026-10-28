@@ -398,7 +398,7 @@ def _isolated_loader_with_provider_lib(tmp_path: pathlib.Path, provider: str, li
     PROVIDER_EFFORT_VALUES, without touching the real lib tree."""
     lib_dir = tmp_path / "lib"
     lib_dir.mkdir()
-    for name in ("config_loader.sh", "ini_parser.sh", "error_contract.sh", "refusal_ledger.sh"):
+    for name in ("config_loader.sh", "ini_parser.sh", "error_contract.sh", "refusal_ledger.sh", "temp.sh"):
         src = _CONFIG_LOADER.parent / name
         if src.is_file():
             (lib_dir / name).write_text(src.read_text(encoding="utf-8"), encoding="utf-8")

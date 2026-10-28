@@ -6,7 +6,9 @@ Renders a "measured pace" block -- per-task wall-time range, its central
 tendency, a composed RC-cost figure, and the sample size behind all three
 -- into marker-delimited generated blocks in README.md and HOW_TO.md. In
 `--check` mode, refuses when a rendered block has drifted from what's on
-disk (a hand-edited figure, most likely).
+disk (a hand-edited figure, most likely). In `--freshness` mode, narrates
+a block whose measured window ends before the newest shipped rollup -- a
+release shipped and nobody re-rendered -- and always exits 0.
 
 WHERE THE NUMBERS COME FROM
 ============================
@@ -99,12 +101,25 @@ the sample as thin inline, so a reader knows not to treat it as settled.
 Usage:
     python3 generate_measured_pace_docs.py             # render: write both docs
     python3 generate_measured_pace_docs.py --check      # verify: report drift, don't write
+    python3 generate_measured_pace_docs.py --freshness  # narrate a stale window, exit 0
 
 Options:
     --check                Compare rendered content against what's on disk;
                             print every disagreement and exit 1 without
                             writing anything. Exit 0 when everything already
                             matches.
+    --freshness            Compare the newest RC each doc's block names
+                            (the end of its "(oldest .. newest)" window)
+                            with the newest shipped rollup. Prints one
+                            STALE line per doc that is behind, plus the
+                            command that re-renders it, and exits 0 either
+                            way -- writes nothing. No rollups, or a kanban
+                            root that cannot be resolved, prints one
+                            "skipped" line. The gated unit runner runs it
+                            on every certification run.
+    --findings-file PATH   With --freshness: also write each stale doc as
+                            a finding (JSON array, the gated runners'
+                            findings-file shape) to PATH.
     --project NAME          Project whose rollups to read. Default:
                              $PGAI_PROJECT_NAME or 'pgai-agent-kanban'.
     --kanban-root PATH       Override $PGAI_AGENT_KANBAN_ROOT_PATH.
@@ -123,7 +138,7 @@ Options:
     --help, -h               Show this help and exit.
 
 Exit codes:
-    0   Render succeeded, or --check found no drift.
+    0   Render succeeded, --check found no drift, or any --freshness run.
     1   --check found one or more disagreements (CONVERT: a stale rendered
         figure carries zero runtime-failure risk -- see the refusal site
         below for the full classification rationale).
@@ -134,7 +149,9 @@ Exit codes:
 from __future__ import annotations
 
 import argparse
+import json
 import pathlib
+import re
 import statistics
 import sys
 from dataclasses import dataclass, field
@@ -450,6 +467,111 @@ def _render_target(stats: PaceStats, target_path: pathlib.Path) -> tuple[str, st
 
 
 # ---------------------------------------------------------------------------
+# Freshness (CONVERT: narrates, never fails a runner)
+# ---------------------------------------------------------------------------
+
+#: The rendered window, "(<oldest> .. <newest>)", inside the per-task line.
+_WINDOW_RE = re.compile(r"\(\s*(\S+)\s*\.\.\s*([^\s)]+)\s*\)")
+_FRESHNESS_LINT = "measured_pace_freshness"
+_RENDER_COMMAND = "python3 team/scripts/generate_measured_pace_docs.py"
+
+
+def block_window_newest(block: str) -> Optional[str]:
+    """The newest RC a rendered block's window names, or None when the block
+    names no window (the "not available yet" block, or a hand-written one)."""
+    match = _WINDOW_RE.search(block)
+    return match.group(2) if match else None
+
+
+def freshness_findings(
+    stats: PaceStats, targets: list[pathlib.Path]
+) -> list[dict[str, Any]]:
+    """One finding per target whose block is behind the newest shipped rollup.
+
+    A target is stale when its block's window ends at an RC other than
+    ``stats.window_newest`` -- the newest shipped rollup. With no usable
+    rollups there is nothing to be behind, so nothing is reported. A target
+    missing its marker pair is reported too, since it cannot be re-rendered
+    until the pair is restored.
+    """
+    if not stats.has_data or not stats.window_newest:
+        return []
+    findings: list[dict[str, Any]] = []
+    for path in targets:
+        content = path.read_text(encoding="utf-8")
+        try:
+            block = _extract_between_markers(content, _BEGIN, _END)
+        except MarkerNotFoundError:
+            findings.append(_freshness_finding(
+                "missing_markers", path, 1,
+                f"{path.name} has no measured-pace marker pair ({_BEGIN} / {_END}), "
+                f"so the newest shipped rollup ({stats.window_newest}) cannot render there",
+            ))
+            continue
+        newest = block_window_newest(block)
+        if newest == stats.window_newest:
+            continue
+        line = content[: content.find(_BEGIN)].count("\n") + 1
+        shown = newest if newest else "no measured window"
+        findings.append(_freshness_finding(
+            "stale_block", path, line,
+            f"{path.name} measured-pace block ends at {shown}; "
+            f"the newest shipped rollup is {stats.window_newest}",
+        ))
+    return findings
+
+
+def _freshness_finding(kind: str, path: pathlib.Path, line: int, summary: str) -> dict[str, Any]:
+    """A finding in the gated runners' findings-file shape."""
+    return {
+        "lint": _FRESHNESS_LINT,
+        "severity": "quality",
+        "kind": kind,
+        "file": str(path),
+        "line": line,
+        "summary": summary,
+        "remedy": f"{_RENDER_COMMAND}  # from the repo root, then commit README.md and HOW_TO.md",
+    }
+
+
+def _run_freshness(
+    rc_dir: Optional[pathlib.Path],
+    targets: list[pathlib.Path],
+    window: Optional[int],
+    findings_file: Optional[str],
+) -> int:
+    """The --freshness mode: narrate each stale block and exit 0.
+
+    CONVERT: a block a release or two behind carries zero runtime-failure
+    risk -- nothing in the pipeline reads README.md/HOW_TO.md prose -- so
+    this reports and returns 0 whatever it finds (SOP-core "Blocking
+    Severity: only real damage blocks").
+    """
+    findings: list[dict[str, Any]] = []
+    if rc_dir is None:
+        print(f"{_FRESHNESS_LINT}: skipped -- no kanban root or project to read rollups from.")
+    else:
+        size = window if window is not None else full_window_size(rc_dir)
+        stats = compute_pace_stats(load_rc_window(rc_dir, window=max(size, 0)), window_requested=size)
+        if not stats.has_data:
+            print(f"{_FRESHNESS_LINT}: skipped -- no shipped rollups under {rc_dir}.")
+        else:
+            findings = freshness_findings(stats, targets)
+            for finding in findings:
+                print(f"{_FRESHNESS_LINT}: STALE -- {finding['summary']}. Fix: {finding['remedy']}")
+            if not findings:
+                print(
+                    f"{_FRESHNESS_LINT}: OK -- every measured-pace block ends at "
+                    f"the newest shipped rollup ({stats.window_newest})."
+                )
+    if findings_file:
+        out = pathlib.Path(findings_file)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(json.dumps(findings, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return 0
+
+
+# ---------------------------------------------------------------------------
 # Rollup loading
 # ---------------------------------------------------------------------------
 
@@ -485,6 +607,19 @@ def _parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
         action="store_true",
         help="Verify only -- report drift and exit non-zero, write nothing.",
     )
+    parser.add_argument(
+        "--freshness",
+        action="store_true",
+        help=(
+            "Narrate any doc whose block ends before the newest shipped "
+            "rollup; always exit 0, write nothing."
+        ),
+    )
+    parser.add_argument(
+        "--findings-file",
+        metavar="PATH",
+        help="With --freshness, also write each stale doc as a JSON finding to PATH.",
+    )
     parser.add_argument("--project", metavar="NAME", help="Project name.")
     parser.add_argument(
         "--kanban-root", metavar="PATH", help="Override the kanban root."
@@ -519,6 +654,17 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     readme_path = pathlib.Path(args.readme) if args.readme else _DEFAULT_README
     how_to_path = pathlib.Path(args.how_to) if args.how_to else _DEFAULT_HOW_TO
+
+    if args.freshness:
+        fresh_rc_dir: Optional[pathlib.Path] = None
+        if args.rc_dir:
+            fresh_rc_dir = pathlib.Path(args.rc_dir)
+        else:
+            try:
+                fresh_rc_dir = resolve_rc_dir(args.project or _DEFAULT_PROJECT, args.kanban_root)
+            except SystemExit:
+                fresh_rc_dir = None
+        return _run_freshness(fresh_rc_dir, [readme_path, how_to_path], args.window, args.findings_file)
 
     if args.rc_dir:
         rc_dir = pathlib.Path(args.rc_dir)

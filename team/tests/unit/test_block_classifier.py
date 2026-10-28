@@ -14,9 +14,17 @@ Covered:
   2. Fail closed: an unknown reason_code, an absent one, an unreadable
      record, unparseable evidence, an unknown owner, an unmet precondition
      and a schema-invalid table each decide escalate.
+  2b. The pipeline ladder: the shipped table names PM, TESTER and CM on a
+     3-attempt 15 -> 30 -> 60 minute ladder; a block one of them holds on a
+     decision-only row walks it (marked pipeline_ladder) before escalating,
+     a CODER or WRITER block on the same row escalates at once, a row with
+     its own action keeps it for every role (a CM ship_policy_halt always
+     defers to the resolution stage), a table without the ladder escalates
+     at once, and an invalid ladder invalidates the whole table.
   3. attempts >= max_attempts decides escalate; now < cooldown_until decides
-     not_yet; rows with a backoff wait 15 -> 30 -> 60 and 5 -> 10 -> 20
-     minutes before their three attempts.
+     not_yet; rows with a backoff wait 15 -> 30 -> 60 (provider_refusal and
+     the two agent self-block ladders) and 5 -> 10 -> 20 minutes before their
+     three attempts.
   4. The classifier only decides: classifying leaves status.md unchanged,
      and a guard asserts that the classifier, the block-triage executor and
      the check-block-triage sweep check invoke none of the forbidden git
@@ -75,7 +83,8 @@ _EXPECTED_ROWS = {
     "plugin_load_failed": ("escalate", 0, 0, None, None),
     "source_branch_missing": ("escalate", 0, 0, None, None),
     "gate_merge_evidence_not_found": ("escalate", 0, 0, None, None),
-    "agent_unclassified": ("escalate", 0, 0, None, None),
+    "agent_transient_provider_error": ("requeue_owner", 3, 900, (2, 3600), None),
+    "agent_unclassified": ("requeue_owner", 3, 900, (2, 3600), None),
 }
 
 _RESTAMP_EVIDENCE = "verb=restamp-fixed-in; project=pgai-agent-kanban; version=v2.28.0; bugs=BUG-0412,BUG-0413"
@@ -97,6 +106,8 @@ _REPRESENTATIVE = {
     ),
     "ship_policy_halt": ("CM", "none", "none", {}),
     "agent_operator_data_action": ("CM", _RESTAMP_EVIDENCE, "none", {"action_targets_verified": True}),
+    "agent_transient_provider_error": ("CM", "none", _PAST_ISO, {"blockers": "the provider aborted the call"}),
+    "agent_unclassified": ("CM", "none", _PAST_ISO, {"blockers": "the subagent was lost twice"}),
 }
 
 # Action params a row must carry (a subset check; notes are matched by substring).
@@ -108,6 +119,8 @@ _EXPECTED_PARAMS = {
     "gate_empty_commit": {"resume": "branch", "note": "abc1234 def5678"},
     "worktree_create_failed": {"note": "pruned"},
     "agent_operator_data_action": {"note": "restamp-fixed-in"},
+    "agent_transient_provider_error": {"note": "transient provider error; its ## Blockers read: 'the provider aborted"},
+    "agent_unclassified": {"note": "blocked without a reason code; its ## Blockers read: 'the subagent was lost twice'"},
 }
 
 
@@ -348,10 +361,13 @@ def test_unmet_precondition_escalates(code, evidence, facts, table):
     assert decision.why == bc.WHY_PRECONDITION_UNMET, decision.detail
 
 
+_VALID_DECISION = "    decision: {inbox: 'why does it stop', answer: 'read the task'}\n"
 _VALID_ROW = (
     "    action: requeue_owner\n    params: {note: retry}\n    max_attempts: 1\n"
     "    cooldown_s: 0\n    backoff: none\n    verification: none\n    preconditions: []\n"
+    + _VALID_DECISION
 )
+_DECISION_ONLY_ROW = _VALID_DECISION
 
 
 @pytest.mark.parametrize(
@@ -375,6 +391,32 @@ _VALID_ROW = (
         pytest.param("rows:\n  - zero_progress\n", id="wrong-top-level"),
         pytest.param("reason_codes: [zero_progress]\n", id="rows-not-a-mapping"),
         pytest.param("reason_codes:\n  zero_progress: [\n", id="not-yaml"),
+        pytest.param("reason_codes:\n  zero_progress:\n" + _VALID_ROW.replace(_VALID_DECISION, ""), id="row-without-decision"),
+        pytest.param("reason_codes:\n  missing_readme: {}\n", id="empty-row"),
+        pytest.param("reason_codes:\n  missing_readme:\n    decision: escalate\n", id="escalate-as-decision"),
+        pytest.param(
+            "reason_codes:\n  missing_readme:\n    decision: {verb: escalate, inbox: q, answer: a}\n",
+            id="escalate-as-decision-verb",
+        ),
+        pytest.param(
+            "reason_codes:\n  missing_readme:\n    action: escalate\n    max_attempts: 0\n    cooldown_s: 0\n"
+            "    backoff: none\n    verification: none\n    preconditions: []\n" + _VALID_DECISION,
+            id="escalate-as-action",
+        ),
+        pytest.param("reason_codes:\n  missing_readme:\n" + _DECISION_ONLY_ROW + "    max_attempts: 0\n", id="decision-only-row-with-triage-key"),
+        pytest.param("reason_codes:\n  missing_readme:\n    decision: {inbox: q}\n", id="decision-without-answer"),
+        pytest.param("reason_codes:\n  missing_readme:\n    decision: {inbox: '', answer: a}\n", id="decision-blank-question"),
+        pytest.param(
+            "reason_codes:\n  missing_readme:\n    decision: {verb: rebase-it, inbox: q, answer: a}\n", id="unknown-decision-verb"
+        ),
+        pytest.param("reason_codes:\n  missing_readme:\n    decision: {budget: 2, inbox: q, answer: a}\n", id="budget-without-verb"),
+        pytest.param(
+            "reason_codes:\n  missing_readme:\n    decision: {verb: reset-to-backlog, budget: 0, inbox: q, answer: a}\n",
+            id="zero-budget",
+        ),
+        pytest.param(
+            "reason_codes:\n  missing_readme:\n    decision: {inbox: q, answer: a, then: ask}\n", id="unknown-decision-key"
+        ),
     ],
 )
 def test_schema_invalid_table_is_refused_and_classifies_as_escalate(text, tmp_path):
@@ -394,8 +436,216 @@ def test_minimal_valid_table_loads(tmp_path):
     assert (decision.action, decision.params["note"]) == ("requeue_owner", "retry")
 
 
+def test_decision_only_row_loads_and_classifies_as_no_triage_step(tmp_path):
+    good = tmp_path / "block-classifier.yaml"
+    good.write_text(
+        "reason_codes:\n  zero_progress:\n"
+        "    decision: {verb: reset-to-backlog, inbox: 'why does it stop', answer: 'read the task'}\n",
+        encoding="utf-8",
+    )
+    rule = bc.load_table(good).rules["zero_progress"]
+    assert not rule.has_triage_step
+    assert (rule.decision.verb, rule.decision.budget) == ("reset-to-backlog", bc.DEFAULT_DECISION_BUDGET)
+    decision = bc.classify(_status_text(_record_body()), now=_NOW, table_path=good)
+    assert (decision.action, decision.why) == ("escalate", bc.WHY_ALWAYS_HUMAN)
+
+
+_LADDER_CODES = ("agent_transient_provider_error", "agent_unclassified")
+
+
+@pytest.mark.parametrize("code", _LADDER_CODES)
+def test_shipped_agent_ladder_rows_validate_carrying_both_an_action_and_an_inbox_decision(code, table):
+    """The shipped table loads with both ladder rows (a row may carry both
+    action and decision), and each row's decision is its inbox question."""
+    rule = table.rules[code]
+    assert rule.has_triage_step and rule.action == "requeue_owner"
+    assert (rule.max_attempts, rule.cooldown_s, rule.cooldown_before_first) == (3, 900, True)
+    assert (rule.backoff.factor, rule.backoff.cap_s) == (2, 3600)
+    assert rule.verification is None and rule.step.preconditions == ()
+    assert "{blockers}" in rule.step.params["note"]
+    assert rule.decision is not None and rule.decision.verb is None
+    assert "{task_id}" in rule.decision.inbox and rule.decision.answer.strip()
+
+
+def _ladder_row(**drop: bool) -> str:
+    keys = (
+        ("action", "    action: requeue_owner\n"),
+        ("params", "    params: {note: 'previous attempt blocked: {blockers}'}\n"),
+        ("max_attempts", "    max_attempts: 3\n"),
+        ("cooldown_s", "    cooldown_s: 900\n"),
+        ("backoff", "    backoff: {factor: 2, cap_s: 3600}\n"),
+        ("cooldown_before_first", "    cooldown_before_first: true\n"),
+        ("verification", "    verification: none\n"),
+        ("preconditions", "    preconditions: []\n"),
+    )
+    return "".join(line for key, line in keys if not drop.get(key)) + _VALID_DECISION
+
+
+def test_a_ladder_row_with_an_action_and_a_decision_loads(tmp_path):
+    good = tmp_path / "block-classifier.yaml"
+    good.write_text("reason_codes:\n  agent_unclassified:\n" + _ladder_row(), encoding="utf-8")
+    rule = bc.load_table(good).rules["agent_unclassified"]
+    assert rule.has_triage_step and rule.decision is not None
+    assert [rule.window_s(k) for k in range(3)] == [900, 1800, 3600]
+
+
+@pytest.mark.parametrize("key", ["max_attempts", "cooldown_s", "backoff", "verification", "preconditions"])
+def test_a_ladder_row_missing_a_required_key_invalidates_the_table(key, tmp_path):
+    bad = tmp_path / "block-classifier.yaml"
+    bad.write_text("reason_codes:\n  agent_unclassified:\n" + _ladder_row(**{key: True}), encoding="utf-8")
+    with pytest.raises(bc.TableError) as excinfo:
+        bc.load_table(bad)
+    assert key in str(excinfo.value)
+    decision = bc.classify(_status_text(_record_body(reason_code="agent_unclassified")), now=_NOW, table_path=bad)
+    assert (decision.action, decision.why) == ("escalate", bc.WHY_TABLE_INVALID)
+
+
+def test_every_shipped_row_carries_a_decision_that_is_never_escalate(table):
+    for code, rule in table.rules.items():
+        assert rule.decision is not None, code
+        assert rule.decision.verb in (None,) + bc.DECISION_VERBS, code
+        assert rule.decision.inbox.strip() and rule.decision.answer.strip(), code
+        assert rule.has_triage_step == (rule.step.action in bc.ROW_ACTIONS), code
+
+
 def test_missing_table_file_classifies_as_escalate(tmp_path):
     decision = bc.classify(_status_text(_record_body()), now=_NOW, table_path=tmp_path / "absent.yaml")
+    assert (decision.action, decision.why) == ("escalate", bc.WHY_TABLE_INVALID)
+
+
+# ---------------------------------------------------------------------------
+# 2b. The pipeline ladder
+# ---------------------------------------------------------------------------
+
+_PIPELINE_ROLES = ("PM", "TESTER", "CM")
+_DECISION_ONLY_CODES = sorted(code for code, (action, *_rest) in _EXPECTED_ROWS.items() if action == "escalate")
+_ACTION_CODES = sorted(code for code, (action, *_rest) in _EXPECTED_ROWS.items() if action != "escalate")
+
+
+def test_shipped_pipeline_ladder_names_the_pipeline_roles_and_the_operators_ladder(table):
+    ladder = table.pipeline_ladder
+    assert ladder is not None, "the shipped table declares a pipeline ladder"
+    assert ladder.roles == _PIPELINE_ROLES
+    assert (ladder.max_attempts, ladder.cooldown_s, ladder.cooldown_before_first) == (3, 900, True)
+    assert (ladder.backoff.factor, ladder.backoff.cap_s) == (2, 3600)
+    for key in ("{reason_code}", "{owner_role}", "{blockers}"):
+        assert key in ladder.note, key
+
+
+@pytest.mark.parametrize("role", _PIPELINE_ROLES)
+@pytest.mark.parametrize("code", _DECISION_ONLY_CODES)
+def test_pipeline_role_block_on_a_decision_only_row_walks_the_ladder_then_escalates(code, role, table):
+    """First sighting waits 900 s; three requeues follow 900, 1800 and 3600 s
+    apart; then the row's decision (escalate, attempts exhausted)."""
+    now = _NOW
+    first = bc.decide(_record(code, owner_role=role), table, now=now)
+    assert (first.action, first.why, first.pipeline_ladder) == (bc.NOT_YET, bc.WHY_FIRST_COOLDOWN, True)
+    waits = [int((datetime.datetime.fromisoformat(first.cooldown_until) - now).total_seconds())]
+    cooldown_until, attempts = first.cooldown_until, 0
+    while True:
+        now = datetime.datetime.fromisoformat(cooldown_until)
+        record = _record(code, owner_role=role, attempts=attempts, cooldown_until=cooldown_until)
+        decision = bc.decide(record, table, now=now)
+        assert decision.pipeline_ladder, decision
+        if decision.action == "escalate":
+            break
+        assert (decision.action, decision.verification, decision.attempt) == ("requeue_owner", None, attempts + 1)
+        attempts, cooldown_until = decision.attempt, decision.cooldown_until
+        if attempts < 3:
+            waits.append(int((datetime.datetime.fromisoformat(cooldown_until) - now).total_seconds()))
+    assert waits == [900, 1800, 3600]
+    assert (attempts, decision.why, decision.max_attempts) == (3, bc.WHY_ATTEMPTS_EXHAUSTED, 3)
+
+
+@pytest.mark.parametrize("role", ["CODER", "WRITER"])
+@pytest.mark.parametrize("code", _DECISION_ONLY_CODES)
+def test_coder_and_writer_blocks_on_a_decision_only_row_escalate_at_once(code, role, table):
+    decision = bc.decide(_record(code, owner_role=role), table, now=_NOW)
+    assert (decision.action, decision.why, decision.pipeline_ladder) == ("escalate", bc.WHY_ALWAYS_HUMAN, False)
+
+
+@pytest.mark.parametrize("role", _PIPELINE_ROLES)
+@pytest.mark.parametrize("code", _ACTION_CODES)
+def test_a_row_with_its_own_action_keeps_it_for_a_pipeline_role(code, role, table):
+    _owner, evidence, cooldown, facts = _REPRESENTATIVE.get(code, ("CODER", _BRANCH_EVIDENCE, "none", {}))
+    record = _record(code, owner_role=role, evidence=evidence, cooldown_until=cooldown)
+    decision = bc.decide(record, table, facts=facts, now=_NOW)
+    assert decision.action == _EXPECTED_ROWS[code][0], f"{code} ({role}): {decision.why}: {decision.detail}"
+    assert not decision.pipeline_ladder
+
+
+@pytest.mark.parametrize("attempts", [0, 1, 3, 9])
+def test_cm_ship_policy_halt_defers_to_the_resolution_stage_and_is_never_requeued(attempts, table):
+    record = _record("ship_policy_halt", owner_role="CM", attempts=attempts)
+    decision = bc.decide(record, table, now=_NOW)
+    assert (decision.action, decision.why) == ("defer_to_resolution_stage", bc.WHY_ROW_MATCHED)
+    assert not decision.pipeline_ladder and decision.max_attempts == "stage"
+
+
+def test_pipeline_ladder_note_names_the_code_and_role_and_quotes_the_blockers(table):
+    record = _record("missing_readme", owner_role="TESTER", attempts=1, cooldown_until=_PAST_ISO)
+    decision = bc.decide(record, table, facts={"blockers": "the README is gone"}, now=_NOW)
+    note = decision.params["note"]
+    assert "previous attempt blocked (missing_readme)" in note, note
+    assert "without this TESTER task" in note, note
+    assert "its ## Blockers read: 'the README is gone'" in note, note
+    assert "on the pipeline ladder (TESTER task)" in decision.detail, decision.detail
+
+
+_PIPELINE_LADDER = (
+    "pipeline_ladder:\n  roles: [PM, TESTER, CM]\n  note: 'retry {reason_code}'\n  max_attempts: 3\n"
+    "  cooldown_s: 900\n  backoff: {factor: 2, cap_s: 3600}\n  cooldown_before_first: true\n"
+)
+_DECISION_ONLY_TABLE = "reason_codes:\n  missing_readme:\n" + _DECISION_ONLY_ROW
+
+
+def test_a_table_without_a_pipeline_ladder_escalates_a_pipeline_roles_decision_only_block(tmp_path):
+    good = tmp_path / "block-classifier.yaml"
+    good.write_text(_DECISION_ONLY_TABLE, encoding="utf-8")
+    table = bc.load_table(good)
+    assert table.pipeline_ladder is None
+    decision = bc.decide(_record("missing_readme", owner_role="CM"), table, now=_NOW)
+    assert (decision.action, decision.why, decision.pipeline_ladder) == ("escalate", bc.WHY_ALWAYS_HUMAN, False)
+
+
+def test_a_minimal_pipeline_ladder_loads(tmp_path):
+    good = tmp_path / "block-classifier.yaml"
+    good.write_text(_PIPELINE_LADDER + _DECISION_ONLY_TABLE, encoding="utf-8")
+    decision = bc.decide(
+        _record("missing_readme", owner_role="PM", cooldown_until=_PAST_ISO), bc.load_table(good), now=_NOW
+    )
+    assert (decision.action, decision.params["note"], decision.pipeline_ladder) == (
+        "requeue_owner", "retry missing_readme", True,
+    )
+
+
+@pytest.mark.parametrize(
+    "ladder, fault",
+    [
+        pytest.param("pipeline_ladder: [PM]\n", "must be a mapping", id="not-a-mapping"),
+        pytest.param(_PIPELINE_LADDER.replace("[PM, TESTER, CM]", "[PM, OPERATOR]"), "OPERATOR", id="unknown-role"),
+        pytest.param(_PIPELINE_LADDER.replace("[PM, TESTER, CM]", "[]"), "roles", id="no-roles"),
+        pytest.param(_PIPELINE_LADDER.replace("[PM, TESTER, CM]", "[PM, PM]"), "repeat", id="repeated-role"),
+        pytest.param(_PIPELINE_LADDER.replace("  max_attempts: 3\n", ""), "max_attempts", id="missing-key"),
+        pytest.param(_PIPELINE_LADDER.replace("max_attempts: 3", "max_attempts: 0"), "max_attempts", id="no-attempts"),
+        pytest.param(_PIPELINE_LADDER.replace("note: 'retry {reason_code}'", "note: ''"), "note", id="blank-note"),
+        pytest.param(_PIPELINE_LADDER.replace("cap_s: 3600", "cap_s: 60"), "cap_s", id="cap-below-cooldown"),
+        pytest.param(
+            _PIPELINE_LADDER.replace("cooldown_before_first: true", "cooldown_before_first: soon"),
+            "cooldown_before_first", id="non-boolean-before-first",
+        ),
+        pytest.param(_PIPELINE_LADDER + "  verification: gate_passes\n", "verification", id="extra-key"),
+        pytest.param(_PIPELINE_LADDER.replace("pipeline_ladder:", "pipeline_ladders:"), "optionally", id="unknown-top-level-key"),
+    ],
+)
+def test_an_invalid_pipeline_ladder_invalidates_the_table(ladder, fault, tmp_path):
+    bad = tmp_path / "block-classifier.yaml"
+    bad.write_text(ladder + _DECISION_ONLY_TABLE, encoding="utf-8")
+    with pytest.raises(bc.TableError) as excinfo:
+        bc.load_table(bad)
+    assert fault in str(excinfo.value) and str(bad) in str(excinfo.value)
+    body = _record_body(reason_code="missing_readme", owner_role="CM")
+    decision = bc.classify(_status_text(body), now=_NOW, table_path=bad)
     assert (decision.action, decision.why) == ("escalate", bc.WHY_TABLE_INVALID)
 
 
@@ -435,7 +685,12 @@ def test_task_whose_cooldown_has_passed_is_acted_on(table):
 
 @pytest.mark.parametrize(
     "code, expected_waits",
-    [("provider_refusal", [900, 1800, 3600]), ("transient_api_error", [300, 600, 1200])],
+    [
+        ("provider_refusal", [900, 1800, 3600]),
+        ("transient_api_error", [300, 600, 1200]),
+        ("agent_unclassified", [900, 1800, 3600]),
+        ("agent_transient_provider_error", [900, 1800, 3600]),
+    ],
 )
 def test_backoff_rows_wait_a_growing_window_before_each_attempt(code, expected_waits, table):
     """Walk one block through its attempts: each window is waited out, then acted on."""

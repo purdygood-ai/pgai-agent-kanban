@@ -136,7 +136,8 @@ from typing import Callable, Optional
 
 from pgai_agent_kanban.api.validation import ComponentRefused, require_component
 from pgai_agent_kanban.cm import write_rc_state
-from pgai_agent_kanban.cm.read_state_field import read_state_field, read_state_section
+from pgai_agent_kanban.cm.read_state_field import read_state_field
+from pgai_agent_kanban.lib import branch_prefix as _branch_prefix
 from pgai_agent_kanban.lib import git_remote as _git_remote
 from pgai_agent_kanban.lib import ini
 from pgai_agent_kanban.lib import push_decision as _push_decision
@@ -144,11 +145,13 @@ from pgai_agent_kanban.lib.error_contract import format_error_contract
 from pgai_agent_kanban.lib.project_cfg import (
     project_cfg_file as _project_cfg_file,
     read_cfg_key as _read_cfg_key,
-    strip_one_quote_each_side as _strip_one_quote_each_side,
 )
+from pgai_agent_kanban.lib.stdio import write_stderr as _write_stderr
+from pgai_agent_kanban.lib.stdio import write_stdout as _write_stdout
 from pgai_agent_kanban.ops.context import OpsContext
 from pgai_agent_kanban.ops.errors import CliRefusal, OpsError
-from pgai_agent_kanban.task_status import read_state
+from pgai_agent_kanban.overwatch.halt_provenance import installed_script_command
+from pgai_agent_kanban.task_status import first_value_line, read_section, read_state
 
 __all__ = [
     "CLI_VERBS",
@@ -168,7 +171,8 @@ CLI_VERBS: tuple[str, ...] = ("cancel_rc",)
 
 EXIT_REFUSED = 1
 
-_SCRIPT = "team/scripts/cm/cancel-rc.sh"
+#: The operator script, relative to the installed ``<kanban root>/scripts/``.
+_SCRIPT = "cm/cancel-rc.sh"
 _SITE_TAG = "[cm-cancel-rc]"
 _VERSION_RE = re.compile(r"^v[0-9]+\.[0-9]+\.[0-9]+$")
 _BRANCH_PREFIX_RE = re.compile(r"^[a-zA-Z0-9_-]+$")
@@ -215,16 +219,6 @@ def cancel_exit_code(exc: OpsError) -> int:
     return getattr(exc, "exit_code", EXIT_REFUSED)
 
 
-def _write_stdout(text: str) -> None:
-    sys.stdout.write(text)
-    sys.stdout.flush()
-
-
-def _write_stderr(text: str) -> None:
-    sys.stderr.write(text)
-    sys.stderr.flush()
-
-
 # ---------------------------------------------------------------------------
 # project.cfg -- the same answers project_paths.sh gives for the same file
 # (pgai_agent_kanban.lib.project_cfg, imported above)
@@ -257,17 +251,17 @@ def push_to_remote(ctx: OpsContext, project: str) -> bool:
 
 
 def branch_prefix(ctx: OpsContext, project: str) -> str:
-    """``project.cfg [project] branch_prefix`` (``""`` when unset).
+    """``project.cfg [project] branch_prefix`` (``""`` when unset or no config file).
+
+    Read by :func:`pgai_agent_kanban.lib.branch_prefix.branch_prefix_for_project_root`
+    (``pp_branch_prefix``'s rules); the validation below is this verb's own.
 
     Raises:
         CancelRcError: the configured prefix holds a character other than
             a letter, digit, ``_`` or ``-`` (exit 1, the two
             ``project_paths.sh`` lines naming it).
     """
-    cfg_file = _project_cfg_file(ctx.project_root(project))
-    if cfg_file is None:
-        return ""
-    raw = _strip_one_quote_each_side(_read_cfg_key(cfg_file, "project", "branch_prefix"), '"')
+    raw = _branch_prefix.branch_prefix_for_project_root(ctx.project_root(project))
     if not raw or _BRANCH_PREFIX_RE.match(raw):
         return raw
     # BLOCK-WORTHY (docs/blocking-site-census.md): a prefix that cannot form
@@ -519,7 +513,7 @@ def cancel_rc(
                 "cancel_rc.confirmation_required",
                 f"cancel-rc would delete the RC branch for {version} in project {project} and "
                 "reset its release-state.md, and the call carried no confirmation.",
-                f"{_SCRIPT} --project {project} --key {version}",
+                installed_script_command(ctx.kanban_root, _SCRIPT, "--project", project, "--key", version),
             ) + "\n",
         )
 
@@ -588,7 +582,7 @@ def cancel_rc(
     # Carried forward unchanged by the reset below; never computed or cleared.
     # Read as a section ending at the next heading, so an empty field is ""
     # (left as written) and never the value of a block after it.
-    last_released = read_state_section(str(release_state), "Last Released")
+    last_released = _last_released(release_state)
 
     local_exists = git.quiet("rev-parse", "--verify", f"refs/heads/{rc_branch}").returncode == 0
     # Only a project that pushes asks its remote; one that does not contacts none.
@@ -743,10 +737,26 @@ def cancel_rc(
     return CancelOutcome(rc_branch, "cancelled", tuple(pending), reset_release_state)
 
 
+def _last_released(release_state: pathlib.Path) -> Optional[str]:
+    """Return release-state.md's ``## Last Released`` value, keeping absent and empty apart.
+
+    The section is read by :func:`read_section` with the release-state
+    reading (``exact_heading`` and ``comments``, as ``cm/read_state_field``
+    reads every release-state field) and its value by
+    :func:`first_value_line`. Returns ``None`` when the heading is absent,
+    ``""`` when it holds no value, otherwise the value (which may be the
+    literal ``none``).
+    """
+    body = read_section(
+        release_state.read_text(encoding="utf-8"), "Last Released", exact_heading=True, comments=True
+    )
+    return None if body is None else first_value_line(body)
+
+
 def _reset_release_state(release_state: pathlib.Path, last_released: Optional[str]) -> None:
     """Reset the three RC fields to none, writing Last Released back unchanged.
 
-    *last_released* is the field as ``read_state_section`` read it: a value
+    *last_released* is the field as ``_last_released`` read it: a value
     is written back as it was, ``None`` (no heading) is written as ``none``,
     and ``""`` (a heading with no value) is not named to the writer at all,
     so the empty field is left exactly as written.

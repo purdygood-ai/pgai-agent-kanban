@@ -60,9 +60,21 @@ bytes. The result always ends with a newline. Callers write it back with
     The ``[project:<name>]`` entries of ``<kanban_root>/projects.cfg`` in
     priority order — ascending ``priority``, file order breaking ties, an
     absent or non-integer priority counting as 999 — the same order
-    ``projects_cfg_list`` in ``team/scripts/lib/projects.sh`` prints. A
-    missing projects.cfg is an empty registry; a malformed one raises
-    :data:`IniError`.
+    ``projects_cfg_list`` in ``team/scripts/lib/projects.sh`` prints. Read
+    by that reader's rules where they differ from :func:`load`'s: an
+    indented section header is a header, and a project with two sections
+    is one entry whose later values win. A section whose name fails the
+    project-name rule (``[project:bad.name]``, ``[project:My_App]``,
+    ``[project:]``), and a header with anything but whitespace after its
+    ``]`` (``[project:alpha] # first``), is no entry, and its keys belong
+    to no project. A missing projects.cfg is an empty registry; a malformed
+    one raises :data:`IniError`.
+
+``project_name_rule()`` / ``is_project_name(name)``
+    The project-name rule, defined once as ``PROJECTS_CFG_NAME_RE`` in
+    ``team/scripts/lib/projects_cfg.sh`` and read from there, so the bash
+    and Python readers and the registry verbs hold the same rule. A tree
+    missing that definition raises :class:`ProjectNameRuleError`.
 
 ``project_enabled(kanban_root, project)``
     Whether projects.cfg leaves *project* enabled -- the one answer every
@@ -93,6 +105,9 @@ Public API:
     split_lines(text) -> list[str]
     ProjectEntry
     projects_registry(kanban_root) -> list[ProjectEntry]
+    ProjectNameRuleError
+    project_name_rule() -> re.Pattern
+    is_project_name(name) -> bool
     parse_project_enabled(raw) -> tuple[bool, bool]
     project_enabled(kanban_root, project) -> bool
 """
@@ -101,11 +116,14 @@ from __future__ import annotations
 
 import configparser
 import dataclasses
+import functools
 import os
 import pathlib
 import re
 import sys
 from typing import Mapping, Union
+
+from pgai_agent_kanban.lib.error_contract import format_error_contract
 
 __all__ = [
     "IniError",
@@ -113,10 +131,13 @@ __all__ = [
     "NoOptionError",
     "NoSectionError",
     "ProjectEntry",
+    "ProjectNameRuleError",
     "get_value",
+    "is_project_name",
     "load",
     "parse_project_enabled",
     "project_enabled",
+    "project_name_rule",
     "projects_registry",
     "read_line_value",
     "remove_line_value",
@@ -143,6 +164,78 @@ PathLike = Union[str, "os.PathLike[str]"]
 DEFAULT_PROJECT_PRIORITY = 999
 
 _PROJECT_SECTION_PREFIX = "project:"
+
+#: The bash library that defines the project-name rule
+#: (``PROJECTS_CFG_NAME_RE``), in this tree's own ``scripts/lib/`` --
+#: ``team/scripts/lib/`` in a checkout, ``<kanban_root>/scripts/lib/`` in a
+#: live install -- so each tree reads its own copy.
+PROJECT_NAME_RULE_FILE = (
+    pathlib.Path(__file__).resolve().parents[2] / "scripts" / "lib" / "projects_cfg.sh"
+)
+
+#: The one ``PROJECTS_CFG_NAME_RE='...'`` assignment line in
+#: :data:`PROJECT_NAME_RULE_FILE` (surrounding blanks tolerated).
+_NAME_RULE_ASSIGNMENT_RE = re.compile(
+    r"^[ \t]*PROJECTS_CFG_NAME_RE[ \t]*=[ \t]*'([^'\n]+)'[ \t]*$", re.MULTILINE
+)
+
+
+class ProjectNameRuleError(RuntimeError):
+    """The project-name rule's definition is missing or unreadable.
+
+    The message is the dual-channel error/message/remedy block and names the
+    file that was read.
+    """
+
+
+@functools.lru_cache(maxsize=None)
+def _load_project_name_rule(path: str) -> "re.Pattern[str]":
+    try:
+        text = pathlib.Path(path).read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        found, reason = None, f"could not be read ({exc.__class__.__name__}: {exc})"
+    else:
+        found = _NAME_RULE_ASSIGNMENT_RE.search(text)
+        reason = "holds no single-quoted PROJECTS_CFG_NAME_RE= assignment line"
+    if found is None:
+        # BLOCK-WORTHY (docs/blocking-site-census.md): an unusable build --
+        # the tree's own project-name rule is missing, so no registry reader
+        # can tell a project from a mistyped section.
+        # CENSUS-ANCHOR: ini-name-rule-missing-01
+        raise ProjectNameRuleError(
+            format_error_contract(
+                "ini.project_name_rule_missing",
+                f"The project-name rule could not be loaded: {path} {reason}. Every "
+                "projects.cfg reader takes the rule from that file, so none can list projects.",
+                f"restore {path} from the release that installed this tree, or from "
+                "version control in a checkout",
+            )
+        )
+    return re.compile(found.group(1))
+
+
+def project_name_rule() -> "re.Pattern[str]":
+    """Return the project-name rule as a compiled, anchored pattern.
+
+    The rule is ``PROJECTS_CFG_NAME_RE`` in ``team/scripts/lib/projects_cfg.sh``
+    (:data:`PROJECT_NAME_RULE_FILE`) -- its one definition, which the bash
+    registry readers use directly -- read once per process. Match a whole
+    name with ``fullmatch``.
+
+    Raises:
+        ProjectNameRuleError: The file is missing or unreadable, or holds no
+            ``PROJECTS_CFG_NAME_RE='...'`` line.
+    """
+    return _load_project_name_rule(str(PROJECT_NAME_RULE_FILE))
+
+
+def is_project_name(name: str) -> bool:
+    """True when *name* satisfies the project-name rule (:func:`project_name_rule`).
+
+    Raises:
+        ProjectNameRuleError: As :func:`project_name_rule`.
+    """
+    return project_name_rule().fullmatch(name) is not None
 
 
 def load(path: PathLike) -> IniParser:
@@ -412,32 +505,94 @@ def _parse_priority(raw: "str | None") -> int:
         return DEFAULT_PROJECT_PRIORITY
 
 
+# Leading whitespace before a section header. projects_cfg_list reads an
+# indented header as a header; configparser would read it as a continuation
+# of the previous value, so the registry reader drops the indent first.
+_INDENTED_SECTION_RE = re.compile(r"^[ \t\f\v]+(?=\[)", re.M)
+
+# A section header for the registry reader, matched against the stripped
+# line. It matches exactly the lines configparser's own rule does (a "["
+# then a "]" further on; "[project:broken" stays a parse error), and differs
+# only in the name: a line that ends in "]" names the text up to that last
+# "]", while one with text after its "]" -- "[project:alpha] # first" --
+# names all of its text after the "[". Such a line still starts a section
+# (whose keys belong to no project) but never one the project-name rule
+# accepts, as projects_cfg_list reads it; configparser's own rule would drop
+# the trailing comment and register "alpha".
+_REGISTRY_SECTCRE = re.compile(r"\[(?P<header>.+(?=\]$)|.+\].*)\]?$")
+
+
+def _load_registry(cfg_path: pathlib.Path) -> IniParser:
+    """Parse projects.cfg by the bash registry reader's rules.
+
+    Unlike :func:`load`, a repeated section merges into the first (later
+    values win) and a repeated key keeps its last value, as
+    ``projects_cfg_list`` reads them, an indented section header is a
+    header, and a header with text after its closing ``]`` keeps that text
+    in its section name (see ``_REGISTRY_SECTCRE``). ``#`` and ``;`` lines
+    are comments, as for :func:`load`. An unreadable file reads as empty, as
+    for :func:`load`.
+    """
+    parser = IniParser(strict=False)
+    parser.SECTCRE = _REGISTRY_SECTCRE
+    try:
+        text = cfg_path.read_text(encoding="utf-8")
+    except OSError:
+        return parser
+    parser.read_string(_INDENTED_SECTION_RE.sub("", text), source=str(cfg_path))
+    return parser
+
+
 def projects_registry(kanban_root: PathLike) -> list[ProjectEntry]:
     """Return the projects registered in ``<kanban_root>/projects.cfg``.
+
+    The file is read as ``projects_cfg_list`` (``team/scripts/lib/projects.sh``)
+    reads it, so both list the same projects: a leading ``#`` or ``;``
+    comment and an indented ``[project:<name>]`` header are INI, and a name
+    with more than one section is one entry -- at its first section's
+    position, holding every key its sections set, the later section's value
+    winning where both set the same key. That tolerance is this reader's
+    alone; :func:`load` still refuses a duplicate section in any other file.
+
+    A ``[project:<name>]`` section whose name fails the project-name rule
+    (:func:`project_name_rule`) -- such as ``[project:bad.name]``,
+    ``[project:bad name]``, ``[project:My_App]`` or ``[project:]`` -- is
+    left out, as ``projects_cfg_list`` leaves it out: its keys belong to no
+    project, so a ``priority`` under it moves no listed project.
+    ``pgai_agent_kanban.ops.projects.unaccepted_project_names`` names such
+    sections. A header line with anything but whitespace after its closing
+    ``]`` (``[project:alpha] # first``) is no project section either, as for
+    ``projects_cfg_list``; its keys too belong to no project.
 
     Args:
         kanban_root: The kanban root directory.
 
     Returns:
-        One :class:`ProjectEntry` per ``[project:<name>]`` section, sorted by
+        One :class:`ProjectEntry` per registered name, sorted by
         ``(priority, section_index)``. Empty when projects.cfg is absent or
         registers no project.
 
     Raises:
-        IniError: projects.cfg exists but is not valid INI.
+        IniError: projects.cfg exists but is not valid INI (for example
+            text before the first section header).
+        UnicodeDecodeError: projects.cfg is not valid UTF-8.
+        ProjectNameRuleError: The project-name rule cannot be loaded.
     """
     cfg_path = pathlib.Path(kanban_root) / "projects.cfg"
     if not cfg_path.is_file():
         return []
-    parser = load(cfg_path)
+    parser = _load_registry(cfg_path)
     entries: list[ProjectEntry] = []
     for index, section in enumerate(parser.sections()):
         if not section.startswith(_PROJECT_SECTION_PREFIX):
             continue
+        name = section[len(_PROJECT_SECTION_PREFIX):]
+        if not is_project_name(name):
+            continue
         options = dict(parser.items(section))
         entries.append(
             ProjectEntry(
-                name=section[len(_PROJECT_SECTION_PREFIX):],
+                name=name,
                 priority=_parse_priority(options.get("priority")),
                 section_index=index,
                 options=options,

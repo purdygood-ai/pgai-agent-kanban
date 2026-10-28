@@ -47,7 +47,7 @@ def _make_release_notes(tmp_path: pathlib.Path, version: str, date: str, **kwarg
     """Create a minimal release-notes/vX.Y.Z.md file under tmp_path/release-notes/.
 
     Content is written at column 0 (no leading indentation) to ensure that
-    ``_parse_markdown_sections`` always matches H2 headings regardless of what
+    the release-notes section reader always matches H2 headings regardless of what
     multi-line kwargs values are passed in.  Using ``textwrap.dedent`` on a
     template that embeds arbitrary multi-line content would silently fail to
     strip indentation whenever any embedded line starts at column 0.

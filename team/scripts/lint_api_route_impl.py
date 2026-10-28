@@ -24,7 +24,7 @@ WHAT IS CHECKED, PER ``module:`` ROW
 ------------------------------------
 For a row declaring ``module:pkg.mod.fn``:
 
-  route-missing        No ``@router.get``/``@router.post`` handler for the
+  route-missing        No ``@router`` route handler for the
                        row's method and route exists in
                        ``team/pgai_agent_kanban/api/reads.py`` or
                        ``team/pgai_agent_kanban/api/routers/*.py``.
@@ -283,15 +283,82 @@ def _router_prefix(tree: ast.Module) -> str:
     return ""
 
 
+# The FastAPI registration forms a route scan recognises: one decorator per
+# HTTP method, plus ``api_route`` (decorator) and ``add_api_route`` (call),
+# both of which take ``methods=`` and default to GET without it.
+_METHOD_DECORATORS = ("get", "post", "put", "patch", "delete", "head", "options")
+_MULTI_METHOD_DECORATOR = "api_route"
+_REGISTRATION_CALL = "add_api_route"
+
+
+def _call_path(call: ast.Call) -> Optional[str]:
+    """The route path a registration call names: first argument or ``path=``."""
+    if call.args and isinstance(call.args[0], ast.Constant) and isinstance(call.args[0].value, str):
+        return call.args[0].value
+    for kw in call.keywords:
+        if kw.arg == "path" and isinstance(kw.value, ast.Constant) and isinstance(kw.value.value, str):
+            return kw.value.value
+    return None
+
+
+def _call_methods(call: ast.Call) -> list[str]:
+    """The upper-cased ``methods=`` of an api_route/add_api_route call.
+
+    No ``methods=`` (or ``methods=None``) is FastAPI's default, GET. A value
+    that is not a literal list, tuple or set of strings cannot be read
+    statically and yields no methods.
+    """
+    for kw in call.keywords:
+        if kw.arg != "methods":
+            continue
+        if isinstance(kw.value, ast.Constant) and kw.value.value is None:
+            return ["GET"]
+        if not isinstance(kw.value, (ast.List, ast.Tuple, ast.Set)):
+            return []
+        return [
+            elt.value.upper() for elt in kw.value.elts
+            if isinstance(elt, ast.Constant) and isinstance(elt.value, str)
+        ]
+    return ["GET"]
+
+
+def _registration_routes(call: ast.Call, *, method_attrs: tuple[str, ...], multi_attr: str) -> list[tuple[str, str]]:
+    """(METHOD, path) pairs one registration call declares, or [] if it is none."""
+    if not isinstance(call.func, ast.Attribute):
+        return []
+    attr = call.func.attr
+    path = _call_path(call)
+    if path is None:
+        return []
+    if attr in method_attrs:
+        return [(attr.upper(), path)]
+    if attr == multi_attr:
+        return [(method, path) for method in _call_methods(call)]
+    return []
+
+
 def _route_decorations(func: ast.FunctionDef | ast.AsyncFunctionDef) -> list[tuple[str, str]]:
+    """(METHOD, path) for every route decorator on *func*.
+
+    Recognises ``@<router>.get/post/put/patch/delete/head/options(path)`` and
+    ``@<router>.api_route(path, methods=[...])`` (one pair per method).
+    """
     out: list[tuple[str, str]] = []
     for dec in func.decorator_list:
-        if not (isinstance(dec, ast.Call) and isinstance(dec.func, ast.Attribute)):
-            continue
-        if dec.func.attr not in ("get", "post"):
-            continue
-        if dec.args and isinstance(dec.args[0], ast.Constant) and isinstance(dec.args[0].value, str):
-            out.append((dec.func.attr.upper(), dec.args[0].value))
+        if isinstance(dec, ast.Call):
+            out.extend(_registration_routes(
+                dec, method_attrs=_METHOD_DECORATORS, multi_attr=_MULTI_METHOD_DECORATOR,
+            ))
+    return out
+
+
+def route_registration_calls(tree: ast.AST) -> list[tuple[str, str, int]]:
+    """(METHOD, path, line) for every ``<router>.add_api_route(path, ...)`` call in *tree*."""
+    out: list[tuple[str, str, int]] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call):
+            for method, path in _registration_routes(node, method_attrs=(), multi_attr=_REGISTRATION_CALL):
+                out.append((method, path, node.lineno))
     return out
 
 

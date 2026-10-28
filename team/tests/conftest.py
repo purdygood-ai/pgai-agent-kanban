@@ -71,22 +71,25 @@ Crontab sandbox (an earlier defect)
 ---------------------------
 All tests are wrapped by an autouse _sandbox_crontab fixture that places a
 stub crontab binary at the front of PATH.  The stub redirects every crontab
-operation (-l, -r, -, and positional-filename) to a file inside the sandbox
-HOME directory ($HOME/.fake_crontab) so the real /var/spool/cron/$USER is
-never read or written during a test run.
+operation (-l, -r, -, and positional-filename) to a fake crontab file so the
+real /var/spool/cron/$USER is never read or written during a test run.  The
+file is private to the test (.fake_crontab under its tmp_path) while HOME is
+still the test process's own, so concurrently running tests never see each
+other's crontab; a subprocess given its own HOME uses $HOME/.fake_crontab.
 
 The stub honours all four invocation forms that install.sh and its helpers
-exercise:
-  crontab -l            list  → cat $HOME/.fake_crontab (exit 1 if absent)
-  crontab -r            remove → rm -f $HOME/.fake_crontab
-  crontab -             install from stdin → read stdin into $HOME/.fake_crontab
-  crontab <file>        install from file  → cp <file> $HOME/.fake_crontab
+exercise (CRONFILE is that fake crontab file):
+  crontab -l            list  → cat CRONFILE (exit 1 if absent)
+  crontab -r            remove → rm -f CRONFILE
+  crontab -             install from stdin → read stdin into CRONFILE
+  crontab <file>        install from file  → cp <file> CRONFILE
 """
 
 from __future__ import annotations
 
 import os
 import pathlib
+import shlex
 import shutil
 import stat
 import subprocess
@@ -101,10 +104,10 @@ import pytest
 
 _PGAI_TEMP_ENV_VAR = "PGAI_AGENT_KANBAN_TEMP_DIR"
 _PGAI_TESTS_SUBDIR = "tests"
-# Framework default temp root: mirrors the shell-layer default
-# "${PGAI_AGENT_KANBAN_TEMP_DIR:-/tmp/pgai_kanban_tmp}" used throughout the
-# bash scripts.  Used by pgai_mkdtemp() so the fallback branch (no env var)
-# never lands in bare /tmp.
+# Framework default temp root: the resolvers' last-resort root
+# (temp.sh's _PGAI_TEMP_FALLBACK_ROOT, temp_root.FALLBACK_TEMP_ROOT), which
+# the bash scripts reach through pgai_temp_dir / pgai_mktemp_d.  Used by
+# pgai_mkdtemp() so the fallback branch (no env var) never lands in bare /tmp.
 _PGAI_DEFAULT_TEMP_ROOT = "/tmp/pgai_kanban_tmp"
 
 # Path to the shell resolver (temp.sh) — used by _resolve_pgai_temp_via_shell()
@@ -481,8 +484,10 @@ def _block_live_kanban_writes(monkeypatch, tmp_path):
     that specific test.
 
     KANBAN_ROOT: the legacy bash-only alias every team/scripts/lib/
-    project_paths.sh function reads directly (never PGAI_AGENT_KANBAN_ROOT_PATH
-    -- see project_paths.sh's _pp_kanban_root) is redirected here too. It is
+    project_paths.sh function reads first is redirected here too.
+    project_paths.sh's _pp_kanban_root resolves KANBAN_ROOT when set, else
+    PGAI_AGENT_KANBAN_ROOT_PATH, else fails closed -- so an inherited
+    KANBAN_ROOT outranks a repointed PGAI_AGENT_KANBAN_ROOT_PATH. It is
     ambient in a real agent's own shell (exported by shell-env, inherited by
     every subprocess including a pytest run), so leaving it untouched would
     let any bash-side test that omits its own explicit KANBAN_ROOT override --
@@ -659,14 +664,22 @@ def pytest_terminal_summary(terminalreporter, exitstatus, config):  # noqa: ARG0
 # Crontab sandbox (crontab-clobber defense)
 # ---------------------------------------------------------------------------
 
-# Stub script text.  Written once per test session into a temp dir.
-# The stub honours -l, -r, -, and positional-file invocations against
-# $HOME/.fake_crontab so the real /var/spool/cron/$USER is never touched.
+# Stub script text.  Written once per test into that test's tmp_path, with
+# __TEST_HOME__ and __TEST_CRONFILE__ replaced by the shell-quoted HOME the
+# test process runs under and the test's own fake crontab file.
+# The stub honours -l, -r, -, and positional-file invocations against that
+# file so the real /var/spool/cron/$USER is never touched.
 _CRONTAB_STUB = """\
 #!/usr/bin/env bash
 # Sandbox stub for crontab (BUG-0108).
-# All operations target $HOME/.fake_crontab, not the real spool.
-CRONFILE="${HOME:?HOME must be set}/.fake_crontab"
+# All operations target a fake crontab file, not the real spool: the test's
+# own file while HOME is the test process's HOME, so concurrently running
+# tests never share one; $HOME/.fake_crontab under any other HOME.
+if [[ "${HOME:?HOME must be set}" == __TEST_HOME__ ]]; then
+    CRONFILE=__TEST_CRONFILE__
+else
+    CRONFILE="$HOME/.fake_crontab"
+fi
 
 case "${1:-}" in
     -l)
@@ -726,8 +739,12 @@ def _sandbox_crontab(monkeypatch, tmp_path):
        whenever tests launched install.sh without an explicit PGAI_CRONTAB_CMD.
 
     The stub binary is created once per test in a dedicated bin/ subdirectory
-    under tmp_path.  The stub reads and writes only $HOME/.fake_crontab so the
-    real /var/spool/cron/$USER is never touched.
+    under tmp_path.  The stub reads and writes only a fake crontab file, so
+    the real /var/spool/cron/$USER is never touched: tmp_path/.fake_crontab
+    while HOME is unchanged from the test process's own -- private to the
+    test, so tests running concurrently (parallel workers, or another run on
+    the same host) never read each other's crontab -- and
+    $HOME/.fake_crontab for a subprocess given its own HOME.
 
     Tests that explicitly override PATH in their own env dict are responsible
     for including the stub directory if they want crontab safety (those tests
@@ -736,16 +753,19 @@ def _sandbox_crontab(monkeypatch, tmp_path):
     overridden by those tests because they set it explicitly in their own
     subprocess env.
 
-    Stub semantics (all four invocation forms):
-      crontab -l          list  → cat $HOME/.fake_crontab (exit 1 if absent)
-      crontab -r          remove → rm -f $HOME/.fake_crontab
-      crontab -           stdin  → read stdin into $HOME/.fake_crontab
-      crontab <file>      file   → cp <file> $HOME/.fake_crontab
+    Stub semantics (all four invocation forms; CRONFILE is the file above):
+      crontab -l          list  → cat CRONFILE (exit 1 if absent)
+      crontab -r          remove → rm -f CRONFILE
+      crontab -           stdin  → read stdin into CRONFILE
+      crontab <file>      file   → cp <file> CRONFILE
     """
     stub_bin = tmp_path / "_crontab_stub_bin"
     stub_bin.mkdir(parents=True, exist_ok=True)
     stub_path = stub_bin / "crontab"
-    stub_path.write_text(_CRONTAB_STUB, encoding="utf-8")
+    stub_text = _CRONTAB_STUB.replace(
+        "__TEST_HOME__", shlex.quote(os.environ.get("HOME", ""))
+    ).replace("__TEST_CRONFILE__", shlex.quote(str(tmp_path / ".fake_crontab")))
+    stub_path.write_text(stub_text, encoding="utf-8")
     stub_path.chmod(stub_path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
 
     # Layer 1: prepend stub bin to PATH so PATH-based crontab lookup hits the stub.

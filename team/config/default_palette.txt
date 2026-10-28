@@ -91,8 +91,9 @@
 %defer_warning          yellow       Deferral posture unreadable/malformed
 %status_open            white        Task/entry lifecycle: open (default)
 %status_running         yellow       Task/entry lifecycle: running (amber)
-%status_done            green        Task/entry lifecycle: done / wont-do
+%status_done            green        Task/entry lifecycle: done / wont-do / duplicate
 %status_blocked         red          Task/entry lifecycle: blocked
+%status_needs_operator  magenta      Intake lifecycle: needs-operator (waits on an operator answer); colour off marks it " [needs-op]"; a carried item keeps the open colour and is marked " ↻" (colour off " [carried]")
 %status_waiting         yellow       Queue lifecycle: waiting
 %status_backlog         dim          Queue lifecycle: backlog
 %frame_label            cyan         Column/pane header label text

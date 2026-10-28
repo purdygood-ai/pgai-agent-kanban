@@ -587,3 +587,138 @@ def test_real_tree_runs_every_project_cfg_check() -> None:
     assert result.notes == [], result.notes
     assert not [f for f in result.findings if f.kind == "project_cfg_render_failed"], result.findings
     assert len(result.project_read_keys or set()) > 25, sorted(result.project_read_keys or set())
+
+
+# The shared tier resolver reads project.cfg, then kanban.cfg. [sec] key is
+# scaffolded in both templates and registered, so a tree whose only reader
+# is a resolver call is clean, and the same tree without it is not.
+_SEC_EXAMPLE = _EXAMPLE + "\n[sec]\n# A tunable. Default: 3\nkey = 3\n"
+_SEC_REGISTRY = _REGISTRY.replace("paths:old_spelling\n", "paths:old_spelling sec:key\n")
+_SEC_TEMPLATE = "[sec]\n# A tunable. Default: 3\n# key = 3\n"
+
+
+def _sec_tree(tmp_path: pathlib.Path, *, reader: str = "", extra: "dict[str, str] | None" = None) -> pathlib.Path:
+    """The project.cfg fixture tree with [sec] key scaffolded in both templates and registered."""
+    return _project_tree(tmp_path, template=_SEC_TEMPLATE, reader=reader, extra={
+        "kanban.cfg_example": _SEC_EXAMPLE,
+        "team/scripts/lib/config_loader.sh": _SEC_REGISTRY,
+        **(extra or {}),
+    })
+
+
+def test_tiered_resolver_call_reads_both_files(tmp_path: pathlib.Path) -> None:
+    unread = {
+        ("example_not_read", "sec", "key"),
+        ("registry_not_read", "sec", "key"),
+        ("project_cfg_example_not_read", "sec", "key"),
+    }
+    assert _kinds(_sec_tree(tmp_path / "none")) == unread
+
+    module = (
+        '"""Reads [sec] key through the shared tier resolver."""\n'
+        "from pgai_agent_kanban.lib.project_cfg import resolve_tiered_cfg_value\n"
+        "def tunable(root, proj):\n"
+        '    return resolve_tiered_cfg_value(root, proj, "sec", "key").value\n'
+    )
+    python_root = _sec_tree(tmp_path / "py", extra={"team/pgai_agent_kanban/tunable.py": module})
+    bash_root = _sec_tree(
+        tmp_path / "sh",
+        reader='mapfile -t r < <(pp_resolve_tiered_cfg_value --with-tier "$root" "$proj" sec key 3)\n',
+    )
+    for root in (python_root, bash_root):
+        result = lint.run(root)
+        assert ("sec", "key") in result.kanban_read_keys, root
+        assert ("sec", "key") in (result.project_read_keys or set()), root
+        assert {(f.kind, f.section, f.key) for f in result.findings} == set(), result.findings
+
+
+def test_tiered_resolver_options_keywords_and_root_only_calls(tmp_path: pathlib.Path) -> None:
+    # Option words before the positionals are skipped, a bare "--" included;
+    # a literal empty project root (bash "", Python None or "") reads
+    # kanban.cfg alone; Python arguments may be passed by keyword.
+    reader = (
+        'v="$(pp_resolve_tiered_cfg_value --no-legacy --with-tier -- "$root" "$proj" sec key 3)"\n'
+        'w="$(pp_resolve_tiered_cfg_value "$root" "" sec kanban_only "")"\n'
+    )
+    module = (
+        '"""Resolver calls in the other accepted shapes."""\n'
+        "from pgai_agent_kanban.lib import project_cfg\n"
+        "def values(root, proj):\n"
+        '    a = project_cfg.resolve_tiered_cfg_value(root, None, "sec", "py_none")\n'
+        '    b = project_cfg.resolve_tiered_cfg_value(root, "", "sec", "py_empty")\n'
+        '    c = project_cfg.resolve_tiered_cfg_value(root, project_root=proj, section="sec", key="py_kw")\n'
+        "    return a, b, c\n"
+    )
+    result = lint.run(_sec_tree(tmp_path, reader=reader, extra={"team/pgai_agent_kanban/values.py": module}))
+    project_read = result.project_read_keys or set()
+    assert ("sec", "key") in result.kanban_read_keys and ("sec", "key") in project_read
+    for key in ("kanban_only", "py_none", "py_empty"):
+        assert ("sec", key) in result.kanban_read_keys, key
+        assert ("sec", key) not in project_read, key
+    assert ("sec", "py_kw") in result.kanban_read_keys and ("sec", "py_kw") in project_read
+
+
+def test_key_read_only_into_an_export_through_the_tiered_resolver_is_reported(tmp_path: pathlib.Path) -> None:
+    reader = 'export SEC_KEY="$(pp_resolve_tiered_cfg_value "$root" "$proj" sec key 3)"\n'
+    assert ("read_but_unconsumed", "sec", "key") in _kinds(_sec_tree(tmp_path, reader=reader))
+    consumed = _sec_tree(tmp_path / "b", reader=reader,
+                         extra={"team/scripts/sec_user.sh": '#!/usr/bin/env bash\necho "${SEC_KEY}"\n'})
+    assert _kinds(consumed) == set()
+
+
+# A reader whose key is a parameter of a module-level helper, supplied by
+# the helper's callers: from a table of dataclass rows, or from a constant.
+_HELPER_READER = '''\
+"""Reads [sec] keys through a helper whose key is a parameter."""
+import dataclasses
+from pgai_agent_kanban.lib import project_cfg
+SECTION = "sec"
+@dataclasses.dataclass(frozen=True)
+class Spec:
+    name: str
+    cfg_key: str
+    default: int
+ROWS: tuple = (Spec("first", "key", 3),)
+def _tiered(root, proj, key):
+    return project_cfg.resolve_tiered_cfg_value(root, proj, SECTION, key)
+def thresholds(root, proj):
+    return {spec.name: _tiered(root, proj, spec.cfg_key) for spec in ROWS}
+'''
+
+
+def test_python_key_from_a_table_row_passed_to_a_helper_counts_as_a_read(tmp_path: pathlib.Path) -> None:
+    # The comprehension above binds no loop for the lint; a for loop does.
+    table = _HELPER_READER.replace(
+        "    return {spec.name: _tiered(root, proj, spec.cfg_key) for spec in ROWS}\n",
+        "    out = {}\n    for spec in ROWS:\n        out[spec.name] = _tiered(root, proj, spec.cfg_key)\n    return out\n",
+    )
+    keyword_row = table.replace('Spec("first", "key", 3)', 'Spec("first", default=3, cfg_key="key")')
+    constant = _HELPER_READER.replace(
+        "    return {spec.name: _tiered(root, proj, spec.cfg_key) for spec in ROWS}\n",
+        '    return _tiered(root, proj, KEY_NAME)\nKEY_NAME = "key"\n',
+    )
+    for label, module in (("table", table), ("keyword", keyword_row), ("constant", constant)):
+        result = lint.run(_sec_tree(tmp_path / label, extra={"team/pgai_agent_kanban/helper.py": module}))
+        assert ("sec", "key") in result.kanban_read_keys, label
+        assert ("sec", "key") in (result.project_read_keys or set()), label
+        assert {(f.kind, f.section, f.key) for f in result.findings} == set(), (label, result.findings)
+
+
+def test_python_helper_key_no_caller_resolves_is_not_a_read(tmp_path: pathlib.Path) -> None:
+    unread = {
+        ("example_not_read", "sec", "key"),
+        ("registry_not_read", "sec", "key"),
+        ("project_cfg_example_not_read", "sec", "key"),
+    }
+    # A comprehension target, a computed key and a never-called helper each
+    # leave the key unresolved: the scan reports it unread rather than guess.
+    computed = _HELPER_READER.replace(
+        "    return {spec.name: _tiered(root, proj, spec.cfg_key) for spec in ROWS}\n",
+        '    return _tiered(root, proj, "k" + "ey")\n',
+    )
+    uncalled = _HELPER_READER.replace(
+        "    return {spec.name: _tiered(root, proj, spec.cfg_key) for spec in ROWS}\n", "    return None\n",
+    )
+    for label, module in (("comprehension", _HELPER_READER), ("computed", computed), ("uncalled", uncalled)):
+        root = _sec_tree(tmp_path / label, extra={"team/pgai_agent_kanban/helper.py": module})
+        assert _kinds(root) == unread, label

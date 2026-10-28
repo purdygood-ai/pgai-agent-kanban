@@ -41,8 +41,10 @@ A task that reached the zero-progress ceiling is classified
 dispatch shows the provider never really ran it: the dispatch span (the
 "dispatched" to "returned" ledger timestamps) is under ``--min-span``
 seconds (default 60), or the last 50 lines of that dispatch's batch-log
-span carry an authentication, model-not-found or usage-limit signature
-(``REFUSAL_SIGNATURES``). Anything else is ``zero_progress``.
+span class as ``refusal`` or ``billing`` against the provider-error
+signature table (``pgai_agent_kanban.lib.provider_signatures``: an
+authentication, model-not-found, usage-limit or quota signature). Anything
+else is ``zero_progress``.
 
 The dispatch ledger is ``<task_dir>/logs/dispatch.jsonl`` (written by the
 wake around each provider run; see overwatch_protocol.sh's
@@ -72,7 +74,6 @@ import argparse
 import dataclasses
 import json
 import pathlib
-import re
 import subprocess
 import sys
 from pathlib import Path
@@ -85,6 +86,7 @@ if not __package__:
     if _OWN_PACKAGE_ROOT not in sys.path:
         sys.path.insert(0, _OWN_PACKAGE_ROOT)
 
+from pgai_agent_kanban.lib import provider_signatures  # noqa: E402
 from pgai_agent_kanban.lib.timeutil import try_parse_iso  # noqa: E402
 from pgai_agent_kanban.overwatch.block_record import (  # noqa: E402
     OWNER_ROLES,
@@ -102,36 +104,9 @@ TAIL_LINES = 50
 #: Seconds any one git call may take before its evidence is a placeholder.
 GIT_TIMEOUT_SECONDS = 30
 
-#: Provider-refusal signatures, checked in this order; the first label whose
-#: pattern matches the tail is reported. Case-insensitive.
-REFUSAL_SIGNATURES: tuple[tuple[str, "re.Pattern[str]"], ...] = (
-    (
-        "auth",
-        re.compile(
-            r"authentication[_ ]error|invalid[ _-]?(api[ _-]?key|x-api-key|bearer)"
-            r"|unauthori[sz]ed|please run /login|not logged in"
-            r"|oauth token (has )?expired",
-            re.IGNORECASE,
-        ),
-    ),
-    (
-        "model_not_found",
-        re.compile(
-            r"model[ _-]?not[ _-]?found|not_found_error|unknown model|invalid model"
-            r"|model\b[^\n]{0,80}\b(does not exist|not found|is not available)",
-            re.IGNORECASE,
-        ),
-    ),
-    (
-        "usage_limit",
-        re.compile(
-            r"usage[ _-]?limit|insufficient_quota|quota[ _-]?(exceeded|reached)"
-            r"|exceeded your (current )?quota|(hit|reached) your (usage )?limit"
-            r"|credit balance is too low",
-            re.IGNORECASE,
-        ),
-    ),
-)
+#: Signature classes that mean the provider would not, or could not, run the
+#: task; a tail of either class is a provider refusal.
+REFUSAL_CLASSES: tuple[str, ...] = ("billing", "refusal")
 
 PLACEHOLDER_WORKTREE = "gone"
 PLACEHOLDER_NONE = "none"
@@ -330,12 +305,17 @@ def dispatch_tail(dispatch: Dispatch, lines: int = TAIL_LINES) -> str:
     return _tail(data.decode("utf-8", errors="replace"), lines)
 
 
+def signature_class(text: str) -> Optional[str]:
+    """The provider-error class of *text* (``billing``, ``refusal``,
+    ``transient``) from the signature table, or ``None``."""
+    return provider_signatures.classify(text)
+
+
 def refusal_signature(text: str) -> Optional[str]:
-    """The label of the first REFUSAL_SIGNATURES pattern found in *text*."""
-    for label, pattern in REFUSAL_SIGNATURES:
-        if pattern.search(text):
-            return label
-    return None
+    """The label of the first refusal or billing signature, in table order,
+    found in *text* (``auth``, ``model_not_found``, ``usage_limit``)."""
+    match = provider_signatures.first_match(text, REFUSAL_CLASSES)
+    return match.label if match is not None else None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -369,7 +349,13 @@ def classify_zero_progress(
     dispatch = latest_dispatch(task_dir)
     span = dispatch.span_seconds if dispatch is not None else None
     tail = dispatch_tail(dispatch) if dispatch is not None else ""
-    signature = refusal_signature(tail)
+    try:
+        signature = refusal_signature(tail) if signature_class(tail) in REFUSAL_CLASSES else None
+    except provider_signatures.SignatureTableError as exc:
+        # Best-effort like every subcommand here: the block is still written,
+        # and the unreadable table is reported on stderr, naming its path.
+        print(str(exc), file=sys.stderr)
+        signature = None
     refused = signature is not None or (span is not None and span < min_span_seconds)
     return ZeroProgressVerdict(
         reason_code="provider_refusal" if refused else "zero_progress",

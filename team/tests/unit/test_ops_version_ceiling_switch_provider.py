@@ -49,6 +49,7 @@ if str(_TEAM_DIR) not in sys.path:
 from pgai_agent_kanban.ops import write as ops_write  # noqa: E402
 from pgai_agent_kanban.ops.context import OpsContext  # noqa: E402
 from pgai_agent_kanban.ops.errors import NotFound, Refused  # noqa: E402
+from pgai_agent_kanban.overwatch.halt_provenance import installed_script_command  # noqa: E402
 from tests.fixtures.golden_board import PROJECT_NAME, build_synthetic_board  # noqa: E402
 from tests.fixtures.route_cli_parity import assert_route_cli_parity, build_api_client  # noqa: E402
 from tests.fixtures.scrubbed_subprocess_env import build_scrubbed_env  # noqa: E402
@@ -277,8 +278,8 @@ def test_cli_invalid_value_is_refused_dual_channel_and_the_file_is_unchanged(tmp
     assert result.stderr == (
         "error:   set_version_ceiling.invalid_ceiling\n"
         f"message: set-version-ceiling.sh: {flag} requires a non-negative integer; got: '{value}'.\n"
-        "remedy:  Re-run with a non-negative integer, e.g. team/scripts/set-version-ceiling.sh "
-        f"--project {_PROJECT} {flag} 5\n"
+        "remedy:  Re-run with a non-negative integer, e.g. "
+        f"{installed_script_command(root.resolve(), 'set-version-ceiling.sh', '--project', _PROJECT, flag, '5')}\n"
     )
     assert (cfg.read_bytes(), cfg.stat().st_mtime_ns) == before
     assert sorted(p.name for p in cfg.parent.iterdir()) == ["project.cfg"]
@@ -371,7 +372,8 @@ def test_cli_switch_provider_unknown_provider_is_refused_and_kanban_cfg_unchange
     assert result.stderr == (
         "error:   switch_provider.unknown_provider\n"
         "message: switch-provider.sh: unrecognized provider 'nobody'; valid providers: claude, codex, gemini.\n"
-        "remedy:  Re-run with a valid provider, e.g. team/scripts/switch-provider.sh --provider claude\n"
+        "remedy:  Re-run with a valid provider, e.g. "
+        f"{installed_script_command(root.resolve(), 'switch-provider.sh', '--provider', 'claude')}\n"
     )
     assert (cfg.read_bytes(), cfg.stat().st_mtime_ns, _mode(cfg)) == before
 

@@ -64,6 +64,7 @@ from pgai_agent_kanban.overwatch.resolution_stage import (
     run_resolution_stage,
 )
 from tests.fixtures.binary_guard import require_binary
+from tests.fixtures.section_reader_modules import copy_section_reader_modules
 from tests.integration.helpers import run_entrypoint
 
 
@@ -250,6 +251,7 @@ def _build_kanban_root(
     cm_py_dir.mkdir(parents=True, exist_ok=True)
     for py_file in _KANBAN_PY_CM_DIR.glob("*.py"):
         (cm_py_dir / py_file.name).write_text(py_file.read_text(encoding="utf-8"), encoding="utf-8")
+    copy_section_reader_modules(cm_py_dir.parent)
 
     shutil.copytree(_TEAM_DIR / "scripts", root / "scripts")
 
@@ -791,7 +793,7 @@ class TestLaneAFullPlaybookWithFixRewriteAndRedecompose:
     def test_all_six_lane_a_outcomes_including_fix_rewrite_and_redecompose(
         self, tmp_path: pathlib.Path
     ) -> None:
-        project_name = "lanea_full_playbook_project"
+        project_name = "lanea-full-playbook-project"
         version = "v2.23.2"
         bug_id = "BUG-0099-inverted-column"
 

@@ -25,6 +25,11 @@ What is proven here, against throwaway kanban roots only:
      and its lock.
   6. The REST twin (POST /operations/intake) renumbers through the same
      function.
+  7. A number an archived bug holds (<root>/archive/<project>/bugs/) is
+     taken: intake.sh renumbers a draft carrying it, a claim with no
+     preferred number lands above the archive's highest, and
+     next_free_number agrees with the claim.  The archive is only read,
+     and PRIORITY numbering ignores it.
 """
 
 from __future__ import annotations
@@ -121,6 +126,13 @@ def _run_intake(root: pathlib.Path, base: pathlib.Path, source: pathlib.Path) ->
         timeout=60,
         stdin=subprocess.DEVNULL,
     )
+
+
+def _archive_bugs(root: pathlib.Path) -> pathlib.Path:
+    """The project's archive bugs/ directory under kanban root *root*, created."""
+    path = root / "archive" / _PROJECT / "bugs"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
 
 
 def _claim_locks(bugs: pathlib.Path) -> list[str]:
@@ -513,3 +525,112 @@ def test_post_operations_intake_renumbers_a_taken_number(
     ).decode("utf-8")
     assert (bugs / "BUG-0010-already-filed.md").read_bytes() == _EXISTING_0010
     assert _claim_locks(bugs) == []
+
+
+# ---------------------------------------------------------------------------
+# 7. A number an archived bug holds is taken
+# ---------------------------------------------------------------------------
+
+_ARCHIVED_0005 = b"# BUG-0005-old-archived\n\n**Bug ID:** BUG-0005-old-archived\n"
+
+
+def test_intake_sh_renumbers_a_draft_whose_number_only_an_archived_bug_holds(tmp_path: pathlib.Path) -> None:
+    project, ctx = _make_board(tmp_path)
+    bugs = project / "bugs"
+    archive = _archive_bugs(ctx.kanban_root)
+    (archive / "BUG-0005-old-archived.md").write_bytes(_ARCHIVED_0005)
+    archive_before = sorted(os.listdir(archive))
+    draft = _draft("BUG-0005-new-draft")
+    source = _stage(tmp_path / "staging" / "BUG-0005-new-draft.md", draft)
+
+    result = _run_intake(ctx.kanban_root, tmp_path, source)
+
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    deposited = bugs / "BUG-0006-new-draft.md"
+    assert result.stdout.splitlines() == [f"intake: deposited {deposited}"], result.stdout
+    assert deposited.read_bytes() == _expected_renumbered(draft, "BUG-0005-new-draft", "BUG-0006-new-draft")
+    assert _bug_files(bugs) == ["BUG-0006-new-draft.md"]
+    assert _claim_locks(bugs) == [] and _temp_files(bugs) == []
+    assert (archive / "BUG-0005-old-archived.md").read_bytes() == _ARCHIVED_0005
+    assert sorted(os.listdir(archive)) == archive_before, "the claim must write nothing under the archive"
+
+
+def test_claim_takes_a_preferred_number_the_archive_holds_only_after_the_archive_s_highest(
+    scanner, tmp_path: pathlib.Path
+) -> None:
+    project, ctx = _make_board(tmp_path)
+    bugs = project / "bugs"
+    archive = _archive_bugs(ctx.kanban_root)
+    (archive / "BUG-0005-old-archived.md").write_bytes(_ARCHIVED_0005)
+    (archive / "BUG-0009-newest-archived.md").write_text("x\n", encoding="utf-8")
+    (bugs / "BUG-0007-live.md").write_text("x\n", encoding="utf-8")
+
+    bug_id, bug_path, lock = scanner.claim_next_bug_id(str(bugs), "slug", "t", preferred_num=5)
+    scanner.release_bug_id_claim(lock)
+
+    assert (bug_id, bug_path.parent) == ("BUG-0010", bugs)
+    assert sorted(os.listdir(archive)) == ["BUG-0005-old-archived.md", "BUG-0009-newest-archived.md"]
+
+
+def test_claim_without_a_preferred_number_lands_above_the_archive_s_highest(
+    scanner, tmp_path: pathlib.Path
+) -> None:
+    """The high-water scan counts the archive too, so the fallback loop never retries a taken number."""
+    project, ctx = _make_board(tmp_path)
+    bugs = project / "bugs"
+    archive = _archive_bugs(ctx.kanban_root)
+    (archive / "BUG-0040-archived.md").write_text("x\n", encoding="utf-8")
+    (bugs / "BUG-0003-live.md").write_text("x\n", encoding="utf-8")
+
+    bug_id, bug_path, lock = scanner.claim_next_bug_id(str(bugs), "slug", "t")
+    scanner.release_bug_id_claim(lock)
+
+    assert (bug_id, bug_path) == ("BUG-0041", bugs / "BUG-0041-slug.md")
+    assert sorted(os.listdir(archive)) == ["BUG-0040-archived.md"]
+    assert _claim_locks(bugs) == []
+
+
+def test_claim_on_an_emptied_live_ledger_never_returns_an_archived_number(
+    scanner, tmp_path: pathlib.Path
+) -> None:
+    project, ctx = _make_board(tmp_path)
+    bugs = project / "bugs"
+    archive = _archive_bugs(ctx.kanban_root)
+    for n in (1, 2, 3):
+        (archive / f"BUG-{n:04d}-archived.md").write_text("x\n", encoding="utf-8")
+
+    bug_id, _path, lock = scanner.claim_next_bug_id(str(bugs), "slug", "t")
+    scanner.release_bug_id_claim(lock)
+
+    assert bug_id == "BUG-0004"
+
+
+def test_next_free_number_agrees_with_the_claim_when_the_archive_holds_the_highest(
+    scanner, tmp_path: pathlib.Path
+) -> None:
+    from pgai_agent_kanban.lib.ledger_filename_contract import next_free_number
+
+    project, ctx = _make_board(tmp_path)
+    bugs = project / "bugs"
+    archive = _archive_bugs(ctx.kanban_root)
+    (archive / "BUG-0040-archived.md").write_text("x\n", encoding="utf-8")
+    (bugs / "BUG-0003-live.md").write_text("x\n", encoding="utf-8")
+
+    expected = next_free_number(bugs, "BUG")
+    bug_id, _path, lock = scanner.claim_next_bug_id(str(bugs), "slug", "t")
+    scanner.release_bug_id_claim(lock)
+
+    assert expected == 41
+    assert bug_id == f"BUG-{expected:04d}"
+
+
+def test_priority_numbering_does_not_read_the_archive(tmp_path: pathlib.Path) -> None:
+    from pgai_agent_kanban.lib.ledger_filename_contract import next_free_number
+
+    project, ctx = _make_board(tmp_path)
+    archived_priority = ctx.kanban_root / "archive" / _PROJECT / "priority"
+    archived_priority.mkdir(parents=True)
+    (archived_priority / "PRIORITY-0050-archived.md").write_text("x\n", encoding="utf-8")
+    (project / "priority" / "PRIORITY-0002-live.md").write_text("x\n", encoding="utf-8")
+
+    assert next_free_number(project / "priority", "PRIORITY") == 3

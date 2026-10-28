@@ -131,6 +131,8 @@ source "${SCRIPT_DIR}/lib/project_paths.sh"
 source "${SCRIPT_DIR}/lib/discovery_state.sh"
 # shellcheck source=lib/discovery_bundle.sh
 source "${SCRIPT_DIR}/lib/discovery_bundle.sh"
+# shellcheck source=lib/md_field.sh
+source "${SCRIPT_DIR}/lib/md_field.sh"
 
 # ---------------------------------------------------------------------------
 # Enable strict mode for our own code
@@ -168,45 +170,39 @@ fi
 # for any item line -- including a section with zero item lines -- is
 # retirable. A bundle with at least one item line resolving to an existing
 # file is kept.
+#
+# The section is read by read_md_field: the next "##" heading that is not
+# "###" ends it, so items under a "###" subheading are counted; an absent
+# heading reads as an empty section. An item line starts "- "; its path is
+# the first (`...`) on it.
+# A file the reader cannot read is kept, so --apply never retires a bundle
+# it could not inspect.
 # ---------------------------------------------------------------------------
 _reb_classify_items() {
     local bundle_file="$1"
-    python3 - "$bundle_file" <<'PY'
-import pathlib
-import re
-import sys
-
-path = pathlib.Path(sys.argv[1])
-text = path.read_text(encoding="utf-8", errors="replace")
-
-m = re.search(
-    r'^##\s+Bundled Items[ \t]*\n(.*?)(?=\n##|\Z)',
-    text,
-    flags=re.M | re.S | re.IGNORECASE,
-)
-body = m.group(1) if m else ""
-
-item_re = re.compile(r'^-\s.*$', re.M)
-path_re = re.compile(r'\(`([^`]*)`\)')
-
-total = 0
-real = []
-for line in item_re.finditer(body):
-    total += 1
-    pm = path_re.search(line.group(0))
-    if not pm:
-        continue
-    candidate = pm.group(1).strip()
-    if candidate and pathlib.Path(candidate).is_file():
-        real.append(candidate)
-
-if real:
-    print("kept")
-    print(f"item resolves to an existing file: {real[0]}")
-else:
-    print("retirable")
-    print(f"{total} item line(s) under Bundled Items, none resolve to an existing file")
-PY
+    local body rc=0 line candidate total=0
+    local path_re='\(`([^`]*)`\)'
+    body="$(read_md_field "$bundle_file" "Bundled Items" 2>/dev/null)" || rc=$?
+    if [[ "$rc" -ne 0 && "$rc" -ne 3 ]]; then
+        echo "kept"
+        echo "Bundled Items could not be read from ${bundle_file}"
+        return 0
+    fi
+    while IFS= read -r line; do
+        [[ "$line" =~ ^-[[:space:]] ]] || continue
+        total=$((total + 1))
+        [[ "$line" =~ $path_re ]] || continue
+        candidate="${BASH_REMATCH[1]}"
+        candidate="${candidate#"${candidate%%[![:space:]]*}"}"
+        candidate="${candidate%"${candidate##*[![:space:]]}"}"
+        if [[ -n "$candidate" && -f "$candidate" ]]; then
+            echo "kept"
+            echo "item resolves to an existing file: ${candidate}"
+            return 0
+        fi
+    done <<< "$body"
+    echo "retirable"
+    echo "${total} item line(s) under Bundled Items, none resolve to an existing file"
 }
 
 # ---------------------------------------------------------------------------

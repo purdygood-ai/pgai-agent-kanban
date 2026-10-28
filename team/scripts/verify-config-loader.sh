@@ -9,8 +9,8 @@
 #          PGAI_DEV_TREE_PATH empty: the key is OPTIONAL (an install may
 #          leave it unset; consumers that need a dev tree call
 #          require_dev_tree from lib/dev_tree.sh).
-#   AC3 — A config with an absent OPTIONAL key (pause_between_tasks) exports
-#          the registry default (5).
+#   AC3 — A config with absent OPTIONAL keys exports their registry
+#          defaults: pause_between_tasks 5, stop_on_blocked false.
 #   AC4 — bash -n passes on config_loader.sh and ini_parser.sh.
 #   AC5 — Sourcing the module has no side effects until load_config runs.
 #   AC6 — An inline comment after a value ("300 # five min") is stripped.
@@ -208,7 +208,8 @@ ENDCFG
     echo "$path"
 }
 
-# Build a cfg with pause_between_tasks absent (OPTIONAL key omitted).
+# Build a cfg with pause_between_tasks and stop_on_blocked absent (OPTIONAL
+# keys omitted).
 _build_missing_optional_cfg() {
     local path="${_WORK_DIR}/missing_optional.cfg"
     cat > "$path" << 'ENDCFG'
@@ -218,7 +219,7 @@ dev_tree_path = /tmp/fake_dev_tree
 [wake]
 max_tasks_per_wake = 3
 # pause_between_tasks intentionally omitted
-stop_on_blocked = false
+# stop_on_blocked intentionally omitted
 ENDCFG
     echo "$path"
 }
@@ -351,6 +352,7 @@ _AC3_RESULT=$(
         if load_config '${_MISSING_OPT_CFG}'; then
             echo \"PAUSE_BETWEEN_TASKS=\${PAUSE_BETWEEN_TASKS:-}\"
             echo \"MAX_TASKS_PER_WAKE=\${MAX_TASKS_PER_WAKE:-}\"
+            echo \"STOP_ON_BLOCKED=\${STOP_ON_BLOCKED:-}\"
             echo \"exit_code=0\"
         else
             echo \"exit_code=1\"
@@ -374,6 +376,15 @@ if [[ "$_ac3_pause" == "5" ]]; then
     pass "AC3: PAUSE_BETWEEN_TASKS = '5' (registry default applied for absent key)"
 else
     fail "AC3: PAUSE_BETWEEN_TASKS = '${_ac3_pause}' (expected registry default '5')"
+fi
+
+# stop_on_blocked is absent → registry default false (a BLOCKED task parks
+# only itself; the batch continues)
+_ac3_sob=$(echo "$_AC3_RESULT" | grep "^STOP_ON_BLOCKED=" | head -1 | cut -d= -f2- || true)
+if [[ "$_ac3_sob" == "false" ]]; then
+    pass "AC3: STOP_ON_BLOCKED = 'false' (registry default applied for absent key)"
+else
+    fail "AC3: STOP_ON_BLOCKED = '${_ac3_sob}' (expected registry default 'false')"
 fi
 
 # max_tasks_per_wake is set to 3 in the fixture → should honor config value

@@ -6,7 +6,8 @@ lock acquisition, retried on contention with backoff for a caller-chosen
 number of seconds.
 
 Covered:
-  1. A wait of 0 is one attempt: a held lock returns 1 at once.
+  1. A wait of 0 is one attempt: a held lock returns 1 without calling the
+     keep-waiting hook or pausing for a retry.
   2. A holder that releases during the wait: the waiter acquires, its
      provenance is on the lock, and its out-fd variable is set.
   3. A holder that keeps the lock for the whole wait: the waiter returns 1
@@ -55,13 +56,13 @@ class _Holder:
         self.proc.wait(timeout=10)
 
 
-def _waiter_script(lock_file: pathlib.Path, wait: str, holder: str = "waiter") -> str:
+def _waiter_script(lock_file: pathlib.Path, wait: str) -> str:
     return textwrap.dedent(f"""\
         source {_LOCK_PROVENANCE}
         my_fd=""
         start=$(date +%s)
         rc=0
-        pgai_lock_acquire_waiting "{wait}" "{lock_file}" "{holder}" "$$" "wait-op" none my_fd || rc=$?
+        pgai_lock_acquire_waiting "{wait}" "{lock_file}" waiter "$$" "wait-op" none my_fd || rc=$?
         echo "RC=$rc ELAPSED=$(( $(date +%s) - start )) FD=${{my_fd}}"
         if [[ $rc -eq 0 ]]; then
             cat "{lock_file}"
@@ -77,15 +78,47 @@ def _field(stdout: str, key: str) -> str:
     return ""
 
 
+def _counting_waiter_script(
+    lock_file: pathlib.Path, wait: str, holder: str = "waiter"
+) -> str:
+    """A waiter that counts the retry machinery instead of timing it.
+
+    Every retry of a contended attempt is preceded by one keep-waiting hook
+    call and one pause, so HOOK_CALLS and PAUSES are both 0 exactly when the
+    call made a single attempt. The counts do not depend on how long anything
+    took on the host. The pause still sleeps after counting, so a waiter that
+    does retry backs off instead of spinning. *holder* is the provenance
+    holder the waiter passes; a blank one makes the acquisition a refusal.
+    """
+    return textwrap.dedent(f"""\
+        source {_LOCK_PROVENANCE}
+        hook_calls=0
+        pauses=0
+        count_hook() {{ hook_calls=$(( hook_calls + 1 )); return 0; }}
+        pgai_lock_wait_pause() {{ pauses=$(( pauses + 1 )); sleep "$1"; }}
+        PGAI_LOCK_WAIT_WHILE=count_hook
+        my_fd=""
+        rc=0
+        pgai_lock_acquire_waiting "{wait}" "{lock_file}" "{holder}" "$$" "wait-op" none my_fd || rc=$?
+        echo "RC=$rc HOOK_CALLS=$hook_calls PAUSES=$pauses FD=${{my_fd}}"
+        if [[ $rc -eq 0 ]]; then
+            pgai_lock_release "{lock_file}" "$my_fd"
+        fi
+    """)
+
+
 def test_zero_wait_is_a_single_attempt(tmp_path):
     lock_file = tmp_path / "locks" / "probe.lock"
     holder = _Holder(tmp_path, lock_file)
     try:
-        result = run_bash(tmp_path, _waiter_script(lock_file, "0"), timeout=30)
+        result = run_bash(tmp_path, _counting_waiter_script(lock_file, "0"), timeout=30)
     finally:
         holder.release()
-    assert _field(result.stdout, "RC") == "1", result.stdout + result.stderr
-    assert int(_field(result.stdout, "ELAPSED")) <= 1
+    diagnostics = result.stdout + result.stderr
+    assert _field(result.stdout, "RC") == "1", diagnostics
+    assert _field(result.stdout, "HOOK_CALLS") == "0", diagnostics
+    assert _field(result.stdout, "PAUSES") == "0", diagnostics
+    assert result.stderr.count("error:   lock.provenance.contended") == 1, result.stderr
 
 
 def test_lock_released_during_the_wait_is_acquired(tmp_path):
@@ -120,7 +153,11 @@ def test_lock_held_for_the_whole_wait_gives_up_after_the_wait(tmp_path):
 
 def test_refusal_is_not_retried(tmp_path):
     lock_file = tmp_path / "locks" / "probe.lock"
-    result = run_bash(tmp_path, _waiter_script(lock_file, "10", holder=""), timeout=30)
-    assert _field(result.stdout, "RC") == "2", result.stdout + result.stderr
-    assert int(_field(result.stdout, "ELAPSED")) <= 1
+    result = run_bash(
+        tmp_path, _counting_waiter_script(lock_file, "10", holder=""), timeout=30
+    )
+    diagnostics = result.stdout + result.stderr
+    assert _field(result.stdout, "RC") == "2", diagnostics
+    assert _field(result.stdout, "HOOK_CALLS") == "0", diagnostics
+    assert _field(result.stdout, "PAUSES") == "0", diagnostics
     assert "lock.provenance.incomplete" in result.stderr

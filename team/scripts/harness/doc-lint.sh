@@ -15,16 +15,30 @@
 #   --suite <name>    Which pass to run (required). One of:
 #                       cmd           Execute fenced bash/sh commands verbatim.
 #                       links         Verify relative Markdown links resolve.
-#                       fossil-greps  Grep for known internal-residue patterns (zero-hit gate).
-#                       feature-greps Grep for required feature tokens (must-find gate).
+#                       fossil-greps  Grep for known internal-residue patterns (zero-hit check).
+#                       feature-greps Grep for required feature tokens (must-find check).
 #   --doc-root <p>    Root directory to scan (default: repo root, auto-detected).
+#   --findings-file <p>
+#                     Write the suite's findings as a JSON array to <p> (parent
+#                     directories created; written even when empty), one
+#                     object per finding with lint "doc_lint", severity
+#                     "quality", summary, cause, remedy, suite and a kind:
+#                     command-failed (one per failing fenced command),
+#                     dead-link (one per unresolved link), fossil-hit (one
+#                     per matching line) or feature-missing (one per absent
+#                     token), plus file/line where the finding has them.
+#                     The gated runners' gated_runner_merge_findings_file
+#                     reads this shape.
 #   --verbose         Print each command/link/grep before its result.
 #   --help            Print this message and exit 0.
 #
+# Quality class: every finding is printed (and recorded with
+# --findings-file) and the suite still exits 0.
+#
 # EXIT CODES
-#   0   All checks in the selected suite passed (or --help requested).
-#   1   One or more checks in the selected suite failed.
-#   2   Invocation error (unknown suite, missing argument, etc.).
+#   0   The selected suite ran, whatever it found (or --help requested).
+#   2   Invocation error: an unknown argument, a missing --suite, or an
+#       unknown suite name.
 #
 # SKIP MECHANISMS (cmd suite)
 #   The cmd suite uses three explicit skip mechanisms and one auto-placeholder
@@ -81,7 +95,15 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../lib/docker_use.sh"
 # shellcheck source=../lib/pp_run_ops.sh
 declare -F pp_run_ops >/dev/null || source "${SCRIPT_DIR}/../lib/pp_run_ops.sh"
+# shellcheck source=../lib/error_contract.sh
+source "${SCRIPT_DIR}/../lib/error_contract.sh"
+# Per-instance findings: gated_runner_record_instance_finding accumulates,
+# gated_runner_write_findings_array writes the --findings-file array.
+# shellcheck source=../lib/gated_runner_lint.sh
+source "${SCRIPT_DIR}/../lib/gated_runner_lint.sh"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
+_DL_SELF="${SCRIPT_DIR}/doc-lint.sh"
+_DL_USAGE="Usage: doc-lint.sh --suite cmd|links|fossil-greps|feature-greps [--doc-root PATH] [--findings-file PATH] [--verbose]"
 
 # ---------------------------------------------------------------------------
 # Defaults
@@ -89,6 +111,7 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
 SUITE=""
 DOC_ROOT="${REPO_ROOT}"
 VERBOSE=false
+FINDINGS_FILE=""
 
 # ---------------------------------------------------------------------------
 # Argument parsing
@@ -107,6 +130,14 @@ while [[ $# -gt 0 ]]; do
             DOC_ROOT="${2:-}"
             shift 2
             ;;
+        --findings-file)
+            FINDINGS_FILE="${2:-}"
+            shift 2
+            ;;
+        --findings-file=*)
+            FINDINGS_FILE="${1#*=}"
+            shift
+            ;;
         --verbose)
             VERBOSE=true
             shift
@@ -120,10 +151,12 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ -z "${SUITE}" ]]; then
-    echo "doc-lint.sh: --suite is required." >&2
-    echo "  Valid suites: cmd, links, fossil-greps, feature-greps" >&2
-    # CONVERT: quality-class harness precondition -- an unnamed suite means
-    # the run has nothing to check, not that the docs tree has a defect.
+    pgai_emit_error_contract "doc_lint.suite_required" \
+        "doc-lint.sh was run without --suite, so no documentation check ran." \
+        "bash ${_DL_SELF@Q} --suite links"
+    echo "${_DL_USAGE}" >&2
+    # CONVERT: operator-CLI argument refusal -- an unnamed suite means the
+    # run has nothing to check, not that the docs tree has a defect.
     # CENSUS-ANCHOR: doc-lint-suite-required-01
     exit 2
 fi
@@ -318,6 +351,29 @@ _extract_fenced_blocks() {
 }
 
 # ---------------------------------------------------------------------------
+# _dl_record <suite> <kind> <cause> <remedy> [KEY=VALUE ...]
+#
+# Record one per-instance finding (lint "doc_lint") for --findings-file.
+# Never fails the caller.
+# ---------------------------------------------------------------------------
+_dl_record() {
+    local suite="$1" kind="$2" cause="$3" remedy="$4"
+    shift 4
+    gated_runner_record_instance_finding doc_lint "$cause" "$remedy" \
+        "suite=${suite}" "kind=${kind}" "doc_root=${DOC_ROOT}" "$@"
+}
+
+# _dl_recheck <suite>: this harness re-run over the same doc root.
+_dl_recheck() {
+    printf 'bash %q --suite %q --doc-root %q' "${_DL_SELF}" "$1" "${DOC_ROOT}"
+}
+
+# _dl_findings_footer: the closing narration of a suite that found something.
+_dl_findings_footer() {
+    echo "=== doc-lint.sh: FINDINGS DETECTED — see above (quality class: reported, exit 0) ==="
+}
+
+# ---------------------------------------------------------------------------
 # Suite: cmd — execute fenced bash/sh commands
 # ---------------------------------------------------------------------------
 _suite_cmd() {
@@ -412,6 +468,10 @@ _suite_cmd() {
                 echo "    interactive editor, credentials), mark it non-executable with one of the three"
                 echo "    doc-lint skip mechanisms documented in this script's --help output, rather than"
                 echo "    leaving the doc fixture failing."
+                _dl_record cmd command-failed \
+                    "${rel_path}: fenced command exited ${exit_code} when executed verbatim from ${DOC_ROOT}: ${cmd_text}" \
+                    "re-run it directly to see its full output -- (cd ${DOC_ROOT@Q} && ${cmd_text}) -- then fix the command in ${rel_path} or mark it with a doc-lint skip annotation, and re-check: $(_dl_recheck cmd)" \
+                    "file=${rel_path}" "command=${cmd_text}" "command_exit=${exit_code}"
                 file_fail=$((file_fail + 1))
                 any_fail=true
             fi
@@ -424,12 +484,11 @@ _suite_cmd() {
 
     echo "=== cmd-pass summary: files=${total_files} pass=${total_pass} skip=${total_skip} fail=${total_fail} ==="
     if [[ "$any_fail" == "true" ]]; then
-        echo "=== doc-lint.sh: FAILURES DETECTED — see above ==="
+        _dl_findings_footer
         echo ""
         echo "Rule: every fenced bash/sh command in the audited doc surface must execute"
         echo "successfully as documented, or be explicitly marked non-executable via a"
         echo "doc-lint skip/docker annotation (see --help)."
-        return 1
     fi
     return 0
 }
@@ -479,6 +538,12 @@ _suite_links() {
                 echo "         file (it currently resolves to '${resolved}', which is absent)."
                 echo "      3. ${BASH_SOURCE[0]} --suite links --doc-root \"${DOC_ROOT}\""
                 echo "    Rule: every relative Markdown link in the audited doc surface must resolve to an existing file."
+                local link_line=""
+                link_line="$(grep -n -F -m1 -- "${link}" "${filepath}" 2>/dev/null | cut -d: -f1 || true)"
+                _dl_record links dead-link \
+                    "${rel_path}${link_line:+:${link_line}} links to '${link}', which resolves to ${resolved}, a path that does not exist" \
+                    "edit the link in ${rel_path}${link_line:+ line ${link_line}} so it points at an existing file, then re-check: $(_dl_recheck links)" \
+                    "file=${rel_path}" ${link_line:+"line=${link_line}"} "link=${link}"
                 total_fail=$((total_fail + 1))
                 any_fail=true
             fi
@@ -493,15 +558,14 @@ _suite_links() {
 
     echo "=== links summary: files=${total_files} pass=${total_pass} fail=${total_fail} ==="
     if [[ "$any_fail" == "true" ]]; then
-        echo "=== doc-lint.sh: FAILURES DETECTED — see above ==="
-        return 1
+        _dl_findings_footer
     fi
     return 0
 }
 
 # ---------------------------------------------------------------------------
 # Suite: fossil-greps — grep audited docs for known internal-residue patterns
-# (zero-hit gate: any match is a failure)
+# (zero-hit check: any match is a finding)
 # ---------------------------------------------------------------------------
 _suite_fossil_greps() {
     local total_fail=0
@@ -525,7 +589,10 @@ _suite_fossil_greps() {
                 # removes the residue is author content — print a filled-in
                 # example command block ending in the re-check, per
                 # docs/coding-standards.md.
-                echo "$hits" | while IFS= read -r hit_line; do
+                # Read from a here-string, not a pipe: a piped loop runs in a
+                # subshell and the findings it records would be lost.
+                local hit_line hit_lineno
+                while IFS= read -r hit_line; do
                     hit_lineno="${hit_line%%:*}"
                     echo "    ${hit_line}"
                     echo "    Cause: ${rel_path}:${hit_lineno} matches the forbidden internal-residue pattern '${pattern}'."
@@ -534,7 +601,11 @@ _suite_fossil_greps() {
                     echo "      2. Remove or rewrite that line in ${rel_path} so it no longer matches '${pattern}'."
                     echo "      3. ${BASH_SOURCE[0]} --suite fossil-greps --doc-root \"${DOC_ROOT}\""
                     echo "    Rule: none of the known internal-residue patterns (FOSSIL_PATTERNS in ${BASH_SOURCE[0]}) may appear in the audited doc surface."
-                done
+                    _dl_record fossil-greps fossil-hit \
+                        "${rel_path}:${hit_lineno} matches the forbidden internal-residue pattern '${pattern}'" \
+                        "remove or rewrite ${rel_path} line ${hit_lineno} so it no longer matches the pattern, then re-check: $(_dl_recheck fossil-greps)" \
+                        "file=${rel_path}" "line=${hit_lineno}" "pattern=${pattern}"
+                done <<< "$hits"
                 total_fail=$((total_fail + 1))
                 any_fail=true
             fi
@@ -543,15 +614,14 @@ _suite_fossil_greps() {
 
     echo "=== fossil-greps summary: fail=${total_fail} ==="
     if [[ "$any_fail" == "true" ]]; then
-        echo "=== doc-lint.sh: FAILURES DETECTED — see above ==="
-        return 1
+        _dl_findings_footer
     fi
     return 0
 }
 
 # ---------------------------------------------------------------------------
 # Suite: feature-greps — grep audited docs for required feature tokens
-# (must-find gate: missing token is a failure)
+# (must-find check: a missing token is a finding)
 # ---------------------------------------------------------------------------
 _suite_feature_greps() {
     local total_fail=0
@@ -581,6 +651,10 @@ _suite_feature_greps() {
             echo "      2. Add a section documenting '${pattern}' to one of the audited docs (e.g. README.md or HOW_TO.md)."
             echo "      3. ${BASH_SOURCE[0]} --suite feature-greps --doc-root \"${DOC_ROOT}\""
             echo "    Rule: every required feature token in FEATURE_PATTERNS (${BASH_SOURCE[0]}) must be documented somewhere in the audited doc surface."
+            _dl_record feature-greps feature-missing \
+                "no file in the audited doc surface under ${DOC_ROOT} mentions the required feature token '${pattern}'" \
+                "document '${pattern}' in one of the audited docs (README.md or HOW_TO.md, for example), then re-check: $(_dl_recheck feature-greps)" \
+                "pattern=${pattern}"
             total_fail=$((total_fail + 1))
             any_fail=true
         fi
@@ -588,8 +662,7 @@ _suite_feature_greps() {
 
     echo "=== feature-greps summary: fail=${total_fail} ==="
     if [[ "$any_fail" == "true" ]]; then
-        echo "=== doc-lint.sh: FAILURES DETECTED — see above ==="
-        return 1
+        _dl_findings_footer
     fi
     return 0
 }
@@ -611,12 +684,20 @@ case "$SUITE" in
         _suite_feature_greps
         ;;
     *)
-        echo "doc-lint.sh: unknown suite: ${SUITE}" >&2
-        echo "  Valid suites: cmd, links, fossil-greps, feature-greps" >&2
-        # CONVERT: quality-class harness precondition -- same reasoning as
-        # doc-lint-suite-required-01, for an unrecognized (not merely absent)
-        # suite name.
+        pgai_emit_error_contract "doc_lint.suite_unknown" \
+            "doc-lint.sh does not know the suite '${SUITE}'; valid suites are cmd, links, fossil-greps and feature-greps." \
+            "bash ${_DL_SELF@Q} --suite links"
+        echo "${_DL_USAGE}" >&2
+        # CONVERT: operator-CLI argument refusal -- same reasoning as
+        # doc-lint-suite-required-01, for an unrecognized suite name.
         # CENSUS-ANCHOR: doc-lint-suite-unknown-01
         exit 2
         ;;
 esac
+
+# Quality class: the suite's findings were printed above; record them for
+# the gated runners' merge path when asked, and exit 0 whatever was found.
+if [[ -n "${FINDINGS_FILE}" ]]; then
+    gated_runner_write_findings_array "${FINDINGS_FILE}"
+fi
+exit 0

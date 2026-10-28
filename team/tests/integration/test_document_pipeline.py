@@ -44,6 +44,7 @@ import subprocess
 from typing import Optional
 
 import pytest
+from tests.fixtures.section_reader_modules import copy_section_reader_modules
 
 # ---------------------------------------------------------------------------
 # Path helpers — resolved from this file's own location.
@@ -165,6 +166,7 @@ def _build_doc_kanban_root(
             (cm_py_dir / py_file.name).write_text(
                 py_file.read_text(encoding="utf-8"), encoding="utf-8"
             )
+    copy_section_reader_modules(cm_py_dir.parent)
 
     # Also copy metrics_aggregator.py and metrics_csv_writer.py into scripts/lib/
     # if present in the dev tree.  finalize.sh invokes these as non-blocking steps;

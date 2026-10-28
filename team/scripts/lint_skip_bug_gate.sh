@@ -1,9 +1,12 @@
 #!/usr/bin/env bash
 # team/scripts/lint_skip_bug_gate.sh
 #
-# Enforcement: every skip statement in team/tests/ that cites a follow-up
-# bug must reference a real BUG-NNNN whose file exists in the project's
-# bugs/ directory.
+# Check: every skip statement in team/tests/ that cites a follow-up bug
+# must reference a real BUG-NNNN whose file exists in the project's bugs/
+# directory. Quality class (CONVERT, team/SOP-core.md "Gates and Refusals"):
+# a bad citation is a provenance defect with zero runtime-failure risk, so
+# each one is reported -- printed, and with --findings-file written as its
+# own finding -- and the gate exits 0.
 #
 # Detection is per-surface, stated explicitly rather than inherited by
 # accident:
@@ -44,8 +47,10 @@
 #      path:line:content, so the file and line to fix are named.
 #
 # Usage:
-#   lint_skip_bug_gate.sh [--tests-dir PATH] [--bugs-dir PATH] [--verbose]
-#   lint_skip_bug_gate.sh --files PATH [PATH ...] [--bugs-dir PATH] [--verbose]
+#   lint_skip_bug_gate.sh [--tests-dir PATH] [--bugs-dir PATH]
+#                         [--findings-file PATH] [--verbose]
+#   lint_skip_bug_gate.sh --files PATH [PATH ...] [--bugs-dir PATH]
+#                         [--findings-file PATH] [--verbose]
 #
 #   --tests-dir PATH   Directory to scan for skip annotations.
 #                      Default: team/tests/ relative to this script's repo root.
@@ -66,18 +71,27 @@
 #                      Default: $PGAI_AGENT_KANBAN_ROOT_PATH/projects/pgai-agent-kanban/bugs/
 #                      If the directory does not exist, the file-existence check
 #                      is skipped with a warning (exit 0).
+#   --findings-file PATH
+#                      Write the findings as a JSON array to PATH (parent
+#                      directories created; written even when empty). Each
+#                      finding carries lint "skip_cites_real_bug", severity
+#                      "quality", summary, cause, remedy, file, line, and a
+#                      kind: placeholder-citation (one per placeholder skip),
+#                      unfiled-citation (one per skip citing a BUG-NNNN with
+#                      no file, with its bug_id) or tests-dir-missing. Built
+#                      by lib/gated_findings.py; the gated runners merge it
+#                      per instance with gated_runner_merge_findings_file.
 #   --verbose          Print each finding and each scanned file.
 #
 # Exit codes:
-#   0   All checks passed (or bugs-dir absent — see above).
-#   1   One or more findings: placeholder IDs or missing bug files.
-#   2   Usage error or required directory not found; in --files mode also
-#       an empty --files list, a --files path that is not an existing
-#       file, or --files combined with --tests-dir.
+#   0   The gate ran, whatever it found (each finding is printed and, with
+#       --findings-file, recorded) -- a missing tests directory included.
+#   2   Usage error: an unknown argument, an empty --files list, a --files
+#       path that is not an existing file, or --files combined with
+#       --tests-dir.
 #
-# This script IS the gated check for skip-citation policy. It is called by
-# run-unit-tests.sh and run-integration-tests.sh before pytest so that a
-# violation surfaces immediately — before the full test suite runs.
+# run-unit-tests.sh and run-integration-tests.sh call this before pytest and
+# merge its findings file; a targeted --files run fails on any entry in it.
 
 set -euo pipefail
 # shellcheck source=lib/env_bootstrap.sh
@@ -99,6 +113,7 @@ _LSG_TESTS_DIR="${_LSG_REPO_ROOT}/team/tests"
 _LSG_KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH}"
 _LSG_BUGS_DIR="${_LSG_KANBAN_ROOT}/projects/pgai-agent-kanban/bugs"
 _LSG_VERBOSE=false
+_LSG_FINDINGS_FILE=""
 # Named-file mode (--files): the exact paths to check, and whether
 # --tests-dir was given explicitly (the two are mutually exclusive).
 _LSG_FILES_MODE=false
@@ -128,12 +143,18 @@ while [[ $# -gt 0 ]]; do
             _LSG_BUGS_DIR="$2"; shift 2 ;;
         --bugs-dir=*)
             _LSG_BUGS_DIR="${1#*=}"; shift ;;
+        --findings-file)
+            _LSG_FINDINGS_FILE="${2:-}"; shift 2 ;;
+        --findings-file=*)
+            _LSG_FINDINGS_FILE="${1#*=}"; shift ;;
         --verbose|-v)
             _LSG_VERBOSE=true; shift ;;
         --help|-h)
             cat <<'HELP'
-Usage: lint_skip_bug_gate.sh [--tests-dir PATH] [--bugs-dir PATH] [--verbose]
-       lint_skip_bug_gate.sh --files PATH [PATH ...] [--bugs-dir PATH] [--verbose]
+Usage: lint_skip_bug_gate.sh [--tests-dir PATH] [--bugs-dir PATH]
+                             [--findings-file PATH] [--verbose]
+       lint_skip_bug_gate.sh --files PATH [PATH ...] [--bugs-dir PATH]
+                             [--findings-file PATH] [--verbose]
 
 Enforce that every skip()/SKIP: annotation in the test suite that cites a
 bug references a real BUG-NNNN whose file exists in the bugs/ directory.
@@ -149,13 +170,19 @@ Options:
                      --tests-dir.
   --bugs-dir PATH    Bugs directory to validate against (default: inferred
                      from PGAI_AGENT_KANBAN_ROOT_PATH)
+  --findings-file PATH
+                     Write the findings as a JSON array to PATH, one per
+                     placeholder citation and per skip citing an unfiled
+                     bug (written even when empty)
   --verbose, -v      Print scan progress
   --help, -h         Show this help
 
+Quality class: findings are printed (and recorded with --findings-file)
+and the gate exits 0 whatever it finds.
+
 Exit codes:
-  0   All checks passed.
-  1   One or more placeholder or missing-file findings.
-  2   Usage error, tests-dir not found, or a --files path not found.
+  0   The gate ran, whatever it found (a missing tests dir is a finding).
+  2   Usage error, or a --files path not found.
 HELP
             exit 0 ;;
         *)
@@ -165,14 +192,73 @@ HELP
 done
 
 # ---------------------------------------------------------------------------
+# Per-instance findings. Each is one JSON object built by
+# lib/gated_findings.py instance; _lsg_write_findings writes them all as the
+# --findings-file array (nothing when the flag was not given).
+# ---------------------------------------------------------------------------
+_LSG_FINDINGS_PY="${_LSG_SCRIPT_DIR}/lib/gated_findings.py"
+_LSG_FINDINGS=()
+
+# _lsg_record <cause> <remedy> [KEY=VALUE ...]
+_lsg_record() {
+    local finding=""
+    if finding="$(python3 "${_LSG_FINDINGS_PY}" instance skip_cites_real_bug "$@" 2>/dev/null)" \
+        && [[ -n "${finding}" ]]; then
+        _LSG_FINDINGS+=("${finding}")
+    else
+        echo "lint_skip_bug_gate: could not record a finding: $1" >&2
+    fi
+    return 0
+}
+
+# _lsg_record_hit <kind> <path:line:content> <remedy-prefix> [KEY=VALUE ...]
+# One finding for one path:line:content skip hit, naming its file and line.
+_lsg_record_hit() {
+    local kind="$1" hit="$2" fix="$3"
+    shift 3
+    local path="${hit%%:*}" rest line
+    rest="${hit#*:}"
+    line="${rest%%:*}"
+    [[ "${line}" =~ ^[0-9]+$ ]] || line=""
+    _lsg_record "${hit}" "${fix} ${path}${line:+ line ${line}}, then re-check: $(_lsg_recheck "${path}")" \
+        "kind=${kind}" "file=${path}" ${line:+"line=${line}"} "$@"
+}
+
+# _lsg_command [arg ...]: this gate run with the given arguments, as a
+# pasteable command line.
+_lsg_command() {
+    local quoted
+    printf -v quoted '%q ' bash "${_LSG_SELF}" "$@"
+    printf '%s' "${quoted% }"
+}
+
+# _lsg_recheck <path>: this gate re-run over the one named file.
+_lsg_recheck() {
+    _lsg_command --files "$1" --bugs-dir "${_LSG_BUGS_DIR}"
+}
+
+_lsg_write_findings() {
+    [[ -n "${_LSG_FINDINGS_FILE}" ]] || return 0
+    if [[ ${#_LSG_FINDINGS[@]} -gt 0 ]]; then
+        printf '%s\n' "${_LSG_FINDINGS[@]}" | python3 "${_LSG_FINDINGS_PY}" array "${_LSG_FINDINGS_FILE}" \
+            || echo "lint_skip_bug_gate: could not write findings file ${_LSG_FINDINGS_FILE}" >&2
+    else
+        python3 "${_LSG_FINDINGS_PY}" array "${_LSG_FINDINGS_FILE}" < /dev/null \
+            || echo "lint_skip_bug_gate: could not write findings file ${_LSG_FINDINGS_FILE}" >&2
+    fi
+    return 0
+}
+
+# ---------------------------------------------------------------------------
 # Usage refusal for named-file mode. One exit site for every --files usage
 # error, so the census carries one anchor for the whole family.
 # ---------------------------------------------------------------------------
 _lsg_usage_refusal() {
     pgai_emit_error_contract "$1" "$2" "$3"
+    echo "Usage: lint_skip_bug_gate.sh --files PATH [PATH ...] [--bugs-dir PATH] [--findings-file PATH] [--verbose]" >&2
     # CONVERT: quality-class lint precondition -- a malformed --files
-    # request means this run has nothing valid to scan, not that the tree
-    # has a defect.
+    # request is an operator-CLI argument refusal: this run has nothing
+    # valid to scan, not a defect in the tree, so it is the one exit 2 left.
     # CENSUS-ANCHOR: lint-skip-bug-gate-files-usage-01
     exit 2
 }
@@ -225,10 +311,18 @@ if [[ "${_LSG_FILES_MODE}" == "true" ]]; then
     _LSG_SCOPE_LABEL="${_LSG_UNIQUE_NAMED_COUNT} named file(s)"
 elif [[ ! -d "${_LSG_TESTS_DIR}" ]]; then
     echo "lint_skip_bug_gate.sh: ERROR: tests directory not found: ${_LSG_TESTS_DIR}" >&2
-    # CONVERT: quality-class lint precondition -- a missing tests directory
-    # means this run has nothing to scan, not that the tree has a defect.
+    _lsg_record "tests directory ${_LSG_TESTS_DIR} not found, so no skip citation was checked" \
+        "$(printf 'ls -ld -- %q' "${_LSG_TESTS_DIR}") && $(_lsg_command --tests-dir "${_LSG_REPO_ROOT}/team/tests")" \
+        "kind=tests-dir-missing" "file=${_LSG_TESTS_DIR}"
+    _lsg_write_findings
     # CENSUS-ANCHOR: lint-skip-bug-gate-tests-dir-missing-01
-    exit 2
+    # CONVERT: quality-class lint precondition -- a missing tests directory
+    # means this run has nothing to scan, not that the tree has a defect;
+    # recorded as a finding, exits 0.
+    pgai_emit_error_contract "lint_skip_bug_gate.tests_dir_missing" \
+        "tests directory not found: ${_LSG_TESTS_DIR}; no skip citation was checked." \
+        "$(_lsg_command --tests-dir "${_LSG_REPO_ROOT}/team/tests")"
+    exit 0
 fi
 
 # ---------------------------------------------------------------------------
@@ -334,8 +428,13 @@ set -e
 
 if [[ -n "${_LSG_PLACEHOLDER_OUTPUT}" ]]; then
     _LSG_PLACEHOLDER_HITS=$(echo "${_LSG_PLACEHOLDER_OUTPUT}" | wc -l | tr -d ' ')
-    echo "lint_skip_bug_gate: FAIL — ${_LSG_PLACEHOLDER_HITS} placeholder skip citation(s) found:" >&2
+    echo "lint_skip_bug_gate: ${_LSG_PLACEHOLDER_HITS} placeholder skip citation(s) found:" >&2
     echo "${_LSG_PLACEHOLDER_OUTPUT}" >&2
+    while IFS= read -r _lsg_hit; do
+        [[ -n "${_lsg_hit}" ]] || continue
+        _lsg_record_hit placeholder-citation "${_lsg_hit}" \
+            "replace the placeholder with a filed BUG-NNNN whose file exists in ${_LSG_BUGS_DIR}, or un-skip the test, in"
+    done <<< "${_LSG_PLACEHOLDER_OUTPUT}"
 else
     _lsg_log "placeholder check: 0 findings"
 fi
@@ -429,6 +528,9 @@ else
                 while IFS= read -r _lsg_hit; do
                     [[ -z "${_lsg_hit}" ]] && continue
                     _LSG_MISSING_BUG_DETAILS="${_LSG_MISSING_BUG_DETAILS}    ${_lsg_hit//\\/\\\\}\n"
+                    _lsg_record_hit unfiled-citation "${_lsg_hit}" \
+                        "${_bug_id} has no file in ${_LSG_BUGS_DIR}: cite a filed BUG-NNNN or un-skip the test in" \
+                        "bug_id=${_bug_id}"
                 done < <(printf '%s\n' "${_LSG_SKIP_LINES}" | grep -E "${_bug_id}([^0-9]|\$)" || true)
             else
                 _lsg_log "  ${_bug_id}: OK (${_LSG_MATCH_COUNT} file(s) found)"
@@ -439,7 +541,7 @@ else
     fi
 
     if [[ "${_LSG_MISSING_BUG_HITS}" -gt 0 ]]; then
-        echo "lint_skip_bug_gate: FAIL — ${_LSG_MISSING_BUG_HITS} cited BUG-NNNN ID(s) have no file in ${_LSG_BUGS_DIR}:" >&2
+        echo "lint_skip_bug_gate: ${_LSG_MISSING_BUG_HITS} cited BUG-NNNN ID(s) have no file in ${_LSG_BUGS_DIR}:" >&2
         printf "%b" "${_LSG_MISSING_BUG_DETAILS}" >&2
     else
         echo "lint_skip_bug_gate: BUG-NNNN file-existence check: 0 missing files"
@@ -450,20 +552,27 @@ fi
 # Summary and exit
 # ---------------------------------------------------------------------------
 _LSG_TOTAL_FINDINGS=$(( _LSG_PLACEHOLDER_HITS + _LSG_MISSING_BUG_HITS ))
+_lsg_write_findings
 
 if [[ "${_LSG_TOTAL_FINDINGS}" -gt 0 ]]; then
-    echo "lint_skip_bug_gate: FAIL — ${_LSG_TOTAL_FINDINGS} finding(s)." >&2
+    echo "lint_skip_bug_gate: ${_LSG_TOTAL_FINDINGS} finding(s)." >&2
     echo "lint_skip_bug_gate: Fix by either:" >&2
     echo "  (a) replacing the placeholder/missing citation with a real filed BUG-NNNN" >&2
     echo "      whose file exists in the bugs/ directory, or" >&2
     echo "  (b) un-skipping the test if the underlying issue is resolved." >&2
     echo "  See roles/TESTER.md \"Test Authoring Guidelines\" for the full skip-citation policy." >&2
+    # CENSUS-ANCHOR: lint-skip-bug-gate-findings-01
     # CONVERT: quality-class finding, zero runtime-failure risk -- a
     # placeholder or missing bug citation on a skipped test is a
     # provenance/hygiene defect, not something that can break a shipped
-    # artefact.
-    # CENSUS-ANCHOR: lint-skip-bug-gate-findings-01
-    exit 1
+    # artefact; reported per instance, exits 0.
+    _lsg_scope_arg=(--tests-dir "${_LSG_TESTS_DIR}")
+    # Named-file mode re-checks the files as scanned: one spelling each.
+    [[ "${_LSG_FILES_MODE}" == "true" ]] && _lsg_scope_arg=(--files "${_LSG_NAMED_PY[@]}" "${_LSG_NAMED_OTHER[@]}")
+    pgai_emit_error_contract "lint_skip_bug_gate.findings" \
+        "${_LSG_TOTAL_FINDINGS} skip citation finding(s) in ${_LSG_SCOPE_LABEL}; each is listed above with its file and line." \
+        "$(_lsg_command "${_lsg_scope_arg[@]}" --bugs-dir "${_LSG_BUGS_DIR}")"
+    exit 0
 fi
 
 echo "lint_skip_bug_gate: OK — all skip annotations are compliant."

@@ -568,6 +568,37 @@ def test_report_systemic_risk_comes_from_its_section_never_from_findings() -> No
     assert without.systemic_risk is None and without.raw == {}
 
 
+def test_summary_keeps_a_fenced_heading_and_reads_an_inline_value() -> None:
+    report = _parse(
+        """\
+        # Verification Report
+
+        ## Summary: Shipped clean.
+
+        ```
+        ## not a heading
+        ```
+
+        ## Findings
+        """
+    )
+    assert report.summary == "Shipped clean.\n```\n## not a heading\n```"
+
+
+def test_summary_is_read_through_the_shared_section_reader(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The Summary body comes from task_status.read_section, never a private reader."""
+    seen: list[str] = []
+
+    def fake_read_section(text: str, heading: str, **kwargs: object) -> "str | None":
+        seen.append(heading)
+        return "from the shared reader" if heading == "Summary" else None
+
+    monkeypatch.setattr(tester_report, "read_section", fake_read_section)
+    report = _parse("# Report\n\n## Summary\n\nignored\n")
+    assert report.summary == "from the shared reader"
+    assert "Summary" in seen
+
+
 def test_summary_is_the_summary_section_text() -> None:
     report = _parse(
         """\

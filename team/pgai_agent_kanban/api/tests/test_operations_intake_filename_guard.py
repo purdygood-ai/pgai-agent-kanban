@@ -12,6 +12,11 @@ What is proven here:
      removed anywhere in the throwaway tree -- the sentinel file outside the
      temp root keeps its content and mtime, and the temp root is not even
      created.
+  1a. A path that still carries a PRIORITY-, version or BUG- routing prefix
+     (_PREFIXED_NOT_BARE) gets a remedy whose example name keeps that prefix
+     -- the very name intake.sh's own refusal offers -- and the remedy's curl
+     line, re-sent exactly as printed, deposits into priority/,
+     requirements/ and bugs/ respectively.
   2. A bug-, priority- and version-prefixed bare name (_ACCEPTED) are still
      deposited into bugs/, priority/ and requirements/, from a temp file in
      a fresh per-request directory directly under the intake temp directory.
@@ -57,6 +62,14 @@ _PATH_NAMES = ["/tmp/x.md", "../x.md", "a/b.md", "..", "BUG-0001/../../x.md"]
 # the test -- it only proves the refused request left that path as it was.
 # anti-pattern-allowlist: 2 (justification: the attack target the acceptance criteria name, read-only observed; the test writes nothing there)
 _ABSOLUTE_TARGET = pathlib.Path("/tmp/x.md")
+
+# Not-bare names that still carry a routing prefix: the bare example name the
+# remedy offers for each, and the directory that prefix routes to.
+_PREFIXED_NOT_BARE = [
+    ("PRIORITY-0050-a%2Fb.md", "PRIORITY-0050-example.md", "priority"),
+    ("v2.42.1..x.md", "v2.42.1-example.md", "requirements"),
+    ("BUG-0050\\x.md", "BUG-0050-example.md", "bugs"),
+]
 
 _ACCEPTED = [
     ("BUG-0001-x.md", "bugs"),
@@ -168,6 +181,14 @@ def _assert_no_path_outside_intake_dir(envelope: dict, box: _Sandbox) -> None:
         )
 
 
+def _resend_body(remedy: str) -> dict:
+    """The JSON body a remedy's curl line re-sends, parsed as a shell command."""
+    argv = shlex.split(remedy[remedy.index("curl "):])
+    assert argv[:4] == ["curl", "-sS", "-X", "POST"], argv
+    assert argv[4].endswith("/operations/intake"), argv
+    return json.loads(argv[argv.index("-d") + 1])
+
+
 def _refused_names(box: _Sandbox) -> list[str]:
     """The listed path names plus two aimed straight at the sentinel."""
     return [*_PATH_NAMES, str(box.sentinel), "../../outside/x.md"]
@@ -205,6 +226,44 @@ def test_path_filename_is_refused_dual_channel_and_nothing_is_written(
         assert _outside_state(_ABSOLUTE_TARGET) == bare_tmp_before, f"{name!r} touched {_ABSOLUTE_TARGET}"
         assert name not in json.dumps(body) or name == "..", f"the refusal echoes {name!r}: {body}"
         _assert_no_path_outside_intake_dir(body, box)
+
+
+@pytest.mark.parametrize(
+    "name, example, subdir", _PREFIXED_NOT_BARE, ids=[subdir for _, _, subdir in _PREFIXED_NOT_BARE]
+)
+def test_not_bare_remedy_keeps_the_routing_prefix_and_resends_into_its_directory(
+    name: str, example: str, subdir: str, client: TestClient, box: _Sandbox
+) -> None:
+    before = _tree_state(box.base)
+
+    resp = client.post(
+        "/operations/intake",
+        json={"project": _PROJECT, "filename": name, "content": _CONTENT, "dry_run": False},
+    )
+
+    body = resp.json()
+    assert resp.status_code == 422, body
+    assert body["error"] == "intake.filename_not_bare", body
+    remedy = body["remedy"]
+    assert "<" not in remedy, f"the remedy carries a placeholder: {remedy}"
+    assert name not in remedy, f"the remedy echoes the refused name {name!r}: {remedy}"
+    assert _tree_state(box.base) == before, f"{name!r} changed the sandbox tree"
+
+    resend = _resend_body(remedy)
+    assert resend["project"] == _PROJECT, resend
+    assert resend["filename"] == example, resend
+    # The API offers the same bare name intake.sh's own refusal does.
+    assert resend["filename"] == ops_write._bare_intake_example(name), resend
+
+    retry = client.post("/operations/intake", json=resend)
+
+    assert retry.status_code == 200, retry.json()
+    deposited = box.root / "projects" / _PROJECT / subdir / example
+    assert deposited.read_text(encoding="utf-8") == resend["content"]
+    for other in {"bugs", "priority", "requirements"} - {subdir}:
+        assert list((box.root / "projects" / _PROJECT / other).iterdir()) == [], (
+            f"re-sending the {subdir} remedy also wrote into {other}/"
+        )
 
 
 def test_dry_run_for_an_accepted_name_names_only_a_path_inside_the_intake_dir(

@@ -80,9 +80,9 @@ Operators set `required` where a human must inspect the RC — user-facing chang
 
 ## HALT is reserved for system-breaking states
 
-Four classes of finding are system-breaking, and nothing else on a report is. A **breakage-class suite failure** — a gated runner exiting non-zero from a syntax error, compile failure, or unresolved first-party import, or a pytest failure the report classifies as a real defect — produced no trustworthy pass signal. A **destructive-path failure** damaged or corrupted state: a squash conflict, a fidelity-gate failure, a pre-squash or pre-tag hook failure, a destructive test failure. **Verification unable to run at all** means CM cannot ship on inputs it could not obtain. And **a defect too severe for the next bugfix iteration to absorb** — high systemic risk, or serious concerns with a large-fix finding — is the "loop is unhealthy" signal, not the "there are known bugs" signal.
+Three classes of finding are system-breaking, and nothing else on a report is. A **breakage-class suite failure** — a gated runner exiting non-zero from a syntax error, compile failure, or unresolved first-party import, or a pytest failure the report classifies as a real defect — produced no trustworthy pass signal. A **destructive-path failure** damaged or corrupted state: a fidelity-gate failure, a pre-squash or pre-tag hook failure, a destructive test failure. **Verification unable to run at all** is not one of them: CM cannot ship on inputs it could not obtain, yet it never halts: `release.sh` requeues verification once (exit 4), then ships `NON-FUNCTIONAL` with "Verification did not run". And **a defect too severe for the next bugfix iteration to absorb** — high systemic risk, or serious concerns with a large-fix finding — is the "loop is unhealthy" signal, not the "there are known bugs" signal.
 
-The mechanical release-failure triggers in the role file's "The nine triggers" stand independently of all four.
+The mechanical release-failure triggers in the role file's "The triggers" stand independently of all four. A squash conflict is one of them, and it halts only when the cancel is not allowed: otherwise `release.sh` cancels the RC and rebundles its cargo (exit 5).
 
 ## The release-notes status stamp in full
 
@@ -92,7 +92,7 @@ Where the notes file holds the placeholder under a `## Status` heading, Step 4e 
 
 After stamping it verifies the placeholder is gone and a `## Status` heading remains, and HALTs (trigger 9) if the placeholder survived, if the stamp step exited non-zero, or if the file has no recognizable heading at all; on any of those the script stops before mutating branches, so a surviving placeholder never ships. CM does not invoke Step 4e — it is internal to the release script — but a trigger-9 HALT means inspecting `release-notes/<version>.md` by hand.
 
-**The augmentation template's sections.** Where a project requires the structured template at `templates/project/release/RELEASE-NOTES-TEMPLATE.md`, the augmented notes carry a **Summary** paragraph, **What Shipped**, **Bugs Resolved**, **Bugs Skipped**, and **Known Issues**, each reading `None.` when empty. Not all five are the author's to write: **Bugs Skipped** never is — it is rendered at release time, below — and **Known Issues** is written for the author on a `KNOWN-ISSUE` decision. Commit and push the augmentation through `scripts/cm/finalize-release.sh`, never a direct `git push origin main`: the finalize script performs the same commit and push from inside a subshell where the PreToolUse protected-branch hook does not apply, so the augmentation reaches origin without weakening the guardrail.
+**The augmentation template's sections.** Where a project README names the structured template at `templates/project/release/RELEASE-NOTES-TEMPLATE.md`, the augmented notes carry a **Summary** paragraph, **What Shipped**, **Bugs Resolved**, **Bugs Skipped**, and **Known Issues**, each reading `None.` when empty. Not all five are the author's to write: **Bugs Skipped** never is — it is rendered at release time, below — and **Known Issues** is written for the author on a `KNOWN-ISSUE` decision. Commit and push the augmentation through `scripts/cm/finalize-release.sh`, never a direct `git push origin main`: the finalize script performs the same commit and push from inside a subshell where the PreToolUse protected-branch hook does not apply, so the augmentation reaches origin without weakening the guardrail.
 
 **Bugs Skipped is rendered, not authored.** The section is no longer a gap summary CM copies out of the TESTER report by hand, on either of the two paths a notes file can reach the tag by. `cm_release_apply_ship_policy` builds the block once on every release, whether or not a WRITER draft exists: it resolves every bug, gap, and stale-assertion finding in the report to a bug file and a rationale, excludes anything the Known-Issues block already covers so no bug appears under both, and renders a table — header, separator, and one row per finding. Each row carries the substance from the bug's own `Symptom` text, its public identifier or `internal-only`, its severity, and the finding's own rationale; every cell passes through the internal-identifier scrub, so a rationale quoting an earlier finding cannot re-leak that finding's kanban task ID. Unlike the Known-Issues body, the render is independent of the ship decision, because a release can carry deferred bugs under any status.
 
@@ -120,7 +120,7 @@ A `KNOWN-ISSUE` decision is the ship policy's answer to a high-risk finding this
 
 ## The ship posture in full
 
-The `[release] ship_posture` key decides how Steps 4c and 4d answer a matrix HALT. Under `matrix`, the default, every HALT row halts. Under `always`, triggers 2, 3 and 8 ship instead and each leaves an `## Auto-Ship Event` in `release-state.md` and one line under the release notes' `## Known Issues`. The keys, the project.cfg-over-kanban.cfg chain and the remote-lane guard are `docs/OPERATIONS.md`, "Ship posture — shipping through a ship-policy stop." This section is the mechanism inside the release script.
+The `[release] ship_posture` key decides how Steps 4c and 4d answer a matrix HALT. Under `always`, the default, triggers 2, 3 and 8 ship instead of halting, and each leaves an `## Auto-Ship Event` in `release-state.md` and one line under the release notes' `## Known Issues`. Under `matrix`, they halt. The keys, the project.cfg-over-kanban.cfg chain and the remote-lane guard are `docs/OPERATIONS.md`, "Ship posture — shipping through a ship-policy stop." This section is the mechanism inside the release script.
 
 **The read.** Step 4c opens by resolving the posture once, through `pp_ship_posture`, which applies the chain and the guard and always answers `matrix` or `always`. A resolver that is unavailable or fails reads as `matrix`. Under `always` the step prints:
 
@@ -141,25 +141,25 @@ Each remaining file's Status is its first visible value: HTML comments are remov
 
 *Passing the stop.* `--force` does not cover trigger 8; the stop is passed by acknowledgment instead. When the guard HALTs, it first records the window of three releases in `projects/<name>/release-state/non-functional-pattern-halted-window`. The operator's `unhalt.sh --project <name>` is the acknowledgment. The next run that reads the same three releases prints `Pattern already halted on this window (…) and the HALT was cleared — continuing.` and goes on to Step 4d. That run neither halts nor files a bug, under either posture. A newer `NON-FUNCTIONAL` release forms a new window, which HALTs again. A `--decide-only` run records no window. A window that cannot be written is narrated as a warning, and the HALT still fires. Until the record is fixed, the next run halts on the same window again.
 
-**Step 4d — the matrix stops.** The matrix decides exactly as it always has. When it returns `HALT`, the script names the row that fired, testing the rows in the matrix's own order, first match winning:
+**Step 4d — the matrix stops.** The matrix returns `HALT` on two rows only, and the script names the one that fired:
 
-| Order | Condition | Error key | Trigger |
-|---|---|---|---|
-| 1 | TESTER state `BLOCKED` | `cm-release.trigger-1.tester-blocked` | 1 |
-| 2 | TESTER task found, state anything but `DONE` | `cm-release.ship-policy.tester-state-unrecognized` | none |
-| 3 | Systemic risk `high` | `cm-release.trigger-2.systemic-risk-high` | 2 |
-| 4 | `ship-with-serious-concerns` with a large fix | `cm-release.trigger-3.serious-concerns-large-fix` | 3 |
-| 5 | Anything else | `cm-release.ship-policy.halt` | none |
+| Trigger | Condition | Error key |
+|---|---|---|
+| 2 | Systemic risk `high`, and the finding is not clear to ship | `cm-release.trigger-2.systemic-risk-high` |
+| 3 | `ship-with-serious-concerns` with a large fix | `cm-release.trigger-3.serious-concerns-large-fix` |
 
-That one classification selects the HALT branch under either posture, so every HALT's message, remedy and `--force` reach are unchanged. Under `always`, a trigger-2 or trigger-3 row is shipped through instead: the decision becomes `SHIP-NON-FUNCTIONAL`, which stamps Status `NON-FUNCTIONAL`, and the event is recorded:
+A TESTER report problem halts under neither posture:
+
+- **Verification did not run** — the TESTER task is `BLOCKED`, or `DONE` with no report. The TESTER task returns to `BACKLOG` once with its block cause, and the release exits 4 without shipping. A re-run while that task is still `BACKLOG`, `WORKING` or `WAITING` exits 4 again and writes nothing. Once it is `BLOCKED` or `WONT-DO` again, or `DONE` with no report, the release ships `NON-FUNCTIONAL` with "Verification did not run" under `## Known Issues` and one operator inbox entry.
+- **Input the matrix cannot place** — a TESTER state it has no row for (`WORKING`, `WONT-DO`, a typo) before the RC's requeue is spent, or TESTER values no row matches. The release ships `KNOWN-BUGS` and files one bug quoting the state or values.
+
+Under `matrix`, triggers 2 and 3 HALT, and `--force` passes them (`docs/operator-commands.md`, "cm-release --force"). Under `always`, they are shipped through instead: the decision becomes `SHIP-NON-FUNCTIONAL`, which stamps Status `NON-FUNCTIONAL`, and the event is recorded:
 
 ```
   Ship posture:         always — trigger 2 (cm-release.trigger-2.systemic-risk-high) ships NON-FUNCTIONAL instead of halting
   Ship decision:       SHIP-NON-FUNCTIONAL
 [cm-release] Auto-Ship Event recorded for trigger 2 (appended to release-state.md after Step 12's field update).
 ```
-
-The other three rows HALT under `always` exactly as under `matrix`.
 
 **The Known Issues body after a trigger-2 or trigger-3 auto-ship.** `pgai_agent_kanban.cm.stop_bug_files` resolves the bugs behind the stop from the TESTER report: for trigger 2, every finding whose own `Systemic Risk` is `high`; for trigger 3, every finding whose own `Fix Effort` is `large`. Each finding's `Filed As` value is matched to a bug file, and one that resolves to no file is narrated and skipped. The bugs feed the same bullet renderer the known-issue ship uses, beneath the non-functional warning:
 
@@ -307,7 +307,7 @@ Flags for all three verbs and the walkthrough for each refusal: `docs/operator-c
 
 Every bug and priority item moves `open -> running -> done`. The bundler in `scripts/lib/discovery.sh` writes `open -> running` when it generates a bundle file; `cm/release.sh` writes `running -> done` as the last release-state mutation on its success path, closing the lifecycle invariant. Items at any other value are skipped.
 
-By then the squash commit exists, the fidelity gate has passed, the RC branch is deleted, `release-state.md` is cleared, and the tag has been created locally. The script finds the RC's bundle file in the project's `requirements/` by glob (`<active-rc>-*bundle*.md`), reads its `## Bundled Items` section, and for each absolute path at `running` asks whether some `DONE` task's README names that item's `BUG-NNNN` / `PRIORITY-NNNN` identifier — only then does it rewrite `## Status` from `running` to `done`. Closing an item is a claim its fix shipped, so an item with no such reference (a withdrawn fix ticket, or one that never reached `DONE`) is left at its prior status and named in the post-ship report as carried rather than closed, remaining eligible for the next bundle. Missing files are logged and skipped, no other field is touched, and the bundle requirements file's own `## Status` promotes to `done` regardless of how many items were carried — the release still ships. No matching bundle file means a warning and everything left at `running`, recoverable by an operator-run migration script.
+By then the squash commit exists, the fidelity gate has passed, the RC branch is deleted, `release-state.md` is cleared, and the tag has been created locally. The script finds the RC's bundle file in the project's `requirements/` by glob (`<active-rc>-*bundle*.md`), reads its `## Bundled Items` section, and for each absolute path at `running` asks whether some `DONE` task's README names that item's `BUG-NNNN` / `PRIORITY-NNNN` identifier — only then does it rewrite `## Status` from `running` to `done`. Closing an item is a claim its fix shipped, so an item with no such reference (a withdrawn fix ticket, or one that never reached `DONE`) stays `running` and is named in the post-ship report as carried rather than closed. The next discovery pass converts each carried item to `needs-operator` with an operator-inbox question, and answering that question returns the item to `open` for bundling (`docs/OPERATIONS.md`, "Carried items become needs-operator"). Missing files are logged and skipped, no other field is touched, and the bundle requirements file's own `## Status` promotes to `done` regardless of how many items were carried — the release still ships. No matching bundle file means a warning and everything left at `running`, recoverable by an operator-run migration script.
 
 Because the promotion is last and the script runs under `set -euo pipefail`, a non-zero exit means no status was updated and an exit 0 means every item reached `done` or was logged as skipped or carried — the exit code is authoritative, and CM verifies nothing by hand. The `[Step 16b]` block in stdout, ending in `Bundled items: N promoted, M skipped (not running), K missing, J carried (unfixed)`, confirms the lifecycle closed cleanly and states the carried count.
 

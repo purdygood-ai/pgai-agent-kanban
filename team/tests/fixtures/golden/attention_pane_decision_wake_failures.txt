@@ -1,0 +1,9 @@
+? OPERATOR INBOX
+--------------------------------------------------------------------
+
+  decision-wake-fixture: 3 open
+    INBOX-0003  {DATE}  (CODER-20260101-002-left-blocked)  OVERWATCH decided verb requeue for CODER-20260101-002-left-blocked, but it did not run: [overwatch] …
+    INBOX-0002  {DATE}  (CODER-20260101-001-reset-raises)  OVERWATCH decided verb reset-to-backlog for CODER-20260101-001-reset-raises, but it did not run: Run…
+    INBOX-0001  {DATE}  (decision-wake-fixture)  The runaway detector is off for project decision-wake-fixture: [overwatch] runaway_releases_per_hour…
+    Answer: scripts/inbox.sh --project decision-wake-fixture list
+

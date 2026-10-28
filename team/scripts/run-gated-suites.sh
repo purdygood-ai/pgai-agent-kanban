@@ -23,8 +23,13 @@
 # team/scripts/lib/gated_suites.py; its module docstring is the full rule.
 #
 # Evidence: each suite writes what it writes when run on its own -- its
-# findings file at ${PGAI_AGENT_KANBAN_TEMP_DIR}/lint/findings-<suite>.json,
-# its green-ledger record, its coverage report when coverage is honoured.
+# findings file at ${PGAI_AGENT_KANBAN_TEMP_DIR}/lint/findings-<suite>.json
+# (per-lint files lint/*_<suite>.json beside it), its green-ledger record,
+# its coverage report at ${PGAI_AGENT_KANBAN_TEMP_DIR}/coverage/<suite>.json
+# when coverage is honoured. Each runner removes the files an earlier run of
+# its suite left at those paths before it starts, so every file there after
+# this run is this run's and none from an earlier run is read; this script
+# prints those locations before the suites start and beside each exit.
 # This script adds, per suite, under --out-dir (default
 # ${PGAI_AGENT_KANBAN_TEMP_DIR}):
 #   <suite>.log   the runner's stdout and stderr, as `runner > log 2>&1`
@@ -125,9 +130,17 @@ from one command, inside one kanban.cfg [testing] workers budget (default 3).
                      single-process -- two suites cannot each have a worker
                      inside a budget of 1.
 
-Each suite writes its own findings file, lint/findings-<suite>.json under
-the temp root, exactly as when it runs on its own. This script also writes,
-per suite, into the output directory:
+Each suite writes its own evidence under the temp root (currently
+$(pgai_temp_dir)), exactly as when it runs on its own:
+  lint/findings-<suite>.json   the run's findings (per-lint files
+                               lint/*_<suite>.json beside it)
+  coverage/<suite>.json        the coverage report, when coverage is
+                               honoured
+Each runner removes the files an earlier run of its suite left at those
+paths before it starts, so every file there after this run is this run's;
+files from earlier runs are never read. The locations are printed before
+the suites start and again beside each suite's exit. This script also
+writes, per suite, into the output directory:
   <suite>.log    the runner's stdout and stderr
   <suite>.exit   one line: the runner's exit code
 (<suite> is unit or integration). Both suites always run to the end, even
@@ -352,7 +365,7 @@ _rgs_record() {
   if ! printf '%s\n' "$rc" > "$exit_file" 2>/dev/null; then
     echo "[gated-suites] could not write ${exit_file}; ${SUITE_NAMES[index]} exited ${rc}" >&2
   fi
-  echo "${SUITE_NAMES[index]}: exit ${rc}; exit file: ${exit_file}; findings: ${PGAI_AGENT_KANBAN_TEMP_DIR}/lint/findings-${SUITE_NAMES[index]}.json"
+  echo "${SUITE_NAMES[index]}: exit ${rc}; exit file: ${exit_file}; findings: ${PGAI_AGENT_KANBAN_TEMP_DIR}/lint/findings-${SUITE_NAMES[index]}.json; coverage: ${PGAI_AGENT_KANBAN_TEMP_DIR}/coverage/${SUITE_NAMES[index]}.json"
 }
 
 # Stop any suite still running when this script is interrupted, so no
@@ -377,6 +390,12 @@ trap '_rgs_on_signal 15' TERM
 # verdict looking like this run's.
 for _rgs_index in "${!SUITE_NAMES[@]}"; do
   rm -f "$(_rgs_exit_file "$_rgs_index")"
+done
+
+# Name where this run's evidence lands. Each runner removes what an earlier
+# run of its suite left there before it starts (its --help, "Run evidence").
+for _rgs_index in "${!SUITE_NAMES[@]}"; do
+  echo "${SUITE_NAMES[_rgs_index]}: this run's evidence: findings ${PGAI_AGENT_KANBAN_TEMP_DIR}/lint/findings-${SUITE_NAMES[_rgs_index]}.json, per-lint ${PGAI_AGENT_KANBAN_TEMP_DIR}/lint/*_${SUITE_NAMES[_rgs_index]}.json, coverage ${PGAI_AGENT_KANBAN_TEMP_DIR}/coverage/${SUITE_NAMES[_rgs_index]}.json; files an earlier run left there are removed before the suite starts and never read"
 done
 
 # Wait for suite <index> alone and record it.

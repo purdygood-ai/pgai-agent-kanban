@@ -22,8 +22,8 @@ project's priority and row limit agree with each other.
       max_rows.
   (7) cron-suggested.template.txt, rendered with the recipe its own header
       documents, leaves no __PLACEHOLDER__, calls wake-batch.sh only in its
-      --agent= form, and schedules the OVERWATCH sweep; every pseudocron
-      tier template schedules the OVERWATCH sweep and the OVERWATCH wake.
+      --agent= form, and schedules the OVERWATCH sweep and no OVERWATCH
+      wake; every pseudocron tier template does the same.
 
 Every fixture lives under tmp_path; the templates are read, never installed.
 """
@@ -168,6 +168,33 @@ def test_rest_board_row_limit_matches_the_tmux_dashboard(
     assert [row["max_rows"] for row in rows] == [expected]
 
 
+def test_rest_board_row_limit_takes_the_environment_over_kanban_cfg(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from pgai_agent_kanban.api.routers import board
+
+    monkeypatch.setenv("DASHBOARD_MAX_ROWS", "12")
+    (tmp_path / "projects.cfg").write_text("[project:alpha]\npriority=1\n", encoding="utf-8")
+    (tmp_path / "kanban.cfg").write_text("[dashboard]\nmax_rows = 30\n", encoding="utf-8")
+
+    assert [row["max_rows"] for row in board._read_projects_registry(tmp_path)] == [12]
+
+
+def test_every_board_surface_binds_the_one_row_cap_resolver() -> None:
+    """The REST board, the tmux board pane and the board gather resolve the
+    row cap through ops.projects, never a copy of the chain."""
+    from pgai_agent_kanban.api.routers import board
+    from pgai_agent_kanban.dashboard.column_render import board_pane
+    from pgai_agent_kanban.ops import projects
+
+    assert board.dashboard_registry_rows is projects.dashboard_registry_rows
+    assert board_pane.dashboard_default_max_rows is projects.dashboard_default_max_rows
+    for module in (board, board_pane):
+        assert not hasattr(module, "_dashboard_max_rows")
+        assert not hasattr(module, "_fallback_max_rows")
+        assert not hasattr(module, "_max_rows")
+
+
 # ---------------------------------------------------------------------------
 # (7) cron-suggested and the pseudocron tiers
 # ---------------------------------------------------------------------------
@@ -190,19 +217,19 @@ def test_cron_suggested_renders_completely_with_its_own_recipe() -> None:
     assert not re.findall(r"__[A-Z_]+__", rendered), "the documented recipe leaves a placeholder behind"
 
 
-def test_cron_suggested_uses_the_agent_flag_and_schedules_overwatch() -> None:
+def test_cron_suggested_uses_the_agent_flag_and_schedules_only_the_overwatch_sweep() -> None:
     jobs = [line for line in _CRON_SUGGESTED.read_text(encoding="utf-8").splitlines()
             if line.strip() and not line.lstrip().startswith("#")]
     positional = [line for line in jobs if re.search(r"wake-batch\.sh\s+(?!-)\w", line)]
     assert not positional, f"deprecated positional wake-batch.sh calls: {positional}"
     assert any("overwatch-sweep.sh" in line for line in jobs)
-    assert any("--agent=overwatch" in line for line in jobs)
+    assert not any("--agent=overwatch" in line for line in jobs)
 
 
 @pytest.mark.parametrize("tier", _TIERS)
-def test_each_pseudocron_tier_schedules_both_overwatch_jobs(tier: str) -> None:
+def test_each_pseudocron_tier_schedules_the_sweep_and_no_overwatch_wake(tier: str) -> None:
     path = _INSTALL / f"pseudocron-{tier}.cfg.example"
     jobs = [line for line in path.read_text(encoding="utf-8").splitlines()
             if re.match(r"^\s*[0-9]+\s+\S", line)]
     assert any("scripts/overwatch-sweep.sh" in line for line in jobs), path.name
-    assert any("--agent=overwatch" in line for line in jobs), path.name
+    assert not any("--agent=overwatch" in line for line in jobs), path.name

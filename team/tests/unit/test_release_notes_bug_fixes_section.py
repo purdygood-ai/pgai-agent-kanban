@@ -209,3 +209,34 @@ class TestRegeneratedChangelogFixed:
         )
         leaked = _INTERNAL_BUG_ID_RE.findall(content)
         assert not leaked, f"internal ids leaked into CHANGELOG: {leaked}"
+
+
+def test_requirement_bundle_lands_under_features_and_changelog_implemented(tmp_path: pathlib.Path) -> None:
+    """A release whose bundle is a requirements document (Category
+    Requirement, no bundled items) names it under Features in the notes,
+    and the CHANGELOG regenerated from those notes lists it under
+    Implemented."""
+    version = "v9.9.0"
+    requirement = tmp_path / f"{version}-new-metrics-pane.md"
+    requirement.write_text(
+        f"# {version}-new-metrics-pane\n\n## Status\nrunning\n\n## Target Version\n{version}\n\n"
+        "## Category\nRequirement\n\n## Deliverables\n- a new pane\n",
+        encoding="utf-8",
+    )
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    rc = release_notes_main(
+        [str(requirement), str(repo_root), version,
+         "FUNCTIONAL", "2026-09-30", "test-project", "none", "rc/" + version]
+    )
+    assert rc == 0
+    notes = (repo_root / "release-notes" / f"{version}.md").read_text(encoding="utf-8")
+    assert f"- {version}-new-metrics-pane" in _section_body(notes, r"^##\s+Features\s*$")
+    assert _section_body(notes, r"^##\s+Other Changes\s*$") == ["None"]
+
+    bugs_dir = tmp_path / "bugs"
+    bugs_dir.mkdir()
+    changelog = regenerate(repo_root, [version], [], bugs_dir)
+    implemented = changelog.split("### Implemented", 1)[1].split("###", 1)[0]
+    assert f"{version}-new-metrics-pane" in implemented
+    assert "None (bugfix release)" not in implemented

@@ -34,7 +34,9 @@ Covers:
   - tier 2b: the self-locate fallback, with that variable unset and with
     it set but pointing at a directory holding no readable kanban.cfg;
   - tier 3: the last-resort literal when no kanban.cfg is readable on
-    either path, and when the configured pair is incomplete;
+    either path;
+  - the per-key default: a kanban.cfg setting tmp_root alone resolves to
+    <tmp_root>/pgai_kanban_tmp;
   - pgai_configured_temp_root never creates the directory it names, while
     pgai_temp_dir does;
   - the filesystem-root decision: a configured pair that canonicalises to
@@ -201,15 +203,15 @@ def test_tier_3_last_resort_when_no_kanban_cfg_is_readable_anywhere(
     assert _resolve(tmp_path, temp_sh=temp_sh, root_path=None, override=None) == _LAST_RESORT
 
 
-def test_tier_3_last_resort_when_the_configured_pair_is_incomplete(
+def test_tier_2_tmp_root_alone_takes_the_default_subdir(
     tmp_path: pathlib.Path,
 ) -> None:
     _install, temp_sh = _scratch_install(tmp_path, "half-install")
     cfg_root = tmp_path / "cfg"
     _write_cfg(cfg_root, str(tmp_path / "root-only"), "")
-    assert _resolve(tmp_path, temp_sh=temp_sh, root_path=str(cfg_root), override=None) == _LAST_RESORT, (
-        "tmp_root without tmp_subdir is not a configured root; the resolver must not invent one"
-    )
+    assert _resolve(tmp_path, temp_sh=temp_sh, root_path=str(cfg_root), override=None) == str(
+        tmp_path / "root-only" / "pgai_kanban_tmp"
+    ), "a blank tmp_subdir takes its documented default, pgai_kanban_tmp, under the configured tmp_root"
 
 
 # ---------------------------------------------------------------------------

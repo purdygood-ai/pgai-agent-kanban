@@ -93,17 +93,25 @@
 # metrics_rollup_refresh_for_task (metrics_rollup_refresh.sh — recomputes
 # the per-RC rollup when this task's tokens.json lands after that rollup
 # was written), log() (wake_bootstrap.sh) — all sourced before this file's
-# function is called. pp_run_ops.sh, atomic_write.sh, block_record.sh and
-# wake_task_budget.sh (the budget-stop requeue) are self-sourced: the ## Model
+# function is called. pp_run_ops.sh, atomic_write.sh, block_record.sh,
+# md_field.sh (read_md_field), wake_task_budget.sh (the budget-stop
+# requeue) and wake_agent_block_scan.sh (reclassify_agent_unclassified_block,
+# the transient check of an agent's own catch-all block) are self-sourced
+# when the caller has not loaded them: the ## Model
 # read and ## Summary append are pgai_agent_kanban.task_status calls (read --raw,
-# render --append), not inline Python.
+# render --append), the tokens.json dominant-model read is
+# pgai_agent_kanban.lib.token_capture dominant-model, and the PM README's
+# ## Inputs read is read_md_field, not inline Python.
 
 _WD_FINALIZE_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # A caller's own pp_run_ops (wake_bootstrap.sh's, or a test stub) wins.
 declare -F pp_run_ops >/dev/null || source "${_WD_FINALIZE_LIB_DIR}/pp_run_ops.sh"
 source "${_WD_FINALIZE_LIB_DIR}/atomic_write.sh"
 declare -F block_record_write >/dev/null || source "${_WD_FINALIZE_LIB_DIR}/block_record.sh"
+# shellcheck source=md_field.sh
+declare -F read_md_field >/dev/null || source "${_WD_FINALIZE_LIB_DIR}/md_field.sh"
 declare -F wd_task_limit_was_budget_cap >/dev/null || source "${_WD_FINALIZE_LIB_DIR}/wake_task_budget.sh"
+declare -F reclassify_agent_unclassified_block >/dev/null || source "${_WD_FINALIZE_LIB_DIR}/wake_agent_block_scan.sh"
 
 # _wd_append_summary_finding <task_status> <finding> — append <finding> to
 # the ## Summary body after one blank line (task_status render --append);
@@ -148,40 +156,10 @@ resolve_dominant_output_token_model() {
   fi
 
   local dominant_model
-  dominant_model="$(python3 - "$tokens_json_path" <<'PY'
-import json, sys
-
-path = sys.argv[1]
-try:
-    with open(path, encoding='utf-8') as f:
-        data = json.load(f)
-except (OSError, json.JSONDecodeError):
-    sys.exit(1)
-
-model_usage = data.get('model_usage')
-if not isinstance(model_usage, dict) or not model_usage:
-    sys.exit(1)
-
-best_model = None
-best_output = 0
-for model_name in sorted(model_usage):
-    entry = model_usage[model_name]
-    if not isinstance(entry, dict):
-        continue
-    try:
-        output_tokens = int(entry.get('output_tokens', 0))
-    except (TypeError, ValueError):
-        continue
-    if output_tokens > best_output:
-        best_output = output_tokens
-        best_model = model_name
-
-if best_model is None:
-    sys.exit(1)
-
-print(best_model)
-PY
-)" || return 1
+  # The ranking is pgai_agent_kanban.lib.token_capture's
+  # dominant_output_token_model.
+  dominant_model="$(pp_run_ops pgai_agent_kanban.lib.token_capture dominant-model -- \
+    "$tokens_json_path")" || return 1
 
   if [[ -z "$dominant_model" ]]; then
     return 1
@@ -225,11 +203,10 @@ narrate_model_mismatch() {
     return 0
   fi
 
-  # task_status read --raw: the ## Model body, stripped; an absent heading
-  # or unreadable file reads empty (silent no-op below).
+  # read_md_field body mode: the ## Model body, stripped; an absent heading
+  # (exit 3) or unreadable file reads empty (silent no-op below).
   local stamped_model
-  stamped_model="$(pp_run_ops pgai_agent_kanban.task_status read "$task_status" \
-    --section=Model --raw 2>/dev/null)" || stamped_model=""
+  stamped_model="$(read_md_field "$task_status" Model 2>/dev/null)" || stamped_model=""
 
   if [[ -z "$stamped_model" ]]; then
     return 0
@@ -538,6 +515,11 @@ wd_finalize_task() {
     # progress clears the usage-limit requeue count (wake_provider_pause.sh).
     zero_progress_reset "$task_status"
     wake_usage_limit_requeue_reset "$task_status"
+    # The agent's own agent_unclassified block gets the transient check a
+    # WORKING exit gets; a transient tail makes it a transient retry.
+    if [[ "$final_state" == "BLOCKED" ]]; then
+      reclassify_agent_unclassified_block "$task_id" "$task_status" "$LOG_FILE" "$agent_exit" >/dev/null || true
+    fi
   fi
 
   # --- CODER/WRITER completion gate ---
@@ -697,25 +679,17 @@ wd_finalize_task() {
       local _pm_task_readme="${task_dir}/README.md"
       local _req_path_arg=""
       if [[ -f "$_pm_task_readme" ]]; then
-        # Read lines under ## Inputs until the next ## heading; take the first
-        # non-blank "- " bullet as the requirements file path.
-        local _in_inputs=false
+        # Read the ## Inputs body (it ends at the next "##" line, "###"
+        # included); take the first "- " bullet naming a .md path.
+        local _inputs_body=""
+        _inputs_body="$(read_md_field --end-at-subheading "$_pm_task_readme" Inputs 2>/dev/null)" || _inputs_body=""
         while IFS= read -r _line; do
-          if [[ "$_line" == "## Inputs" ]]; then
-            _in_inputs=true
-            continue
+          # Match lines like "- /absolute/path/to/file.md"
+          if [[ "$_line" =~ ^-[[:space:]]+(/[^[:space:]]+\.md) ]]; then
+            _req_path_arg="${BASH_REMATCH[1]}"
+            break
           fi
-          if [[ "$_in_inputs" == "true" ]]; then
-            if [[ "$_line" == "##"* ]]; then
-              break
-            fi
-            # Match lines like "- /absolute/path/to/file.md"
-            if [[ "$_line" =~ ^-[[:space:]]+(/[^[:space:]]+\.md) ]]; then
-              _req_path_arg="${BASH_REMATCH[1]}"
-              break
-            fi
-          fi
-        done < "$_pm_task_readme"
+        done <<< "$_inputs_body"
       fi
       local _req_path_flag=""
       if [[ -n "$_req_path_arg" && -f "$_req_path_arg" ]]; then

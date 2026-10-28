@@ -2,27 +2,50 @@
 #
 # Loaded by pgai_agent_kanban.overwatch.block_classifier.load_table(). For a
 # BLOCKED task carrying a ## Block Record, the row keyed by the record's
-# reason_code says what OVERWATCH's block triage may do about it. The
-# classifier only decides; it reads nothing but the record, the caller's
-# facts and this file, and changes nothing.
+# reason_code says what OVERWATCH's block triage may do about it, and what
+# resolves the block once triage has nothing (more) to do. The classifier
+# only decides; it reads nothing but the record, the caller's facts and this
+# file, and changes nothing. pgai_agent_kanban.overwatch.decide turns the
+# classifier's verdict and the row's decision into one outcome: a verb, an
+# operator-inbox question, a runaway stop, or none.
 #
 # Fail closed: a reason_code with no row, a record that cannot be read, an
-# unmet precondition, or a table that does not validate always decides
-# `escalate` — never a default action.
+# unmet precondition, or a table that does not validate never takes a
+# triage action; decide parks it in the operator inbox.
 #
-# Row shape. Every row declares these six keys:
+# Row shape. Every row declares `decision`; a row whose block triage takes
+# a step also declares the six triage keys:
 #
+#   decision        what resolves the block once triage has no step (left)
+#                   to take: {inbox: QUESTION, answer: TEXT} or
+#                   {verb: NAME, budget: N, inbox: QUESTION, answer: TEXT}.
+#                   verb is an existing operator write, one of:
+#                   reset-to-backlog (the status-writer tool's
+#                   --state BACKLOG --needs-human no); it is used at most
+#                   budget times on one task (default 1), then the inbox
+#                   question is asked. answer is what the human does; decide
+#                   adds the runnable return-to-BACKLOG and close commands.
+#                   QUESTION and TEXT may name {task_id}, {project},
+#                   {reason_code}, {owner_role} or an evidence key such as
+#                   {branch}; an unknown key reads `unknown`. escalate is
+#                   never a decision. On a row with an action it applies
+#                   once triage stops: max_attempts spent, an unmet
+#                   precondition, or the requeue budget spent.
 #   action          one of: requeue_owner, prune_worktree_then_requeue,
 #                   recompute_gate, defer_to_resolution_stage,
-#                   run_allowlisted_verb, escalate.
+#                   run_allowlisted_verb. Omitted, with the five keys below,
+#                   on a decision-only row (triage takes no step; the row's
+#                   decision applies at once, or after the pipeline ladder
+#                   below for an owner role it names). escalate is not an
+#                   action.
 #   max_attempts    triage attempts allowed on one block (a whole number), or
 #                   `stage` for a row whose ceiling is the resolution
 #                   stage's own ([release] max_rc_retries) — only with
 #                   defer_to_resolution_stage. Once the record's `attempts`
-#                   reaches it, the decision is escalate.
+#                   reaches it, triage stops and the row's decision applies.
 #   cooldown_s      seconds the record's cooldown_until is set ahead after an
 #                   action; 0 for none. Inside a cooldown_until window the
-#                   decision is "not yet" (no action), not escalate.
+#                   decision is "not yet" (no action).
 #   backoff         none, or {factor: F, cap_s: C}: the window before attempt
 #                   k+1 is min(cooldown_s * F^k, C) seconds.
 #   verification    none, or the check the next terminal outcome must pass:
@@ -30,13 +53,14 @@
 #                   gate_passes, next_create_succeeds, stage_decision_event,
 #                   rerun_reports_no_changes.
 #   preconditions   facts that must all hold before the action is taken (a
-#                   list, may be empty); any one unmet decides escalate.
+#                   list, may be empty); any one unmet ends triage and the
+#                   row's decision applies.
 #                   Closed set: branch_ancestor_of_source, merge_tree_clean,
 #                   owner_is_coder_or_writer, worktree_residue_in_base,
 #                   residue_holds_no_unique_commits, source_branch_exists,
 #                   action_args_valid, action_targets_verified.
 #
-# and may declare:
+# and a row with an action may declare:
 #
 #   params                 the action's arguments. requeue_owner,
 #                          prune_worktree_then_requeue and
@@ -44,7 +68,9 @@
 #                          Note text; {key} is filled from the caller's facts,
 #                          then the record's evidence, else `unknown`; the
 #                          triage executor supplies {killed_at} for a
-#                          per-task timeout) and
+#                          per-task timeout and {blockers}, the task's
+#                          ## Blockers text on one line, for an agent
+#                          self-block and the pipeline ladder) and
 #                          accept `resume` (branch|fresh). requeue_owner also
 #                          accepts `snapshot` (evidence to save under
 #                          artifacts/block-evidence/ first: commits_ahead,
@@ -57,12 +83,43 @@
 #                          when this row's own preconditions are unmet; may
 #                          itself carry an `otherwise`.
 #
-# Any other key, an unknown name, a duplicate key, or a row for a
-# reason_code outside the Block Record vocabulary makes the whole table
-# invalid. Each row's comment says when the block stays with a human.
+# Any other key, an unknown name, a duplicate key, a row without a
+# decision, or a row for a reason_code outside the Block Record vocabulary
+# makes the whole table invalid. Each row's comment says what its decision
+# resolves.
+#
+# Pipeline ladder. The optional top-level `pipeline_ladder` puts a requeue
+# ladder in front of every decision-only row for the owner roles it names:
+# a block such an owner holds on a row with no action of its own is
+# requeued to its owner (requeue_owner, no verification, no preconditions)
+# until max_attempts are spent, and only then does the row's decision
+# apply. A row with an action keeps it for every role, and a role it does
+# not name takes the row as written. Its keys, all required:
+#
+#   roles                  owner roles the ladder applies to (a non-empty
+#                          list of Block Record owner roles, no repeats).
+#   note                   the Triage Note text; {key} is filled as a row's
+#                          note is, and {reason_code} and {owner_role} name
+#                          the block's own.
+#   max_attempts           requeues before the row's decision (at least 1).
+#   cooldown_s, backoff    as on a row.
+#   cooldown_before_first  as on a row (true or false).
+#
+# Absent, no row gains a ladder; invalid, the whole table is invalid.
+
+# A release cannot carry on without its PM, TESTER or CM task, so a block
+# one of them holds on a decision-only row is retried after 15, 30 and 60
+# minutes before its row's decision (normally the operator inbox) applies.
+pipeline_ladder:
+  roles: [PM, TESTER, CM]
+  note: "previous attempt blocked ({reason_code}) and the release cannot carry on without this {owner_role} task; its ## Blockers read: '{blockers}'. Retried after a cool-down: resolve what it reported if you can, or block again if the cause remains"
+  max_attempts: 3
+  cooldown_s: 900
+  backoff: {factor: 2, cap_s: 3600}
+  cooldown_before_first: true
 
 reason_codes:
-  # Stays human on a second timeout.
+  # A second timeout: the task is too large for one dispatch.
   per_task_timeout:
     action: requeue_owner
     params:
@@ -74,8 +131,12 @@ reason_codes:
     backoff: none
     verification: next_outcome_not_timeout
     preconditions: []
+    decision:
+      inbox: "{task_id} was killed at the per-task timeout again after a requeue on its existing branch: split it into smaller tickets, or raise the timeout?"
+      answer: "split the task into smaller tickets or raise [wake] max_task_seconds; the feature branch and the commits-ahead snapshot under artifacts/block-evidence/ keep the work done so far"
 
-  # Stays human when still refusing after 3 (a fleet-level cause).
+  # Still refusing after 3: a fleet-level cause (provider, model or usage
+  # limit), which only a human changes.
   provider_refusal:
     action: requeue_owner
     params:
@@ -87,8 +148,11 @@ reason_codes:
     cooldown_before_first: true
     verification: zero_progress_not_readvanced
     preconditions: []
+    decision:
+      inbox: "The provider keeps refusing {task_id} (signature={signature}) after every retry: is the provider login, the configured model or the account's usage limit at fault?"
+      answer: "check the active provider's authentication, the model it is configured to use and the account's usage limit; these are fleet-wide and refuse every task until fixed"
 
-  # Stays human when it repeats.
+  # Zero-progress cap reached: returned to BACKLOG once, then asked.
   zero_progress:
     action: requeue_owner
     params:
@@ -98,9 +162,14 @@ reason_codes:
     backoff: none
     verification: zero_progress_not_readvanced
     preconditions: []
+    decision:
+      verb: reset-to-backlog
+      budget: 1
+      inbox: "{task_id} keeps exiting without forward progress, even after a requeue and a return to BACKLOG: what is unclear in its README, or should it be split?"
+      answer: "read the task README, its ## Triage Note and the batch-log span named in the evidence to see why the agent exits without moving the task, then clarify the README or split the task"
 
-  # The existing transient-error handler's requeue, with a backoff. Stays
-  # human when the cap is reached.
+  # The existing transient-error handler's requeue, with a backoff. At the
+  # handler's ceiling: returned to BACKLOG once, then asked.
   transient_api_error:
     action: requeue_owner
     params:
@@ -111,11 +180,16 @@ reason_codes:
     cooldown_before_first: true
     verification: none
     preconditions: []
+    decision:
+      verb: reset-to-backlog
+      budget: 1
+      inbox: "{task_id} kept failing with transient provider errors past its retry ceiling and a return to BACKLOG: is the provider in a sustained outage?"
+      answer: "check the provider's status for a sustained outage and the ## Transient Retry record's last_error; return the task once the provider is healthy"
 
   # (a) branch already an ancestor of the source: recompute the gate
   # read-only. (b) otherwise a clean merge-tree: requeue the CODER/WRITER
-  # owner onto its branch to merge. Stays human on a merge-tree conflict or
-  # a second refusal.
+  # owner onto its branch to merge. A merge-tree conflict or a second
+  # refusal is asked: conflicts are never resolved automatically.
   gate_merge_not_found:
     action: recompute_gate
     preconditions: [branch_ancestor_of_source]
@@ -129,8 +203,11 @@ reason_codes:
     cooldown_s: 0
     backoff: none
     verification: gate_passes
+    decision:
+      inbox: "{task_id}'s feature branch {branch} is not merged into its source branch and cannot be merged without a human (a merge conflict, a non-merging owner, or a second refusal): merge it by hand or return it to its owner?"
+      answer: "merge the feature branch into the source branch in the dev tree, resolving any conflicting paths, then mark the task DONE; or return the task to its owner with a note to merge"
 
-  # Stays human on a second refusal.
+  # A second refusal: what belongs to the task is a human's call.
   gate_dirty_worktree:
     action: requeue_owner
     params:
@@ -142,8 +219,11 @@ reason_codes:
     backoff: none
     verification: gate_passes
     preconditions: []
+    decision:
+      inbox: "{task_id} was refused by the completion gate for uncommitted changes again: which of the saved changes belong to the task?"
+      answer: "inspect the retained task worktree and any dirty.patch / untracked.txt under artifacts/block-evidence/, commit or discard what belongs to the task, then re-complete it"
 
-  # Stays human on a second refusal.
+  # A second refusal, or no sha to quote.
   gate_empty_commit:
     action: requeue_owner
     params:
@@ -154,10 +234,13 @@ reason_codes:
     backoff: none
     verification: gate_passes
     preconditions: []
+    decision:
+      inbox: "{task_id}'s branch {branch} still carries empty commits after a requeue: drop them and re-merge, or close the task?"
+      answer: "drop the empty commit(s) named in ## Blockers from the feature branch, re-merge it --no-ff into the source branch, then re-complete the task"
 
   # Only "already exists" residue inside the worktree base whose commits all
-  # exist elsewhere. Stays human when the source branch is missing or the
-  # residue holds unique commits.
+  # exist elsewhere is pruned. Residue holding unique commits, or a missing
+  # source branch, is asked: nothing is removed.
   worktree_create_failed:
     action: prune_worktree_then_requeue
     params:
@@ -167,9 +250,12 @@ reason_codes:
     backoff: none
     verification: next_create_succeeds
     preconditions: [worktree_residue_in_base, residue_holds_no_unique_commits, source_branch_exists]
+    decision:
+      inbox: "{task_id}'s worktree cannot be created and the residue is not safe to prune (it holds unique commits, sits outside the worktree base, or the source branch is missing): keep those commits or discard them?"
+      answer: "run 'git worktree list' in the dev tree; put any commits the stale worktree holds on a branch, remove that worktree and run 'git worktree prune', or open the missing source branch, then return the task"
 
   # No new authority: the resolution stage decides, under its own ceiling.
-  # Stays human when the stage declines.
+  # Asked when the stage declines.
   ship_policy_halt:
     action: defer_to_resolution_stage
     max_attempts: stage
@@ -177,10 +263,13 @@ reason_codes:
     backoff: none
     verification: stage_decision_event
     preconditions: []
+    decision:
+      inbox: "The resolution stage declined the ship-policy HALT that blocks {task_id}: cancel and rebundle the RC, or ship it as it is?"
+      answer: "read the resolution stage's decision in the project's overwatch/actions.log and the ## OVERWATCH Decision events in release-state.md, resolve the ship-policy HALT as roles/CM.md describes, then return the task"
 
   # Only an allowlisted verb with valid typed arguments whose targets exist
-  # (and, for bugs, are done). Stays human on any invalid argument, a verb
-  # not allowlisted, or a prose-only remedy.
+  # (and, for bugs, are done) runs. An invalid argument, a verb not
+  # allowlisted or a prose-only remedy is asked.
   agent_operator_data_action:
     action: run_allowlisted_verb
     params:
@@ -190,15 +279,88 @@ reason_codes:
     backoff: none
     verification: rerun_reports_no_changes
     preconditions: [action_args_valid, action_targets_verified]
+    decision:
+      inbox: "{task_id} asked for the operator data action {verb}, which cannot run as recorded (an invalid argument or target, or a verb not allowlisted): run it by hand, or correct its arguments?"
+      answer: "run the operator data action by hand once its arguments and targets are right (for a restamp, see 'scripts/restamp-fixed-in.sh --help'), or correct the typed action arguments in the Block Record evidence, then return the task"
 
-  # Always human.
-  missing_readme: {action: escalate, max_attempts: 0, cooldown_s: 0, backoff: none, verification: none, preconditions: []}
-  invalid_assignment: {action: escalate, max_attempts: 0, cooldown_s: 0, backoff: none, verification: none, preconditions: []}
-  invalid_effort_config: {action: escalate, max_attempts: 0, cooldown_s: 0, backoff: none, verification: none, preconditions: []}
-  invalid_state: {action: escalate, max_attempts: 0, cooldown_s: 0, backoff: none, verification: none, preconditions: []}
-  branch_prefix_failed: {action: escalate, max_attempts: 0, cooldown_s: 0, backoff: none, verification: none, preconditions: []}
-  workflow_type_unparseable: {action: escalate, max_attempts: 0, cooldown_s: 0, backoff: none, verification: none, preconditions: []}
-  plugin_load_failed: {action: escalate, max_attempts: 0, cooldown_s: 0, backoff: none, verification: none, preconditions: []}
-  source_branch_missing: {action: escalate, max_attempts: 0, cooldown_s: 0, backoff: none, verification: none, preconditions: []}
-  gate_merge_evidence_not_found: {action: escalate, max_attempts: 0, cooldown_s: 0, backoff: none, verification: none, preconditions: []}
-  agent_unclassified: {action: escalate, max_attempts: 0, cooldown_s: 0, backoff: none, verification: none, preconditions: []}
+  # The agent blocked itself on a transient provider error: retried after
+  # 15, 30 and 60 minutes, then asked whether the outage is sustained.
+  agent_transient_provider_error:
+    action: requeue_owner
+    params:
+      note: "previous attempt blocked itself on a transient provider error; its ## Blockers read: '{blockers}'. Retried after a cool-down: continue the task, and block again with the same reason code if the provider still fails"
+    max_attempts: 3
+    cooldown_s: 900
+    backoff: {factor: 2, cap_s: 3600}
+    cooldown_before_first: true
+    verification: none
+    preconditions: []
+    decision:
+      inbox: "{task_id} ({owner_role}) kept blocking on a transient provider error after three retries 15, 30 and 60 minutes apart: is the provider in a sustained outage?"
+      answer: "check the active provider's status for a sustained outage and the error quoted in ## Blockers of the task's status.md; return the task once the provider is healthy"
+
+  # The agent's own question: retried after 15, 30 and 60 minutes (a
+  # one-off failure often clears on its own), then parked rather than
+  # raised as Needs Human.
+  agent_unclassified:
+    action: requeue_owner
+    params:
+      note: "previous attempt blocked without a reason code; its ## Blockers read: '{blockers}'. Retried after a cool-down: resolve what it reported if you can, or block again naming the reason code that fits"
+    max_attempts: 3
+    cooldown_s: 900
+    backoff: {factor: 2, cap_s: 3600}
+    cooldown_before_first: true
+    verification: none
+    preconditions: []
+    decision:
+      inbox: "{task_id} ({owner_role}) blocked itself without a reason code; its question is in ## Blockers of its status.md: what does it need?"
+      answer: "read ## Blockers in the task's status.md and supply what the agent asked for"
+
+  # No operator write regenerates a task README: asked.
+  missing_readme:
+    decision:
+      inbox: "{task_id} has no README.md, so no agent can be dispatched on it, and no operator write regenerates one: restore it, or close the task?"
+      answer: "restore README.md in the task folder from the decomposition that created it (no operator write regenerates it)"
+
+  invalid_assignment:
+    decision:
+      inbox: "{task_id}'s README assigns a role or owner the wake cannot dispatch: which role should own it?"
+      answer: "correct ## Role (and ## Owner) in the task README to a dispatchable role such as CODER"
+
+  invalid_effort_config:
+    decision:
+      inbox: "{task_id} resolves to an invalid effort configuration: which effort setting should it use?"
+      answer: "correct the task's effort setting in its README, or the role's effort keys in kanban.cfg"
+
+  # The return to BACKLOG rewrites ## State itself; asked if it recurs.
+  invalid_state:
+    decision:
+      verb: reset-to-backlog
+      budget: 1
+      inbox: "{task_id}'s status.md carries a ## State outside the six canonical states again after a return to BACKLOG: what keeps writing it?"
+      answer: "find the writer that leaves a non-canonical ## State and rewrite the state with the status-writer tool"
+
+  branch_prefix_failed:
+    decision:
+      inbox: "The branch prefix of project {project} could not be resolved for {task_id}: what should branch_prefix be?"
+      answer: "check branch_prefix in the project's project.cfg"
+
+  workflow_type_unparseable:
+    decision:
+      inbox: "{task_id}'s README carries a ## Workflow Type that cannot be parsed: which workflow type is meant?"
+      answer: "set ## Workflow Type in the task README to release, feature, document or an installed workflow plugin"
+
+  plugin_load_failed:
+    decision:
+      inbox: "The workflow plugin {task_id} names failed to load: install or fix it, or change the task's workflow type?"
+      answer: "check that the workflow plugin named in the task README's ## Workflow Type is installed under workflows/ with a readable workflow.cfg"
+
+  source_branch_missing:
+    decision:
+      inbox: "The source branch {task_id} names does not exist in the dev tree: open it, or correct the task's ## Source Branch?"
+      answer: "create the branch named in ## Source Branch (an RC branch is opened by CM) or correct the field"
+
+  gate_merge_evidence_not_found:
+    decision:
+      inbox: "The completion gate found no evidence that {task_id}'s feature branch was merged, and the branch is gone: was the work merged?"
+      answer: "check the source branch history in the dev tree for the task's merge, then mark the task DONE or return it to its owner"

@@ -231,13 +231,13 @@ class TestDeferralOff:
         line appears in the run's narration.
         """
         root = two_project_root
-        _add_bug_file(root, "project_a", bug_id="BUG-0001", slug="one", severity="low")
-        _add_bug_file(root, "project_a", bug_id="BUG-0002", slug="two", severity="high")
+        _add_bug_file(root, "project-a", bug_id="BUG-0001", slug="one", severity="low")
+        _add_bug_file(root, "project-a", bug_id="BUG-0002", slug="two", severity="high")
 
-        result = _run_discovery(root, "project_a")
+        result = _run_discovery(root, "project-a")
 
         assert result.returncode == 0, result.stderr
-        bundles = _bundle_files(root, "project_a")
+        bundles = _bundle_files(root, "project-a")
         assert bundles, f"Expected a bug bundle; stderr:\n{result.stderr}"
         item_ids = parse_bundled_item_basenames(str(bundles[0]))
         assert any("BUG-0001" in i for i in item_ids)
@@ -262,24 +262,24 @@ class TestLevelLowDefersLowSeverityBugs:
         run.
         """
         root = two_project_root
-        _set_defer_posture(root, "project_a", deferred_bugs=True, deferred_bug_level="low")
-        bug1 = _add_bug_file(root, "project_a", bug_id="BUG-0001", slug="one", severity="low")
-        bug2 = _add_bug_file(root, "project_a", bug_id="BUG-0002", slug="two", severity="low")
-        _add_requirements_file(root, "project_a", version="v0.0.5", slug="unrelated")
-        _install_pm_agent_stub(root, "project_a", "PM-20260909-001-decompose-v0-0-5-unrelated")
+        _set_defer_posture(root, "project-a", deferred_bugs=True, deferred_bug_level="low")
+        bug1 = _add_bug_file(root, "project-a", bug_id="BUG-0001", slug="one", severity="low")
+        bug2 = _add_bug_file(root, "project-a", bug_id="BUG-0002", slug="two", severity="low")
+        _add_requirements_file(root, "project-a", version="v0.0.5", slug="unrelated")
+        _install_pm_agent_stub(root, "project-a", "PM-20260909-001-decompose-v0-0-5-unrelated")
 
-        result = _run_discovery(root, "project_a")
+        result = _run_discovery(root, "project-a")
 
         assert result.returncode == 0, result.stderr
-        assert not _bundle_files(root, "project_a"), (
+        assert not _bundle_files(root, "project-a"), (
             f"Expected no bug bundle while both bugs are deferred.\n"
-            f"requirements/ contents: {list(_requirements_dir(root, 'project_a').iterdir())}\n"
+            f"requirements/ contents: {list(_requirements_dir(root, 'project-a').iterdir())}\n"
             f"stderr:\n{result.stderr}"
         )
         assert _bug_status(bug1) == "open"
         assert _bug_status(bug2) == "open"
 
-        bug_backlog = root / "projects" / "project_a" / "tasks" / "queues" / "bug_backlog.md"
+        bug_backlog = root / "projects" / "project-a" / "tasks" / "queues" / "bug_backlog.md"
         backlog_text = bug_backlog.read_text(encoding="utf-8")
         assert "[x]" not in backlog_text, f"bug_backlog.md should be unchanged:\n{backlog_text}"
 
@@ -289,7 +289,7 @@ class TestLevelLowDefersLowSeverityBugs:
 
         # AC5: the requirements step still processes the pending file in the
         # same run, untouched by the deferral gate.
-        req_file = _requirements_dir(root, "project_a") / "v0.0.5-unrelated.md"
+        req_file = _requirements_dir(root, "project-a") / "v0.0.5-unrelated.md"
         assert "running" in req_file.read_text(encoding="utf-8").lower(), (
             "Requirements step should still queue PM while bugs are deferred"
         )
@@ -310,16 +310,16 @@ class TestLevelLowStillBundlesAboveLevelSeverity:
         """
         root = two_project_root
         _set_defer_posture(
-            root, "project_a", deferred_bugs=True, deferred_bug_level="low", defer_piggyback=False
+            root, "project-a", deferred_bugs=True, deferred_bug_level="low", defer_piggyback=False
         )
-        low1 = _add_bug_file(root, "project_a", bug_id="BUG-0001", slug="one", severity="low")
-        low2 = _add_bug_file(root, "project_a", bug_id="BUG-0002", slug="two", severity="low")
-        _add_bug_file(root, "project_a", bug_id="BUG-0003", slug="three", severity="medium")
+        low1 = _add_bug_file(root, "project-a", bug_id="BUG-0001", slug="one", severity="low")
+        low2 = _add_bug_file(root, "project-a", bug_id="BUG-0002", slug="two", severity="low")
+        _add_bug_file(root, "project-a", bug_id="BUG-0003", slug="three", severity="medium")
 
-        result = _run_discovery(root, "project_a")
+        result = _run_discovery(root, "project-a")
 
         assert result.returncode == 0, result.stderr
-        bundles = _bundle_files(root, "project_a")
+        bundles = _bundle_files(root, "project-a")
         assert bundles, f"Expected a bundle for the medium bug.\nstderr:\n{result.stderr}"
         item_ids = parse_bundled_item_basenames(str(bundles[0]))
         assert any("BUG-0003" in i for i in item_ids), item_ids
@@ -339,18 +339,18 @@ class TestLevelMediumAndHighDeferAtTheirOwnRung:
         queued for PM (AC5).
         """
         root = two_project_root
-        _set_defer_posture(root, "project_a", deferred_bugs=True, deferred_bug_level="medium")
-        bug = _add_bug_file(root, "project_a", bug_id="BUG-0001", slug="one", severity="medium")
-        _add_requirements_file(root, "project_a", version="v0.0.5", slug="unrelated")
-        _install_pm_agent_stub(root, "project_a", "PM-20260909-002-decompose-v0-0-5-unrelated")
+        _set_defer_posture(root, "project-a", deferred_bugs=True, deferred_bug_level="medium")
+        bug = _add_bug_file(root, "project-a", bug_id="BUG-0001", slug="one", severity="medium")
+        _add_requirements_file(root, "project-a", version="v0.0.5", slug="unrelated")
+        _install_pm_agent_stub(root, "project-a", "PM-20260909-002-decompose-v0-0-5-unrelated")
 
-        result = _run_discovery(root, "project_a")
+        result = _run_discovery(root, "project-a")
 
         assert result.returncode == 0, result.stderr
-        assert not _bundle_files(root, "project_a"), result.stderr
+        assert not _bundle_files(root, "project-a"), result.stderr
         assert _bug_status(bug) == "open"
 
-        req_file = _requirements_dir(root, "project_a") / "v0.0.5-unrelated.md"
+        req_file = _requirements_dir(root, "project-a") / "v0.0.5-unrelated.md"
         assert "running" in req_file.read_text(encoding="utf-8").lower()
 
     def test_high_severity_bug_deferred_at_level_high(
@@ -362,18 +362,18 @@ class TestLevelMediumAndHighDeferAtTheirOwnRung:
         defers every bug, by design.
         """
         root = two_project_root
-        _set_defer_posture(root, "project_a", deferred_bugs=True, deferred_bug_level="high")
-        bug = _add_bug_file(root, "project_a", bug_id="BUG-0001", slug="one", severity="high")
-        _add_requirements_file(root, "project_a", version="v0.0.5", slug="unrelated")
-        _install_pm_agent_stub(root, "project_a", "PM-20260909-003-decompose-v0-0-5-unrelated")
+        _set_defer_posture(root, "project-a", deferred_bugs=True, deferred_bug_level="high")
+        bug = _add_bug_file(root, "project-a", bug_id="BUG-0001", slug="one", severity="high")
+        _add_requirements_file(root, "project-a", version="v0.0.5", slug="unrelated")
+        _install_pm_agent_stub(root, "project-a", "PM-20260909-003-decompose-v0-0-5-unrelated")
 
-        result = _run_discovery(root, "project_a")
+        result = _run_discovery(root, "project-a")
 
         assert result.returncode == 0, result.stderr
-        assert not _bundle_files(root, "project_a"), result.stderr
+        assert not _bundle_files(root, "project-a"), result.stderr
         assert _bug_status(bug) == "open"
 
-        req_file = _requirements_dir(root, "project_a") / "v0.0.5-unrelated.md"
+        req_file = _requirements_dir(root, "project-a") / "v0.0.5-unrelated.md"
         assert "running" in req_file.read_text(encoding="utf-8").lower()
 
 
@@ -386,18 +386,18 @@ class TestHygieneSweep:
         deferred bugs.
         """
         root = two_project_root
-        _set_defer_posture(root, "project_a", deferred_bugs=True, deferred_bug_level="low")
-        bug1 = _add_bug_file(root, "project_a", bug_id="BUG-0001", slug="one", severity="low")
-        bug2 = _add_bug_file(root, "project_a", bug_id="BUG-0002", slug="two", severity="low")
+        _set_defer_posture(root, "project-a", deferred_bugs=True, deferred_bug_level="low")
+        bug1 = _add_bug_file(root, "project-a", bug_id="BUG-0001", slug="one", severity="low")
+        bug2 = _add_bug_file(root, "project-a", bug_id="BUG-0002", slug="two", severity="low")
         # No requirements file: requirements queue is empty.
 
-        result = _run_discovery(root, "project_a")
+        result = _run_discovery(root, "project-a")
 
         assert result.returncode == 0, result.stderr
         assert "hygiene sweep" in result.stderr.lower(), (
             f"Expected the hygiene sweep to fire and narrate.\nstderr:\n{result.stderr}"
         )
-        bundles = _bundle_files(root, "project_a")
+        bundles = _bundle_files(root, "project-a")
         assert bundles, f"Expected the hygiene sweep to bundle the deferred bugs.\nstderr:\n{result.stderr}"
         item_ids = parse_bundled_item_basenames(str(bundles[0]))
         assert any("BUG-0001" in i for i in item_ids), item_ids
@@ -412,13 +412,13 @@ class TestHygieneSweep:
         an unprocessed requirement, even though every open bug is deferred.
         """
         root = two_project_root
-        _set_defer_posture(root, "project_a", deferred_bugs=True, deferred_bug_level="low")
-        bug1 = _add_bug_file(root, "project_a", bug_id="BUG-0001", slug="one", severity="low")
-        bug2 = _add_bug_file(root, "project_a", bug_id="BUG-0002", slug="two", severity="low")
-        _add_requirements_file(root, "project_a", version="v0.0.5", slug="unrelated")
-        _install_pm_agent_stub(root, "project_a", "PM-20260909-004-decompose-v0-0-5-unrelated")
+        _set_defer_posture(root, "project-a", deferred_bugs=True, deferred_bug_level="low")
+        bug1 = _add_bug_file(root, "project-a", bug_id="BUG-0001", slug="one", severity="low")
+        bug2 = _add_bug_file(root, "project-a", bug_id="BUG-0002", slug="two", severity="low")
+        _add_requirements_file(root, "project-a", version="v0.0.5", slug="unrelated")
+        _install_pm_agent_stub(root, "project-a", "PM-20260909-004-decompose-v0-0-5-unrelated")
 
-        result = _run_discovery(root, "project_a")
+        result = _run_discovery(root, "project-a")
 
         assert result.returncode == 0, result.stderr
         # The withheld narration itself says "hygiene sweep withheld" -- assert
@@ -430,7 +430,7 @@ class TestHygieneSweep:
         assert "hygiene sweep withheld" in result.stderr.lower(), (
             f"Expected the run to narrate why the sweep did not fire.\nstderr:\n{result.stderr}"
         )
-        assert not _bundle_files(root, "project_a"), result.stderr
+        assert not _bundle_files(root, "project-a"), result.stderr
         assert _bug_status(bug1) == "open"
         assert _bug_status(bug2) == "open"
 
@@ -444,13 +444,13 @@ class TestUnparseableSeverityIsNeverDeferred:
         the unparseable field, naming the file.
         """
         root = two_project_root
-        _set_defer_posture(root, "project_a", deferred_bugs=True, deferred_bug_level="low")
-        bug = _add_bug_file(root, "project_a", bug_id="BUG-0001", slug="no-severity", severity=None)
+        _set_defer_posture(root, "project-a", deferred_bugs=True, deferred_bug_level="low")
+        bug = _add_bug_file(root, "project-a", bug_id="BUG-0001", slug="no-severity", severity=None)
 
-        result = _run_discovery(root, "project_a")
+        result = _run_discovery(root, "project-a")
 
         assert result.returncode == 0, result.stderr
-        bundles = _bundle_files(root, "project_a")
+        bundles = _bundle_files(root, "project-a")
         assert bundles, f"Expected the unparseable-severity bug to be bundled, not deferred.\nstderr:\n{result.stderr}"
         item_ids = parse_bundled_item_basenames(str(bundles[0]))
         assert any("BUG-0001" in i for i in item_ids), item_ids
@@ -467,15 +467,15 @@ class TestUnparseableSeverityIsNeverDeferred:
         deferred.
         """
         root = two_project_root
-        _set_defer_posture(root, "project_a", deferred_bugs=True, deferred_bug_level="high")
+        _set_defer_posture(root, "project-a", deferred_bugs=True, deferred_bug_level="high")
         bug = _add_bug_file(
-            root, "project_a", bug_id="BUG-0001", slug="urgent-bug", severity="urgent"
+            root, "project-a", bug_id="BUG-0001", slug="urgent-bug", severity="urgent"
         )
 
-        result = _run_discovery(root, "project_a")
+        result = _run_discovery(root, "project-a")
 
         assert result.returncode == 0, result.stderr
-        bundles = _bundle_files(root, "project_a")
+        bundles = _bundle_files(root, "project-a")
         assert bundles, f"Expected the unparseable-severity bug to be bundled, not deferred.\nstderr:\n{result.stderr}"
         item_ids = parse_bundled_item_basenames(str(bundles[0]))
         assert any("BUG-0001" in i for i in item_ids), item_ids
@@ -494,15 +494,15 @@ class TestCriticalSeverityIsRankedNotUnparseable:
         narrated as if its severity field were broken.
         """
         root = two_project_root
-        _set_defer_posture(root, "project_a", deferred_bugs=True, deferred_bug_level="high")
+        _set_defer_posture(root, "project-a", deferred_bugs=True, deferred_bug_level="high")
         bug = _add_bug_file(
-            root, "project_a", bug_id="BUG-0001", slug="critical-bug", severity="critical"
+            root, "project-a", bug_id="BUG-0001", slug="critical-bug", severity="critical"
         )
 
-        result = _run_discovery(root, "project_a")
+        result = _run_discovery(root, "project-a")
 
         assert result.returncode == 0, result.stderr
-        bundles = _bundle_files(root, "project_a")
+        bundles = _bundle_files(root, "project-a")
         assert bundles, f"Expected the critical bug to be bundled as the trigger.\nstderr:\n{result.stderr}"
         item_ids = parse_bundled_item_basenames(str(bundles[0]))
         assert any("BUG-0001" in i for i in item_ids), item_ids

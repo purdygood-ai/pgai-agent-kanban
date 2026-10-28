@@ -27,14 +27,14 @@
 #     Draining: 📝 v<version> | 🟢 PM:auto | ⚠️ HALT-AFTER GLOBAL <event> | 📅 <day> <HH:MM>
 #     Halted:   📝 v<version> | 🟢 PM:auto | 🛑 HALT GLOBAL | 📅 <day> <HH:MM>
 #     Pending:  📝 v<version> | 🟢 PM:auto | ✋ APPROVAL(n) | 📅 <day> <HH:MM>
-#     Deferring: 📝 v<version> | 🟢 PM:auto | ✋ DEFER <proj> <=low until v2.33.0 (2 waiting) | 📅 <day> <HH:MM>
+#     Deferring: 📝 v<version> | 🟢 PM:auto | ✋ DEFER <proj> <=low until vX.Y.Z (2 waiting) | 📅 <day> <HH:MM>
 #               one DEFER segment per deferral scope in force — GLOBAL for a
 #               kanban.cfg or root-campaign deferral, then each project whose
 #               own settings defer its bugs — shown even at (0 waiting)
 #     Simultaneous (a global HALT, a project's own HALT-AFTER, and a
 #     project's own deferral all in force at once — every flag renders,
 #     none suppresses another):
-#               📝 v<version> | 🟢 PM:auto | 🛑 HALT GLOBAL | ⚠️ HALT-AFTER <proj> until v2.9.15 | ✋ DEFER <proj> <=low (3 waiting) | 📅 <day> <HH:MM>
+#               📝 v<version> | 🟢 PM:auto | 🛑 HALT GLOBAL | ⚠️ HALT-AFTER <proj> until vX.Y.Z | ✋ DEFER <proj> <=low (3 waiting) | 📅 <day> <HH:MM>
 #
 #   Per-project bar (PROJECT_NAME supplied):
 #     Normal:   📝 v<ver> | 📝 <proj>:<ver> | workflow:<type> | 🟢 PM:auto | 📅 <day> <HH:MM>
@@ -151,8 +151,11 @@ _DSB_EXPLICIT_PROJECT="${2:+yes}"
 # ---------------------------------------------------------------------------
 [[ -f "$KANBAN_ROOT/bashrc" ]]                 && source "$KANBAN_ROOT/bashrc"              2>/dev/null || true
 [[ -f "$KANBAN_ROOT/env" ]]                    && source "$KANBAN_ROOT/env"                 2>/dev/null || true
-[[ -f "$HOME/.config/pgai-kanban.cfg" ]]       && source "$HOME/.config/pgai-kanban.cfg"   2>/dev/null || true
-# Source: kanban.cfg [chain/paths] — INI format replaces legacy config.cfg
+# Operator user config, then [chain] pm_mode (config_loader.sh).
+# shellcheck source=../lib/config_loader.sh
+source "$(dirname "${BASH_SOURCE[0]}")/../lib/config_loader.sh"
+config_startup_prelude "$KANBAN_ROOT" 2>/dev/null || true
+# Source: kanban.cfg [paths] — INI format replaces legacy config.cfg
 # Source ini_parser.sh for read_ini (project_paths.sh not available here).
 # Source project_paths.sh and projects.sh for projects_cfg_list (project name resolution).
 _DSB_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -180,9 +183,6 @@ source "${_DSB_SCRIPT_DIR}/../lib/status_glyphs.sh"
 # halt/approval/defer tmux-markup color meanings below).
 # shellcheck source=../lib/dashboard_palette.sh
 source "${_DSB_SCRIPT_DIR}/../lib/dashboard_palette.sh"
-if [[ -f "${KANBAN_ROOT}/kanban.cfg" ]]; then
-    export PGAI_KANBAN_PM_MODE="${PGAI_KANBAN_PM_MODE:-$(read_ini "${KANBAN_ROOT}/kanban.cfg" chain pm_mode automatic)}"
-fi
 unset _DSB_SCRIPT_DIR
 export PGAI_DEV_TREE_PATH="${PGAI_DEV_TREE_PATH:-$(resolve_global_dev_tree)}"
 

@@ -13,9 +13,11 @@ Readers covered:
       through release_state_section (lib/cm/common.sh), and its write
       through the release-state writer (cm/write_rc_state.py)
   scripts/cm/finalize.sh
-      read_md_field (``## Artifact Name`` / ``## Output Formats``), which
-      also stops at a ``---`` horizontal rule
-      the requirements-dir ``## Target Version`` scan
+      _requirement_field (``## Artifact Name`` / ``## Output Formats``),
+      which also stops at a ``---`` horizontal rule
+      _requirement_for_version, the requirements-dir ``## Target Version``
+      scan
+      (both read through read_md_field, lib/md_field.sh)
   scripts/cm/promote_bundled_items.py
       _TARGET_VERSION_SECTION_RE / find_requirement_by_version
   scripts/verify-blocked-task-guard.sh
@@ -25,8 +27,8 @@ Readers covered:
       keeps it that way
 
 Every test runs the shipped code: a bash function is cut out of its script
-by name and run, a python heredoc is cut out of its script and run, and the
-python module is imported from its file. Fixtures live under pytest's
+by name and run (beside the shared lib it calls), and the python module is
+imported from its file. Fixtures live under pytest's
 tmp_path; no live task folder or kanban install is read or written.
 
 Naming: function names describe behavior under test, never bug IDs or task
@@ -38,12 +40,10 @@ from __future__ import annotations
 import importlib.util
 import pathlib
 import re
-import subprocess
-import sys
 
 import pytest
 
-from pgai_agent_kanban.cm.read_state_field import read_state_section
+from tests.fixtures.release_state_section import release_state_section_value
 from tests.unit.shell_harness import run_bash
 
 _TEAM_DIR = pathlib.Path(__file__).resolve().parents[2]
@@ -54,6 +54,7 @@ _PROMOTE = _SCRIPTS / "cm" / "promote_bundled_items.py"
 _GUARD_VERIFIER = _SCRIPTS / "verify-blocked-task-guard.sh"
 _WAKE_TASK_STATE = _SCRIPTS / "lib" / "wake_task_state.sh"
 _CM_COMMON = _SCRIPTS / "lib" / "cm" / "common.sh"
+_MD_FIELD = _SCRIPTS / "lib" / "md_field.sh"
 
 # The pre-boundary reader shape: "\s*\n(.*?)" lets \s* swallow an empty
 # body's blank line so the lazy body starts at the next heading.
@@ -140,7 +141,7 @@ def _field(tmp_path: pathlib.Path, release_state: str, heading: str) -> "str | N
     reader as a section ending at the next '##' heading (None: absent)."""
     check = tmp_path / "written-release-state.md"
     check.write_text(release_state, encoding="utf-8")
-    return read_state_section(str(check), heading)
+    return release_state_section_value(str(check), heading)
 
 
 @pytest.mark.parametrize(
@@ -196,14 +197,25 @@ def test_open_doc_keeps_appended_event_blocks(tmp_path: pathlib.Path) -> None:
     assert written == before.replace("## Active RC\nnone\n", "## Active RC\nv1.5.0\n", 1), written
 
 
-# --- finalize.sh: read_md_field -----------------------------------------------
+# --- finalize.sh: _requirement_field -------------------------------------------
+
+# The heading pattern each finalize.sh read matched -> the heading names its
+# _requirement_field call passes for it.
+_FINALIZE_FIELD_HEADINGS = {
+    r"Artifact\s*Name": ("Artifact Name",),
+    r"Output\s*Formats?": ("Output Formats", "Output Format"),
+}
 
 
 def _read_md_field(tmp_path: pathlib.Path, doc_text: str, field_pattern: str) -> str:
     doc = tmp_path / "requirements.md"
     doc.write_text(doc_text, encoding="utf-8")
-    fn_file = _write_fn_file(tmp_path, _FINALIZE, "read_md_field")
-    result = run_bash(tmp_path, f"set -euo pipefail\nsource '{fn_file}'\nread_md_field '{doc}' '{field_pattern}'\n")
+    fn_file = _write_fn_file(tmp_path, _FINALIZE, "_requirement_field")
+    headings = " ".join(f"'{h}'" for h in _FINALIZE_FIELD_HEADINGS[field_pattern])
+    result = run_bash(
+        tmp_path,
+        f"set -euo pipefail\nsource '{_MD_FIELD}'\nsource '{fn_file}'\n_requirement_field '{doc}' {headings}\n",
+    )
     assert result.returncode == 0, _explain(result)
     return result.stdout.rstrip("\n")
 
@@ -261,26 +273,16 @@ def test_finalize_populated_md_field_reads_as_before(
 # --- finalize.sh: requirements-dir ## Target Version scan ---------------------
 
 
-def _finalize_target_version_scan() -> str:
-    """The python heredoc finalize.sh runs to find the requirement doc whose
-    ## Target Version matches TARGET_VERSION."""
-    lines = _FINALIZE.read_text(encoding="utf-8").splitlines()
-    start = next(i for i, line in enumerate(lines) if '_meta_req_file="$(python3 - "$_meta_req_dir"' in line)
-    end = next(i for i in range(start + 1, len(lines)) if lines[i] == "PY")
-    return "\n".join(lines[start + 1 : end]) + "\n"
-
-
 def _scan(tmp_path: pathlib.Path, docs: dict[str, str], version: str) -> str:
+    """Run finalize.sh's _requirement_for_version over *docs* for *version*."""
     req_dir = tmp_path / "requirements"
     req_dir.mkdir(parents=True)
     for name, text in docs.items():
         (req_dir / name).write_text(text, encoding="utf-8")
-    result = subprocess.run(
-        [sys.executable, "-", str(req_dir), version],
-        input=_finalize_target_version_scan(),
-        capture_output=True,
-        text=True,
-        timeout=30,
+    fn_file = _write_fn_file(tmp_path, _FINALIZE, "_requirement_for_version")
+    result = run_bash(
+        tmp_path,
+        f"set -euo pipefail\nsource '{_MD_FIELD}'\nsource '{fn_file}'\n_requirement_for_version '{req_dir}' '{version}'\n",
     )
     assert result.returncode == 0, _explain(result)
     return pathlib.Path(result.stdout.strip()).name if result.stdout.strip() else ""
@@ -299,6 +301,16 @@ def test_finalize_scan_finds_populated_target_version_as_before(tmp_path: pathli
     }
     assert _scan(tmp_path, docs, "1.5.0") == "b-match.md"
     assert _scan(tmp_path / "second", {"z.md": "## target version\n\n  v1.5.0  \n"}, "v1.5.0") == "z.md"
+
+
+def test_finalize_scan_ignores_letter_case_of_the_version_value(tmp_path: pathlib.Path) -> None:
+    """The bash scan agrees with find_requirement_by_version: a body line
+    ``V1.2.4`` matches whichever case, or no prefix, the target carries."""
+    docs = {"req.md": "# R\n\n## Target Version\nV1.2.4\n\n## Next\nx\n"}
+    assert _scan(tmp_path / "lower", docs, "v1.2.4") == "req.md"
+    assert _scan(tmp_path / "upper", docs, "V1.2.4") == "req.md"
+    assert _scan(tmp_path / "bare", docs, "1.2.4") == "req.md"
+    assert _scan(tmp_path / "other", docs, "v1.2.5") == ""
 
 
 # --- promote_bundled_items.py: _TARGET_VERSION_SECTION_RE ---------------------
@@ -341,3 +353,12 @@ def test_promote_find_requirement_matches_populated_target_version_as_before(tmp
     assert promote.find_requirement_by_version(tmp_path, "1.5.0") == tmp_path / "b-match.md"
     assert promote.find_requirement_by_version(tmp_path, "v1.7.0") == tmp_path / "c-lower.md"
     assert promote.find_requirement_by_version(tmp_path, "v1.8.0") is None
+
+
+def test_promote_find_requirement_ignores_letter_case_of_the_version_value(tmp_path: pathlib.Path) -> None:
+    promote = _import_promote()
+    (tmp_path / "req.md").write_text("# R\n\n## Target Version\nV1.2.4\n\n## Next\nx\n", encoding="utf-8")
+    assert promote.find_requirement_by_version(tmp_path, "v1.2.4") == tmp_path / "req.md"
+    assert promote.find_requirement_by_version(tmp_path, "V1.2.4") == tmp_path / "req.md"
+    assert promote.find_requirement_by_version(tmp_path, "1.2.4") == tmp_path / "req.md"
+    assert promote.find_requirement_by_version(tmp_path, "v1.2.5") is None

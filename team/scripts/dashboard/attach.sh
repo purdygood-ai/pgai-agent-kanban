@@ -59,13 +59,11 @@ while [[ $# -gt 0 ]]; do
 done
 
 # ---------------------------------------------------------------------------
-# Source config — INI format (kanban.cfg) replaces legacy config.cfg
-# read_ini available via project_paths.sh (sourced above).
+# Operator user config, then [chain] pm_mode (config_loader.sh).
 # ---------------------------------------------------------------------------
-if [[ -f "${KANBAN_ROOT}/kanban.cfg" ]]; then
-    # Source: kanban.cfg [chain] key values
-    export PGAI_KANBAN_PM_MODE="${PGAI_KANBAN_PM_MODE:-$(read_ini "${KANBAN_ROOT}/kanban.cfg" chain pm_mode automatic)}"
-fi
+# shellcheck source=../lib/config_loader.sh
+source "$(dirname "${BASH_SOURCE[0]}")/../lib/config_loader.sh"
+config_startup_prelude "$KANBAN_ROOT"
 export PGAI_DEV_TREE_PATH="${PGAI_DEV_TREE_PATH:-$(resolve_global_dev_tree)}"
 
 # Allow session name override from env or kanban.cfg

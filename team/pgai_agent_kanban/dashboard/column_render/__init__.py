@@ -12,8 +12,9 @@ every item, WONT-DO included.
 Modules
 -------
 cells
-    Pure formatting shared by both panes: palette, display status and
-    colour, ANSI-aware truncation, compact IDs, row-window selection.
+    Pure formatting shared by both panes: palette, display status,
+    colour and status markers, ANSI-aware truncation, compact IDs,
+    row-window selection.
 single
     One project's input or queue column.
 multi

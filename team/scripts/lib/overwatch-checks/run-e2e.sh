@@ -210,7 +210,7 @@ RSEOF
     # --- Check 1: empty file in priority/ ---
     touch "${E2E_PROJECT_ROOT}/priority/PRIORITY-TEST-EMPTY.md"
 
-    # --- Check 2: BLOCKED task carrying an always-human Block Record ---
+    # --- Check 2: BLOCKED task whose agent self-block ladder is spent ---
     # check-block-triage escalates it: Needs Human -> yes and an
     # OVERWATCH Diagnosis; the task stays BLOCKED.
     local bt_task_id="CODER-20260101-001-example-blocked-task"
@@ -255,7 +255,7 @@ none
 ## Block Record
 reason_code: agent_unclassified
 owner_role: CODER
-attempts: 0
+attempts: 3
 first_blocked_at: 2026-01-01T00:00:00+00:00
 last_blocked_at: 2026-01-01T00:00:00+00:00
 cooldown_until: none
@@ -531,7 +531,7 @@ _assert_file_contains "live/fix-6/active-rc-reset" \
     "${E2E_PROJECT_ROOT}/release-state.md" \
     "^none$"
 
-# Fix 2: always-human block escalated with a diagnosis
+# Fix 2: an agent self-block whose retry ladder is spent, escalated with a diagnosis
 _assert_file_contains "live/fix-2/task-diagnosed" \
     "${E2E_PROJECT_ROOT}/tasks/CODER-20260101-001-example-blocked-task/status.md" \
     "^## OVERWATCH Diagnosis"

@@ -1,5 +1,5 @@
 {
- "_about": "Pre-port CLI behaviour of unwind-rc.sh on sandbox roots and repositories (scenarios), and the expected outcome of the scenarios whose behaviour changed on purpose (changed); see team/tests/integration/test_cm_unwind_rc.py. Scenarios for a project the shared push-decision resolver cannot resolve (no project.cfg, no dev_tree_path in it, a project directory with no project.cfg) are recorded with the push gate applied: one skipped-unresolved-project line and no origin check. Every scenario whose unwind renames the requirements file SUPERSEDED, or finds it already renamed, is recorded with that file's ## Status closed to wont-do (staged with the rename when the file is tracked).",
+ "_about": "Pre-port CLI behaviour of unwind-rc.sh on sandbox roots and repositories (scenarios), and the expected outcome of the scenarios whose behaviour changed on purpose (changed); see team/tests/integration/test_cm_unwind_rc.py. Scenarios for a project the shared push-decision resolver cannot resolve (no project.cfg, no dev_tree_path in it, a project directory with no project.cfg) are recorded with the push gate applied: one skipped-unresolved-project line and no origin check. Every scenario whose unwind renames the requirements file SUPERSEDED, or finds it already renamed, is recorded with that file's ## Status closed to wont-do (staged with the rename when the file is tracked). The no-HALT refusal is recorded naming the halt and unhalt scripts an installed kanban carries, under <ROOT>/scripts/, rather than the repository's team/scripts/ path.",
  "changed": {
   "intake-without-status-heading": {
    "outcome": {
@@ -1386,7 +1386,7 @@
     "tracked": ""
    },
    "rc": 1,
-   "stderr": "ERROR: no HALT file found.\n\n  unwind-rc.sh requires the system to be halted before it will run.\n  This prevents the wake scripts from scheduling new work while the\n  unwind is in progress.\n\n  To halt the entire kanban, run: team/scripts/halt-global.sh\n\n  To halt only this project, run: team/scripts/halt.sh --project unwind-fixture\n\n  After the unwind completes, resume with the matching unhalt verb:\n    team/scripts/unhalt-global.sh (if you halted globally), or\n    team/scripts/unhalt.sh --project unwind-fixture (if you halted this project only).\n",
+   "stderr": "ERROR: no HALT file found.\n\n  unwind-rc.sh requires the system to be halted before it will run.\n  This prevents the wake scripts from scheduling new work while the\n  unwind is in progress.\n\n  To halt the entire kanban, run: <ROOT>/scripts/halt-global.sh\n\n  To halt only this project, run: <ROOT>/scripts/halt.sh --project unwind-fixture\n\n  After the unwind completes, resume with the matching unhalt verb:\n    <ROOT>/scripts/unhalt-global.sh (if you halted globally), or\n    <ROOT>/scripts/unhalt.sh --project unwind-fixture (if you halted this project only).\n",
    "stdout": ""
   },
   "project-dir-missing": {

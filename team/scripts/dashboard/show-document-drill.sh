@@ -50,6 +50,10 @@ source "${SCRIPT_DIR}/../lib/project_paths.sh"
 # Source script_common.sh for the shared ansi_code() helper.
 # shellcheck source=lib/script_common.sh
 source "${SCRIPT_DIR}/../lib/script_common.sh"
+# pp_run_ops: the drill renderer runs from this tree's own pgai_agent_kanban
+# package.
+# shellcheck source=../lib/pp_run_ops.sh
+source "${SCRIPT_DIR}/../lib/pp_run_ops.sh"
 
 # ---------------------------------------------------------------------------
 # Parse arguments
@@ -175,150 +179,9 @@ TASKS_DIR="${KANBAN_ROOT}/projects/${PROJECT_NAME}/tasks"
 if [[ ! -d "$TASKS_DIR" ]]; then
   printf '%s(tasks/ directory not found)%s\n' "${C_DIM}" "${RESET}"
 else
-  # Use python3 for robust state reading — mirrors data.sh and show-progress.sh
-  python3 - "${TASKS_DIR}" "${USE_COLOR}" \
-    "${C_LABL}" "${C_DONE}" "${C_WORK}" "${C_BLCK}" "${C_DIM}" "${RESET}" <<'PYEOF'
-import os, re, sys, pathlib
-
-tasks_dir = pathlib.Path(sys.argv[1])
-use_color  = sys.argv[2].lower() == "true"
-C_LABL  = sys.argv[3]
-C_DONE  = sys.argv[4]
-C_WORK  = sys.argv[5]
-C_BLCK  = sys.argv[6]
-C_DIM   = sys.argv[7]
-RESET   = sys.argv[8]
-
-if not use_color:
-    C_LABL = C_DONE = C_WORK = C_BLCK = C_DIM = RESET = ""
-
-SKIP = {"archive", "queues", "plans"}
-
-# Document pipeline roles — PM and CODER are infrastructure/planning roles,
-# not part of the document content pipeline.
-DOC_PIPELINE_ROLES = ["writer", "tester", "cm"]
-
-DONE_STATES  = {"DONE", "WONT-DO"}
-VALID_STATES = {"WORKING", "BLOCKED", "WAITING", "DONE", "WONT-DO", "BACKLOG"}
-
-def read_field(text, heading):
-    pat = re.compile(r'##\s+' + re.escape(heading) + r'\s*$', re.M | re.I)
-    m = pat.search(text)
-    if not m:
-        return ""
-    rest = text[m.end():]
-    for line in rest.splitlines():
-        stripped = line.strip()
-        if stripped.startswith("## "):
-            break
-        if stripped:
-            return stripped
-    return ""
-
-def normalize_role(role_raw):
-    r = role_raw.strip().lower().split("|")[0].strip()
-    return r if r in DOC_PIPELINE_ROLES else None
-
-def normalize_state(state_raw):
-    s = state_raw.strip().upper()
-    if s in ("DONE", "WONT-DO"):
-        return "DONE"
-    if s in VALID_STATES:
-        return s
-    return "BACKLOG"
-
-# agent -> counts
-counts = {role: {"total": 0, "done": 0, "working": 0, "blocked": 0, "waiting": 0}
-          for role in DOC_PIPELINE_ROLES}
-
-if tasks_dir.is_dir():
-    for task_dir in sorted(tasks_dir.iterdir()):
-        if not task_dir.is_dir():
-            continue
-        task_id = task_dir.name
-        if task_id in SKIP or task_id.startswith("TASK-"):
-            continue
-
-        status_file = task_dir / "status.md"
-        readme_file = task_dir / "README.md"
-
-        if not status_file.is_file() or not readme_file.is_file():
-            continue
-
-        try:
-            status_text = status_file.read_text(errors="replace")
-            readme_text = readme_file.read_text(errors="replace")
-        except OSError:
-            continue
-
-        role_raw  = read_field(readme_text, "Role")
-        role      = normalize_role(role_raw)
-        if role is None:
-            continue
-
-        state_raw = read_field(status_text, "State")
-        state     = normalize_state(state_raw)
-
-        c = counts[role]
-        c["total"] += 1
-        if state == "DONE":
-            c["done"] += 1
-        elif state == "WORKING":
-            c["working"] += 1
-        elif state == "BLOCKED":
-            c["blocked"] += 1
-        elif state in ("WAITING", "BACKLOG"):
-            c["waiting"] += 1
-
-# Render one line per document-pipeline role
-PANE_WIDTH = 36
-for role in DOC_PIPELINE_ROLES:
-    c = counts[role]
-    total   = c["total"]
-    done    = c["done"]
-    working = c["working"]
-    blocked = c["blocked"]
-    waiting = c["waiting"]
-
-    label = f"{role}:"
-    padded_label = f"{label:<8}"
-
-    if total == 0:
-        print(f"{C_LABL}{padded_label}{RESET}{C_DIM}0/0{RESET}")
-        continue
-
-    pct    = done * 100 // total
-    xx_yy  = f"{done}/{total}"
-    pct_str = f"{pct}%"
-
-    codes = ""
-    if working > 0:
-        codes += f"{working}W "
-    if blocked > 0:
-        codes += f"{blocked}B "
-    if waiting > 0:
-        codes += f"{waiting}Wa "
-    codes = codes.rstrip()
-
-    label_vlen = len(padded_label)
-    xxyy_vlen  = len(xx_yy)
-    codes_vlen = len(codes)
-    pct_vlen   = len(pct_str)
-    fixed_vlen = label_vlen + xxyy_vlen + 2 + codes_vlen
-    pad = max(1, PANE_WIDTH - fixed_vlen - pct_vlen)
-    padding = " " * pad
-
-    codes_colored = codes
-    if use_color and codes:
-        codes_colored = ""
-        if working > 0:
-            codes_colored += f"{C_WORK}{working}W{RESET} "
-        if blocked > 0:
-            codes_colored += f"{C_BLCK}{blocked}B{RESET} "
-        if waiting > 0:
-            codes_colored += f"{C_DIM}{waiting}Wa{RESET} "
-        codes_colored = codes_colored.rstrip()
-
-    print(f"{C_LABL}{padded_label}{RESET}{C_DONE}{xx_yy}{RESET}  {codes_colored}{padding}{pct_str}")
-PYEOF
+  # task_panes reads each task's Role and State through
+  # pgai_agent_kanban.task_status in one interpreter.
+  pp_run_ops pgai_agent_kanban.dashboard.task_panes document-pipeline "${TASKS_DIR}" \
+    --use-color "${USE_COLOR}" --label "${C_LABL}" --done "${C_DONE}" \
+    --working "${C_WORK}" --blocked "${C_BLCK}" --dim "${C_DIM}" --reset "${RESET}"
 fi

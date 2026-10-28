@@ -9,7 +9,8 @@ Covered:
   1. Sandbox wake (the real ``scripts/wake/claude.sh`` entry point): a chain
      whose dispatched task blocks fires the nudge after its "done" line and
      its lock release; the woken sweep runs only block-triage, takes the
-     repo lock, and escalates the blocked task. Neither the trigger log nor
+     repo lock, and escalates the blocked task (an agent self-block whose
+     three-attempt retry ladder is already spent). Neither the trigger log nor
      the action log carries a lock-contention refusal from the woken run.
   2. Sandbox wake: a chain whose task completes (blocks nothing) fires no
      nudge -- no nudge line, no trigger log.
@@ -97,7 +98,7 @@ _STUB = textwrap.dedent("""\
     ## Block Record
     reason_code: agent_unclassified
     owner_role: CODER
-    attempts: 0
+    attempts: 3
     first_blocked_at: 2026-01-01T10:00:00+00:00
     last_blocked_at: 2026-01-01T10:00:00+00:00
     cooldown_until: none

@@ -199,7 +199,7 @@ discovery_step_requirements() {
         pgai_emit_error_contract \
             "discovery.ceiling-unreadable" \
             "discovery will not queue PM for project '${project_name}' this run because a version ceiling in its project config is unreadable (one line printed above names the file, key and value)." \
-            "Inspect and correct the ceilings: team/scripts/set-version-ceiling.sh --project ${project_name} --show" \
+            "Inspect and correct the ceilings: $(printf '%q' "${TEAM_ROOT}/scripts/set-version-ceiling.sh") --project $(printf '%q' "${project_name}") --show" \
             "${project_name}"
         # CENSUS-ANCHOR: discovery-step-requirements-ceiling-unreadable-01
         return 1

@@ -25,6 +25,22 @@
 #      host-wide, so it runs once per sweep, before the first project, and
 #      every project's check reads that one result
 #      (OVERWATCH_LEAKED_LISTENER_SCAN) and acts only on its own listeners.
+#   3a. The decision wake: the sweep sets OVERWATCH_DECISION_WAKE=1 for its
+#      checks, so check-block-triage.sh -- in a full sweep and under
+#      --only block-triage (the on-BLOCK nudge) alike -- decides every stop
+#      of a project that has a release-state.md once (its HALT, an RC-level
+#      failure CM's release HALTed on, every BLOCKED task, every BACKLOG or
+#      WAITING task with Needs Human yes) and carries the outcome out through
+#      pgai_agent_kanban.overwatch.decision_wake.
+#   3b. Check scope: a module whose header carries the line
+#        # OVERWATCH-CHECK-SCOPE: kanban-only
+#      runs only for the kanban's own project -- the one whose dev tree
+#      (project.cfg dev_tree_path, else PGAI_DEV_TREE_PATH) is the kanban
+#      source, holding install.sh and team/pgai_agent_kanban/__init__.py.
+#      For every other project it is not sourced or run: the sweep narrates
+#      one "not applicable" line, logs a check-not-applicable row, and counts
+#      it neither ok nor error. A module with no such line (or
+#      "per-project") runs for every project.
 #   4. Writes a per-project sweep log under:
 #        $KANBAN_ROOT/projects/<name>/logs/overwatch/sweep.log
 #   5. Records sweep start/end entries in the project's action log via
@@ -48,10 +64,12 @@
 #   filing run, but every fix is deferred. The sweep narrates one
 #   "fixes deferred" row for the project, and each fix a check attempts is
 #   declined by overwatch_halt_first_fix (sentinel 5, its own "fix deferred:
-#   HALT present" row) with nothing changed. The one fix that still runs is
-#   block triage handing a ship_policy_halt task to the resolution stage,
-#   which exists to resolve the HALT CM wrote. Sibling projects are swept
-#   as usual.
+#   HALT present" row) with nothing changed. The fixes that still run are
+#   those whose subject is that HALT: the decision wake clearing a chain
+#   HALT whose cause is resolved or handing it to the resolution stage (an
+#   operator HALT is decided none and never touched), and block triage
+#   handing a ship_policy_halt task to the resolution stage. Sibling
+#   projects are swept as usual.
 #
 # Exit codes:
 #   0  — completed (all projects swept, or suppressed by a halt flag)
@@ -134,6 +152,75 @@ _sweep_available_slugs() {
 }
 
 # ---------------------------------------------------------------------------
+# _sweep_check_scope <check_script_path>
+# Print the project scope a check module declares in its header:
+# "kanban-only" for a line "# OVERWATCH-CHECK-SCOPE: kanban-only", else
+# "per-project". Case, surrounding whitespace and underscores for hyphens
+# are tolerated. A value that is neither runs the check for every project
+# (the scope a module with no declaration has) after one warning naming it.
+# ---------------------------------------------------------------------------
+_sweep_check_scope() {
+    local declared=""
+    declared="$(grep -m 1 -E '^#[[:space:]]*OVERWATCH-CHECK-SCOPE[[:space:]]*:' "$1" 2>/dev/null \
+        | sed -E 's/^#[[:space:]]*OVERWATCH-CHECK-SCOPE[[:space:]]*:[[:space:]]*//; s/[[:space:]]+$//' \
+        | tr '[:upper:]_' '[:lower:]-')" || declared=""
+    case "${declared}" in
+        kanban-only) echo "kanban-only" ;;
+        ""|per-project) echo "per-project" ;;
+        *)
+            echo "overwatch-sweep: warning: $(basename "$1") declares OVERWATCH-CHECK-SCOPE '${declared}', which is neither per-project nor kanban-only; running it for every project" >&2
+            echo "per-project"
+            ;;
+    esac
+}
+
+# ---------------------------------------------------------------------------
+# _sweep_kanban_only_slugs
+# Print the slugs of the modules that declare kanban-only scope,
+# comma-separated, or "none", for --help.
+# ---------------------------------------------------------------------------
+_sweep_kanban_only_slugs() {
+    local -a slugs=()
+    local cs
+    while IFS= read -r cs; do
+        [[ -n "${cs}" ]] || continue
+        if [[ "$(_sweep_check_scope "${cs}" 2>/dev/null)" == "kanban-only" ]]; then
+            slugs+=("$(_sweep_slug_of "${cs}")")
+        fi
+    done < <(_sweep_check_scripts_found)
+    (( ${#slugs[@]} > 0 )) || { echo "none"; return 0; }
+    local IFS=','
+    printf '%s\n' "${slugs[*]}" | sed 's/,/, /g'
+}
+
+# ---------------------------------------------------------------------------
+# _sweep_kanban_source_check <project_name>
+# Decide whether the project is the kanban's own project: its dev tree is
+# the kanban source, recognised by install.sh at the tree's root and the
+# team/pgai_agent_kanban package (team/pgai_agent_kanban/__init__.py). The
+# dev tree is project.cfg dev_tree_path, else PGAI_DEV_TREE_PATH -- the
+# resolution the kanban-only checks make themselves. Assumes nothing about
+# any other project's layout: a tree without both files is simply not the
+# kanban source. Returns 0 when it is; otherwise returns 1 and prints why
+# on stdout, as a phrase for the not-applicable narration.
+# Needs pp_dev_tree_path (project_paths.sh) and KANBAN_ROOT.
+# ---------------------------------------------------------------------------
+_sweep_kanban_source_check() {
+    local project_name="$1" dev_tree=""
+    dev_tree="$(pp_dev_tree_path "${project_name}" 2>/dev/null)" || dev_tree=""
+    [[ -n "${dev_tree}" ]] || dev_tree="${PGAI_DEV_TREE_PATH:-}"
+    if [[ -z "${dev_tree}" ]]; then
+        echo "the project names no dev_tree_path"
+        return 1
+    fi
+    if [[ -f "${dev_tree}/install.sh" && -f "${dev_tree}/team/pgai_agent_kanban/__init__.py" ]]; then
+        return 0
+    fi
+    echo "dev tree ${dev_tree} is not the kanban source (install.sh and team/pgai_agent_kanban/__init__.py are not both present)"
+    return 1
+}
+
+# ---------------------------------------------------------------------------
 # _sweep_print_help
 # The --help text: usage, every option, environment, HALT gates, exit codes.
 # ---------------------------------------------------------------------------
@@ -174,10 +261,23 @@ _sweep_print_help() {
     echo "firing holds (a sweep, an on-BLOCK nudge, the overwatch wake) is skipped and"
     echo "logged 'firing-skipped:lock-held'; the sweep still exits 0."
     echo ""
+    echo "Check scope: a check whose module header declares"
+    echo "'# OVERWATCH-CHECK-SCOPE: kanban-only' runs only for the kanban's own project"
+    echo "(the one whose dev tree holds install.sh and team/pgai_agent_kanban/); for"
+    echo "every other project it is skipped and logged 'check-not-applicable', counted"
+    echo "neither ok nor error. Kanban-only checks: $(_sweep_kanban_only_slugs)."
+    echo ""
+    echo "Decision wake: check-block-triage (also under --only block-triage) decides"
+    echo "every stop of a project with a release-state.md once -- its HALT, an RC-level"
+    echo "failure CM's release HALTed on, each BLOCKED task, each BACKLOG or WAITING task"
+    echo "with Needs Human yes -- and carries the outcome out: an operator verb, an"
+    echo "operator-inbox question, a runaway stop, or nothing."
+    echo ""
     echo "Project HALT (\$KANBAN_ROOT/projects/<name>/HALT): that project's read-only"
     echo "scans and bug filing still run, but every fix is deferred and logged"
-    echo "'fix deferred: HALT present'; only the resolution stage's handling of a"
-    echo "CM ship-policy HALT still acts. Other projects are swept as usual."
+    echo "'fix deferred: HALT present'; only fixes whose subject is that HALT still act"
+    echo "(clearing a chain HALT whose cause is resolved, the resolution stage); an"
+    echo "operator HALT is never touched. Other projects are swept as usual."
     echo ""
     echo "Exit codes:"
     echo "  0   Completed (all projects swept, or suppressed by a halt flag)."
@@ -284,6 +384,11 @@ fi
 # run in this shell.
 OVERWATCH_LOCK_WAIT_SECONDS="${_SWEEP_LOCK_WAIT_SECONDS}"
 
+# check-block-triage.sh runs the decision wake when this is 1 (see 3a in the
+# header). Set by the sweep alone and not exported: the checks run in this
+# shell, and the overwatch wake's own run of the check keeps block triage.
+OVERWATCH_DECISION_WAKE=1
+
 # ---------------------------------------------------------------------------
 # Source required libraries.
 # ---------------------------------------------------------------------------
@@ -388,6 +493,16 @@ done < <(_sweep_check_scripts_found)
 if (( ${#_sweep_check_scripts[@]} == 0 )); then
     echo "overwatch-sweep: warning: no check-*.sh modules found in ${_SWEEP_CHECKS_DIR}" >&2
 fi
+
+# Each module's declared project scope (3b in the header), read once.
+declare -A _sweep_check_scope_of=()
+_sweep_has_kanban_only=0
+for _cs in "${_sweep_check_scripts[@]}"; do
+    _sweep_check_scope_of["${_cs}"]="$(_sweep_check_scope "${_cs}")"
+    if [[ "${_sweep_check_scope_of["${_cs}"]}" == "kanban-only" ]]; then
+        _sweep_has_kanban_only=1
+    fi
+done
 
 # ---------------------------------------------------------------------------
 # Record a firing timestamp for this sweep run so all backup entries share it.
@@ -499,6 +614,16 @@ _sweep_one_project() {
 
     local check_pass_count=0
     local check_fail_count=0
+    local check_na_count=0
+
+    # Kanban-only checks (3b in the header) run only when this project's dev
+    # tree is the kanban source; decided once per project.
+    local is_kanban_source=1 not_kanban_reason=""
+    if (( _sweep_has_kanban_only )); then
+        if ! not_kanban_reason="$(_sweep_kanban_source_check "${project_name}")"; then
+            is_kanban_source=0
+        fi
+    fi
 
     # Run each check module in lexical order.
     local check_script check_slug fn_name check_exit
@@ -535,6 +660,24 @@ _sweep_one_project() {
         check_slug="$(basename "${check_script}" .sh | sed 's/^check-//')"
         # Replace hyphens with underscores to form the function name.
         fn_name="overwatch_check_$(echo "${check_slug}" | tr '-' '_')"
+
+        # A kanban-only check on any other project: not sourced, not run,
+        # counted neither ok nor error.
+        if [[ "${_sweep_check_scope_of["${check_script}"]:-per-project}" == "kanban-only" ]] \
+            && (( is_kanban_source == 0 )); then
+            echo "overwatch-sweep: [${project_name}] ${check_slug}: not applicable (kanban-only check; ${not_kanban_reason})" >&2
+            check_na_count=$(( check_na_count + 1 ))
+            printf '%s\toverwatch-sweep\t%s\tcheck-not-applicable\tnone\t%s\n' \
+                "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${project_name}" "${check_slug}" >> "${sweep_log}" || true
+            overwatch_log_action \
+                "overwatch-sweep" \
+                "${project_name}" \
+                "check-not-applicable" \
+                "none" \
+                "${check_slug}: kanban-only check, not run; ${not_kanban_reason}" \
+            2>/dev/null || true
+            continue
+        fi
 
         echo "overwatch-sweep: [${project_name}] running ${check_slug}" >&2
 
@@ -577,18 +720,21 @@ _sweep_one_project() {
     # Append sweep-end entry.
     local ts_end
     ts_end="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-    printf '%s\toverwatch-sweep\t%s\tsweep-end\tnone\t%d ok, %d error\n' \
-        "${ts_end}" "${project_name}" "${check_pass_count}" "${check_fail_count}" >> "${sweep_log}" || true
+    # Not-applicable checks are named only when there are some.
+    local na_tail=""
+    (( check_na_count == 0 )) || na_tail=", ${check_na_count} not applicable"
+    printf '%s\toverwatch-sweep\t%s\tsweep-end\tnone\t%d ok, %d error%s\n' \
+        "${ts_end}" "${project_name}" "${check_pass_count}" "${check_fail_count}" "${na_tail}" >> "${sweep_log}" || true
 
     overwatch_log_action \
         "overwatch-sweep" \
         "${project_name}" \
         "sweep-end" \
         "none" \
-        "${check_pass_count} check(s) ok, ${check_fail_count} check(s) error" \
+        "${check_pass_count} check(s) ok, ${check_fail_count} check(s) error${na_tail:+, ${check_na_count} check(s) not applicable}" \
     2>/dev/null || true
 
-    echo "overwatch-sweep: [${project_name}] sweep end — ${check_pass_count} ok, ${check_fail_count} error" >&2
+    echo "overwatch-sweep: [${project_name}] sweep end — ${check_pass_count} ok, ${check_fail_count} error${na_tail}" >&2
     return 0
 }
 

@@ -284,7 +284,16 @@ so an unrelated table two sections later is never attributed to a stale
 section. Within a recognized section, a citation is either an *active*
 (uncommented) ``key = value`` line inside a raw template or a fenced
 ` ```ini ` block, or a markdown reference-table row whose first column is
-a backtick-quoted key name. A key mentioned only in a commented-out
+a backtick-quoted key name. A fenced ` ```ini ` block in a markdown
+document is an example of setting keys, not a statement of their
+defaults: its keys are checked against the registry and count as
+documented, but its values are never compared with a default. A prose
+sentence of the form `` `key` defaults to `value` `` (the key span may
+lead with its ``[section]``) is a default claim wherever it sits outside a
+fence; its section is the one it names, else the surrounding context,
+else the one registry section that declares the key. A prose key no
+registry section pins down is skipped, never reported unknown, since prose
+states CLI-flag and parameter defaults the same way. A key mentioned only in a commented-out
 illustration (` # coder = claude-sonnet-4-6 `) is not a citation — it is
 an example, not a claim about the accepted default. In a raw template that
 commented line still documents the key's existence: a registered key
@@ -345,6 +354,10 @@ to open and add it at. Override the doc lists with ``--operator-doc`` /
 tree that has none of these documents (a fixture tree built for the other
 checks) is not checked, with a stderr note.
 
+``check_undocumented_scripts()`` is the whole check as ``main()`` runs it
+(document resolution, walk, finding text); a test that calls it with only
+``repo_root`` gets the lint's own verdict for that tree.
+
 Exit codes
 ----------
   0   No findings from any of the four checks.
@@ -386,7 +399,7 @@ import signal
 import subprocess
 import sys
 import tempfile
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Optional
 
@@ -403,6 +416,7 @@ from pgai_agent_kanban.lib.markdown_fence import (  # noqa: E402
     find_fence_close,
     match_fence_opener,
 )
+from pgai_agent_kanban.lib.temp_root import resolve_temp_root  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # --help probe timeout — the single place this value is stated.
@@ -798,12 +812,12 @@ def _make_help_sandbox_root() -> Path:
     whatever directory the calling process happens to be sitting in makes
     the probe's verdict a property of what ran earlier in the same process
     rather than of the tree it is checking.
+
+    The directory is made under ``<temp root>/lint_doc_command_truth``, the
+    temp root coming from
+    :func:`pgai_agent_kanban.lib.temp_root.resolve_temp_root`.
     """
-    # anti-pattern-allowlist: 2 (justification: mirrors the documented
-    # PGAI_AGENT_KANBAN_TEMP_DIR-with-hard-fallback convention in
-    # team/roles/CODER.md "Temporary File Hygiene" for non-bash callers; the
-    # same fallback literal team/tests/conftest.py's own resolver carries)
-    temp_base = Path(os.environ.get("PGAI_AGENT_KANBAN_TEMP_DIR") or "/tmp/pgai_kanban_tmp") / "lint_doc_command_truth"
+    temp_base = Path(resolve_temp_root()) / "lint_doc_command_truth"
     temp_base.mkdir(parents=True, exist_ok=True)
     return Path(tempfile.mkdtemp(prefix="help-sandbox-", dir=str(temp_base)))
 
@@ -1368,6 +1382,18 @@ class KeyCitation:
     line: it documents that the key exists (the undocumented-key direction
     counts it) but makes no claim about the accepted key set or its default,
     so the unknown-key and default comparisons skip it.
+
+    *claims_default* is False for an assignment inside a fenced ```` ```ini
+    ```` block in a markdown document: the block shows how to set a key, so
+    its value is an example, not the default. The key is still checked
+    against the registry and still counts as documented.
+
+    *prose* is True for a sentence that states a default (`` `key` defaults
+    to `value` ``). Its *section* is the one the sentence names, else the
+    surrounding section context, else "" -- resolved against the registry
+    in ``run_key_parity_check``. A prose citation that resolves to no
+    registry key is dropped rather than reported unknown: prose also says
+    what CLI flags and function parameters default to.
     """
     doc_display: str
     doc_path: Path
@@ -1376,6 +1402,8 @@ class KeyCitation:
     key: str
     claimed_default: str
     commented: bool = False
+    claims_default: bool = True
+    prose: bool = False
 
 
 _KEY_SECTION_BRACKET_RE = re.compile(r"^\[([a-z][a-z0-9_.]*)\]")
@@ -1390,6 +1418,16 @@ _KEY_RAW_INI_HEADER_RE = re.compile(r"^\[([a-z][a-z0-9_.]*)\]\s*(?:[#;].*)?$")
 _KEY_RAW_INI_COMMENTED_RE = re.compile(r"^[#;]\s?([a-z_][a-z0-9_]*)\s*=\s*(\S*)\s*$")
 _KEY_TABLE_ROW_RE = re.compile(r"^\|\s*`([a-z_][a-z0-9_]*)`\s*\|\s*`?([^|`]*)`?\s*\|")
 _KEY_FENCE_OPEN_RE = re.compile(r"^(`{3,}|~{3,})\s*([A-Za-z0-9_+-]*)\s*$")
+# A prose default statement: a code span naming the key -- optionally led by
+# its "[section]", inside the span or as a span of its own -- then "defaults
+# to" and a code span holding the value:
+#   `deferred_bugs` defaults to `true`
+#   `[providers] available` defaults to `claude codex`
+#   `[release]` `deferred_bugs` defaults to `false`
+_KEY_PROSE_DEFAULT_RE = re.compile(
+    r"`(?:\[(?P<sec>[a-z][a-z0-9_.]*)\]`?\s*`?)?(?P<key>[a-z_][a-z0-9_]*)`"
+    r"\s+defaults\s+to\s+`(?P<val>[^`]*)`"
+)
 
 
 def _section_header_from_line(line: str) -> Optional[str]:
@@ -1423,8 +1461,9 @@ def _extract_key_citations(
     *is_raw_ini* is True for a real ``.cfg_example`` template (the whole
     file is INI-shaped, no markdown fencing) and False for a markdown
     document, where key=value scanning is restricted to fenced ```` ```ini
-    ```` blocks and key/default claims also come from markdown reference
-    tables. See the module docstring's "Config-key parity" section for the
+    ```` blocks (example values: key checked, default not) and default
+    claims come from markdown reference tables and `` `key` defaults to
+    `value` `` prose. See the module docstring's "Config-key parity" section for the
     full citation-recognition rule.
     """
     try:
@@ -1475,8 +1514,13 @@ def _extract_key_citations(
         if scan_kv and current_section:
             km = _KEY_INI_KEYVAL_RE.match(stripped)
             if km:
+                # A raw template's active line is the shipped value; a fenced
+                # block's is an example (see KeyCitation.claims_default).
                 citations.append(
-                    KeyCitation(doc_display, doc_path, lineno, current_section, km.group(1), km.group(2).strip())
+                    KeyCitation(
+                        doc_display, doc_path, lineno, current_section, km.group(1), km.group(2).strip(),
+                        claims_default=is_raw_ini,
+                    )
                 )
             elif is_raw_ini:
                 cm = _KEY_RAW_INI_COMMENTED_RE.match(stripped)
@@ -1494,6 +1538,15 @@ def _extract_key_citations(
             if tm:
                 citations.append(
                     KeyCitation(doc_display, doc_path, lineno, current_section, tm.group(1), tm.group(2).strip())
+                )
+
+        if not is_raw_ini and not fence_active:
+            for pm in _KEY_PROSE_DEFAULT_RE.finditer(line):
+                citations.append(
+                    KeyCitation(
+                        doc_display, doc_path, lineno, pm.group("sec") or current_section or "",
+                        pm.group("key"), pm.group("val").strip(), prose=True,
+                    )
                 )
 
     return citations
@@ -1561,6 +1614,24 @@ def _format_undocumented_key_finding(entry: RegistryKey, lint_invocation: str) -
     )
 
 
+def _resolve_prose_key_citation(
+    citation: KeyCitation, registry: dict[tuple[str, str], RegistryKey]
+) -> Optional[KeyCitation]:
+    """Pin a prose default statement to one registry entry, or return None.
+
+    The section the citation carries wins when the registry declares the key
+    there; otherwise the key resolves only when exactly one registry section
+    declares it. Anything else -- no such key, or a name several sections
+    share -- is not a checkable claim.
+    """
+    if (citation.section, citation.key) in registry:
+        return citation
+    sections = [sec for (sec, key) in registry if key == citation.key]
+    if len(sections) != 1:
+        return None
+    return replace(citation, section=sections[0])
+
+
 def run_key_parity_check(
     scan_set: list[tuple[Path, str]],
     registry: dict[tuple[str, str], RegistryKey],
@@ -1599,7 +1670,16 @@ def run_key_parity_check(
     for c in all_citations:
         if c.commented and (c.section, c.key) in registry:
             matched.add((c.section, c.key))
-    citations = [c for c in all_citations if not c.commented]
+    citations = []
+    for c in all_citations:
+        if c.commented:
+            continue
+        if c.prose:
+            resolved = _resolve_prose_key_citation(c, registry)
+            if resolved is None:
+                continue
+            c = resolved
+        citations.append(c)
 
     for c in citations:
         entry = registry.get((c.section, c.key))
@@ -1615,7 +1695,9 @@ def run_key_parity_check(
             continue
         matched.add((c.section, c.key))
         matched_citations.append(c)
-        if entry.default_checked and _normalize_default_text(c.claimed_default) != _normalize_default_text(
+        if c.claims_default and entry.default_checked and _normalize_default_text(
+            c.claimed_default
+        ) != _normalize_default_text(
             entry.default
         ):
             findings.append(_format_key_default_mismatch_finding(c, entry, lint_invocation))
@@ -1988,6 +2070,9 @@ def _resolve_pane_parity_scan_set(
 # an operator doc or listed in the "Internal checks" section.
 # ---------------------------------------------------------------------------
 
+# How a finding's remedy tells the reader to re-run this lint.
+_LINT_INVOCATION = "python3 team/scripts/lint_doc_command_truth.py"
+
 # The three operator docs, repo-root-relative. A script named anywhere in one
 # of them is documented.
 _OPERATOR_DOCS: tuple[str, ...] = ("HOW_TO.md", "docs/OPERATIONS.md", "docs/operator-commands.md")
@@ -2151,6 +2236,59 @@ def _resolve_doc_list(repo_root: Path, explicit: list[str], defaults: tuple[str,
         if path.is_file():
             out.append((path, rel))
     return out
+
+
+@dataclass(frozen=True)
+class UndocumentedScriptReport:
+    """What the undocumented-script check found, as the lint prints it."""
+
+    undocumented: list[UndocumentedScript]
+    scripts_checked: int
+    operator_doc_displays: list[str]
+    # (display path, heading line) of the Internal checks section a finding's
+    # remedy opens; None when no scanned document has that section.
+    where_to_list: Optional[tuple[str, int]]
+    # One formatted finding per undocumented script, exactly as printed.
+    findings: list[str]
+
+
+def check_undocumented_scripts(
+    repo_root: Path,
+    *,
+    scripts_dir: Optional[Path] = None,
+    operator_doc: Optional[list[str]] = None,
+    internal_checks_doc: Optional[list[str]] = None,
+) -> Optional[UndocumentedScriptReport]:
+    """Run the undocumented-script check the way ``main()`` runs it.
+
+    Resolves the document lists (``--operator-doc`` / ``--internal-checks-doc``
+    when given, else the defaults that exist under *repo_root*) and the
+    scripts tree (``--scripts-dir``, else ``<repo-root>/team/scripts``), runs
+    the check and formats each finding. ``main()`` calls this and nothing
+    else for the check, so a caller that passes only *repo_root* gets the
+    lint's own verdict and finding text for that tree. Returns ``None`` when
+    none of the documents exists, the case ``main()`` skips with a note.
+    """
+    scripts_dir = scripts_dir if scripts_dir is not None else repo_root / "team" / "scripts"
+    operator_docs = _resolve_doc_list(repo_root, operator_doc or [], _OPERATOR_DOCS)
+    internal_checks_docs = _resolve_doc_list(repo_root, internal_checks_doc or [], _INTERNAL_CHECKS_DOCS)
+    if not operator_docs and not internal_checks_docs:
+        return None
+    undocumented, scripts_checked, where_to_list = run_undocumented_script_check(
+        scripts_dir, operator_docs, internal_checks_docs
+    )
+    operator_doc_displays = [display for _path, display in operator_docs]
+    findings = [
+        _format_undocumented_script_finding(entry, operator_doc_displays, where_to_list, _LINT_INVOCATION)
+        for entry in undocumented
+    ]
+    return UndocumentedScriptReport(
+        undocumented=undocumented,
+        scripts_checked=scripts_checked,
+        operator_doc_displays=operator_doc_displays,
+        where_to_list=where_to_list,
+        findings=findings,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -2345,7 +2483,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         seen.add(key)
         unique_citations.append(c)
 
-    lint_invocation = "python3 team/scripts/lint_doc_command_truth.py"
+    lint_invocation = _LINT_INVOCATION
 
     findings: list[str] = []
     help_cache: dict[str, HelpResult] = {}
@@ -2539,28 +2677,24 @@ def main(argv: Optional[list[str]] = None) -> int:
     # stderr note, the same degrade-and-warn discipline as the registry and
     # census loads above.
     # ------------------------------------------------------------------
-    scripts_dir = Path(args.scripts_dir).resolve() if args.scripts_dir else team_dir / "scripts"
-    operator_docs = _resolve_doc_list(repo_root, args.operator_doc, _OPERATOR_DOCS)
-    internal_checks_docs = _resolve_doc_list(repo_root, args.internal_checks_doc, _INTERNAL_CHECKS_DOCS)
+    script_report = check_undocumented_scripts(
+        repo_root,
+        scripts_dir=Path(args.scripts_dir).resolve() if args.scripts_dir else None,
+        operator_doc=args.operator_doc,
+        internal_checks_doc=args.internal_checks_doc,
+    )
     script_findings: list[str] = []
-    if not operator_docs and not internal_checks_docs:
+    if script_report is None:
         print(
             f"lint_doc_command_truth: WARNING: none of {', '.join(_OPERATOR_DOCS)} exists under "
             f"{repo_root}; undocumented-script check skipped.",
             file=sys.stderr,
         )
     else:
-        undocumented, scripts_checked, where_to_list = run_undocumented_script_check(
-            scripts_dir, operator_docs, internal_checks_docs
-        )
-        operator_doc_displays = [display for _path, display in operator_docs]
-        script_findings = [
-            _format_undocumented_script_finding(entry, operator_doc_displays, where_to_list, lint_invocation)
-            for entry in undocumented
-        ]
+        script_findings = script_report.findings
         print(
-            f"lint_doc_command_truth: undocumented-scripts: checked {scripts_checked} installed "
-            f"script(s) against {len(operator_docs)} operator doc(s) and the Internal checks "
+            f"lint_doc_command_truth: undocumented-scripts: checked {script_report.scripts_checked} installed "
+            f"script(s) against {len(script_report.operator_doc_displays)} operator doc(s) and the Internal checks "
             f"section; {len(script_findings)} finding(s).",
             flush=True,
         )

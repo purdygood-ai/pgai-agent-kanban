@@ -2,19 +2,24 @@
 test_lint_python_import_completeness.py
 ========================================
 Tests for team/scripts/lint_python_import_completeness.py — the import-
-completeness lint that verifies every third-party Python import across the
-team/ source trees is declared in requirements.txt or requirements-test.txt.
+completeness lint that reports every third-party Python import across the
+team/ source trees not declared in requirements.txt or requirements-test.txt.
+The lint is quality class: it exits 0 whatever it finds, so each case below
+reads its verdict from the --findings-file it writes (an empty array is a
+clean run).
 
 Test cases:
 
-  1. **Real-tree green** — the lint exits 0 on the actual codebase (the main
+  1. **Real-tree green** — the lint records no finding on the actual codebase (the main
      acceptance criterion: current tree is clean).
 
-  2. **Clean-fixture green** — the lint exits 0 against the clean fixture
+  2. **Clean-fixture green** — the lint records no finding against the clean fixture
      (team/tests/fixtures/import_completeness/clean_project/), where all
      imports are declared.
 
-  3. **Stray-import fixture red** — the lint exits 1 against the stray-import
+  3. **Stray-import fixture red** — the lint exits 0 and records one finding
+     ('httpx', stray_script.py), and a direct command-line run prints it,
+     writes it and exits 0, against the stray-import
      fixture (team/tests/fixtures/import_completeness/stray_import_project/),
      which has a planted import that is NOT in the requirements files.
 
@@ -22,11 +27,12 @@ Test cases:
      output identifies the missing module name ('httpx') AND the path to the
      file that imports it.
 
-  5. **main() returns 0 for a synthetic clean tree** — two synthetic files
+  5. **main() records no finding for a synthetic clean tree** — two synthetic files
      created in tmp_path: a requirements.txt declaring 'requests' and a Python
      file that only imports 'requests' and stdlib modules.
 
-  6. **main() returns 1 for a synthetic tree with a gap** — a synthetic
+  6. **main() records the gap as a finding (and returns 0) for a synthetic
+     tree with a gap** — a synthetic
      Python file imports a package that is absent from the synthetic
      requirements files.
 
@@ -57,7 +63,7 @@ Test cases:
      in the remedy block are parsed out of the captured output and executed,
      verbatim, through a real shell — the appended requirements.txt entry
      actually covers the import, and the lint re-run against the fixture
-     exits 0.
+     records no finding.
 
 All tests use pytest's ``tmp_path`` for isolation — no bare /tmp paths,
 no live kanban state mutations.
@@ -66,6 +72,7 @@ no live kanban state mutations.
 from __future__ import annotations
 
 import importlib.util
+import json
 import re
 import subprocess
 import sys
@@ -73,6 +80,8 @@ import textwrap
 from pathlib import Path
 
 import pytest
+
+from tests.fixtures.lint_findings import run_main
 
 
 # ---------------------------------------------------------------------------
@@ -151,16 +160,16 @@ def _make_minimal_tree(
 # ---------------------------------------------------------------------------
 
 
-def test_real_tree_lint_clean():
-    """The lint exits 0 on the actual codebase."""
+def test_real_tree_lint_clean(tmp_path):
+    """The lint records no finding on the actual codebase."""
     # Deliberately exercises the real team/ + repo root (not a fixture):
     # this is a live regression guard, not an isolated behavior a fixture
     # could stand in for.
-    exit_code = _lint.main([
+    exit_code, findings = run_main(_lint.main, [
         "--team-dir", str(_TEAM_DIR),
         "--repo-root", str(_REPO_ROOT),
-    ])
-    assert exit_code == 0, (
+    ], tmp_path / "findings.json")
+    assert exit_code == 0 and findings == [], (
         "lint_python_import_completeness found uncovered third-party imports "
         "in the real tree — add the missing package to requirements.txt or "
         "requirements-test.txt."
@@ -172,16 +181,16 @@ def test_real_tree_lint_clean():
 # ---------------------------------------------------------------------------
 
 
-def test_clean_fixture_exits_zero():
-    """The lint exits 0 against the clean fixture project."""
+def test_clean_fixture_exits_zero(tmp_path):
+    """The lint records no finding against the clean fixture project."""
     clean_dir = _FIXTURES_DIR / "clean_project"
     assert clean_dir.is_dir(), f"Fixture directory not found: {clean_dir}"
 
-    exit_code = _lint.main([
+    exit_code, findings = run_main(_lint.main, [
         "--team-dir", str(clean_dir / "team"),
         "--repo-root", str(clean_dir),
-    ])
-    assert exit_code == 0, (
+    ], tmp_path / "findings.json")
+    assert exit_code == 0 and findings == [], (
         f"Clean fixture unexpectedly triggered a lint failure in {clean_dir}"
     )
 
@@ -191,19 +200,47 @@ def test_clean_fixture_exits_zero():
 # ---------------------------------------------------------------------------
 
 
-def test_stray_import_fixture_exits_nonzero():
-    """The lint exits 1 against the stray-import fixture."""
+def test_stray_import_fixture_records_one_finding_and_exits_zero(tmp_path):
+    """The lint records the stray import as one finding and exits 0."""
     stray_dir = _FIXTURES_DIR / "stray_import_project"
     assert stray_dir.is_dir(), f"Fixture directory not found: {stray_dir}"
 
-    exit_code = _lint.main([
+    exit_code, findings = run_main(_lint.main, [
         "--team-dir", str(stray_dir / "team"),
         "--repo-root", str(stray_dir),
-    ])
-    assert exit_code == 1, (
-        f"Stray-import fixture did not trigger a lint failure (exit {exit_code}); "
+    ], tmp_path / "findings.json")
+    assert exit_code == 0, f"a quality-class finding must exit 0, got {exit_code}"
+    assert len(findings) == 1, (
+        f"Stray-import fixture did not record exactly one finding: {findings}; "
         "the guard is not working."
     )
+    finding = findings[0]
+    assert finding["lint"] == "python_import_completeness"
+    assert finding["severity"] == "quality"
+    assert finding["module"] == "httpx", finding
+    assert finding["file"].endswith("scripts/stray_script.py"), finding
+    assert "requirements.txt" in finding["remedy"], finding
+
+
+def test_direct_run_prints_writes_and_exits_zero(tmp_path):
+    """A command-line run prints the finding, writes it, and exits 0."""
+    stray_dir = _FIXTURES_DIR / "stray_import_project"
+    findings_path = tmp_path / "out" / "findings.json"
+    proc = subprocess.run(
+        [
+            sys.executable, str(_LINT_SCRIPT),
+            "--team-dir", str(stray_dir / "team"),
+            "--repo-root", str(stray_dir),
+            "--findings-file", str(findings_path),
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "'httpx' imported in" in proc.stdout, proc.stdout
+    assert "error:   lint.python-import-completeness" in proc.stderr, proc.stderr
+    findings = json.loads(findings_path.read_text(encoding="utf-8"))
+    assert [f["module"] for f in findings] == ["httpx"], findings
 
 
 # ---------------------------------------------------------------------------
@@ -220,7 +257,7 @@ def test_stray_import_fixture_names_module_and_file(capsys):
         "--team-dir", str(stray_dir / "team"),
         "--repo-root", str(stray_dir),
     ])
-    assert exit_code == 1
+    assert exit_code == 0
 
     captured = capsys.readouterr()
     output = captured.out
@@ -251,20 +288,20 @@ def test_main_clean_synthetic_tree_exits_zero(tmp_path):
             import requests
         """),
     )
-    exit_code = _lint.main([
+    exit_code, findings = run_main(_lint.main, [
         "--team-dir", str(team_dir),
         "--repo-root", str(repo_root),
-    ])
-    assert exit_code == 0
+    ], tmp_path / "findings.json")
+    assert exit_code == 0 and findings == [], findings
 
 
 # ---------------------------------------------------------------------------
-# Test 6: Synthetic tree with missing import exits 1
+# Test 6: Synthetic tree with missing import records it and exits 0
 # ---------------------------------------------------------------------------
 
 
-def test_main_missing_import_exits_one(tmp_path):
-    """main() returns 1 for a synthetic tree with an undeclared import."""
+def test_main_missing_import_records_finding_and_exits_zero(tmp_path):
+    """main() records an undeclared import as a finding and returns 0."""
     team_dir, repo_root = _make_minimal_tree(
         tmp_path,
         requirements_txt="requests>=2.0\n",
@@ -273,11 +310,12 @@ def test_main_missing_import_exits_one(tmp_path):
             import boto3  # not in requirements
         """),
     )
-    exit_code = _lint.main([
+    exit_code, findings = run_main(_lint.main, [
         "--team-dir", str(team_dir),
         "--repo-root", str(repo_root),
-    ])
-    assert exit_code == 1
+    ], tmp_path / "findings.json")
+    assert exit_code == 0
+    assert [f["module"] for f in findings] == ["boto3"], findings
 
 
 # ---------------------------------------------------------------------------
@@ -336,11 +374,11 @@ def test_stdlib_imports_not_flagged(tmp_path):
             from collections import defaultdict
         """),
     )
-    exit_code = _lint.main([
+    exit_code, findings = run_main(_lint.main, [
         "--team-dir", str(team_dir),
         "--repo-root", str(repo_root),
-    ])
-    assert exit_code == 0
+    ], tmp_path / "findings.json")
+    assert exit_code == 0 and findings == [], findings
 
 
 # ---------------------------------------------------------------------------
@@ -358,11 +396,11 @@ def test_relative_imports_not_flagged(tmp_path):
             from .utils import helper
         """),
     )
-    exit_code = _lint.main([
+    exit_code, findings = run_main(_lint.main, [
         "--team-dir", str(team_dir),
         "--repo-root", str(repo_root),
-    ])
-    assert exit_code == 0
+    ], tmp_path / "findings.json")
+    assert exit_code == 0 and findings == [], findings
 
 
 # ---------------------------------------------------------------------------
@@ -464,11 +502,13 @@ class TestImportCompletenessRemedyBlock:
         """
         team_dir, repo_root, script_path = self._write_missing_import_fixture(tmp_path)
 
-        result = _lint.main([
+        result, findings = run_main(_lint.main, [
             "--team-dir", str(team_dir),
             "--repo-root", str(repo_root),
-        ])
-        assert result == 1, "Forced missing-import fixture did not fail the gate."
+        ], tmp_path / "findings.json")
+        assert result == 0 and len(findings) == 1, (
+            f"Forced missing-import fixture was not recorded as one finding: {findings}"
+        )
 
         out = capsys.readouterr().out
 
@@ -517,15 +557,17 @@ class TestImportCompletenessRemedyBlock:
         The test parses the exact numbered command strings out of the
         captured stdout (not a hand-reconstructed equivalent) and runs them
         through a real shell, then re-invokes the lint directly to confirm
-        it now exits 0.
+        it now records no finding.
         """
         team_dir, repo_root, script_path = self._write_missing_import_fixture(tmp_path)
 
-        result = _lint.main([
+        result, findings = run_main(_lint.main, [
             "--team-dir", str(team_dir),
             "--repo-root", str(repo_root),
-        ])
-        assert result == 1, "Forced missing-import fixture did not fail the gate."
+        ], tmp_path / "findings.json")
+        assert result == 0 and len(findings) == 1, (
+            f"Forced missing-import fixture was not recorded as one finding: {findings}"
+        )
 
         out = capsys.readouterr().out
         commands = _NUMBERED_COMMAND_RE.findall(out)
@@ -545,16 +587,16 @@ class TestImportCompletenessRemedyBlock:
                 f"stdout: {proc.stdout!r}\nstderr: {proc.stderr!r}"
             )
 
-        # The last command IS the re-lint verification command and already
-        # asserted returncode == 0 above. Confirm independently via a direct
-        # main() call for belt-and-braces.
-        recheck = _lint.main([
+        # The last command IS the re-lint verification command; it exits 0
+        # whatever it finds, so confirm via a direct main() call that the
+        # fixture tree now carries no finding.
+        recheck, after = run_main(_lint.main, [
             "--team-dir", str(team_dir),
             "--repo-root", str(repo_root),
-        ])
-        assert recheck == 0, (
-            "lint_python_import_completeness still fails against the fixture "
-            "tree after running every printed remedy command verbatim."
+        ], tmp_path / "after.json")
+        assert recheck == 0 and after == [], (
+            "lint_python_import_completeness still reports a finding against the "
+            f"fixture tree after running every printed remedy command verbatim: {after}"
         )
 
         # The requirements.txt file must now declare the previously-missing

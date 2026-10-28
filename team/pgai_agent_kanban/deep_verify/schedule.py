@@ -78,7 +78,7 @@ if not __package__:
     if _OWN_PACKAGE_ROOT not in sys.path:
         sys.path.insert(0, _OWN_PACKAGE_ROOT)
 
-from pgai_agent_kanban.lib.timeutil import parse_iso  # noqa: E402
+from pgai_agent_kanban.lib.timeutil import format_days_hours, parse_iso  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Mode vocabulary. Kept here (not re-derived in project_paths.sh) as the one
@@ -199,14 +199,6 @@ def _within_window(now: datetime.datetime, window: tuple[datetime.time, datetime
     return current >= start or current <= end
 
 
-def _format_elapsed(delta: datetime.timedelta) -> str:
-    total_hours = int(delta.total_seconds() // 3600)
-    days, hours = divmod(total_hours, 24)
-    if days:
-        return f"{days}d{hours}h"
-    return f"{hours}h"
-
-
 def evaluate_due(
     *,
     project: str,
@@ -256,7 +248,7 @@ def evaluate_due(
     if elapsed >= WEEKLY_INTERVAL:
         return DueDecision(
             True,
-            f"deep-verify: project={project} last run {_format_elapsed(elapsed)} ago "
+            f"deep-verify: project={project} last run {format_days_hours(elapsed)} ago "
             "(>= 7 days); running now",
         )
 
@@ -264,7 +256,7 @@ def evaluate_due(
     return DueDecision(
         False,
         f"deep-verify: project={project} scheduled run not due (last run "
-        f"{_format_elapsed(elapsed)} ago; next due "
+        f"{format_days_hours(elapsed)} ago; next due "
         f"{next_due.strftime('%Y-%m-%dT%H:%M:%S+00:00')})",
     )
 

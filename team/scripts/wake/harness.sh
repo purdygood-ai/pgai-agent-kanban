@@ -247,15 +247,30 @@ setup_project_directories() {
 
 # ---------------------------------------------------------------------------
 # Utility readers: README field extractors -- the first word of the field's
-# value (pgai_agent_kanban.lib.md_fields read, through pp_run_ops), exit 1
-# with no output when the README, the field or its value is missing.
+# value, exit 1 with no output when the README, the field or its value is
+# missing. The value is the first line of the "## <heading>" section (read
+# by read_md_field, which wake_common.sh below loads; the section ends at
+# the next "##" line, "###" included) with a whole-line **bold** or __bold__
+# wrapper removed.
 # (These are defined in claude.sh; duplicated here so harness.sh is
 # self-contained without sourcing the Claude-specific provider script.)
 # ---------------------------------------------------------------------------
 
+_harness_readme_field() {
+  local value
+  value="$(read_md_field --end-at-subheading "$1" "$2" 2>/dev/null)" || return 1
+  value="${value%%$'\n'*}"
+  value="${value%"${value##*[![:space:]]}"}"
+  if [[ "$value" =~ ^\*\*(.+)\*\*$ || "$value" =~ ^__(.+)__$ ]]; then
+    value="${BASH_REMATCH[1]}"
+    value="${value#"${value%%[![:space:]]*}"}"
+  fi
+  printf '%s\n' "$value"
+}
+
 get_workflow_type_from_readme() {
   local readme="${1:-}" value
-  value="$(pp_run_ops pgai_agent_kanban.lib.md_fields read "$readme" "Workflow Type" 2>/dev/null)" || return 1
+  value="$(_harness_readme_field "$readme" "Workflow Type")" || return 1
   value="${value%%[[:space:]]*}"
   [[ -n "$value" ]] || return 1
   printf '%s\n' "$value"
@@ -263,7 +278,7 @@ get_workflow_type_from_readme() {
 
 get_source_branch_from_readme() {
   local readme="${1:-}" value
-  value="$(pp_run_ops pgai_agent_kanban.lib.md_fields read "$readme" "Source Branch" 2>/dev/null)" || return 1
+  value="$(_harness_readme_field "$readme" "Source Branch")" || return 1
   value="${value%%[[:space:]]*}"
   [[ -n "$value" ]] || return 1
   printf '%s\n' "$value"

@@ -383,6 +383,20 @@ declare -gA _PGAI_LOCK_HELD_FDS 2>/dev/null || true
 declare -gA _PGAI_LOCK_HELD_PIDS 2>/dev/null || true
 
 # ---------------------------------------------------------------------------
+# _pgai_lock_release_locks_cmd
+# Echo the release-locks.sh an installed kanban carries under its root,
+# shell-quoted, so a remedy that names it runs as printed from any
+# directory. The root is $KANBAN_ROOT, else $PGAI_AGENT_KANBAN_ROOT_PATH,
+# else the root this library sits under (<root>/scripts/lib/). Internal
+# helper -- not part of this file's public surface.
+# ---------------------------------------------------------------------------
+_pgai_lock_release_locks_cmd() {
+    local root="${KANBAN_ROOT:-${PGAI_AGENT_KANBAN_ROOT_PATH:-}}"
+    [[ -n "$root" ]] || root="$(cd "${_PGAI_LOCK_PROVENANCE_LIB_DIR}/../.." && pwd)"
+    printf '%q' "${root}/scripts/release-locks.sh"
+}
+
+# ---------------------------------------------------------------------------
 # _pgai_lock_field <content> <key>
 # Echo the value of "<key>=" from a provenance record's text, or nothing if
 # absent. Internal helper -- not part of this file's public surface.
@@ -979,6 +993,11 @@ _PGAI_LOCK_FLOOR_NARRATED_DERIVATION=""
 # <project> is optional and forwarded to
 # pp_stale_lock_reap_after_wake_periods unchanged; omit it to resolve via
 # PGAI_PROJECT_NAME, exactly as that function's own contract documents.
+# That function walks project.cfg > kanban.cfg > 3 through the shared
+# pp_resolve_tiered_cfg_value (project_paths.sh) -- the chain
+# stale_lock_reap_periods() in team/pgai_agent_kanban/ops/locks.py reads
+# through its Python twin -- so this file never walks the two cfg tiers by
+# hand. An invalid value there is a non-zero return, read here as 3.
 # Resolution degrades to the shipped default of 3 periods (rather than
 # failing) when pp_stale_lock_reap_after_wake_periods is not loaded in this
 # process -- the case for a caller that sources this file standalone (a
@@ -1089,14 +1108,19 @@ pgai_lock_contention_probe_count() {
 
 # ---------------------------------------------------------------------------
 # pgai_lock_files_for_project <project>
-# Echo, one per line, every lock file under $KANBAN_ROOT/locks/ whose name
-# identifies <project> -- both naming schemes in the tree today
-# (pp_repo_lock_path's repo-wake-<repo_id>.lock and
-# overwatch_acquire_firing_lock's overwatch-<project>.lock), matched by a
-# "-<name>.lock" suffix. Its Python form,
-# pgai_agent_kanban.ops.locks.project_lock_files, is what why.sh's lock
-# pane and STUCK-LOCK correlation (pgai_agent_kanban.ops.verdict) read; a
-# unit test holds the two to the same answer on the same locks/ directory.
+# Echo, one per line, every lock file under $KANBAN_ROOT/locks/ that belongs
+# to <project>. A lock is a candidate when its name ends "-<name>.lock" for
+# the project name or its repo id -- pp_repo_lock_path's
+# repo-wake-<repo_id>.lock, overwatch-<project>.lock and wake-batch.sh's
+# wake-batch-<agent>-<project>.lock alike. A candidate that is really
+# another project's is left out, so project beta never claims alpha-beta's
+# locks: a wake-batch lock whose record (or its own provenance) names its
+# project in op ("wake-batch:<agent>:<project>") belongs to that project
+# only; any other name that also ends "-<other>.lock" for a longer project
+# directory under $KANBAN_ROOT/projects/ belongs to that other project.
+# Its Python form, pgai_agent_kanban.ops.locks.project_lock_files, is what
+# why.sh's lock pane and STUCK-LOCK correlation (pgai_agent_kanban.ops.verdict)
+# read; a unit test holds the two to the same answer on the same root.
 #
 # KANBAN_ROOT must be exported. Echoes nothing (not an error) when locks/
 # is absent or no lock file matches.
@@ -1109,12 +1133,67 @@ pgai_lock_files_for_project() {
     local repo_id
     repo_id="$(printf '%s' "${project}" | tr '/' '_' | tr -cd '[:alnum:]_-')"
 
-    local f base
+    # Every other project directory: a longer name among them that the lock
+    # name also ends with owns the lock instead.
+    local -a others=()
+    local d other
+    for d in "${KANBAN_ROOT}/projects"/*/; do
+        [[ -d "${d}" ]] || continue
+        other="$(basename "${d}")"
+        [[ "${other}" == "${project}" || "${other}" == "${repo_id}" ]] || others+=("${other}")
+    done
+
+    local f base stem matched is_candidate recorded claimed
     for f in "${locks_dir}"/*.lock; do
         [[ -e "${f}" ]] || continue
         base="$(basename "${f}")"
-        if [[ "${base}" == *"-${project}.lock" || "${base}" == *"-${repo_id}.lock" ]]; then
-            printf '%s\n' "${f}"
+        stem="${base%.lock}"
+        matched=""
+        is_candidate=0
+        if [[ "${stem}" == *"-${project}" ]]; then
+            matched="${project}"
+            is_candidate=1
+        fi
+        if [[ "${stem}" == *"-${repo_id}" ]]; then
+            [[ ${#repo_id} -gt ${#matched} ]] && matched="${repo_id}"
+            is_candidate=1
+        fi
+        [[ ${is_candidate} -eq 1 ]] || continue
+        if [[ "${stem}" == wake-batch-* ]]; then
+            recorded="$(_pgai_wake_batch_lock_project "${locks_dir}" "${stem}")"
+            if [[ -n "${recorded}" ]]; then
+                if [[ "${recorded}" == "${project}" || "${recorded}" == "${repo_id}" ]]; then
+                    printf '%s\n' "${f}"
+                fi
+                continue
+            fi
+        fi
+        claimed=0
+        for other in ${others[@]+"${others[@]}"}; do
+            if [[ ${#other} -gt ${#matched} && "${stem}" == *"-${other}" ]]; then
+                claimed=1
+                break
+            fi
+        done
+        [[ ${claimed} -eq 1 ]] || printf '%s\n' "${f}"
+    done
+    return 0
+}
+
+# _pgai_wake_batch_lock_project <locks_dir> <stem>
+# Echo the project the wake-batch lock <stem> (wake-batch-<agent>-<project>)
+# belongs to, read from the op field of <stem>.record and then <stem>.lock:
+# the first "wake-batch:<agent>:<project>" or "wake-batch-guard:..." value
+# whose agent and project spell <stem> back. Echoes nothing when neither
+# names one. The Python form is ops.locks._wake_batch_lock_project.
+_pgai_wake_batch_lock_project() {
+    local locks_dir="$1" stem="$2" path op
+    for path in "${locks_dir}/${stem}.record" "${locks_dir}/${stem}.lock"; do
+        op="$(pgai_lock_field "$(pgai_lock_read_provenance "${path}" 2>/dev/null)" op)"
+        if [[ "${op}" =~ ^(wake-batch|wake-batch-guard):([^:]+):([^:]+)$ ]] \
+            && [[ "${stem}" == "wake-batch-${BASH_REMATCH[2]}-${BASH_REMATCH[3]}" ]]; then
+            printf '%s\n' "${BASH_REMATCH[3]}"
+            return 0
         fi
     done
     return 0
@@ -1321,7 +1400,7 @@ pgai_lock_acquire() {
     while :; do
         _attempt=$(( _attempt + 1 ))
         if (( _attempt > _PGAI_LOCK_ACQUIRE_MAX_ATTEMPTS )); then
-            echo "lock_provenance.sh: pgai_lock_acquire: declining ${lock_file} after ${_PGAI_LOCK_ACQUIRE_MAX_ATTEMPTS} attempts -- the file at that path was replaced between open and flock on every attempt, so another process is acquiring or releasing it continuously; treating this as contention. Retry on the next wake, and if it persists, list the lock's holders with: team/scripts/release-locks.sh" >&2
+            echo "lock_provenance.sh: pgai_lock_acquire: declining ${lock_file} after ${_PGAI_LOCK_ACQUIRE_MAX_ATTEMPTS} attempts -- the file at that path was replaced between open and flock on every attempt, so another process is acquiring or releasing it continuously; treating this as contention. Retry on the next wake, and if it persists, list the lock's holders with: $(_pgai_lock_release_locks_cmd)" >&2
             { exec {_fd}>&-; } 2>/dev/null || true
             rm -f -- "$_tmp" 2>/dev/null || true
             return 1
@@ -1488,7 +1567,7 @@ pgai_lock_acquire() {
             pgai_emit_error_contract \
                 "$_reap_key" \
                 "$_reap_message" \
-                "No action needed -- the waiter reaped the stale lock automatically and proceeded with its own acquisition. If stale locks recur often for this path, inspect the holder's exit behavior; team/scripts/release-locks.sh lists every lock file with its provenance and staleness verdict."
+                "No action needed -- the waiter reaped the stale lock automatically and proceeded with its own acquisition. If stale locks recur often for this path, inspect the holder's exit behavior; $(_pgai_lock_release_locks_cmd) lists every lock file with its provenance and staleness verdict."
             rm -f -- "$lock_file" 2>/dev/null || true
             { exec {_pfd}>&-; } 2>/dev/null || true
             continue
@@ -1504,10 +1583,10 @@ pgai_lock_acquire() {
             _orphan_pids="$(_pgai_lock_inode_holder_pids "$lock_file" "$_orphan_self" "$_pfd")"
             if [[ -n "$_orphan_pids" ]]; then
                 _orphan_named="pids ${_orphan_pids}"
-                _orphan_remedy="If those processes are leftovers of a stopped chain rather than live work, stop them: kill -TERM ${_orphan_pids} -- or let team/scripts/release-locks.sh --release ${_lock_name} --force signal them; the next acquisition then takes the lock."
+                _orphan_remedy="If those processes are leftovers of a stopped chain rather than live work, stop them: kill -TERM ${_orphan_pids} -- or let $(_pgai_lock_release_locks_cmd) --release $(printf '%q' "${_lock_name}") --force signal them; the next acquisition then takes the lock."
             else
                 _orphan_named="pids not visible to this account"
-                _orphan_remedy="List the processes holding it with: find -L /proc/[0-9]*/fd -maxdepth 1 -samefile ${lock_file} 2>/dev/null -- stop them if they are leftovers of a stopped chain, or run team/scripts/release-locks.sh --release ${_lock_name} --force; the next acquisition then takes the lock."
+                _orphan_remedy="List the processes holding it with: find -L /proc/[0-9]*/fd -maxdepth 1 -samefile ${lock_file} 2>/dev/null -- stop them if they are leftovers of a stopped chain, or run $(_pgai_lock_release_locks_cmd) --release $(printf '%q' "${_lock_name}") --force; the next acquisition then takes the lock."
             fi
             # CONVERT: quality-class narration with zero runtime-failure
             # risk -- nothing is refused here that the contended refusal
@@ -1539,7 +1618,7 @@ pgai_lock_acquire() {
             pgai_emit_error_contract \
                 "lock.provenance.holder_overdue" \
                 "pgai_lock_acquire is deferring to a holder that looks wedged: ${lock_file} (${_overdue_held}) has gone unrefreshed for longer than the stale-lock threshold of ${_overdue_threshold_human} (derivation: ${_age_derivation}), yet its recorded holder pid ${_overdue_pid} still answers kill -0 -- ${_existing_desc}. A lock whose holder is alive is never deleted on age alone: unlinking it would not stop that holder, only let a second chain in beside it. A running chain refreshes its lock while a task runs, so this holder has stopped refreshing or is running with the per-task timeout disabled." \
-                "If the holder is wedged rather than doing real work, have it release its own lock: team/scripts/release-locks.sh --release ${_lock_name} --force (sends SIGTERM to pid ${_overdue_pid}, whose exit path releases the lock). A holder that has actually died is reaped automatically on the next acquisition."
+                "If the holder is wedged rather than doing real work, have it release its own lock: $(_pgai_lock_release_locks_cmd) --release $(printf '%q' "${_lock_name}") --force (sends SIGTERM to pid ${_overdue_pid}, whose exit path releases the lock). A holder that has actually died is reaped automatically on the next acquisition."
         fi
 
         # A fresh, provenance-less file is named as such in the contention
@@ -1563,7 +1642,7 @@ pgai_lock_acquire() {
             pgai_emit_error_contract \
                 "lock.provenance.contended" \
                 "pgai_lock_acquire could not take ${lock_file}: it is already held by ${_existing_desc}${_contended_detail}" \
-                "If the holder is still legitimately working, wait and retry -- most callers of this lock already retry automatically. If it looks stuck (the recorded holder pid is dead or wedged), inspect and clear it with: team/scripts/release-locks.sh --release ${_lock_name} (add --force only if the holder pid is still alive and you are certain it should be released)."
+                "If the holder is still legitimately working, wait and retry -- most callers of this lock already retry automatically. If it looks stuck (the recorded holder pid is dead or wedged), inspect and clear it with: $(_pgai_lock_release_locks_cmd) --release $(printf '%q' "${_lock_name}") (add --force only if the holder pid is still alive and you are certain it should be released)."
         fi
         # BLOCK-WORTHY: invariant-by-design — the flock this lock file backs
         # exists to serialize exclusive access to shared project state; a
@@ -1816,7 +1895,7 @@ pgai_lock_release() {
             pgai_emit_error_contract \
                 "lock.provenance.release_not_owner" \
                 "pgai_lock_release: ${lock_file} is no longer this process's lock (pid ${_PGAI_LOCK_HELD_PIDS[$lock_file]:-<unknown>} acquired it; the path now holds ${_current_desc}) -- closing this process's own fd and leaving the file to its current holder instead of removing it." \
-                "No action needed -- the lock was reaped and reacquired by another process while this one was still running, and this release correctly declined to disturb the new holder. Inspect current lock ownership with: team/scripts/release-locks.sh"
+                "No action needed -- the lock was reaped and reacquired by another process while this one was still running, and this release correctly declined to disturb the new holder. Inspect current lock ownership with: $(_pgai_lock_release_locks_cmd)"
             pgai_lock_abandon "$lock_file" "$fd"
             return 0
         fi
@@ -1939,7 +2018,7 @@ pgai_lock_reverify_or_narrate() {
     pgai_emit_error_contract \
         "lock.provenance.reverify_lost" \
         "pgai_lock_reverify_or_narrate: pid ${expected_pid} (op=${op}, task=${task}) no longer holds ${lock_file} at the '${phase}' phase boundary -- it is now held by ${_current_desc}. Stopping this chain cleanly before performing the ${phase} phase rather than racing the new holder." \
-        "No action needed -- the chain stopped itself before mutating shared state rather than race the new holder. Inspect current lock ownership with: team/scripts/release-locks.sh"
+        "No action needed -- the chain stopped itself before mutating shared state rather than race the new holder. Inspect current lock ownership with: $(_pgai_lock_release_locks_cmd)"
     return 1
 }
 

@@ -18,6 +18,9 @@ Tests cover the acceptance criteria from the task README:
      present.
   8. Internal-ID leak gate — grep for BUG-[0-9] in generated output returns zero
      hits.
+  9. Provenance scrub — a bug title and a Fixed line carry no commit id, RC
+     branch name or task id; ordinary words, versions and PRIORITY citations
+     survive.
 
 Test naming describes behavior, not bug IDs or scaffolding labels (roles/TESTER.md Anti-pattern 6).
 All temp paths use pytest's tmp_path fixture (redirected to the framework temp root).
@@ -54,6 +57,7 @@ def _make_release_notes(tmp_path: pathlib.Path, version: str, date: str, **kwarg
         features: str — text for the ## Features section
         bug_fixes: str — text for the ## Bug Fixes section
         bugs_resolved: str — text for the ## Bugs Resolved section
+        other_changes: str — text for the ## Other Changes section
     """
     notes_dir = tmp_path / "release-notes"
     notes_dir.mkdir(parents=True, exist_ok=True)
@@ -63,6 +67,7 @@ def _make_release_notes(tmp_path: pathlib.Path, version: str, date: str, **kwarg
     features = kwargs.get("features", "None")
     bug_fixes = kwargs.get("bug_fixes", "None")
     bugs_resolved = kwargs.get("bugs_resolved", "None")
+    other_changes = kwargs.get("other_changes", "None")
 
     content = textwrap.dedent(f"""\
         # Release Notes: test-project {version}
@@ -84,6 +89,9 @@ def _make_release_notes(tmp_path: pathlib.Path, version: str, date: str, **kwarg
 
         ## Bugs Resolved
         {bugs_resolved}
+
+        ## Other Changes
+        {other_changes}
 
         ## Known Issues
         None
@@ -791,6 +799,39 @@ class TestStructuralConformance:
         content = regenerate(repo_root, versions, [], bugs_dir)
         assert "None (bugfix release)" in content
 
+    def test_requirement_release_lists_its_requirement_under_implemented(
+        self, tmp_path: pathlib.Path
+    ) -> None:
+        """A release built from a requirement, whose notes name it under Other
+        Changes, lists that requirement under Implemented -- never 'None
+        (bugfix release)'. Other bullets there stay out of the entry."""
+        repo_root, bugs_dir, versions = _make_minimal_repo(
+            tmp_path,
+            versions_newest_first=["v1.2.0", "v1.1.0"],
+            published_versions=[],
+            bugs=[],
+            release_kwargs={
+                "v1.2.0": {
+                    "features": "None",
+                    # Continuation lines carry the fixture template's indent,
+                    # which _make_release_notes dedents after substitution.
+                    "other_changes": "\n        ".join(
+                        ["- v1.2.0-new-metrics-pane", "- v1.1.0-older-requirement", "- Tidied the logs"]
+                    ),
+                },
+                "v1.1.0": {"features": "None", "bug_fixes": "- **BUG-0001**: Some fix."},
+            },
+        )
+        content = regenerate(repo_root, versions, [], bugs_dir)
+        entry = content.split("## v1.2.0", 1)[1].split("\n## v1.1.0", 1)[0]
+        implemented = entry.split("### Implemented", 1)[1].split("###", 1)[0]
+        assert "v1.2.0-new-metrics-pane" in implemented
+        assert "None (bugfix release)" not in implemented
+        assert "v1.1.0-older-requirement" not in implemented
+        assert "Tidied the logs" not in implemented
+        older = content.split("\n## v1.1.0", 1)[1]
+        assert "None (bugfix release)" in older.split("### Fixed", 1)[0]
+
     def test_header_contains_auto_generated_marker(
         self, tmp_path: pathlib.Path
     ) -> None:
@@ -1477,3 +1518,58 @@ class TestContentQualityFixed:
         assert not (len(fixed_lines) == 1 and fixed_lines[0].strip() == "```"), (
             "Fixed section consists of only a bare '```' — stray fence regression present"
         )
+
+
+# ===========================================================================
+# Criterion 9: Provenance scrub on bug titles and Fixed lines
+# ===========================================================================
+
+_PROVENANCE_SYMPTOM = (
+    "On ai_rc/v1.2.3 the unit suite (a1b2c3d4) fails, as TESTER-20260101-001 found."
+)
+_PROVENANCE_TOKENS = ("a1b2c3d4", "ai_rc/v1.2.3", "TESTER-20260101-001", "()")
+
+
+class TestProvenanceScrub:
+    """Commit ids, RC branch names and task ids never reach a CHANGELOG line."""
+
+    def test_bug_title_drops_commit_branch_and_task_id(self, tmp_path: pathlib.Path) -> None:
+        path = _make_bug_file(tmp_path / "bugs", bug_num=5, slug="leak", symptom=_PROVENANCE_SYMPTOM)
+
+        symptom = parse_bug_file(path).symptom
+
+        for token in _PROVENANCE_TOKENS:
+            assert token not in symptom
+        assert symptom == "On the release candidate the unit suite fails, as another item found."
+
+    def test_bug_title_keeps_ordinary_words_and_versions(self, tmp_path: pathlib.Path) -> None:
+        text = "The defaced notes for v2.53.5 render wrongly."
+        path = _make_bug_file(tmp_path / "bugs", bug_num=6, slug="plain", symptom=text)
+
+        assert parse_bug_file(path).symptom == text
+
+    def test_fixed_lines_carry_no_commit_branch_or_task_id(self, tmp_path: pathlib.Path) -> None:
+        repo_root, bugs_dir, versions = _make_minimal_repo(
+            tmp_path,
+            versions_newest_first=["v1.1.0", "v1.0.0"],
+            published_versions=["v1.0.0"],
+            bugs=[{
+                "bug_num": 42, "slug": "leak", "symptom": _PROVENANCE_SYMPTOM,
+                "status": "resolved", "affects": "v1.0.0", "fixed_in": "v1.1.0",
+            }],
+            # Continuation lines carry the notes template's own indent, which
+            # _make_release_notes dedents away.
+            release_kwargs={"v1.1.0": {"bug_fixes": "\n        ".join([
+                "- BUG-0042: the suite.",
+                f"- Fixed: {_PROVENANCE_SYMPTOM}",
+                "- Fixed: PRIORITY-0007 shipped in v2.53.5 (commit d3e118d7).",
+            ])}},
+        )
+
+        content = regenerate(repo_root, versions, ["v1.0.0"], bugs_dir)
+        fixed = content.split("### Fixed\n", 1)[1].split("\n\n", 1)[0]
+
+        for token in _PROVENANCE_TOKENS + ("d3e118d7",):
+            assert token not in fixed
+        assert "On the release candidate the unit suite fails, as another item found." in fixed
+        assert "- Fixed: PRIORITY-0007 shipped in v2.53.5." in fixed.splitlines()

@@ -1,0 +1,32 @@
+=== Today ({TODAY}) ===
+
+  alpha
+    (no activity yet today)
+
+  beta
+    (no activity yet today)
+
+  gamma
+    (no activity yet today)
+
+=== Current RC ===
+
+  (no RC active in any project)
+=== Reliability ===
+
+  alpha
+    (no reliability data yet)
+
+  beta
+    (no reliability data yet)
+
+  gamma
+    (no reliability data yet)
+
+=== Bugs ===
+
+  alpha
+    2 open / 3 deferred / 1 needs-operator
+
+Updated: {UPDATED}
+History CSV: projects/*/metrics/history.csv

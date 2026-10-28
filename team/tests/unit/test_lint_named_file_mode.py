@@ -17,6 +17,8 @@ subprocess:
   - a sibling file carrying the same finding, but NOT named, is never
     reported (proof the directory is not walked);
   - a named clean file exits 0 with no finding;
+  - a finding exits 0 too (both lints are quality class): it prints and,
+    with --findings-file, is written as its own JSON finding;
   - malformed requests (no paths, a missing path, --files combined with a
     directory option) are usage errors, exit 2.
 
@@ -36,6 +38,7 @@ for them.
 from __future__ import annotations
 
 import importlib.util
+import json
 import shlex
 import signal
 import sys
@@ -50,7 +53,7 @@ _AP_LINT = _SCRIPTS_DIR / "lint_test_anti_patterns.py"
 _SKIP_GATE = _SCRIPTS_DIR / "lint_skip_bug_gate.sh"
 _SCAN_MODULE_PATH = _SCRIPTS_DIR / "lib" / "skip_bug_citation_scan.py"
 
-# The skip gate's verdict is its exit code and output, never how long it
+# The skip gate's verdict is its output and findings file, never how long it
 # took. One --files run costs a fraction of a CPU second, but a contended
 # host can stretch its wall-clock time a hundredfold, so a tight wall-clock
 # limit makes host load the verdict. A runaway run is caught by CPU time
@@ -200,7 +203,7 @@ def test_anti_pattern_lint_reports_ap7_in_named_file_and_ignores_unnamed_sibling
 
     result = _run_ap_lint(tmp_path, "--files", str(named), str(clean))
 
-    assert result.returncode == 1, result.stdout + result.stderr
+    assert result.returncode == 0, result.stdout + result.stderr
     assert f"{named}:{AP7_ENV_LINENO}: [AP7]" in result.stdout, result.stdout
     assert str(unnamed) not in result.stdout
     assert "lint_test_anti_patterns: 1 finding(s)" in result.stdout
@@ -245,7 +248,7 @@ def test_anti_pattern_lint_named_file_under_fixtures_dir_is_still_scanned(
 
     result = _run_ap_lint(tmp_path, "--files", str(named))
 
-    assert result.returncode == 1, result.stdout + result.stderr
+    assert result.returncode == 0, result.stdout + result.stderr
     assert f"{named}:{AP7_ENV_LINENO}: [AP7]" in result.stdout
 
 
@@ -254,7 +257,7 @@ def test_anti_pattern_lint_counts_a_file_named_twice_once(tmp_path: Path) -> Non
 
     result = _run_ap_lint(tmp_path, "--files", str(named), str(named))
 
-    assert result.returncode == 1
+    assert result.returncode == 0
     assert "lint_test_anti_patterns: 1 finding(s)" in result.stdout
     assert "scanning 1 named file(s)" in result.stdout
 
@@ -291,14 +294,91 @@ def test_anti_pattern_lint_whole_tree_default_still_walks_tests_dir(
 
     result = _run_ap_lint(tmp_path, "--tests-dir", str(tests_dir), "--scripts-dirs")
 
-    assert result.returncode == 1, result.stdout + result.stderr
+    assert result.returncode == 0, result.stdout + result.stderr
     assert f"{walked.resolve()}:{AP7_ENV_LINENO}: [AP7]" in result.stdout
     assert "scanning tests" in result.stdout
+
+
+def test_anti_pattern_lint_writes_each_finding_to_its_findings_file_and_exits_zero(
+    tmp_path: Path,
+) -> None:
+    named = _write(tmp_path / "tests" / "test_named_golden.py", AP7_SOURCE)
+    findings_file = tmp_path / "out" / "anti_patterns.json"
+
+    result = _run_ap_lint(tmp_path, "--files", str(named), "--findings-file", str(findings_file))
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert f"{named}:{AP7_ENV_LINENO}: [AP7]" in result.stdout, result.stdout
+    assert "error:   lint.test-anti-patterns" in result.stderr, result.stderr
+    findings = json.loads(findings_file.read_text(encoding="utf-8"))
+    assert len(findings) == 1, findings
+    finding = findings[0]
+    assert finding["lint"] == "test_anti_patterns"
+    assert finding["severity"] == "quality"
+    assert (finding["file"], finding["line"], finding["code"]) == (str(named), AP7_ENV_LINENO, "AP7")
+    assert finding["summary"] == finding["cause"]
+    assert f"--files {named}" in finding["remedy"], finding["remedy"]
+
+
+def test_anti_pattern_lint_clean_run_writes_an_empty_findings_file(tmp_path: Path) -> None:
+    clean = _write(tmp_path / "tests" / "test_clean.py", CLEAN_SOURCE)
+    findings_file = tmp_path / "out" / "anti_patterns.json"
+
+    result = _run_ap_lint(tmp_path, "--files", str(clean), "--findings-file", str(findings_file))
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert json.loads(findings_file.read_text(encoding="utf-8")) == []
+    assert "error:" not in result.stderr
 
 
 # ---------------------------------------------------------------------------
 # lint_skip_bug_gate.sh --files
 # ---------------------------------------------------------------------------
+
+
+def test_skip_gate_writes_one_finding_per_bad_citation_and_exits_zero(tmp_path: Path) -> None:
+    tests_dir = tmp_path / "tests"
+    placeholder = _write(tests_dir / "test_named_placeholder.py", PLACEHOLDER_SKIP_SOURCE)
+    unfiled = _write(tests_dir / "test_unfiled.py", UNFILED_CITATION_SOURCE)
+    bugs_dir = _bugs_dir_with_filed_citation(tmp_path)
+    findings_file = tmp_path / "out" / "skip_gate.json"
+
+    result = _run_skip_gate(
+        tmp_path, bugs_dir, "--files", str(placeholder), str(unfiled),
+        "--findings-file", str(findings_file),
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "BUG-SKIP-synthetic-placeholder" in result.stderr
+    assert "BUG-9871: no matching file found" in result.stderr
+    assert "error:   lint_skip_bug_gate.findings" in result.stderr
+    findings = json.loads(findings_file.read_text(encoding="utf-8"))
+    by_kind = {f["kind"]: f for f in findings}
+    assert len(findings) == 2 and set(by_kind) == {"placeholder-citation", "unfiled-citation"}, findings
+    assert (by_kind["placeholder-citation"]["file"], by_kind["placeholder-citation"]["line"]) == (
+        str(placeholder), 5,
+    )
+    assert (by_kind["unfiled-citation"]["file"], by_kind["unfiled-citation"]["line"]) == (str(unfiled), 5)
+    assert by_kind["unfiled-citation"]["bug_id"] == "BUG-9871"
+    for finding in findings:
+        assert finding["lint"] == "skip_cites_real_bug"
+        assert finding["severity"] == "quality"
+        assert f"--files {finding['file']}" in finding["remedy"], finding["remedy"]
+
+
+def test_skip_gate_clean_named_file_writes_an_empty_findings_file(tmp_path: Path) -> None:
+    filed = _write(tmp_path / "tests" / "test_filed.py", FILED_CITATION_SOURCE)
+    bugs_dir = _bugs_dir_with_filed_citation(tmp_path)
+    findings_file = tmp_path / "out" / "skip_gate.json"
+
+    result = _run_skip_gate(
+        tmp_path, bugs_dir, "--files", str(filed), "--findings-file", str(findings_file)
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert json.loads(findings_file.read_text(encoding="utf-8")) == []
+
+
 
 
 def test_skip_gate_reports_placeholder_in_named_file_only(tmp_path: Path) -> None:
@@ -309,7 +389,7 @@ def test_skip_gate_reports_placeholder_in_named_file_only(tmp_path: Path) -> Non
 
     result = _run_skip_gate(tmp_path, bugs_dir, "--files", str(named))
 
-    assert result.returncode == 1, result.stdout + result.stderr
+    assert result.returncode == 0, result.stdout + result.stderr
     assert f"{named}:5:" in result.stderr
     assert "BUG-SKIP-synthetic-placeholder" in result.stderr
     assert str(unnamed) not in result.stderr + result.stdout
@@ -322,7 +402,7 @@ def test_skip_gate_reports_unfiled_citation_in_named_file(tmp_path: Path) -> Non
 
     result = _run_skip_gate(tmp_path, bugs_dir, "--files", str(named))
 
-    assert result.returncode == 1, result.stdout + result.stderr
+    assert result.returncode == 0, result.stdout + result.stderr
     assert "BUG-9871: no matching file found" in result.stderr
 
 
@@ -347,7 +427,7 @@ def test_skip_gate_named_shell_file_uses_line_scan(tmp_path: Path) -> None:
 
     result = _run_skip_gate(tmp_path, bugs_dir, "--files", str(named))
 
-    assert result.returncode == 1, result.stdout + result.stderr
+    assert result.returncode == 0, result.stdout + result.stderr
     assert "BUG-9873: no matching file found" in result.stderr
 
 
@@ -362,7 +442,7 @@ def test_skip_gate_unfiled_citation_names_each_citing_file_and_line(tmp_path: Pa
         tmp_path, bugs_dir, "--files", str(first), str(second), str(shell)
     )
 
-    assert result.returncode == 1, result.stdout + result.stderr
+    assert result.returncode == 0, result.stdout + result.stderr
     # One finding per missing ID, each followed by every skip that cites it.
     assert "2 cited BUG-NNNN ID(s) have no file" in result.stderr
     assert result.stderr.count("BUG-9871: no matching file found") == 1
@@ -387,7 +467,7 @@ def test_skip_gate_counts_one_file_named_under_two_spellings_once(tmp_path: Path
         cwd=tmp_path,
     )
 
-    assert result.returncode == 1, result.stdout + result.stderr
+    assert result.returncode == 0, result.stdout + result.stderr
     assert "placeholder skip IDs in 2 named file(s)" in result.stdout
     assert "1 placeholder skip citation(s) found" in result.stderr
     assert result.stderr.count("test_probe_skip_placeholder.py:5:") == 1

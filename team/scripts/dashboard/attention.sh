@@ -46,6 +46,31 @@
 # Each line names one active halt scope: GLOBAL if $KANBAN_ROOT/HALT is present,
 # then each projects/<name>/HALT by project name.
 #
+# NEEDS OPERATOR section: omitted entirely when no project has a bug or
+# priority item at needs-operator. Otherwise one block per such project: its
+# count, and the newest open inbox question whose source names one of them:
+#   ❓ NEEDS OPERATOR
+#   ──────────────────────────────────────────────────────────────
+#
+#     pgai-chomp-man: 2 needs-operator
+#       Newest: INBOX-0004  2026-01-02T10:00:00+00:00  (BUG-NNNN-login-crash)  Which account should the fix log in with?
+#       Answer: scripts/inbox.sh --project pgai-chomp-man list
+#
+#   The Newest line reads "(no open inbox question)" when no open entry names
+#   one of the items, and "(inbox unreadable)" when the inbox cannot be read.
+#
+# OPERATOR INBOX section: omitted entirely when no inbox entry is open.
+# Otherwise one block per project with open entries (projects/<name>/operator-inbox.md):
+#   📥 OPERATOR INBOX
+#   ──────────────────────────────────────────────────────────────
+#
+#     pgai-chomp-man: 2 open
+#       INBOX-0002  2026-01-01T10:00:00+00:00  (rc:v1.2.3)  Cancel the RC or keep it open for the late fix?
+#       INBOX-0001  2026-01-01T09:00:00+00:00  (pgai-chomp-man)  Will you fix the runaway threshold setting?
+#       Answer: scripts/inbox.sh --project pgai-chomp-man list
+#
+#   One line per open entry, newest first, the question cut at 100 characters.
+#
 # Usage:
 #   attention.sh [--kanban-root <path>] [-h|--help]
 #
@@ -161,12 +186,10 @@ source "${SCRIPT_DIR}/../lib/discovery.sh"
 # Pattern matches wake/claude.sh lines ~136-139.
 [[ -f "$KANBAN_ROOT/bashrc" ]] && source "$KANBAN_ROOT/bashrc" 2>/dev/null || true
 [[ -f "$KANBAN_ROOT/env" ]] && source "$KANBAN_ROOT/env" 2>/dev/null || true
-[[ -f "$HOME/.config/pgai-kanban.cfg" ]] && source "$HOME/.config/pgai-kanban.cfg" 2>/dev/null || true
-# Source config — INI format (kanban.cfg) replaces legacy config.cfg
-# read_ini available via project_paths.sh (sourced above).
-if [[ -f "$KANBAN_ROOT/kanban.cfg" ]]; then
-    export PGAI_KANBAN_PM_MODE="${PGAI_KANBAN_PM_MODE:-$(read_ini "$KANBAN_ROOT/kanban.cfg" chain pm_mode automatic)}"
-fi
+# Operator user config, then [chain] pm_mode (config_loader.sh).
+# shellcheck source=../lib/config_loader.sh
+source "${SCRIPT_DIR}/../lib/config_loader.sh"
+config_startup_prelude "$KANBAN_ROOT" 2>/dev/null || true
 export PGAI_DEV_TREE_PATH="${PGAI_DEV_TREE_PATH:-$(resolve_global_dev_tree)}"
 
 # PM mode
@@ -504,6 +527,23 @@ if [[ "$_stale_found_any" == "false" ]]; then
   fi
 fi
 printf '\n'
+
+# ---------------------------------------------------------------------------
+# Needs operator: each project's count of needs-operator bug and priority
+# items and the newest open inbox question naming one, read through the
+# inbox module.  The scanner prints its own header and divider, and nothing
+# at all when no project has a needs-operator item.
+# ---------------------------------------------------------------------------
+PYTHONPATH="$_ATTN_PYTHONPATH" python3 "$_SCAN_ATTENTION_PY" \
+  needs-operator "$KANBAN_ROOT" "$_COLOR_ARG"
+
+# ---------------------------------------------------------------------------
+# Operator inbox: each project's open inbox count and newest open question,
+# read through the inbox module.  The scanner prints its own header and
+# divider, and nothing at all when no entry is open in any project.
+# ---------------------------------------------------------------------------
+PYTHONPATH="$_ATTN_PYTHONPATH" python3 "$_SCAN_ATTENTION_PY" \
+  inbox "$KANBAN_ROOT" "$_COLOR_ARG"
 
 # ---------------------------------------------------------------------------
 # Pending-approvals needs-human stratum: render each pending HUMAN-APPROVE

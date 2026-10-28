@@ -17,6 +17,11 @@ Fixtures exercised:
       tags v9.0.0 and ai_v9.0.0, main and ai_main both ahead of the fixture
       origin. With push_to_remote = true the check pushes only ai_v9.0.0 and
       ai_main; with push_to_remote unset or false it pushes nothing.
+  (G) A release whose push the remote refused (a pre-receive hook on the
+      fixture origin): main ahead and the release tag missing there. While
+      the remote refuses, the check records push-main-failed and
+      push-tag-failed, changes nothing on the remote and returns non-zero;
+      once the remote accepts, the next run pushes main and the tag.
 
 All tests run against synthetic environments and never touch the live kanban root.
 """
@@ -579,3 +584,48 @@ def test_push_lag_pushes_nothing_unless_push_to_remote_is_true(tmp_path: pathlib
         assert _git(origin, "rev-parse", ref) == sha
     assert "staged-by-design" in _action_log(proj_dir)
 
+
+
+# ---------------------------------------------------------------------------
+# (G) a release push the remote refused is pushed once the remote accepts
+# ---------------------------------------------------------------------------
+
+
+def test_push_lag_left_by_a_refused_release_push_is_pushed_once_the_remote_accepts(tmp_path: pathlib.Path) -> None:
+    origin = tmp_path / "origin.git"
+    origin.mkdir()
+    _git(origin, "init", "--bare")
+    dev_tree = tmp_path / "dev"
+    _make_git_repo(dev_tree)
+    _git(dev_tree, "branch", "-M", "main")
+    _git(dev_tree, "remote", "add", "origin", str(origin))
+    _git(dev_tree, "push", "origin", "main")
+    origin_main_before = _git(origin, "rev-parse", "refs/heads/main")
+    # The release: one commit and its tag, cut locally while the remote refuses pushes.
+    _make_commit(dev_tree, "release-commit")
+    _make_tag(dev_tree, "v1.0.0")
+    hook = origin / "hooks" / "pre-receive"
+    hook.write_text("#!/bin/sh\necho 'fixture remote: rejected' >&2\nexit 1\n", encoding="utf-8")
+    hook.chmod(0o755)
+    kanban_root = tmp_path / "kanban"
+    project_name = "release-lane"
+    proj_dir = _build_kanban(kanban_root, project_name, dev_tree, push_to_remote="true")
+
+    refused = _run_live_push_lag(tmp_path, kanban_root, project_name, proj_dir)
+
+    assert refused.returncode != 0, refused.stderr
+    assert "local main is 1 commit(s) ahead of origin/main" in refused.stderr
+    assert "unpushed tag: v1.0.0" in refused.stderr
+    log = _action_log(proj_dir)
+    assert "push-main-failed\tmain" in log and "push-tag-failed\tv1.0.0" in log, log
+    assert _git(origin, "rev-parse", "refs/heads/main") == origin_main_before
+    assert _origin_tags(origin) == set()
+
+    hook.unlink()
+    accepted = _run_live_push_lag(tmp_path, kanban_root, project_name, proj_dir)
+
+    assert accepted.returncode == 0, accepted.stderr
+    assert _git(origin, "rev-parse", "refs/heads/main") == _git(dev_tree, "rev-parse", "main")
+    assert _origin_tags(origin) == {"v1.0.0"}
+    log = _action_log(proj_dir)
+    assert "pushed-main-to-origin\tmain" in log and "pushed-tag-to-origin\tv1.0.0" in log, log

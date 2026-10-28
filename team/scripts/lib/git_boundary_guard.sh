@@ -639,16 +639,16 @@ _git_boundary_guard_path_under_temp_root() {
     local canon
     canon="$(realpath -m -- "$path" 2>/dev/null)" || canon="$path"
 
+    # The temp root is pgai_temp_dir's answer alone: it honours the
+    # override (whitespace-trimmed, blank reading as unset) before the
+    # configured root, so this guard compares against the same root every
+    # other framework caller writes under.
     local temp_root
-    if [[ -n "${PGAI_AGENT_KANBAN_TEMP_DIR:-}" ]]; then
-        temp_root="${PGAI_AGENT_KANBAN_TEMP_DIR}"
-    else
-        if ! command -v pgai_temp_dir >/dev/null 2>&1; then
-            # shellcheck source=temp.sh
-            source "${_GIT_BOUNDARY_GUARD_LIB_DIR}/temp.sh"
-        fi
-        temp_root="$(pgai_temp_dir)"
+    if ! command -v pgai_temp_dir >/dev/null 2>&1; then
+        # shellcheck source=temp.sh
+        source "${_GIT_BOUNDARY_GUARD_LIB_DIR}/temp.sh"
     fi
+    temp_root="$(pgai_temp_dir)"
     local canon_temp_root
     canon_temp_root="$(realpath -m -- "$temp_root" 2>/dev/null)" || canon_temp_root="$temp_root"
 

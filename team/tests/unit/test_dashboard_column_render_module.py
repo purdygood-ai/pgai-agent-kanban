@@ -5,14 +5,17 @@ dashboard's board column panes (team/scripts/dashboard/column-render.sh).
 
 Coverage:
 
-  1. cells — display status and colour for every board status (WONT-DO
-     drawn like DONE but kept distinct), ANSI-aware truncation, compact IDs,
-     and the two row-window selections.
+  1. cells — display status and colour for every board status (WONT-DO and
+     duplicate drawn like DONE but kept distinct, needs-operator in its own
+     palette colour), the carried and needs-operator status markers,
+     ANSI-aware truncation, compact IDs, and the two row-window selections.
   2. single — the input column (mtime order, requirements active window,
-     max_rows cut, deferral glyph) and the queue column (status.md wins
-     over the queue marker, middle-position window, max_rows cut).
-  3. multi — row allocation, the environment contract, project tags, and
-     requirements classified by target version alone, as GET /board does.
+     max_rows cut, deferral glyph, needs-operator / duplicate / carried
+     rows) and the queue column (status.md wins over the queue marker,
+     middle-position window, max_rows cut).
+  3. multi — row allocation, the environment contract, project tags,
+     needs-operator / duplicate / carried rows, and requirements classified
+     by target version alone, as GET /board does.
   4. The command line — each mode prints the pane; --help exits 0.
 """
 
@@ -46,15 +49,17 @@ from pgai_agent_kanban.dashboard.column_render.cells import (  # noqa: E402
     active_window,
     compact_id,
     middle_position_window,
+    status_marker,
     truncate_ansi,
     visible_len,
 )
 from pgai_agent_kanban.dashboard.column_render.multi import compute_layout  # noqa: E402
+from pgai_agent_kanban.lib.palette import resolve_semantic_color  # noqa: E402
 
-RED, YELLOW, GREEN, WHITE, DIM, RESET = (
-    "\033[0;31m", "\033[0;33m", "\033[0;32m", "\033[0;37m", "\033[2m", "\033[0m",
+RED, YELLOW, GREEN, WHITE, DIM, RESET, MAGENTA = (
+    "\033[0;31m", "\033[0;33m", "\033[0;32m", "\033[0;37m", "\033[2m", "\033[0m", "\033[0;35m",
 )
-COLOR = Palette(True, RED, YELLOW, GREEN, WHITE, DIM, RESET)
+COLOR = Palette(True, RED, YELLOW, GREEN, WHITE, DIM, RESET, needs_operator=MAGENTA)
 PLAIN = Palette(False)
 _SGR_RE = re.compile(r"\033\[[0-9;]*m")
 
@@ -82,7 +87,10 @@ def _plain(lines: list) -> list:
         ("label", "running", YELLOW),
         ("done", "done", GREEN),
         ("wont-do", "wont-do", GREEN),
+        ("duplicate", "duplicate", GREEN),
         ("blocked", "blocked", RED),
+        ("needs-operator", "needs-operator", MAGENTA),
+        ("carried", "carried", WHITE),
         ("open", "open", WHITE),
         ("anything-else", "open", WHITE),
     ],
@@ -90,6 +98,28 @@ def _plain(lines: list) -> list:
 def test_each_board_status_has_one_display_status_and_colour(board_status, shown, colour) -> None:
     assert display_status(board_status) == shown
     assert status_color(display_status(board_status), COLOR) == colour
+
+
+def test_the_palette_gives_needs_operator_a_colour_of_its_own() -> None:
+    needs_operator = resolve_semantic_color("status_needs_operator", True)
+    others = {resolve_semantic_color(f"status_{key}", True) for key in ("open", "running", "done", "blocked")}
+    assert needs_operator and needs_operator not in others
+    assert resolve_semantic_color("status_needs_operator", False) == ""
+
+
+@pytest.mark.parametrize(
+    "status, colour_on, colour_off",
+    [
+        ("carried", " ↻", " [carried]"),
+        ("needs-operator", "", " [needs-op]"),
+        ("open", "", ""),
+        ("running", "", ""),
+        ("duplicate", "", ""),
+    ],
+)
+def test_status_marker_marks_carried_always_and_needs_operator_without_colour(status, colour_on, colour_off) -> None:
+    assert status_marker(status, True) == colour_on
+    assert status_marker(status, False) == colour_off
 
 
 def test_wont_do_stays_distinct_from_done_but_shares_its_colour() -> None:
@@ -228,6 +258,42 @@ def test_malformed_posture_warns_only_on_cards_whose_file_says_open(tmp_path) ->
     assert lines == ["BUG-0001 !", "BUG-0002", "BUG-0003"]
 
 
+def _intake_states(project: pathlib.Path) -> pathlib.Path:
+    """Write bugs at needs-operator, duplicate, carried and running; return bugs/.
+
+    The first running bug is carried: it is listed only by a done bundle in
+    the requirements/ directory beside bugs/.  The second running bug has
+    no bundle listing it, so it stays running.
+    """
+    bugs = project / "bugs"
+    for mtime, (number, status) in enumerate((("9001", "needs-operator"), ("9002", "duplicate"),
+                                             ("9003", "running"), ("9004", "running")), start=1):
+        _write(bugs / f"BUG-{number}-state.md", f"# BUG-{number}\n\n## Status\n{status}\n", mtime)
+    _write(project / "requirements" / "v0.1.0-bugfix-bundle.md",
+           "# Requirements: v0.1.0\n\n## Status\ndone\n\n## Target Version\nv0.1.0\n\n"
+           f"## Bundled Items\n\n- BUG-9003-state.md (`{bugs / 'BUG-9003-state.md'}`)\n")
+    return bugs
+
+
+def test_input_column_draws_needs_operator_duplicate_and_carried(tmp_path) -> None:
+    bugs = _intake_states(tmp_path)
+    coloured = render_input_column(
+        bugs, rows=10, width=38, is_requirements=False, active_rc="", last_released="",
+        max_rows=20, palette=COLOR,
+    )
+    assert coloured == [
+        f"{YELLOW}BUG-9004{RESET}",
+        f"{WHITE}BUG-9003{RESET} ↻",
+        f"{GREEN}BUG-9002{RESET}",
+        f"{MAGENTA}BUG-9001{RESET}",
+    ]
+    plain = render_input_column(
+        bugs, rows=10, width=38, is_requirements=False, active_rc="", last_released="",
+        max_rows=20, palette=PLAIN,
+    )
+    assert plain == ["BUG-9004", "BUG-9003 [carried]", "BUG-9002", "BUG-9001 [needs-op]"]
+
+
 def _queue(tmp_path: pathlib.Path, entries: list) -> tuple:
     """Write a backlog of (marker, task_id, state-or-None) and return (backlog, tasks_dir)."""
     tasks = tmp_path / "tasks"
@@ -331,6 +397,26 @@ def test_multi_requirements_classify_by_target_version_alone(tmp_path) -> None:
     ]
 
 
+def test_multi_column_draws_needs_operator_duplicate_and_carried(tmp_path) -> None:
+    source = ProjectSource("alpha", "#378ADD", input_dir=str(_intake_states(tmp_path)))
+    coloured = render_multi_project_column([source], subcommand="input", column_type="bugs", width=29, palette=COLOR)
+    assert [line.split(" ", 1)[1] for line in coloured] == [
+        f"{YELLOW}BUG-9004{RESET}",
+        f"{WHITE}BUG-9003{RESET} ↻",
+        f"{GREEN}BUG-9002{RESET}",
+        f"{MAGENTA}BUG-9001{RESET}",
+    ]
+    plain = render_multi_project_column([source], subcommand="input", column_type="bugs", width=29, palette=PLAIN)
+    assert plain == ["[alph] BUG-9004", "[alph] BUG-9003 [carried]", "[alph] BUG-9002", "[alph] BUG-9001 [needs-op]"]
+
+
+def test_multi_column_marker_survives_truncation_of_a_narrow_pane(tmp_path) -> None:
+    source = ProjectSource("alpha", "#378ADD", input_dir=str(_intake_states(tmp_path)))
+    lines = render_multi_project_column([source], subcommand="input", column_type="bugs", width=20, palette=PLAIN)
+    assert lines[1] == "[alph] BU… [carried]"
+    assert all(visible_len(line) <= 20 for line in lines)
+
+
 def test_multi_column_with_no_rows_renders_empty() -> None:
     source = ProjectSource("alpha", "#378ADD")
     assert render_multi_project_column([source], subcommand="input", column_type="bugs", width=20, palette=PLAIN) == ["(empty)"]
@@ -365,6 +451,15 @@ def test_cli_multi_mode_reads_projects_from_the_environment(tmp_path, capsys, mo
     monkeypatch.setenv("_PROJ_TASKS_DIRS_STR", f"{tasks}\n")
     assert cli.main(["multi", "--subcommand=queue", "--column-type=coder", "--width=22"]) == 0
     assert capsys.readouterr().out == "[alph] 20260101-001\n"
+
+
+def test_cli_input_mode_draws_needs_operator_in_the_palette_colour(tmp_path, capsys) -> None:
+    bugs = _intake_states(tmp_path)
+    assert cli.main([
+        "input", f"--input-dir={bugs}", "--rows=10", "--width=38", "--use-color=true", f"--reset={RESET}",
+    ]) == 0
+    last = capsys.readouterr().out.splitlines()[-1]
+    assert last == f"{resolve_semantic_color('status_needs_operator', True)}BUG-9001{RESET}"
 
 
 def test_cli_help_exits_zero(capsys) -> None:

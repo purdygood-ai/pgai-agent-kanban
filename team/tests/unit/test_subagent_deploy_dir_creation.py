@@ -625,11 +625,10 @@ def test_ensure_provider_agents_dir_fails_loud_on_unwritable_parent(
 
 
 # ---------------------------------------------------------------------------
-# Manifest completeness — every shipped wrapper, OVERWATCH included
+# Manifest completeness — every shipped wrapper; OVERWATCH ships none
 # ---------------------------------------------------------------------------
 
 _REAL_SUBAGENTS_DIR = _REPO_ROOT / "subagents"
-_OVERWATCH_SRC = _REAL_SUBAGENTS_DIR / "overwatch.md"
 
 
 def _manifest_names() -> list[str]:
@@ -667,59 +666,34 @@ def test_manifest_lists_every_shipped_subagent_wrapper() -> None:
         f"wrappers shipped under {_REAL_SUBAGENTS_DIR} but absent from "
         f"{_REAL_MANIFEST}: {missing}"
     )
-    assert "overwatch" in listed, f"overwatch must be listed in {_REAL_MANIFEST}"
+    # OVERWATCH dispatches no model, so it ships no wrapper.
+    assert "overwatch" not in listed, f"overwatch must not be listed in {_REAL_MANIFEST}"
+    assert not (_REAL_SUBAGENTS_DIR / "overwatch.md").exists()
 
 
-@pytest.mark.skipif(
-    not _REAL_INSTALL_SH.exists() or not _OVERWATCH_SRC.exists(),
-    reason="Real install.sh or subagents/overwatch.md not found; skipping.",
-)
-def test_install_deploys_overwatch_wrapper_identical_to_source_and_tracks_it(
-    tmp_path: pathlib.Path,
-) -> None:
-    """A fixture install writes agents/overwatch.md byte-identical to its source.
+@pytest.mark.skipif(not _REAL_INSTALL_SH.exists(), reason="Real install.sh not found; skipping.")
+def test_install_removes_a_previously_installed_overwatch_wrapper(tmp_path: pathlib.Path) -> None:
+    """An install that earlier deployed agents/overwatch.md removes it.
 
-    The install runs into a sandbox root with a temporary HOME and
-    CLAUDE_CONFIG_DIR, and records overwatch in .installed-subagents.
+    The wrapper is no longer in the manifest, so install.sh's state-file
+    cleanup deletes the copy it recorded in .installed-subagents and stops
+    tracking it.
     """
     home = tmp_path / "home"
     home.mkdir()
     kanban_root = tmp_path / "kanban_root"
+    kanban_root.mkdir()
+    (kanban_root / ".installed-subagents").write_text("coder\noverwatch\n", encoding="utf-8")
+    stale = home / ".claude" / "agents" / "overwatch.md"
+    stale.parent.mkdir(parents=True)
+    stale.write_text("---\nname: overwatch\n---\n", encoding="utf-8")
 
     result = _run_install(tmp_path, home=home, kanban_root=kanban_root)
     output = _combined_output(result)
     assert result.returncode == 0, f"install.sh failed:\n{output}"
 
-    deployed = home / ".claude" / "agents" / "overwatch.md"
-    assert deployed.is_file(), f"overwatch wrapper not deployed:\n{output}"
-    assert deployed.read_bytes() == _OVERWATCH_SRC.read_bytes(), (
-        f"{deployed} differs from {_OVERWATCH_SRC}"
-    )
-    assert "overwatch" in _installed_subagents_state(kanban_root)
-
-
-@pytest.mark.skipif(
-    not _REAL_UPGRADE_SH.exists() or not _OVERWATCH_SRC.exists(),
-    reason="Real upgrade.sh or subagents/overwatch.md not found; skipping.",
-)
-def test_upgrade_add_claude_agents_deploys_overwatch_wrapper_and_tracks_it(
-    tmp_path: pathlib.Path,
-) -> None:
-    """upgrade.sh --add-claude-agents installs and tracks overwatch too."""
-    home = tmp_path / "home"
-    home.mkdir()
-    kanban_root = tmp_path / "kanban_root"
-
-    result = _run_upgrade_phase2(tmp_path, home=home, kanban_root=kanban_root)
-    output = _combined_output(result)
-    assert result.returncode == 0, f"upgrade.sh --phase2 failed:\n{output}"
-
-    deployed = home / ".claude" / "agents" / "overwatch.md"
-    assert deployed.is_file(), f"overwatch wrapper not deployed:\n{output}"
-    assert deployed.read_bytes() == _OVERWATCH_SRC.read_bytes(), (
-        f"{deployed} differs from {_OVERWATCH_SRC}"
-    )
-    assert "overwatch" in _installed_subagents_state(kanban_root)
+    assert not stale.exists(), f"the previously installed overwatch wrapper was not removed:\n{output}"
+    assert "overwatch" not in _installed_subagents_state(kanban_root), output
 
 
 # ---------------------------------------------------------------------------

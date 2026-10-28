@@ -28,8 +28,9 @@ Coverage:
      of none lets the call through.
   4. File mode: a rewritten projects.cfg keeps its permission bits.
   5. The functions directly: refusal exit codes, the registry helpers'
-     palette and priority answers, the seeded overwatch files' bytes equal
-     the bash seeders', and the ops CLI's verb dispatch.
+     palette and priority answers, the seeded overwatch_resolve block's
+     bytes equal the bash seeder's (and no OVERWATCH queue file is seeded),
+     and the ops CLI's verb dispatch.
   7. A registry priority that is not a whole number -- a newline that would
      open a [project:...] section of its own above all -- is refused
      (``create_project.priority_invalid`` / ``add_project.priority_invalid``)
@@ -40,7 +41,10 @@ Coverage:
      when absent, never overwrite an existing one (a second create or add,
      and refresh_seeded_templates, leave an edited README byte-unchanged),
      a dry run writes none, a missing template only warns, and the create
-     output tells the operator to fill it in.
+     output tells the operator to fill it in. Whenever create_project seeds
+     the README it also writes projects/<name>/.readme-template.md, a byte
+     copy of the same template (for every workflow type); its dry run lists
+     that copy, and a README it does not seed gets no snapshot.
 
 Every board is a throwaway directory under tmp_path; every CLI run gets an
 explicit, minimal environment (build_scrubbed_env).
@@ -68,6 +72,7 @@ from pgai_agent_kanban.lib.palette import load_default_palette  # noqa: E402
 from pgai_agent_kanban.ops import projects as ops_projects  # noqa: E402
 from pgai_agent_kanban.ops.context import OpsContext  # noqa: E402
 from pgai_agent_kanban.ops.errors import IoError, OpsError  # noqa: E402
+from pgai_agent_kanban.overwatch.halt_provenance import installed_script_command  # noqa: E402
 from tests.fixtures.golden_board import build_synthetic_board  # noqa: E402
 from tests.fixtures.route_cli_parity import assert_route_cli_parity, build_api_client  # noqa: E402
 from tests.fixtures.scrubbed_subprocess_env import build_scrubbed_env  # noqa: E402
@@ -144,7 +149,7 @@ _SCENARIOS: dict[str, tuple[dict, str, list[str], dict]] = {
     "create-bad-color-junk": ({}, "create-project.sh", ["--project", "alpha", "--color", "red"], {}),
     "create-empty-devtree": ({}, "create-project.sh", ["--project", "alpha", "--dev-tree="], {}),
     "create-no-name": ({}, "create-project.sh", [], {}),
-    "create-bad-name": ({}, "create-project.sh", ["--project", "1abc"], {}),
+    "create-bad-name": ({}, "create-project.sh", ["--project", "My_App"], {}),
     "create-bad-name2": ({}, "create-project.sh", ["--project", "a.b"], {}),
     "create-exists": ({"projects/alpha/x": "x\n"}, "create-project.sh", ["--project", "alpha"], {}),
     "create-unknown-wf": ({}, "create-project.sh", ["--project", "alpha", "--workflow-type", "nope"], {}),
@@ -515,8 +520,9 @@ def test_cli_active_rc_refuses_with_and_without_force_and_changes_nothing(tmp_pa
     assert triple is not None and triple["error"] == "remove_project.active_rc", run.stderr
     assert "Active RC = v1.2.3" in triple["message"]
     assert "with or without --force" in triple["message"]
-    assert "team/scripts/cm/cancel-rc.sh --project old --key v1.2.3 --yes" in triple["remedy"]
-    assert "team/scripts/remove-project.sh --project old" in triple["remedy"]
+    cancel_rc = installed_script_command(root.resolve(), "cm/cancel-rc.sh", "--project", "old", "--key", "v1.2.3", "--yes")
+    assert cancel_rc in triple["remedy"]
+    assert installed_script_command(root.resolve(), "remove-project.sh", "--project", "old") in triple["remedy"]
     assert (root / "projects.cfg").read_text(encoding="utf-8") == _INI_CFG
     assert (root / "projects" / "old" / "x.md").is_file()
 
@@ -717,18 +723,13 @@ def test_an_unknown_workflow_lists_the_ready_plugins_under_the_kanban_root(tmp_p
     )
 
 
-def test_seeded_overwatch_files_equal_the_bash_seeders(tmp_path):
+def test_seeded_overwatch_resolve_block_equals_the_bash_seeder_and_no_overwatch_queue(tmp_path):
     seeders = _SCRIPTS / "lib"
-    backlog = subprocess.run(
-        ["bash", "-c", f'source "{seeders}/overwatch_backlog_seed.sh"; overwatch_backlog_seed_content'],
-        capture_output=True, text=True, env=_env(tmp_path, tmp_path), check=True, timeout=30,
-    ).stdout
     resolve = subprocess.run(
         ["bash", "-c", f'source "{seeders}/overwatch_resolve_seed.sh"; overwatch_resolve_seed_comment_block'],
         capture_output=True, text=True, env=_env(tmp_path, tmp_path), check=True, timeout=30,
     ).stdout
 
-    assert ops_projects.queue_file_text("Overwatch Backlog", "overwatch agent") == backlog
     assert resolve == _SEED_FILE.read_text(encoding="utf-8")
     assert resolve.rstrip("\n").endswith("# overwatch_resolve = false")
 
@@ -736,7 +737,9 @@ def test_seeded_overwatch_files_equal_the_bash_seeders(tmp_path):
     _seed(root, {})
     ops_projects.create_project(_ctx(root), "alpha")
     project = root / "projects" / "alpha"
-    assert (project / "tasks" / "queues" / "overwatch_backlog.md").read_text(encoding="utf-8") == backlog
+    # OVERWATCH has no model queue: its firings are the sweep and the
+    # on-BLOCK nudge, neither of which reads a queue file.
+    assert not (project / "tasks" / "queues" / "overwatch_backlog.md").exists()
     # The template carries the seed block verbatim as the close of [release],
     # so a new project.cfg and an upgraded one say the same thing.
     release = (project / "project.cfg").read_text(encoding="utf-8").split("\n[release]\n", 1)[1].split("\n[", 1)[0]
@@ -848,6 +851,25 @@ def test_the_create_output_tells_the_operator_to_fill_in_the_project_readme(tmp_
     assert f"     $EDITOR {root}/projects/alpha/README.md" in steps
 
 
+@pytest.mark.parametrize(
+    ("git_remote", "named"),
+    [("upstream", "upstream"), (None, "origin"), ("", "origin")],
+    ids=["given", "omitted", "blank"],
+)
+def test_the_create_output_names_the_remote_the_base_branches_go_to(tmp_path, capsys, git_remote, named):
+    root = tmp_path / "root"
+    _seed(root, {})
+
+    kwargs = {} if git_remote is None else {"git_remote": git_remote}
+    ops_projects.create_project(_ctx(root), "alpha", scripts_dir=_SCRIPTS, **kwargs)
+
+    lines = capsys.readouterr().out.splitlines()
+    steps = lines[lines.index("Next steps:"):]
+    step3 = next(line for line in steps if line.strip().startswith("3. "))
+    assert step3 == f"  3. Push the chain's base branches to {named} (run once, before first release):"
+    assert steps[steps.index(step3) + 1] == "     init-project-git-repo.sh --project alpha"
+
+
 def test_create_project_dry_run_lists_the_readme_copy_and_writes_none(tmp_path, capsys):
     root = tmp_path / "root"
     _seed(root, {})
@@ -857,6 +879,44 @@ def test_create_project_dry_run_lists_the_readme_copy_and_writes_none(tmp_path, 
     assert not (root / "projects").exists()
     out = capsys.readouterr().out
     assert f"  cp {_SCRIPTS}/../templates/project/README-TEMPLATE.md -> {root}/projects/alpha/README.md" in out
+    assert (
+        f"  cp {_SCRIPTS}/../templates/project/README-TEMPLATE.md -> {root}/projects/alpha/"
+        f"{ops_projects.PROJECT_README_SNAPSHOT}"
+    ) in out
+
+
+@pytest.mark.parametrize("workflow_type", [None, "document"], ids=["default", "document"])
+def test_create_project_stores_a_byte_copy_of_the_readme_template_as_the_snapshot(tmp_path, workflow_type):
+    root = tmp_path / "root"
+    _seed(root, {})
+
+    ops_projects.create_project(_ctx(root), "alpha", workflow_type=workflow_type, scripts_dir=_SCRIPTS)
+
+    project = root / "projects" / "alpha"
+    snapshot = project / ".readme-template.md"
+    assert ops_projects.PROJECT_README_SNAPSHOT == snapshot.name
+    assert snapshot.read_bytes() == _README_TEMPLATE.read_bytes()
+    assert snapshot.read_bytes() == (project / "README.md").read_bytes()
+
+
+def test_a_missing_readme_template_warns_and_create_writes_no_readme_and_no_snapshot(tmp_path, capsys):
+    root = tmp_path / "root"
+    _seed(root, _PLUGINS)
+    install = tmp_path / "no-readme-template-install"
+    bare_scripts = install / "scripts"
+    bare_scripts.mkdir(parents=True)
+    shutil.copytree(_TEAM_DIR / "templates" / "project" / "release", install / "templates" / "project" / "release")
+
+    outcome = ops_projects.create_project(_ctx(root), "alpha", scripts_dir=bare_scripts)
+
+    project = root / "projects" / "alpha"
+    assert outcome.changed
+    assert (project / "INTENT.md").is_file()
+    assert not (project / "README.md").exists()
+    assert not (project / ".readme-template.md").exists()
+    assert "[project:alpha]" in (root / "projects.cfg").read_text(encoding="utf-8")
+    err = capsys.readouterr().err
+    assert f"WARNING: project README template not found: {bare_scripts}/../templates/project/README-TEMPLATE.md" in err
 
 
 @pytest.mark.parametrize("registry", [None, _INI_CFG], ids=["unregistered", "registered"])
@@ -893,6 +953,43 @@ def test_add_project_leaves_an_existing_project_readme_byte_unchanged(tmp_path, 
     assert readme.read_text(encoding="utf-8") == _EDITED_README
     assert readme.stat().st_mtime_ns == mtime
     assert "README" not in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("registry", [None, _INI_CFG], ids=["unregistered", "registered"])
+def test_add_project_stores_the_readme_template_snapshot_beside_a_readme_it_seeds(tmp_path, registry):
+    """Like create_project, add_project keeps a byte copy of the template it
+    seeded the README from, so the template refresh can report a later
+    template change for this project."""
+    root = tmp_path / "root"
+    files = {"projects/two/": _DIR}
+    if registry is not None:
+        files["projects.cfg"] = registry
+    _seed(root, files)
+
+    ops_projects.add_project(_ctx(root), "two", scripts_dir=_SCRIPTS)
+
+    project = root / "projects" / "two"
+    snapshot = project / ops_projects.PROJECT_README_SNAPSHOT
+    assert snapshot.read_bytes() == _README_TEMPLATE.read_bytes()
+    assert snapshot.read_bytes() == (project / "README.md").read_bytes()
+
+
+def test_add_project_writes_no_snapshot_when_the_readme_exists(tmp_path):
+    root = tmp_path / "root"
+    _seed(root, {"projects/two/README.md": _EDITED_README})
+
+    ops_projects.add_project(_ctx(root), "two", scripts_dir=_SCRIPTS)
+
+    assert not (root / "projects" / "two" / ops_projects.PROJECT_README_SNAPSHOT).exists()
+
+
+def test_add_project_dry_run_writes_no_snapshot(tmp_path):
+    root = tmp_path / "root"
+    _seed(root, {"projects/two/": _DIR})
+
+    ops_projects.add_project(_ctx(root), "two", dry_run=True, scripts_dir=_SCRIPTS)
+
+    assert not (root / "projects" / "two" / ops_projects.PROJECT_README_SNAPSHOT).exists()
 
 
 def test_add_project_dry_run_reports_the_readme_seed_and_writes_none(tmp_path, capsys):

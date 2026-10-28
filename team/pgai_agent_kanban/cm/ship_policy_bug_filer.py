@@ -34,14 +34,20 @@ stop a release would be a gate no requirement authorized.
 
 Dedup key
 ---------
-``## Ship-Policy Input`` -- one line, ``<kind>|<field>|<source_path>``. A bug
-already open or running for the same key suppresses a fresh filing (the
-same "cites an OPEN bug" rule team/roles/TESTER.md Step 6 states and
-pgai_agent_kanban.deep_verify.bug_filer / pgai_agent_kanban.lint.bug_filer
-already follow for their own keys). The claim of a BUG-NNNN slot and the
-scan of bugs/ for a live dedup candidate come from
-pgai_agent_kanban.lib.bug_filing, never re-implemented here
-(docs/coding-standards.md directive 1).
+``## Ship-Policy Input`` -- one line, ``<kind>|<field>|<source_path>``. A live
+bug (status open, running or needs-operator) recording the same key
+suppresses a fresh filing (the same "cites an OPEN bug" rule
+team/roles/TESTER.md Step 6 states and pgai_agent_kanban.deep_verify.bug_filer
+/ pgai_agent_kanban.lint.bug_filer already follow for their own keys). When
+the key matches nothing, the shared same-defect rule
+(lib.bug_filing.find_same_defect_for_draft) is consulted for the drafted
+report: a live bug whose slug differs from the draft's only by re-file
+markers (a re-file word, an ordinal or a trailing counter), or one the
+draft's body cites as its defect, is cited the same way. The record shape,
+the existing-bug lookup, the claim of a BUG-NNNN slot and the same-defect
+rule come from pgai_agent_kanban.lib.bug_filing (file_or_cite_record),
+never re-implemented here (docs/coding-standards.md directive 1); this
+module supplies only the ship-policy fields.
 
 Filed-bug shape
 ---------------
@@ -76,8 +82,9 @@ Usage (import):
 Usage (CLI, consumed by release_ship_policy.sh and release_ship_posture.sh):
     python3 -m pgai_agent_kanban.cm.ship_policy_bug_filer \\
         <bugs_dir> <project> <version> <kind> <field> <raw_value> <source_path>
-    Prints "key=value" lines: outcome=filed|duplicate, bug_id=BUG-NNNN,
-    bug_path=<abs path, or empty for outcome=duplicate>. Exits 0 on either
+    Prints "key=value" lines: outcome=filed|duplicate, bug_id=BUG-NNNN (the
+    filed bug, or the live bug cited), bug_path=<abs path, or empty for
+    outcome=duplicate>. Exits 0 on either
     outcome; exits 1 with the reason on stderr when nothing could be filed.
 """
 
@@ -90,7 +97,6 @@ import re
 import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from pathlib import Path
 
 # Run by file path (``python3 .../ship_policy_bug_filer.py``) or loaded from a file
 # outside its package, this module has no parent package and the interpreter
@@ -104,39 +110,25 @@ if not __package__:
     if _OWN_PACKAGE_ROOT not in sys.path:
         sys.path.insert(0, _OWN_PACKAGE_ROOT)
 
-from pgai_agent_kanban.lib.bug_filing import import_bug_scanner, iter_open_or_running_bugs  # noqa: E402
+from pgai_agent_kanban.lib.bug_filing import BugRecord, file_or_cite_record  # noqa: E402
 
-# The two kinds of input defect Step 4d files, and the one release-history
-# pattern Step 4c files under the ship-always posture. Each maps to the slug
-# the filed file is named with and the sentence its header carries.
+# The three kinds of input defect Step 4d files (a report value, a lookup
+# field, a TESTER state the matrix has no row for), and the one
+# release-history pattern Step 4c files under the ship-always posture. Each
+# maps to the slug the filed file is named with and the sentence its header
+# carries.
 KIND_REPORT_VALUE = "report-value"
 KIND_LOOKUP_FIELD = "lookup-field"
 KIND_RELEASE_PATTERN = "release-pattern"
-_KINDS = (KIND_REPORT_VALUE, KIND_LOOKUP_FIELD, KIND_RELEASE_PATTERN)
+KIND_TESTER_STATE = "tester-state"
+_KINDS = (KIND_REPORT_VALUE, KIND_LOOKUP_FIELD, KIND_RELEASE_PATTERN, KIND_TESTER_STATE)
 
-_INPUT_SECTION = "## Ship-Policy Input"
-_INPUT_RE = re.compile(r"^##\s+Ship-Policy Input\s*\n\s*(.+?)\s*$", re.MULTILINE | re.IGNORECASE)
+_INPUT_HEADING = "Ship-Policy Input"
 
 
 def input_key(kind: str, field: str, source_path: str) -> str:
     """The dedup key one filing records and a later run matches against."""
     return f"{kind}|{field}|{source_path}"
-
-
-def _read_input_key(text: str) -> "str | None":
-    match = _INPUT_RE.search(text)
-    return match.group(1).strip() if match else None
-
-
-def find_existing_bug_for_input(bugs_dir: str, key: str) -> "str | None":
-    """Return the BUG-NNNN id of an open/running bug in *bugs_dir* whose
-    recorded '## Ship-Policy Input' equals *key*, or None. Scans in
-    filename-sorted order (via iter_open_or_running_bugs) for a
-    deterministic pick."""
-    for bug_id, text in iter_open_or_running_bugs(bugs_dir):
-        if _read_input_key(text) == key:
-            return bug_id
-    return None
 
 
 def _slug_for(kind: str, field: str) -> str:
@@ -145,12 +137,13 @@ def _slug_for(kind: str, field: str) -> str:
     field_slug = re.sub(r"[^a-z0-9]+", "-", field.lower()).strip("-") or "field"
     if kind == KIND_LOOKUP_FIELD:
         return f"tester-lookup-{field_slug}"
+    if kind == KIND_TESTER_STATE:
+        return f"unrecognized-tester-{field_slug}"
     return f"unparseable-{field_slug}-value"
 
 
-def _render_bug_content(
+def _input_record(
     *,
-    bug_id: str,
     slug: str,
     project: str,
     version: str,
@@ -159,7 +152,9 @@ def _render_bug_content(
     raw_value: str,
     source_path: str,
     filed_at: str,
-) -> str:
+) -> BugRecord:
+    """The bug record for one ship-policy input defect (or the release
+    pattern), keyed on input_key() in "## Ship-Policy Input"."""
     quoted = raw_value if raw_value.strip() else "(empty)"
     files_involved = (
         f"- {source_path}\n"
@@ -204,6 +199,39 @@ def _render_bug_content(
             "Speculative -- the findings behind the NON-FUNCTIONAL statuses were "
             "filed but not bundled ahead of new work, or one defect recurs across "
             "the releases."
+        )
+    elif kind == KIND_TESTER_STATE:
+        headline = (
+            f"the ship-policy matrix has no row for the TESTER task's `{field}` for {version} "
+            f"-- it reads `{quoted}` in {source_path} -- and floored the release to SHIP-WITH-CONCERNS."
+        )
+        symptom = (
+            f"While applying the ship-policy decision matrix for {project} at {version}, the "
+            f"TESTER task's `{field}` read from `{source_path}` as:\n\n"
+            f"    {quoted}\n\n"
+            "The matrix has rows only for a TESTER task that reads DONE or BLOCKED. The release did "
+            "not halt and was not treated as untested: it shipped as SHIP-WITH-CONCERNS (release "
+            "notes Status KNOWN-BUGS) and filed this report."
+        )
+        expected = (
+            "The TESTER task for the RC reads DONE (with artifacts/report.md) or BLOCKED when the "
+            "release runs, so the matrix reads the row its outcome names."
+        )
+        actual = f"`{field}` reads `{quoted}`."
+        remedy = (
+            f"1. Open `{source_path}` and find why the TESTER task ended in this state (a session "
+            "that did not finish, a hand edit, a typo).\n"
+            "2. Fix the writer or the procedure that left it there, so the next RC's TESTER task "
+            "ends DONE or BLOCKED.\n"
+            "3. Confirm the next release's ship-policy step reads a recognised state."
+        )
+        files_involved = (
+            f"- {source_path}\n"
+            "- team/scripts/lib/cm/release_verification_retry.sh (the step that floored the release)"
+        )
+        hypothesis = (
+            "Speculative -- the TESTER session ended without writing a final state, or the state was "
+            "edited by hand."
         )
     elif kind == KIND_LOOKUP_FIELD:
         headline = (
@@ -275,35 +303,26 @@ def _render_bug_content(
             "the row the report intends."
         )
 
-    return (
-        f"# {bug_id}-{slug}\n\n"
-        f"**Bug ID:** {bug_id}-{slug}\n"
-        f"**Filed By:** cm-release ship-policy (autonomous) -- {headline}\n"
-        f"**Date:** {filed_at}\n"
-        "**Severity:** medium\n\n"
-        "## Status\nopen\n\n"
-        "## Category\ncm\n\n"
-        "---\n\n"
-        "## Symptom\n"
-        f"{symptom}\n\n"
-        "## Expected\n"
-        f"{expected}\n\n"
-        "## Actual\n"
-        f"{actual}\n\n"
-        "## Reproduction\n"
-        f"{remedy}\n\n"
-        "## Files Involved\n"
-        f"{files_involved}\n\n"
-        "## Hypothesis (optional)\n"
-        f"{hypothesis}\n\n"
-        "---\n\n"
-        f"{_INPUT_SECTION}\n"
-        f"{input_key(kind, field, source_path)}\n\n"
-        "## Ship-Policy Run\n"
-        f"- Project: {project}\n"
-        f"- Version: {version}\n"
-        f"- Field: {field}\n"
-        f"- Raw value: {quoted}\n"
+    return BugRecord(
+        slug=slug,
+        filed_by=f"cm-release ship-policy (autonomous) -- {headline}",
+        filed_at=filed_at,
+        severity="medium",
+        category="cm",
+        symptom=symptom,
+        expected=expected,
+        actual=actual,
+        reproduction=remedy,
+        files_involved=files_involved,
+        hypothesis=hypothesis,
+        key_heading=_INPUT_HEADING,
+        key=input_key(kind, field, source_path),
+        extra_sections=(
+            (
+                "Ship-Policy Run",
+                f"- Project: {project}\n- Version: {version}\n- Field: {field}\n- Raw value: {quoted}",
+            ),
+        ),
     )
 
 
@@ -311,10 +330,12 @@ def _render_bug_content(
 class FilingResult:
     """Outcome of one file_or_cite_input_bug() call.
 
-    outcome   -- "filed" (a new bug file was written) or "duplicate" (an
-                 existing open/running bug already records the same input
-                 key; nothing was written).
-    bug_id    -- "BUG-NNNN" for either outcome.
+    outcome   -- "filed" (a new bug file was written) or "duplicate" (a
+                 live bug -- open, running or needs-operator -- already
+                 records the same input key, or the shared same-defect rule
+                 matches it; nothing was written).
+    bug_id    -- "BUG-NNNN" for either outcome: the filed bug, or the live
+                 bug cited.
     bug_path  -- absolute path to the filed file ("filed" only); None for
                  "duplicate".
     key       -- the dedup key this result covers.
@@ -339,8 +360,11 @@ def file_or_cite_input_bug(
 ) -> FilingResult:
     """File a bug for one unreadable ship-policy input (or, for the
     release-pattern kind, for the last-three-releases-NON-FUNCTIONAL
-    pattern), or cite the existing open/running bug that already records
-    the same (kind, field, source path).
+    pattern), or cite the live bug (open, running or needs-operator) that
+    already records the same (kind, field, source path) -- or, failing
+    that, the live bug the shared same-defect rule matches the drafted
+    report to (lib.bug_filing.find_same_defect_for_draft). Either citation
+    claims no slot and writes nothing.
 
     Creates *bugs_dir* if it does not yet exist (a fresh project's first
     filing has no bugs/ directory yet). Never touches anything outside
@@ -356,20 +380,9 @@ def file_or_cite_input_bug(
         )
     os.makedirs(bugs_dir, exist_ok=True)
 
-    key = input_key(kind, field, source_path)
-    existing = find_existing_bug_for_input(bugs_dir, key)
-    if existing:
-        return FilingResult(outcome="duplicate", bug_id=existing, bug_path=None, key=key)
-
-    claim_next_bug_id, release_bug_id_claim = import_bug_scanner()
-    slug = _slug_for(kind, field)
-    bug_id, bug_path, lock_path = claim_next_bug_id(
-        bugs_dir, slug, claimed_by="cm-release-ship-policy-filer"
-    )
     filed_at = filed_at or datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    content = _render_bug_content(
-        bug_id=bug_id,
-        slug=slug,
+    record = _input_record(
+        slug=_slug_for(kind, field),
         project=project,
         version=version,
         kind=kind,
@@ -378,12 +391,8 @@ def file_or_cite_input_bug(
         source_path=source_path,
         filed_at=filed_at,
     )
-    try:
-        Path(bug_path).write_text(content, encoding="utf-8")
-    finally:
-        release_bug_id_claim(lock_path)
-
-    return FilingResult(outcome="filed", bug_id=bug_id, bug_path=str(bug_path), key=key)
+    filed = file_or_cite_record(bugs_dir, record, claimed_by="cm-release-ship-policy-filer")
+    return FilingResult(outcome=filed.outcome, bug_id=filed.bug_id, bug_path=filed.bug_path, key=record.key)
 
 
 def main(argv: "list | None" = None) -> int:
@@ -395,7 +404,10 @@ def main(argv: "list | None" = None) -> int:
             "read (an unparseable TESTER report value, or a TESTER-task lookup "
             "field that matched only after normalization), or for the "
             "last-three-releases-NON-FUNCTIONAL pattern, or cite the "
-            "open/running bug that already records it."
+            "open, running or needs-operator bug that already records it "
+            "or reports the same defect (a slug differing only by a re-file "
+            "word, ordinal or trailing counter, or a body citing it as its "
+            "defect)."
         ),
     )
     parser.add_argument("bugs_dir", help="The project's bugs/ directory (created if absent).")

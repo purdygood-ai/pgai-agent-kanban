@@ -1,0 +1,82 @@
+# provider-error-signatures.txt -- the one table of provider error signatures.
+#
+# Every reader of a provider's failure output takes its signatures from this
+# file: the wake's post-exit check (handle_working_after_exit), OVERWATCH's
+# transient-API-error check, and the block-evidence classifier. Python reads
+# it through pgai_agent_kanban.lib.provider_signatures; bash through
+# scripts/lib/provider_signatures.sh, which calls that module. Both resolve
+# this file beside their own install (config/ next to scripts/ and
+# pgai_agent_kanban/); a missing or malformed table fails loud, naming its path.
+#
+# Adding a signature is one line:
+#
+#   <class>  <label>  <pattern>
+#
+#   class    transient, refusal or billing (meanings below).
+#   label    a short lowercase name, [a-z0-9_]+. The block-evidence classifier
+#            reports the label of the first refusal or billing line that
+#            matches, in file order, as its signature.
+#   pattern  the rest of the line: an extended regular expression, matched
+#            case-insensitively against each line of a log tail. bash runs it
+#            with grep -E and Python with re, so write only what both read the
+#            same way: [0-9] not \d, [ _-] not \s, plain (...) groups, no (?...)
+#            and no lazy quantifiers. \b, {m,n}, ^ and $ (line start and end)
+#            are fine. A pattern using any of the others is refused.
+#
+# Fields are separated by blanks; the pattern may itself contain blanks.
+# Blank lines and lines starting with # are ignored.
+#
+# Classes, and the action each one takes:
+#
+#   transient  The provider failed for a reason that passes on its own:
+#              overload, rate limit, a 5xx, a safeguard or safety-filter abort.
+#              Action: retry. The wake blocks the task as TRANSIENT API ERROR
+#              and counts it in the ## Transient Retry record; OVERWATCH
+#              requeues a blocked task after its backoff, both up to the one
+#              transient retry ceiling.
+#   refusal    The provider would not run the task: authentication, an unknown
+#              model, a usage limit. Action: no transient retry. A task that
+#              reaches the zero-progress ceiling is recorded provider_refusal.
+#   billing    The account cannot pay for the run: quota exhausted, credit too
+#              low. Action: never retried as transient, since waiting does not
+#              cure it; recorded provider_refusal like refusal, for an operator
+#              to fix the account.
+#
+# A tail that carries more than one class is billing over refusal over
+# transient: a retry cures neither an empty account nor a refusal, so a 429
+# that arrives with insufficient_quota is billing.
+#
+# Bare HTTP status codes are digit-bounded, (^|[^0-9])429([^0-9]|$), so they
+# never match inside a task-ID date, a token count or an elapsed-ms value
+# (20260503, 15030, 5029ms).
+
+# --- transient -------------------------------------------------------------
+transient  server_5xx       API Error: 5[0-9][0-9]
+transient  overloaded       overloaded
+transient  rate_limit       rate[_. -]?limit
+transient  http_429         (^|[^0-9])429([^0-9]|$)
+transient  http_500         (^|[^0-9])50[023]([^0-9]|$)
+transient  http_529         (^|[^0-9])529([^0-9]|$)
+transient  server_error     server_error
+transient  server_error     the server had an error
+transient  safeguard        API safeguard|safeguard error
+transient  safeguard        safety[ _-]?filter
+transient  safeguard        reasoning_extraction
+
+# --- refusal ---------------------------------------------------------------
+refusal    auth             authentication[_ ]error
+refusal    auth             invalid[ _-]?(api[ _-]?key|x-api-key|bearer)
+refusal    auth             unauthori[sz]ed
+refusal    auth             please run /login|not logged in
+refusal    auth             oauth token (has )?expired
+refusal    model_not_found  model[ _-]?not[ _-]?found|not_found_error
+refusal    model_not_found  unknown model|invalid model
+refusal    model_not_found  model\b.{0,80}\b(does not exist|not found|is not available)
+refusal    usage_limit      usage[ _-]?limit
+refusal    usage_limit      (hit|reached) your (usage )?limit
+
+# --- billing ---------------------------------------------------------------
+billing    usage_limit      insufficient_quota
+billing    usage_limit      quota[ _-]?(exceeded|reached)
+billing    usage_limit      exceeded your (current )?quota
+billing    usage_limit      credit balance is too low

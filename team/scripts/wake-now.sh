@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # team/scripts/wake-now.sh
 # Convenience wrapper: fire one or all agents immediately (--sleep=0).
+# --agent overwatch runs the OVERWATCH sweep (overwatch-sweep.sh), which is
+# what every OVERWATCH firing is; it never starts a model wake.
 #
 # Usage:
 #   wake-now.sh --agent <role> [--bg]   Fire one named agent; --bg backgrounds it.
@@ -8,7 +10,8 @@
 #   wake-now.sh --help                  Print this message.
 #
 # Options:
-#   --agent ROLE     Agent role to wake: pm|coder|cm|writer|tester|overwatch (required unless --all)
+#   --agent ROLE     Agent role to wake: pm|coder|cm|writer|tester|overwatch (required unless --all);
+#                    overwatch runs overwatch-sweep.sh
 #   --all            Fire all pipeline agents backgrounded (pm coder cm writer tester)
 #   --bg             Background the agent process instead of running in foreground
 #   --help, -h       Print this help and exit
@@ -33,6 +36,10 @@ source "${SCRIPT_DIR}/lib/operator_args.sh"
 # shellcheck source=lib/error_contract.sh
 source "${SCRIPT_DIR}/lib/error_contract.sh"
 
+# This script as installed under the resolved kanban root, shell-quoted, so
+# a remedy that names it runs as printed from any directory.
+_wake_now_cmd="$(printf '%q' "${KANBAN_ROOT}/scripts/wake-now.sh")"
+
 VALID_AGENTS=(pm coder cm writer tester overwatch)
 PIPELINE_AGENTS=(pm coder cm writer tester)
 
@@ -43,8 +50,10 @@ PIPELINE_AGENTS=(pm coder cm writer tester)
 OPERATOR_VALID_FLAGS=(agent all bg help)
 
 # --all and --bg are outside the canonical vocabulary, so their help lines are
-# given here (the header's Options block describes them the same way).
+# given here (the header's Options block describes them the same way); --agent
+# names this verb's own roles and what overwatch runs.
 declare -A OPERATOR_FLAG_HELP=(
+    [agent]="  --agent ROLE       Agent to fire: pm|coder|cm|writer|tester, or overwatch (runs overwatch-sweep.sh)"
     [all]="  --all              Fire all pipeline agents backgrounded (pm coder cm writer tester)"
     [bg]="  --bg               Background the agent process instead of running in foreground"
 )
@@ -66,7 +75,7 @@ if argparse_missing "agent"; then
     pgai_emit_error_contract \
         "wake_now.agent_value_required" \
         "wake-now.sh: --agent requires a value." \
-        "Run team/scripts/wake-now.sh --agent pm (or coder, cm, writer, tester, overwatch)."
+        "Run ${_wake_now_cmd} --agent pm (or coder, cm, writer, tester, overwatch)."
     # CENSUS-ANCHOR: wake-now-agent-value-required-01
     exit 1
 fi
@@ -88,7 +97,7 @@ if [[ "${#ARGPARSE_POSITIONAL[@]}" -gt 0 ]]; then
     pgai_emit_error_contract \
         "wake_now.unexpected_positional_argument" \
         "wake-now.sh: unexpected positional argument: ${ARGPARSE_POSITIONAL[0]}." \
-        "Run team/scripts/wake-now.sh --agent pm, or team/scripts/wake-now.sh --all, with no positional arguments."
+        "Run ${_wake_now_cmd} --agent pm, or ${_wake_now_cmd} --all, with no positional arguments."
     # CENSUS-ANCHOR: wake-now-unexpected-positional-01
     echo "" >&2
     echo "Usage: wake-now.sh --agent <role> [--bg]  OR  wake-now.sh --all" >&2
@@ -125,7 +134,7 @@ if [[ "$FIRE_ALL" == "true" && -n "$AGENT" ]]; then
     pgai_emit_error_contract \
         "wake_now.agent_all_mutually_exclusive" \
         "wake-now.sh: --all and --agent are mutually exclusive." \
-        "Run team/scripts/wake-now.sh --agent pm OR team/scripts/wake-now.sh --all, not both."
+        "Run ${_wake_now_cmd} --agent pm OR ${_wake_now_cmd} --all, not both."
     # CENSUS-ANCHOR: wake-now-agent-all-mutually-exclusive-01
     exit 1
 fi
@@ -138,7 +147,7 @@ if [[ "$FIRE_ALL" == "false" && -z "$AGENT" ]]; then
     pgai_emit_error_contract \
         "wake_now.agent_required" \
         "wake-now.sh: --agent is required (or use --all to fire all pipeline agents)." \
-        "Run team/scripts/wake-now.sh --agent pm, or team/scripts/wake-now.sh --all to fire every pipeline agent."
+        "Run ${_wake_now_cmd} --agent pm, or ${_wake_now_cmd} --all to fire every pipeline agent."
     # CENSUS-ANCHOR: wake-now-agent-required-01
     echo "" >&2
     echo "Usage: wake-now.sh --agent <role> [--bg]  OR  wake-now.sh --all" >&2
@@ -156,9 +165,21 @@ is_valid_agent() {
     return 1
 }
 
+# fire_command <agent> -- the command line one agent's firing runs. OVERWATCH
+# has no model wake: its firing is the sweep, the same script the hourly cron
+# line and the on-BLOCK nudge run.
+fire_command() {
+    if [[ "$1" == "overwatch" ]]; then
+        FIRE_CMD=("$SCRIPT_DIR/overwatch-sweep.sh")
+    else
+        FIRE_CMD=("$SCRIPT_DIR/wake-batch.sh" --agent="$1" --sleep=0)
+    fi
+}
+
 fire_one_bg() {
     local agent="$1"
-    "$SCRIPT_DIR/wake-batch.sh" --agent="$agent" --sleep=0 &
+    fire_command "$agent"
+    "${FIRE_CMD[@]}" &
     local pid=$!
     echo "  [${agent}] PID ${pid}"
 }
@@ -181,13 +202,14 @@ else
         pgai_emit_error_contract \
             "wake_now.unknown_agent" \
             "wake-now.sh: unknown agent '${AGENT}'." \
-            "Run team/scripts/wake-now.sh --agent pm (valid agents: ${VALID_AGENTS[*]})."
+            "Run ${_wake_now_cmd} --agent pm (valid agents: ${VALID_AGENTS[*]})."
         # CENSUS-ANCHOR: wake-now-unknown-agent-01
         exit 1
     fi
     if [[ "$BG" == "true" ]]; then
         fire_one_bg "$AGENT"
     else
-        exec "$SCRIPT_DIR/wake-batch.sh" --agent="$AGENT" --sleep=0
+        fire_command "$AGENT"
+        exec "${FIRE_CMD[@]}"
     fi
 fi

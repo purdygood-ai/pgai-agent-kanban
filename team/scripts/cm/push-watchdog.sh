@@ -2,7 +2,9 @@
 # team/scripts/cm/push-watchdog.sh
 # Push unpushed main commits and release tags to each registered project's
 # git remote: project.cfg [project] git_remote_name, origin when absent or
-# blank (pp_git_remote_name). "origin" below means that remote.
+# blank (pp_git_remote_name). "origin" below means that remote. Also deletes
+# from the remote an RC branch whose deletion a release recorded as refused
+# in a release-state.md Push Lag Event, once the remote accepts.
 #
 # Designed to run from cron OUTSIDE the Claude Code tool-use environment,
 # so PreToolUse hook interception cannot block git push to main/origin.
@@ -11,7 +13,7 @@
 #   cm/push-watchdog.sh [--dry-run] [--project <name>]
 #
 # Options:
-#   --dry-run          Show what would be pushed without actually pushing.
+#   --dry-run          Show what would be pushed or deleted without doing it.
 #   --project <name>   Operate on a single named project instead of all.
 #   --help, -h         Show this help and exit.
 #
@@ -41,13 +43,25 @@
 #      the tag the release cuts (ai_v1.2.3 with branch_prefix=ai_, v1.2.3
 #      with none). Any other local tag, including another lane's bare vX.Y.Z
 #      in a shared repository, is never considered.
-#   6. Push the missing commits and/or tags. Each missing tag is pushed by
+#   6. Read the RC branches a recorded Push Lag Event names as still on the
+#      remote (the "<branch> (still on <remote>; deletion failed)" items under
+#      its "Not On Remote:" list, through pgai_agent_kanban.cm.push_lag_events)
+#      and keep those the remote still holds (git ls-remote). Only a branch
+#      that is exactly <branch_prefix>rc/<Version> for the event's vX.Y.Z
+#      Version, recorded against this remote, is ever deleted; every other
+#      such item is logged as skipped. No other remote branch is considered.
+#   7. Push the missing commits and/or tags. Each missing tag is pushed by
 #      its explicit ref (refs/tags/<tag>); the watchdog never pushes every
-#      local tag at once.
-#   7. Log every action to KANBAN_ROOT/projects/<name>/logs/cm-push-watchdog.log.
+#      local tag at once. Then delete each RC branch from step 6 with
+#      git push <remote> --delete <branch> -- only once main is on the
+#      remote (up to date, or pushed this run); otherwise the delete waits
+#      for the next tick.
+#   8. Log every action to KANBAN_ROOT/projects/<name>/logs/cm-push-watchdog.log.
 #
-# Idempotent and safe: when there is nothing to push the script exits 0
-# without touching origin.  Network / credential failures are logged and
+# Idempotent and safe: when there is nothing to push or delete the script
+# exits 0 without changing origin. An RC branch already gone from the remote
+# is not deleted again, so a Push Lag Event left in release-state.md is
+# harmless once it is cleared.  Network / credential failures are logged and
 # treated as non-fatal (script exits 0 to avoid noisy cron mail on transient
 # errors; individual project failures are recorded in the per-project log).
 #
@@ -82,6 +96,13 @@ Pushes unpushed main commits and release tags to each registered project's
 git remote (project.cfg [project] git_remote_name, origin when absent or
 blank). Safe to run on every cron tick — no-op when there is nothing to push.
 
+Also retries a refused RC-branch delete: when a release-state.md Push Lag
+Event lists "<branch> (still on <remote>; deletion failed)" and the remote
+still holds that branch, it runs git push <remote> --delete <branch> once
+main is on the remote. Only <branch_prefix>rc/<Version> for the event's own
+vX.Y.Z Version and this remote is deleted; any other listed branch is
+logged as skipped, and no other remote branch is ever deleted.
+
 A release tag is the project's <branch_prefix>vX.Y.Z (e.g. ai_v1.2.3 with
 branch_prefix = ai_, v1.2.3 with none). Only a release tag missing from the
 remote is pushed, each by its explicit refs/tags/<tag> ref; no other local
@@ -94,7 +115,7 @@ absent there. Otherwise it is skipped before any git command runs: one
 '[push_to_remote=false]' line for a local-only project.
 
 Options:
-  --dry-run          Report what would be pushed without pushing.
+  --dry-run          Report what would be pushed or deleted without doing it.
   --project <name>   Operate on a single named project.
   --help, -h         Show this help.
 
@@ -155,6 +176,9 @@ else
     echo "cm-push-watchdog: ERROR: push_decision.sh library not found at ${_LIB_DIR}/push_decision.sh" >&2
     exit 1
 fi
+# pp_run_ops, which runs the Push Lag Event reader
+# (pgai_agent_kanban.cm.push_lag_events), comes in with push_decision.sh,
+# which sources its sibling pp_run_ops.sh.
 
 # ---------------------------------------------------------------------------
 # Logging helpers
@@ -193,7 +217,8 @@ _list_projects() {
 }
 
 # ---------------------------------------------------------------------------
-# Validate a project name corresponds to a real directory under projects/.
+# Validate a project name: it satisfies the project-name rule and names a
+# real directory under projects/.
 # Returns 0 if valid, 1 otherwise. Logs a warning on rejection.
 # ---------------------------------------------------------------------------
 _validate_project_name() {
@@ -201,10 +226,11 @@ _validate_project_name() {
   if [[ -z "$name" ]]; then
     return 1
   fi
-  # Reject names that contain shell-suspicious characters
-  # (defensive against ad-hoc parser leakage like '[project').
-  if [[ ! "$name" =~ ^[a-zA-Z0-9_-]+$ ]]; then
-    _log_global "Rejecting suspicious project name: '$name' (does not match [a-zA-Z0-9_-]+)"
+  # Reject any name the project-name rule (PROJECTS_CFG_NAME_RE,
+  # lib/projects_cfg.sh, sourced with projects.sh) refuses: the registry
+  # readers list no such name, and it becomes part of a path below.
+  if [[ -z "${PROJECTS_CFG_NAME_RE:-}" || ! "$name" =~ $PROJECTS_CFG_NAME_RE ]]; then
+    _log_global "Rejecting suspicious project name: '$name' (does not match the project-name rule ${PROJECTS_CFG_NAME_RE})"
     return 1
   fi
   if [[ ! -d "${KANBAN_ROOT}/projects/${name}" ]]; then
@@ -347,8 +373,44 @@ _process_project() {
     tag_refs+=("refs/tags/${tag}")
   done
 
+  # --- RC branches a Push Lag Event recorded as still on the remote ---
+  # The reader decides which items name this project's own RC branch for
+  # the event's version and this remote ("delete") and which do not
+  # ("skip", never deleted). A branch the remote no longer holds needs
+  # nothing; one the remote cannot be asked about waits for the next tick.
+  local rc_deletes=()
+  if [[ "$tag_prefix_ok" == "true" ]]; then
+    local release_state lag_out lag_rc=0 action lag_branch lag_reason heads_out
+    release_state="$(pp_release_state "$project_name" 2>/dev/null)" || release_state=""
+    if [[ -n "$release_state" && -f "$release_state" ]]; then
+      lag_out="$(pp_run_ops pgai_agent_kanban.cm.push_lag_events rc-branch-deletes "$release_state" \
+        --remote "$remote" --branch-prefix "$tag_prefix" 2>&1)" || lag_rc=$?
+      if [[ $lag_rc -ne 0 ]]; then
+        _log "WARNING: could not read Push Lag Events from ${release_state} (exit ${lag_rc}) — RC-branch deletes not checked this tick: ${lag_out}"
+      else
+        while IFS=$'\t' read -r action lag_branch lag_reason; do
+          case "$action" in
+            delete)
+              if ! heads_out="$(git -C "$dev_tree" ls-remote --heads "$remote" "refs/heads/${lag_branch}" 2>&1)"; then
+                _log "WARNING: could not list ${lag_branch} on ${remote} — its delete waits for the next tick: ${heads_out}"
+              elif [[ -n "$heads_out" ]]; then
+                _log "${lag_branch} is still on ${remote} (a Push Lag Event recorded its deletion as refused) — delete needed"
+                rc_deletes+=("$lag_branch")
+              else
+                _log "${lag_branch} named by a Push Lag Event is already gone from ${remote}"
+              fi
+              ;;
+            skip)
+              _log "Push Lag Event item '${lag_branch}' is not deleted: ${lag_reason}"
+              ;;
+          esac
+        done <<< "$lag_out"
+      fi
+    fi
+  fi
+
   # --- Nothing to do? ---
-  if [[ "$push_main" == "false" && ${#missing_tags[@]} -eq 0 ]]; then
+  if [[ "$push_main" == "false" && ${#missing_tags[@]} -eq 0 && ${#rc_deletes[@]} -eq 0 ]]; then
     _log "Nothing to push — idempotent exit"
     return 0
   fi
@@ -360,6 +422,9 @@ _process_project() {
     fi
     if [[ ${#missing_tags[@]} -gt 0 ]]; then
       _log "[dry-run] would: git -C '$dev_tree' push ${remote} ${tag_refs[*]}"
+    fi
+    if [[ ${#rc_deletes[@]} -gt 0 ]]; then
+      _log "[dry-run] would: git -C '$dev_tree' push ${remote} --delete ${rc_deletes[*]}"
     fi
     return 0
   fi
@@ -390,11 +455,30 @@ _process_project() {
     fi
   fi
 
+  # --- Delete the RC branches a Push Lag Event named, once main is there ---
+  # The RC branch's work reaches the remote through main, so the delete
+  # runs only when main is up to date there or was pushed above.
+  local delete_rc=0
+  if [[ ${#rc_deletes[@]} -gt 0 ]]; then
+    if [[ $push_main_rc -ne 0 ]]; then
+      _log "Not deleting ${rc_deletes[*]} from ${remote} while $MAIN_BRANCH is not on it — will retry on next tick"
+    else
+      _log "Deleting from ${remote}: ${rc_deletes[*]}"
+      if git -C "$dev_tree" push "$remote" --delete "${rc_deletes[@]}" 2>&1 | \
+         while IFS= read -r line; do _log "  git: $line"; done; then
+        _log "RC branch(es) deleted from ${remote}: ${rc_deletes[*]}"
+      else
+        delete_rc=$?
+        _log "WARNING: push ${remote} --delete ${rc_deletes[*]} failed (exit code $delete_rc) — will retry on next tick"
+      fi
+    fi
+  fi
+
   # Log overall outcome for this project
-  if [[ $push_main_rc -eq 0 && $push_tags_rc -eq 0 ]]; then
+  if [[ $push_main_rc -eq 0 && $push_tags_rc -eq 0 && $delete_rc -eq 0 ]]; then
     _log "Push complete for $project_name"
   else
-    _log "One or more pushes failed for $project_name (main_rc=$push_main_rc tags_rc=$push_tags_rc)"
+    _log "One or more pushes failed for $project_name (main_rc=$push_main_rc tags_rc=$push_tags_rc delete_rc=$delete_rc)"
   fi
 
   # Always return 0 — individual push failures are logged, not fatal.

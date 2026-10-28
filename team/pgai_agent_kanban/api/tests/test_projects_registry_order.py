@@ -82,6 +82,6 @@ def test_list_projects_without_projects_cfg_is_empty(tmp_path: pathlib.Path) -> 
 
 
 def test_list_projects_malformed_projects_cfg_raises_io_error(tmp_path: pathlib.Path) -> None:
-    (tmp_path / "projects.cfg").write_text("[project:a]\n[project:a]\n", encoding="utf-8")
+    (tmp_path / "projects.cfg").write_text("priority=1\n[project:a]\n", encoding="utf-8")
     with pytest.raises(IoError, match="projects.cfg"):
         list_projects(OpsContext(kanban_root=tmp_path))

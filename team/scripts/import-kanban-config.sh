@@ -53,6 +53,25 @@ KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH}"
 # shellcheck source=lib/operator_args.sh
 source "${SCRIPT_DIR}/lib/operator_args.sh"
 
+# The staging root comes from the shared temp wrapper beside this script
+# (lib/temp.sh, in the repo and the installed layout alike). A missing copy
+# refuses here rather than guessing a root of its own.
+_IMPORT_TEMP_SH="${SCRIPT_DIR}/lib/temp.sh"
+if [[ ! -f "$_IMPORT_TEMP_SH" ]]; then
+    # shellcheck source=lib/error_contract.sh
+    source "${SCRIPT_DIR}/lib/error_contract.sh"
+    # BLOCK-WORTHY: without temp.sh there is no resolved temp root to extract
+    # the archive into, and nothing has been read or written yet.
+    pgai_emit_error_contract "import-kanban-config.temp-sh-missing" \
+        "import-kanban-config.sh needs the temp-root wrapper at ${_IMPORT_TEMP_SH} and it does not exist; nothing was restored." \
+        "ls -l '${SCRIPT_DIR}/lib/temp.sh'"
+    # CENSUS-ANCHOR: import-kanban-config-temp-sh-missing-01
+    exit 1
+fi
+# shellcheck source=lib/temp.sh
+source "$_IMPORT_TEMP_SH"
+unset _IMPORT_TEMP_SH
+
 # Final guard: if the resolved root does not look like a kanban root, bail.
 if [[ ! -d "$KANBAN_ROOT" ]]; then
     echo "ERROR: kanban root not found: $KANBAN_ROOT" >&2
@@ -127,8 +146,9 @@ fi
 # ---------------------------------------------------------------------------
 # Build the temp staging directory and register trap for cleanup
 # ---------------------------------------------------------------------------
-TEMP_ROOT="${PGAI_AGENT_KANBAN_TEMP_DIR:-${TMPDIR:-/tmp}/pgai_kanban_tmp}/import-kanban-config"
-mkdir -p "$TEMP_ROOT"
+# Under the framework temp root (pgai_temp_dir: PGAI_AGENT_KANBAN_TEMP_DIR,
+# then kanban.cfg [paths], then the wrapper's own fallback).
+TEMP_ROOT="$(pgai_temp_subdir import-kanban-config)"
 
 WORK_DIR="$(mktemp -d "${TEMP_ROOT}/import-XXXXXX")"
 

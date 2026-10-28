@@ -18,7 +18,7 @@ front of you.
 | [pseudocron.md](pseudocron.md) | Run the chain on a host where cron is unavailable or unwanted. |
 | [codex-known-issues.md](codex-known-issues.md) | Rough edges in the experimental Codex/OpenAI lane. |
 | [po-briefs.md](po-briefs.md) | The PO agent's operator guide — briefs, draft mode, batch workflow. |
-| [overwatch.md](overwatch.md) | OVERWATCH condensed: two tiers, on-BLOCK trigger, whitelist, `HALT_OVERWATCH`. |
+| [overwatch.md](overwatch.md) | OVERWATCH condensed: the decision wake (verb, inbox, runaway, none), the operator inbox, the runaway detector, HALT provenance and chain-HALT clearing. |
 | [operator-troubleshooting.md](operator-troubleshooting.md) | Six common symptoms (slow chain, slow dashboard, RC stuck, near-identical bundles piling up, work vanished, a heavy co-hosted workload) and enabling debug logs. |
 | [quarantine-recovery.md](quarantine-recovery.md) | Recover files quarantined by intake. |
 | [disk-hygiene.md](disk-hygiene.md) | Log rotation, artifact cleanup, worktree pruning. |

@@ -203,7 +203,15 @@ ls "$PGAI_AGENT_KANBAN_ROOT_PATH"/projects/*/tasks/CM-*/status.md 2>/dev/null \
   | tail -3
 ```
 
-Read the most recent BLOCKED CM task's status.md. CM records the trigger (one of those enumerated in `docs/OPERATIONS.md` "When the chain halts"): pre-squash hook failure, merge conflict, push failure, tag already on remote, three consecutive NON-FUNCTIONAL RCs, and so on. The trigger names the work you need to do before the chain can ship.
+Read the most recent BLOCKED CM task's status.md. CM records the trigger, and the trigger names the work you need to do before the chain can ship. The release's stops are listed in `docs/OPERATIONS.md`, "CM HALT triggers": the integrity stops (pre-squash hook, strict squash pollution guard, fidelity gate, pre-tag hook), the release-notes status stamp failing, an existing tag on the wrong commit, and the few others listed after that table. On a lane whose ship posture is `matrix`, triggers 2, 3 and 8 halt too.
+
+Three release failures do not halt and leave no BLOCKED CM task. Look for their record instead:
+
+- **Squash conflict** — `release.sh` exits 5. The RC is cancelled and its cargo rebundled, its open tasks (the CM release task included) are closed `WONT-DO`, and one operator inbox entry names every conflicting path. It halts only when the cancel is not allowed or fails.
+- **Push refused after the tag** — the release exits 0 and ships locally. `release-state.md` gains a `## Push Lag Event`, and the push-lag check pushes main and the tag once the remote accepts.
+- **Tag already on the remote** — `release.sh` exits 6 and changes nothing locally. One operator inbox entry names the tag.
+
+Read inbox entries with `"$PGAI_AGENT_KANBAN_ROOT_PATH/scripts/inbox.sh" --project my-app list`.
 
 ### 4. Check whether HALT is set
 

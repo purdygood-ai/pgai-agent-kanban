@@ -6,6 +6,9 @@
 **Date:** YYYY-MM-DD
 **Severity:** (critical / high / medium / low)
 
+<!-- Accepted Status values: open, running, needs-operator, done, wont-do, duplicate.
+     File new bugs as open; discovery, the PM, the release step and close.sh
+     set the others (docs/OPERATIONS.md, "The bug lifecycle"). -->
 ## Status
 open
 

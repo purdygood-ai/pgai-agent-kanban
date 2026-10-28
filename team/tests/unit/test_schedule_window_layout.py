@@ -20,8 +20,12 @@ Every test runs the real team/scripts/dashboard/create.sh against a
 sandbox kanban root under tmp_path, on a private tmux server (its own -L
 socket under a short private TMUX_TMPDIR, reached through a PATH-shadowing
 ``tmux`` wrapper, with TMUX unset) with a unique session name -- never the
-operator's live dashboard session or server. The crontab is the autouse
-sandbox stub (team/tests/conftest.py), loaded with a seven-agent roster.
+operator's live dashboard session or server. The crontab is a read-only
+stub private to each test, listing a crontab file under tmp_path loaded
+with a seven-agent roster -- never the invoking user's crontab. The panes
+reach the stub through PGAI_CRONTAB_CMD rather than PATH: each pane is an
+interactive shell whose startup files may reset PATH, so only the
+environment variable reliably names it there.
 """
 
 from __future__ import annotations
@@ -67,9 +71,28 @@ _ROSTER_CRONTAB = (
     "0 4 * * 0 $KANBAN_ROOT/scripts/cleanup.sh\n"
 )
 _ROSTER_AGENTS = ("PM", "CM", "TESTER", "CODER", "WRITER", "CLEANUP", "OVERWATCH")
+# A roster no operator's crontab plausibly holds (no pipeline agents at
+# all): a band showing exactly these rows can only have read the stub.
+_STUB_ONLY_CRONTAB = (
+    "0 3 * * 4 $KANBAN_ROOT/scripts/wake-batch.sh --agent=overwatch\n"
+    "0 4 * * 0 $KANBAN_ROOT/scripts/cleanup.sh\n"
+)
+_STUB_ONLY_AGENTS = ("OVERWATCH", "CLEANUP")
 # Header row + one row per agent + one row of headroom (lib/schedule_layout.sh).
 _LIST_ROWS = 1 + len(_ROSTER_AGENTS) + 1
 _RENDER_WAIT_S = 90
+# The test's private crontab: lists one file, refuses every change, so
+# nothing a pane or create.sh runs can rewrite the roster under test.
+_PRIVATE_CRONTAB_STUB = """\
+#!/usr/bin/env bash
+if [[ "${{1:-}}" == "-l" ]]; then
+    [[ -f {crontab_file} ]] && exec cat {crontab_file}
+    printf 'no crontab for testuser\\n' >&2
+    exit 1
+fi
+printf 'test crontab stub: only -l is supported, got: %s\\n' "$*" >&2
+exit 1
+"""
 _SETTLE_WAIT_S = 30
 
 
@@ -109,13 +132,13 @@ def _visible_rows(text: str) -> list[str]:
     return [line.split()[0] for line in text.splitlines() if line.strip()]
 
 
-def _wait_for_full_list(dash: _Dashboard) -> str:
+def _wait_for_full_list(dash: _Dashboard, agents: tuple[str, ...] = _ROSTER_AGENTS) -> str:
     deadline = time.monotonic() + _RENDER_WAIT_S
     text = ""
     while time.monotonic() < deadline:
         text = dash.list_text()
         rows = _visible_rows(text)
-        if rows[:1] == ["AGENT"] and all(agent in rows for agent in _ROSTER_AGENTS):
+        if rows[:1] == ["AGENT"] and all(agent in rows for agent in agents):
             return text
         time.sleep(0.5)
     pytest.fail(f"the list band never showed its header and every roster row:\n{text}")
@@ -214,7 +237,13 @@ def _descendant_cmdlines(pid: int) -> list[str]:
 
 
 @pytest.fixture
-def dashboard(tmp_path: pathlib.Path, pgai_tests_temp_dir: pathlib.Path) -> Iterator[_Dashboard]:
+def dashboard(
+    request: pytest.FixtureRequest, tmp_path: pathlib.Path, pgai_tests_temp_dir: pathlib.Path
+) -> Iterator[_Dashboard]:
+    """A real create.sh dashboard on a private tmux server, its private stub
+    crontab holding _ROSTER_CRONTAB, or the crontab text an indirect
+    parametrization passes."""
+    crontab_text = getattr(request, "param", _ROSTER_CRONTAB)
     guard = try_resolve_binary("tmux")
     socket = f"pgai-test-{os.getpid()}-{uuid.uuid4().hex[:8]}"
     session = f"sched-layout-{uuid.uuid4().hex[:8]}"
@@ -234,6 +263,14 @@ def dashboard(tmp_path: pathlib.Path, pgai_tests_temp_dir: pathlib.Path) -> Iter
             f"#!/usr/bin/env bash\nexec {shlex.quote(guard.path)} -L {shlex.quote(socket)} \"$@\"\n"
         )
         wrapper.chmod(0o755)
+        crontab_file = tmp_path / "crontab"
+        crontab_file.write_text(crontab_text, encoding="utf-8")
+        # Named "crontab" in bin_dir, ahead on PATH, as well as through
+        # PGAI_CRONTAB_CMD: whichever way a script finds its crontab, it is
+        # this one.
+        stub_crontab = bin_dir / "crontab"
+        stub_crontab.write_text(_PRIVATE_CRONTAB_STUB.format(crontab_file=shlex.quote(str(crontab_file))))
+        stub_crontab.chmod(0o755)
 
         root = tmp_path / "kanban"
         (root / "tmp").mkdir(parents=True)
@@ -244,10 +281,10 @@ def dashboard(tmp_path: pathlib.Path, pgai_tests_temp_dir: pathlib.Path) -> Iter
             PGAI_AGENT_KANBAN_ROOT_PATH=str(root),
             PGAI_AGENT_KANBAN_TEMP_DIR=str(root / "tmp"),
             TMUX_TMPDIR=tmux_tmpdir,
+            PGAI_CRONTAB_CMD=str(stub_crontab),
         )
-        installed = subprocess.run(["crontab", "-"], input=_ROSTER_CRONTAB, text=True,
-                                   capture_output=True, env=env, timeout=10)
-        assert installed.returncode == 0, installed.stderr
+        listed = subprocess.run([str(stub_crontab), "-l"], text=True, capture_output=True, env=env, timeout=10)
+        assert listed.stdout == crontab_text, (listed.returncode, listed.stdout, listed.stderr)
 
         created = subprocess.run(
             ["bash", str(_CREATE_SH), "--kanban-root", str(root), "--session", session],
@@ -283,6 +320,20 @@ def test_schedule_window_is_two_bands_without_next_cron_firings(dashboard: _Dash
         assert "next-cron-firings.sh" not in cmdlines, f"pane {index} runs next-cron-firings.sh"
     commands = {index: " ".join(_descendant_cmdlines(int(pid))) for index, pid in panes}
     assert "status-band.sh" in commands["0"] and "event-band.sh" in commands["1"], commands
+
+
+@pytest.mark.parametrize("dashboard", [_STUB_ONLY_CRONTAB], ids=["overwatch-and-cleanup-stub"], indirect=True)
+def test_list_band_lists_the_stub_crontab_not_the_invoking_users(dashboard: _Dashboard) -> None:
+    """The list pane create.sh starts shows exactly the stub crontab's
+    roster -- its OVERWATCH row included, and none of the pipeline agents an
+    operator's own crontab schedules -- whatever the invoking user's crontab
+    holds."""
+    text = _wait_for_full_list(dashboard, _STUB_ONLY_AGENTS)
+
+    assert sorted(_visible_rows(text)[1:]) == sorted(_STUB_ONLY_AGENTS), (
+        f"the list band shows a roster other than the stub crontab's {_STUB_ONLY_AGENTS}; "
+        f"its pane read some other crontab:\n{text}"
+    )
 
 
 def test_list_band_keeps_every_roster_row_when_the_window_shrinks(dashboard: _Dashboard) -> None:

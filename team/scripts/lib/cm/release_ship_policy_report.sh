@@ -80,19 +80,17 @@
 #
 # Dependencies
 # ------------
-#   python3 on PATH. The two report readers run the package module
-#   pgai_agent_kanban.cm.ship_policy_report_inputs through pp_run_ops
-#   (pp_run_ops.sh, sourced here, self-located). That module takes every
-#   report value from the one TESTER-report parser,
+#   python3 on PATH. The two report readers and the TESTER-task lookup run
+#   the package module pgai_agent_kanban.cm.ship_policy_report_inputs
+#   through pp_run_ops (pp_run_ops.sh, sourced here, self-located). That
+#   module takes every report value from the one TESTER-report parser,
 #   pgai_agent_kanban.reports.tester_report (parse_report), so the matrix
 #   reads a report by that module's documented rules and nothing in this
-#   file matches report text. The TESTER-task lookup is an embedded
-#   Python program (_ship_policy_report_py) that reads task README.md and
-#   status.md fields through pgai_agent_kanban.cm.read_state_field — the
-#   single field reader release_preflight.sh's read_md_field also wraps —
+#   file matches report text. Its lookup reads task README.md and status.md
+#   fields through pgai_agent_kanban.cm.read_state_field — the
+#   release-state field reading lib/cm/common.sh's read_field also applies —
 #   and normalises Release Version through
-#   pgai_agent_kanban.cm.release_version, on the PYTHONPATH pp_pythonpath
-#   gives it; the release-notes reader
+#   pgai_agent_kanban.cm.release_version; the release-notes reader
 #   carries its own. This file reads no shell globals, so it can be sourced
 #   on its own. release_ship_policy.sh sources it, so a caller that sources
 #   only that file still resolves every function here.
@@ -186,11 +184,12 @@ read_ship_policy_report_values() {
 # Usage: read_ship_policy_tester_lookup <tasks_dir> <active_rc>
 # Output shape and selection rule: see the file header. Never fails: a
 # missing <tasks_dir> prints tester_task_found=no with the "none"/empty
-# values.
+# values. The lookup is
+# pgai_agent_kanban.cm.ship_policy_report_inputs.tester_task_lookup.
 read_ship_policy_tester_lookup() {
   local tasks_dir="$1"
   local active_rc="$2"
-  _ship_policy_report_py lookup "$tasks_dir" "$active_rc"
+  pp_run_ops pgai_agent_kanban.cm.ship_policy_report_inputs lookup -- "$tasks_dir" "$active_rc"
 }
 
 # Helper: scan release-notes/ directory to detect the last-3-NON-FUNCTIONAL pattern.
@@ -259,130 +258,4 @@ cm_record_non_functional_pattern_window() {
   rm -f "${file}.tmp.$$" 2>/dev/null || true
   echo "WARNING: could not record the NON-FUNCTIONAL pattern window at ${file}; the next run halts on it again." >&2
   return 0
-}
-
-# The embedded TESTER-task lookup program. Usage: _ship_policy_report_py lookup <tasks_dir> <active_rc>
-# It reads task README.md / status.md fields, never a TESTER report.
-_ship_policy_report_py() {
-  local _pythonpath
-  _pythonpath="$(pp_pythonpath 2>/dev/null || true)"
-  PYTHONPATH="${_pythonpath}" python3 - "$@" <<'PY'
-import os
-import re
-import sys
-
-mode = sys.argv[1]
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-def first_word(value):
-    """The first letters-and-dashes word of *value*, lowercased, with
-    underscores read as dashes and trailing punctuation dropped."""
-    m = re.match(r"([A-Za-z][A-Za-z_-]*)", value.strip())
-    return m.group(1).lower().replace("_", "-").rstrip("-") if m else ""
-
-
-def read_field(path, heading):
-    """The single field reader every CM lookup uses. None when the file is
-    missing or the heading has no value (read_state_field's "none")."""
-    from pgai_agent_kanban.cm.read_state_field import read_state_field
-
-    value = read_state_field(path, heading)
-    return None if value == "none" else value
-
-
-# ---------------------------------------------------------------------------
-# Mode: lookup — the TESTER task for a release version
-# ---------------------------------------------------------------------------
-
-if mode == "lookup":
-    tasks_dir = sys.argv[2]
-    active_rc = sys.argv[3]
-    active_rc_token = active_rc.strip().lower()
-    # The one Release Version normaliser, shared with the release-time
-    # bundled-item promotion so both read a written value the same way.
-    from pgai_agent_kanban.cm.release_version import VERSION_SHAPE_RE as VERSION_RE
-    from pgai_agent_kanban.cm.release_version import version_token
-
-    candidates = []   # (task_dir, state)
-    mismatches = []   # (field, raw, readme_path)
-    if os.path.isdir(tasks_dir):
-        for name in sorted(os.listdir(tasks_dir)):
-            task_dir = os.path.join(tasks_dir, name)
-            readme = os.path.join(task_dir, "README.md")
-            status = os.path.join(task_dir, "status.md")
-            if not (os.path.isdir(task_dir) and os.path.isfile(readme)
-                    and os.path.isfile(status)):
-                continue
-            role_raw = read_field(readme, "Role")
-            if role_raw is None or first_word(re.sub(r"[*`]", " ", role_raw)) != "tester":
-                continue
-            version_raw = read_field(readme, "Release Version")
-            if version_raw is None:
-                continue
-            version = version_token(version_raw)
-            if version == "none":
-                continue
-            if not VERSION_RE.match(version):
-                mismatches.append(("Release Version", version_raw, readme))
-                print(
-                    f"TESTER task {name}: Release Version {version_raw!r} in "
-                    f"{readme} is not version-shaped (expected vX.Y.Z); the task "
-                    f"cannot be tied to any RC and is not a candidate for {active_rc}",
-                    file=sys.stderr,
-                )
-                continue
-            if version != active_rc_token:
-                continue
-            if role_raw.strip() != "TESTER":
-                mismatches.append(("Role", role_raw, readme))
-                print(
-                    f"TESTER task {name}: Role {role_raw!r} in {readme} matched "
-                    f"TESTER only after normalization",
-                    file=sys.stderr,
-                )
-            if version_raw.strip() != active_rc.strip():
-                mismatches.append(("Release Version", version_raw, readme))
-                print(
-                    f"TESTER task {name}: Release Version {version_raw!r} in "
-                    f"{readme} matched {active_rc} only after normalization",
-                    file=sys.stderr,
-                )
-            state = read_field(status, "State")
-            candidates.append((task_dir, state if state is not None else "none"))
-    sys.stderr.flush()
-
-    selected = None
-    for task_dir, state in candidates:
-        if state.strip().lower() == "done":
-            selected = (task_dir, state)
-    if selected is None and candidates:
-        selected = candidates[-1]
-
-    if selected is None:
-        print("tester_task_dir=")
-        print("tester_task_id=none")
-        print("tester_state=none")
-        print("tester_report_path=")
-        print("tester_task_found=no")
-    else:
-        task_dir, state = selected
-        report = os.path.join(task_dir, "artifacts", "report.md")
-        print(f"tester_task_dir={task_dir}")
-        print(f"tester_task_id={os.path.basename(task_dir)}")
-        print(f"tester_state={state}")
-        print(f"tester_report_path={report if os.path.isfile(report) else ''}")
-        print("tester_task_found=yes")
-    for field, raw, readme in mismatches:
-        print(f"mismatch_field={field}")
-        print(f"mismatch_raw={raw}")
-        print(f"mismatch_path={readme}")
-    sys.exit(0)
-
-print(f"unknown reader mode {mode!r}: expected lookup", file=sys.stderr)
-sys.exit(2)
-PY
 }

@@ -49,7 +49,7 @@ _WAKE_HARNESS = _TEAM_DIR / "scripts" / "wake" / "harness.sh"
 _HELLOWORLD_HARNESS = _TEAM_DIR / "scripts" / "harness" / "helloworld-flow-check.sh"
 _REAL_WORKFLOWS_DIR = _TEAM_DIR / "workflows"
 
-_PROJECT = "planted_report_proj"
+_PROJECT = "planted-report-proj"
 _TASK_ID = "TESTER-20260101-001-verify-planted-report"
 
 # The recommendation both harnesses write, as written.

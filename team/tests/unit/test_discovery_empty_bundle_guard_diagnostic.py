@@ -107,13 +107,14 @@ def _step_script(root: pathlib.Path, step: str, scan_output_file: pathlib.Path) 
         pp_requirements_dir() {{ printf '%s\\n' '{root}/requirements'; }}
         pp_max_priorities_per_run() {{ printf '1\\n'; }}
         _disc_check_bug_id_collisions() {{ :; }}
+        _disc_convert_carried_items() {{ :; }}
         _disc_find_unhandled_items() {{ cat '{scan_output_file}'; }}
-        {step} project_a
+        {step} project-a
         """)
 
 
 def _fixture_tree(tmp_path: pathlib.Path) -> tuple[pathlib.Path, pathlib.Path]:
-    root = tmp_path / "project_a"
+    root = tmp_path / "project-a"
     for sub in ("bugs", "priority", "requirements", "tasks/queues"):
         (root / sub).mkdir(parents=True)
     scan_output_file = tmp_path / "scan-output.txt"

@@ -31,9 +31,34 @@
 #       Increments TEMP_ITEMS_PURGED for every item actually removed (or that
 #       would be removed in dry-run mode).
 #
+#   temp_purge_scan_root <dir>
+#       "each" when some process runs with its working directory inside
+#       <dir>, else "none": one scan per sweep, so temp_purge_remove scans
+#       an entry only when something is rooted under the swept directory.
+#
+#   temp_purge_remove <path>
+#       Remove one entry the sweep chose. A directory is removed only after
+#       every process whose working directory is inside it has been stopped
+#       (SIGTERM, then SIGKILL after KILL_GRACE_SECONDS, default 30), each one
+#       logged with its pid and command. A process attached to a terminal
+#       (an operator's shell) is never signalled: the directory is kept and
+#       the log says why. In dry-run mode it logs what it would stop and
+#       removes nothing. Returns 0 when the entry is removed (or would be),
+#       1 when it is kept.
+#
+# Dependencies: md_field.sh (read_md_field, the task ## State read), loaded
+# from beside this file unless the caller already defines read_md_field;
+# pp_run_ops (pp_run_ops.sh) for the process scan
+# (pgai_agent_kanban.lib.process_reap), loaded the same way.
+#
 # Include guard: safe to source multiple times.
 [[ -n "${_PGAI_TEMP_PURGE_SH_LOADED:-}" ]] && return 0
 _PGAI_TEMP_PURGE_SH_LOADED=1
+
+# shellcheck source=md_field.sh
+declare -F read_md_field >/dev/null || source "$(dirname "${BASH_SOURCE[0]}")/md_field.sh"
+# shellcheck source=pp_run_ops.sh
+declare -F pp_run_ops >/dev/null || source "$(dirname "${BASH_SOURCE[0]}")/pp_run_ops.sh"
 
 # ---------------------------------------------------------------------------
 # Allowlist of kanban-owned transient top-level basenames.
@@ -121,30 +146,21 @@ temp_purge_basename_allowed() {
 
 # ---------------------------------------------------------------------------
 # _temp_purge_read_task_state <task_status_file>
-# Echo the ## State field value from a task status.md, or "" if not found.
+# Echo the ## State field value from a task status.md -- the first non-blank
+# line of the section, trimmed -- or "" when the file, the heading or a value
+# is missing. Always returns 0. The section is read by read_md_field
+# (md_field.sh) with --free-spacing --end-at-subheading: "##State" and
+# "## State" both match, in any letter case, and the next "##" line ends the
+# section.
 # ---------------------------------------------------------------------------
 _temp_purge_read_task_state() {
     local status_file="$1"
     [[ -f "$status_file" ]] || { echo ""; return 0; }
-    local in_state=false
-    while IFS= read -r line; do
-        if [[ "$line" =~ ^##[[:space:]]*State[[:space:]]*$ ]]; then
-            in_state=true
-            continue
-        fi
-        if [[ "$in_state" == true ]]; then
-            # Skip blank lines
-            [[ -z "${line// /}" ]] && continue
-            # Next heading means state section ended with no value
-            [[ "$line" == "##"* ]] && break
-            # Strip leading/trailing whitespace and return
-            local val="${line#"${line%%[![:space:]]*}"}"
-            val="${val%"${val##*[![:space:]]}"}"
-            echo "$val"
-            return 0
-        fi
-    done < "$status_file"
-    echo ""
+    local val
+    val="$(read_md_field --free-spacing --end-at-subheading "$status_file" State)" || val=""
+    val="${val%%$'\n'*}"
+    val="${val%"${val##*[![:space:]]}"}"
+    echo "$val"
 }
 
 # ---------------------------------------------------------------------------
@@ -204,6 +220,72 @@ temp_purge_check_wake_locks() {
 }
 
 # ---------------------------------------------------------------------------
+# temp_purge_remove <path>
+#
+# Remove <path> (rm -rf), first stopping every process whose working
+# directory is <path> or inside it, so nothing keeps running from a deleted
+# directory. Only processes rooted there are scanned
+# (pgai_agent_kanban.lib.process_reap --cwd-under, which never signals this
+# process or its ancestors); one rooted there that has a controlling
+# terminal -- an operator's shell -- is never signalled, and the entry is
+# kept with a log line naming it. Each stopped process is logged with its
+# pid, outcome and command before the removal line.
+#
+# Uses the caller's DRY_RUN and log. Returns 0 when <path> is removed (or,
+# in dry-run mode, would be), 1 when it is kept.
+# ---------------------------------------------------------------------------
+temp_purge_remove() {
+    local _path="$1"
+    local _grace="${KILL_GRACE_SECONDS:-30}"
+    [[ "$_grace" =~ ^[0-9]+$ ]] || _grace=30
+    if [[ -d "$_path" && ! -L "$_path" && "${_TEMP_PURGE_SCAN:-each}" != "none" ]]; then
+        local -a _reap_args=(--cwd-under "$_path" --grace "$_grace" --skip-terminals)
+        [[ "$DRY_RUN" == "true" ]] && _reap_args+=(--dry-run)
+        local _reap_out _reap_rc=0 _reap_line
+        _reap_out="$(pp_run_ops pgai_agent_kanban.lib.process_reap "${_reap_args[@]}" 2>&1)" || _reap_rc=$?
+        while IFS= read -r _reap_line; do
+            [[ -n "$_reap_line" ]] || continue
+            if [[ "$DRY_RUN" == "true" ]]; then
+                log "[DRY-RUN] temp purge: would stop a process running in $_path: $_reap_line"
+            else
+                log "temp purge: stopped a process running in $_path before removing it: $_reap_line"
+            fi
+        done <<< "$_reap_out"
+        if [[ $_reap_rc -eq 3 ]]; then
+            log "temp purge: keeping $_path: a process running in it was left running (outcome=kept: attached to a terminal; outcome=survived: in kernel teardown); remove it once that process has exited"
+            return 1
+        elif [[ $_reap_rc -ne 0 ]]; then
+            log "temp purge: keeping $_path: the scan for processes running in it failed (exit ${_reap_rc})"
+            return 1
+        fi
+    fi
+    if [[ "$DRY_RUN" == "false" ]]; then
+        rm -rf "$_path"
+    fi
+    return 0
+}
+
+# ---------------------------------------------------------------------------
+# temp_purge_scan_root <dir>
+#
+# One process scan for a whole sweep: echoes "each" when some process has
+# its working directory inside <dir> (so temp_purge_remove must scan each
+# entry it removes), "none" when no process does. A sweep keeps the answer
+# in a local _TEMP_PURGE_SCAN, which temp_purge_remove reads; unset, every
+# entry is scanned. A scan that fails answers "each".
+# ---------------------------------------------------------------------------
+temp_purge_scan_root() {
+    local _dir="$1" _out _rc=0
+    [[ -d "$_dir" ]] || { echo "none"; return 0; }
+    _out="$(pp_run_ops pgai_agent_kanban.lib.process_reap --cwd-under "$_dir" --dry-run 2>/dev/null)" || _rc=$?
+    if [[ $_rc -eq 0 && -z "$_out" ]]; then
+        echo "none"
+    else
+        echo "each"
+    fi
+}
+
+# ---------------------------------------------------------------------------
 # temp_purge_sweep_worktrees <worktrees_dir> <label> [tasks_dir]
 #
 # Sweep the contents of a worktrees/ directory, applying the live-task
@@ -235,6 +317,8 @@ temp_purge_sweep_worktrees() {
         log "temp purge: worktrees directory does not exist, skipping (${_label}): $_wt_dir"
         return 0
     fi
+    local _TEMP_PURGE_SCAN
+    _TEMP_PURGE_SCAN="$(temp_purge_scan_root "$_wt_dir")"
 
     for _wt_entry in "${_wt_dir}"/*; do
         [[ -e "$_wt_entry" ]] || continue
@@ -259,10 +343,9 @@ temp_purge_sweep_worktrees() {
         esac
 
         log_action "temp purge (${_label}): $_wt_entry"
-        if [[ "$DRY_RUN" == "false" ]]; then
-            rm -rf "$_wt_entry"
+        if temp_purge_remove "$_wt_entry"; then
+            TEMP_ITEMS_PURGED=$(( TEMP_ITEMS_PURGED + 1 ))
         fi
-        TEMP_ITEMS_PURGED=$(( TEMP_ITEMS_PURGED + 1 ))
     done
     unset _wt_entry _wt_basename _task_status_file _task_state
 }
@@ -302,6 +385,8 @@ temp_purge_sweep_dir() {
         log "temp purge: directory does not exist, skipping (${_label}): $_dir"
         return 0
     fi
+    local _TEMP_PURGE_SCAN
+    _TEMP_PURGE_SCAN="$(temp_purge_scan_root "$_dir")"
 
     for _item in "${_dir}"/*; do
         [[ -e "$_item" ]] || continue
@@ -323,10 +408,9 @@ temp_purge_sweep_dir() {
 
         # --- Normal allowlisted entry ---
         log_action "temp purge (${_label}): $_item"
-        if [[ "$DRY_RUN" == "false" ]]; then
-            rm -rf "$_item"
+        if temp_purge_remove "$_item"; then
+            TEMP_ITEMS_PURGED=$(( TEMP_ITEMS_PURGED + 1 ))
         fi
-        TEMP_ITEMS_PURGED=$(( TEMP_ITEMS_PURGED + 1 ))
     done
     unset _item _basename
 }

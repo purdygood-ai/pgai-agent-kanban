@@ -44,6 +44,11 @@ Public API
         operator API's JSON refusal bodies) shares, so a change to the
         house shape is made in this module and nowhere else.
 
+    module_file_command(module_file, *args) -> str
+        A ``python3 <module file> <args>`` command line, every argument
+        shell-quoted: a remedy that runs a package module by its file path
+        works as printed from any directory, with no PYTHONPATH set.
+
     dual_channel_from_text(text, fallback_error_key, fallback_remedy) -> dict
         parse_error_contract with a guaranteed answer: the parsed triple
         when *text* carries the house shape, otherwise *text* itself as
@@ -94,6 +99,7 @@ from __future__ import annotations
 import inspect
 import os
 import re
+import shlex
 import sys
 from typing import Optional, TextIO
 
@@ -145,6 +151,20 @@ def format_error_contract(error: str, message: str, remedy: str) -> str:
         f"{_MESSAGE_LABEL}{message}\n"
         f"{_REMEDY_LABEL}{remedy}"
     )
+
+
+def module_file_command(module_file: "str | os.PathLike[str]", *args: str) -> str:
+    """Return a runnable ``python3 <module_file> <args...>`` command line.
+
+    Every part is shell-quoted, so the line can be pasted as a remedy. The
+    module must run by file path (it puts its own package root on
+    ``sys.path``), which every package CLI does.
+
+    Example:
+        >>> module_file_command("/opt/k/pgai_agent_kanban/overwatch/inbox.py", "list", "--project", "demo")
+        'python3 /opt/k/pgai_agent_kanban/overwatch/inbox.py list --project demo'
+    """
+    return " ".join(["python3", shlex.quote(str(module_file)), *(shlex.quote(a) for a in args)])
 
 
 def emit_error_contract(

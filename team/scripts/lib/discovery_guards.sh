@@ -54,7 +54,7 @@
 # -----------------------------------------------------------------------
 #   team/scripts/lib/project_paths.sh — pp_require_project_context,
 #     pp_release_state, pp_queue_path, pp_max_major, pp_max_minor,
-#     pp_max_patch.
+#     pp_max_patch, pp_git_remote_name.
 #   team/scripts/lib/discovery.sh itself — the log() shim (falls back to a
 #     stderr printer when the caller has not defined its own).
 #   team/scripts/lib/error_contract.sh — self-sourced below (mirrors
@@ -65,8 +65,8 @@
 #
 #   team/scripts/lib/cm/common.sh — self-sourced below, the same way, for
 #     release_state_section: _disc_get_release_field reads release-state.md
-#     through the one release-state reader (cm/read_state_field.py), so
-#     python3 must be on PATH.
+#     through read_md_field (lib/md_field.sh) with the release-state
+#     reading, so python3 must be on PATH.
 #   team/scripts/lib/pp_run_ops.sh — self-sourced below, for
 #     _disc_task_terminal's read of a task's ## State
 #     (pgai_agent_kanban.discovery.items task-state) and
@@ -132,7 +132,7 @@ _disc_active_rc_blocks() {
         pgai_emit_error_contract \
             "discovery.active-rc-in-flight" \
             "discovery skipped the ${step_name} bundle for project '${project_name}' because an RC (${_active_rc}) is already in flight" \
-            "Wait for the in-flight RC to ship (CM ships it) -- discovery re-checks on the next wake; if it is stuck and must be cleared, run: team/scripts/unwind-rc.sh --project ${project_name} --key ${_active_rc}" \
+            "Wait for the in-flight RC to ship (CM ships it) -- discovery re-checks on the next wake; if it is stuck and must be cleared, run: $(printf '%q' "${TEAM_ROOT}/scripts/unwind-rc.sh") --project $(printf '%q' "${project_name}") --key $(printf '%q' "${_active_rc}")" \
             "${project_name}"
         # BLOCK-WORTHY: invariant-by-design — allowing PM to decompose a
         # second release while an RC is in flight would inject unbounded
@@ -528,7 +528,8 @@ _disc_pm_ticket_in_flight() {
     return 1  # every decompose-v* entry is terminal, or there are none
 }
 
-# _disc_git_tag_exists <tag> [dev_tree] — check both local and origin tags
+# _disc_git_tag_exists <tag> [dev_tree] [project] — check both local tags and
+# the project's remote
 # Resolution order for the git working directory:
 #   1. Explicit dev_tree argument (passed by discovery_compute_next_patch)
 #   2. $PGAI_DEV_TREE_PATH environment variable (for callers that set it directly)
@@ -536,9 +537,17 @@ _disc_pm_ticket_in_flight() {
 #
 # Using an explicit dev_tree keeps bump-around consistent with
 # pp_last_released_version, which reads its dev tree from project.cfg (or PROJECT.cfg).
+#
+# The remote is the project's git_remote_name (pp_git_remote_name --quiet;
+# project from the third argument, then PGAI_PROJECT_NAME, else the
+# default). An invalid git_remote_name skips the remote check with one log
+# line and answers "not found", so git is never handed a value that cannot
+# name a remote.
 _disc_git_tag_exists() {
     local tag="$1"
     local dev_tree="${2:-${PGAI_DEV_TREE_PATH:-}}"
+    local project="${3:-}"
+    local remote
 
     # Local-only guard: PGAI_GIT_LOCAL_ONLY, checked BEFORE the ls-remote
     # fallthrough in both branches below (dev-tree path and cwd fallback).
@@ -549,10 +558,10 @@ _disc_git_tag_exists() {
     # (team/scripts/lib/wake_guard_wiring.sh) exports it for every
     # dispatched role other than "cm", so agent-side discovery under a
     # non-CM role is local-only by design -- CM is the only role that
-    # touches origin, and the dev tree's own tags are what CM tags and
+    # touches the remote, and the dev tree's own tags are what CM tags and
     # pushes from. Left unset (a CM dispatch, an operator's own shell),
     # behavior is unchanged: a tag not found locally still falls through to
-    # the origin check.
+    # the remote check.
     #
     # Each git listing feeds grep through process substitution, not a pipe:
     # callers run under `set -euo pipefail`, where grep -q exiting on its
@@ -565,8 +574,9 @@ _disc_git_tag_exists() {
     if [[ -n "$dev_tree" && -d "$dev_tree/.git" ]]; then
         grep -qx "$tag" < <(git -C "$dev_tree" tag -l "$tag" 2>/dev/null) && return 0
         [[ -n "$_local_only" ]] && return 1
-        # Also check origin (cheap if refs already fetched recently)
-        grep -q "refs/tags/$tag" < <(git -C "$dev_tree" ls-remote --tags origin "refs/tags/$tag" 2>/dev/null) && return 0
+        # Also check the project's remote (cheap if refs already fetched recently)
+        remote="$(pp_git_remote_name --quiet "$project")" || { _disc_log_invalid_tag_remote "$project" "$tag"; return 1; }
+        grep -q "refs/tags/$tag" < <(git -C "$dev_tree" ls-remote --tags "$remote" "refs/tags/$tag" 2>/dev/null) && return 0
         return 1
     fi
 
@@ -574,7 +584,16 @@ _disc_git_tag_exists() {
     if git rev-parse --git-dir >/dev/null 2>&1; then
         grep -qx "$tag" < <(git tag -l "$tag" 2>/dev/null) && return 0
         [[ -n "$_local_only" ]] && return 1
-        grep -q "refs/tags/$tag" < <(git ls-remote --tags origin "refs/tags/$tag" 2>/dev/null) && return 0
+        remote="$(pp_git_remote_name --quiet "$project")" || { _disc_log_invalid_tag_remote "$project" "$tag"; return 1; }
+        grep -q "refs/tags/$tag" < <(git ls-remote --tags "$remote" "refs/tags/$tag" 2>/dev/null) && return 0
     fi
     return 1
+}
+
+# _disc_log_invalid_tag_remote <project> <tag> — the one line
+# _disc_git_tag_exists logs when the project's git_remote_name is invalid
+# and its remote tag check is skipped.
+_disc_log_invalid_tag_remote() {
+    local project="${1:-${PGAI_PROJECT_NAME:-}}"
+    log "discovery: [project] git_remote_name for project '${project}' is not a valid git remote name; skipped the remote check for tag $2 (pp_git_remote_name ${project} names the fault)"
 }

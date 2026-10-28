@@ -84,10 +84,10 @@ means these directives apply.
     in a Python module — in the kanban, under `pgai_agent_kanban/` —
     and have the script call it.
     `team/scripts/lint_inline_python.py` counts both shapes in every
-    non-test script under `team/scripts` against
-    `team/config/inline-python-allowlist.txt`; when you move a block
-    out, lower that script's entry to its new counts in the same
-    change, or delete the entry at zero. Python inside a heredoc cannot
+    non-test script under `team/scripts` and in `install.sh` against
+    `team/config/inline-python-allowlist.txt`. That allowlist is empty,
+    so any inline Python in a scanned file is a finding: move it into a
+    module, never add an entry for it. Python inside a heredoc cannot
     be imported, reused, or unit tested, so the next caller who needs
     it copies it.
 
@@ -95,7 +95,7 @@ means these directives apply.
     it.** Before you write an atomic file writer, a `status.md`
     section reader, a version or timestamp parser, an INI reader, or a
     path-traversal check, import the owning one — the table under
-    "Three ratchet lints enforce directives 12–14" names each owner. If
+    "Four ratchet lints enforce directives 12–14" names each owner. If
     no owner exists yet, the first copy becomes the owner, in a
     `lib/` module (directive 3). `team/scripts/lint_python_duplicates.py`
     reports a deny-listed helper defined outside its owner and any
@@ -104,6 +104,13 @@ means these directives apply.
     copy with an import, lower or remove its entry in the same change.
     A private copy is invisible to whoever fixes the original, so the
     bug lives on in the copy.
+
+    A `## ` field in a markdown file is read only through
+    `pgai_agent_kanban.task_status.read_section` (Python) or
+    `read_md_field` from `team/scripts/lib/md_field.sh` (bash, which
+    calls the same reader); never find a section by matching its
+    heading yourself. `team/scripts/lint_section_parsers.py` reports
+    code that does.
 
 14. **An API route and its CLI script call the same Python function.**
     The route imports the function and calls it; the bash script
@@ -276,19 +283,22 @@ defaults resolve to the same two values when you run the lint from the
 dev tree. Re-run the lint afterwards to prove the finding cleared — that
 re-check is step 2 of the remedy block the lint prints.
 
-## Three ratchet lints enforce directives 12–14
+## Four ratchet lints enforce directives 12–14
 
-Each of directives 12, 13 and 14 has one lint. None of them demands
-zero: each compares the tree against a checked-in record of what it
-holds, and the record may only fall.
+Directives 12 and 14 have one lint each; directive 13 has two, one for
+copied helpers and one for hand-rolled `## ` section parsers. Each
+compares the tree against a checked-in record of what it holds, and the
+record may only fall. The inline-python record is empty, so that lint
+demands zero: any inline Python in a scanned file is a finding.
 
 | Directive | Lint | Record it ratchets against |
 |---|---|---|
-| 12 | `team/scripts/lint_inline_python.py` | `team/config/inline-python-allowlist.txt` — one `<path> <blocks> <python_lines>` line per script |
+| 12 | `team/scripts/lint_inline_python.py` | `team/config/inline-python-allowlist.txt` — empty; its format is one `<path> <blocks> <python_lines>` line per script. Scans `team/scripts` and `install.sh` |
 | 13 | `team/scripts/lint_python_duplicates.py` | `team/config/python-duplicates-allowlist.txt` — one `<family> <path> <symbol> <count>` line per finding key |
+| 13 | `team/scripts/lint_section_parsers.py` | `team/config/section-parser-allowlist.txt` — one tab-separated `<path> <class> <reason> <code>` line per site that detects a `## ` heading but reads no value (a section writer, a heading counter); a value-reading site is never listed |
 | 14 | `team/scripts/lint_api_route_impl.py` | `team/config/api-route-impl-baseline.txt` — one `shell_rows <count>` line |
 
-**All three are quality class.** Each narrates one line per finding,
+**All four are quality class.** Each narrates one line per finding,
 writes its findings to the gated runners' quality findings file, and
 exits 0 whatever it found. None ever blocks a runner or a release;
 TESTER files the findings like any other quality finding, and the next
@@ -296,7 +306,7 @@ loop heals them.
 
 ### The ratchet, in both directions
 
-The same three outcomes apply to every lint:
+The same three outcomes apply to the three lints that count:
 
 - **Something new** — a script with inline Python that has no entry, a
   copy of a helper with no entry, a `module:` row the route or the
@@ -312,6 +322,13 @@ The same three outcomes apply to every lint:
   An entry left loose lets the next change regress back up to it
   unreported.
 
+`lint_section_parsers.py` records sites, not counts. A new site that
+reads a value is a finding: read it through the reader instead. A new
+site that reads no value gets an entry naming its class — the classes
+are in the allowlist's header and the lint's `--help`. An entry whose
+site is gone or changed is a finding too, and is removed in the same
+change. `--list-sites` prints every site the lint finds.
+
 `lint_inline_python.py` also reports a Python heredoc opened with an
 unquoted delimiter (`<<PY` rather than `<<'PY'`) even when its script is
 within its counts: bash expands `$` and backticks in that body before
@@ -319,16 +336,15 @@ Python sees it.
 
 ### Tightening an entry
 
-Each lint prints its measured values in its own record's format, so a
-tightened entry is copied from the lint, never computed by hand. The
-two allowlists are edited line by line — the emit modes print the
-measured lines without the file's header comment, so never redirect them
-over the allowlist; filter for the file you changed instead. For
-example, for the script `team/scripts/cm/finalize.sh` and the duplicated
-function `_make_envelope`:
+Each counting lint prints its measured values in its own record's
+format, so a tightened entry is copied from the lint, never computed by
+hand. The inline-python allowlist is empty and has nothing to tighten.
+The duplicates allowlist is edited line by line — its emit mode prints
+the measured lines without the file's header comment, so never redirect
+it over the allowlist; filter for what you changed instead. For example,
+for the duplicated function `_make_envelope`:
 
 ```bash
-python3 team/scripts/lint_inline_python.py --emit-allowlist | grep -F 'team/scripts/cm/finalize.sh'
 python3 team/scripts/lint_python_duplicates.py --emit-allowlist | grep -F '_make_envelope'
 ```
 
@@ -363,6 +379,30 @@ owner instead.
 
 The lint's own module docstring is the authoritative copy of this list
 and of the body-normalisation rule behind its `duplicate-body` family.
+
+## One lint caps engine file size
+
+The kanban's shell engines are thin drivers composing single-concern
+`lib/` stages (directive 1). `team/scripts/lint_engine_size_dupe.py`
+holds every file in its `ENGINE_FILES` manifest under 800 lines
+(`--max-lines`); a stage that needs more room becomes a new stage file.
+The lint is quality class and exits 0; `run-unit-tests.sh --pre-merge`
+fails on a manifest file over the ceiling.
+
+**The ceiling covers the manifest only.** It is not a tree-wide size
+limit, and nothing outside `team/scripts/` is checked. These known
+files are over 800 lines and outside the manifest:
+
+| File or module | Why it is outside the manifest |
+|---|---|
+| `team/pm-agent/pm_materialize.py` | The PM plan materializer, the largest module in the tree; it lives outside `team/scripts/` and is not one of the decomposed engines, so its size is unpoliced |
+| `pgai_agent_kanban.api.routers.operations` | The REST mutation router, one handler per operator verb; package code outside `team/scripts/` |
+| `pgai_agent_kanban.ops.write` | The ops library's write operations; package code outside `team/scripts/` |
+| `team/scripts/lib/project_paths.sh`, `lib/projects.sh`, `lib/temp.sh` | Pre-existing utility libraries, not part of the decomposed engines |
+| The standalone lints and test runners (`lint_*.py`, `run-unit-tests.sh`, `run-integration-tests.sh`) | Single-purpose tools, not engine drivers or stages |
+
+The lint's module docstring ("CHECK 1: ENGINE SIZE") is the
+authoritative copy of the manifest's scope and of this list.
 
 ## Gates prescribe, not just diagnose
 

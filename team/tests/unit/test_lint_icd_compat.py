@@ -48,8 +48,19 @@ Tests cover:
      the table, and an absent document are each reported.
 
   9. **Support-table mirror via the CLI** (``TestSupportTableMirrorCli``): main()
-     exits 1 on drift with a causes/fix/rule block and 0 when mirrored, while
-     check_compat() itself still returns True on the drifting fixture.
+     prints a causes/fix/rule block on drift, writes each drift item and each
+     compatibility violation to --findings-file as its own quality finding,
+     and exits 0 either way (quality class), while check_compat() itself still
+     returns True on the drifting fixture.
+
+ 10. **Refused branch prefix** (``TestResolveMainRefRefusedPrefix``): against a
+     scratch kanban root, a project.cfg prefix ``pp_branch_prefix`` refuses
+     makes _resolve_main_ref() name the same branch as no project.cfg at all,
+     and an inline comment is stripped.
+
+ 11. **Unimportable branch-prefix reader** (``TestResolveMainRefUnimportableReader``):
+     with ``pgai_agent_kanban.lib.branch_prefix`` unimportable,
+     _resolve_main_ref() raises ImportError rather than naming a branch.
 
 All scratch files are written under tmp_path (redirected to the framework temp root
 by conftest.py when PGAI_AGENT_KANBAN_TEMP_DIR is set).  No bare /tmp paths.
@@ -165,12 +176,12 @@ class TestIcdCompatPositive:
     def test_clean_tree_passes(self, capsys: pytest.CaptureFixture[str]) -> None:
         """check_compat() returns True for the committed docs/api/icd.json.
 
-        At the current contract version (ICD 1.18.5), icd.json was regenerated
-        and icd-v1.18.5.json was frozen as a byte-identical copy. SUPPORTED lists
-        1.0.0 through 1.18.5. The compat gate must pass because icd.json (1.18.5)
+        At the current contract version (ICD 1.21.3), icd.json was regenerated
+        and icd-v1.21.3.json was frozen as a byte-identical copy. SUPPORTED lists
+        1.0.0 through 1.21.3. The compat gate must pass because icd.json (1.21.3)
         is a superset of every older baseline (no paths or response fields
-        removed and no request field became required; the latest change is
-        description-only).
+        removed and no request field became required; the latest change edits
+        one route description).
 
         Args:
             capsys: pytest capture fixture for inspecting stdout/stderr.
@@ -186,7 +197,7 @@ class TestIcdCompatPositive:
         assert result is True, (
             "check_compat() returned False for the committed artifacts.\n"
             f"Captured stderr: {capsys.readouterr().err}\n"
-            "icd.json (1.18.5) must be a compatible superset of every older baseline — "
+            "icd.json (1.21.3) must be a compatible superset of every older baseline — "
             "no path, response field or optional request field was removed."
         )
 
@@ -210,11 +221,11 @@ class TestIcdCompatPositive:
         )
 
     def test_baseline_byte_equality(self) -> None:
-        """docs/api/baselines/icd-v1.18.5.json is byte-identical to docs/api/icd.json.
+        """docs/api/baselines/icd-v1.21.3.json is byte-identical to docs/api/icd.json.
 
-        At the current contract version (ICD 1.18.5), the freeze is
-        icd-v1.18.5.json.  The frozen baseline must be byte-identical to the
-        current artifact.  icd-v1.0.0.json through icd-v1.18.4.json intentionally
+        At the current contract version (ICD 1.21.3), the freeze is
+        icd-v1.21.3.json.  The frozen baseline must be byte-identical to the
+        current artifact.  icd-v1.0.0.json through icd-v1.21.2.json intentionally
         differ (they are older, published baselines, not the current version).
 
         This is a structural check, not a compat check; it verifies the freeze was
@@ -223,27 +234,27 @@ class TestIcdCompatPositive:
         Note: When the ICD version is bumped in a future RC, repoint this test at
         the new current version — the prior version's baseline stays frozen.
         """
-        baseline = _BASELINES_DIR / "icd-v1.18.5.json"
+        baseline = _BASELINES_DIR / "icd-v1.21.3.json"
         assert baseline.exists(), (
             f"Baseline file does not exist: {baseline}\n"
-            "Run the baseline freeze step to create docs/api/baselines/icd-v1.18.5.json "
+            "Run the baseline freeze step to create docs/api/baselines/icd-v1.21.3.json "
             "as a byte-identical copy of docs/api/icd.json after regeneration."
         )
         current_bytes = _ICD_ARTIFACT.read_bytes()
         baseline_bytes = baseline.read_bytes()
         assert current_bytes == baseline_bytes, (
-            "docs/api/baselines/icd-v1.18.5.json is NOT byte-identical to docs/api/icd.json.\n"
+            "docs/api/baselines/icd-v1.21.3.json is NOT byte-identical to docs/api/icd.json.\n"
             f"Current size: {len(current_bytes)} bytes\n"
             f"Baseline size: {len(baseline_bytes)} bytes\n"
             "The frozen baseline must be an exact copy of the current artifact at this RC."
         )
 
     def test_supported_manifest_contains_all_versions(self) -> None:
-        """docs/api/baselines/SUPPORTED contains '1.0.0' through '1.18.5'.
+        """docs/api/baselines/SUPPORTED contains '1.0.0' through '1.21.3'.
 
-        The ICD patch bump (1.18.4 → 1.18.5) removes nothing: 1.0.0 through 1.18.4
+        The ICD patch bump (1.21.2 → 1.21.3) removes nothing: 1.0.0 through 1.21.2
         are kept in SUPPORTED so the compat gate continues to prove backward
-        compatibility. The 1.18.5 entry reflects the new freeze.
+        compatibility. The 1.21.3 entry reflects the new freeze.
 
         Args: none — reads the committed manifest file.
         """
@@ -253,16 +264,16 @@ class TestIcdCompatPositive:
         )
         content = supported.read_text(encoding="utf-8")
         lines = [v.strip() for v in content.splitlines() if v.strip()]
-        for version in ("1.0.0", "1.1.0", "1.2.0", "1.3.0", "1.4.0", "1.5.0", "1.6.0", "1.7.0", "1.8.0", "1.9.0", "1.10.0", "1.11.0", "1.12.0", "1.13.0", "1.13.1", "1.14.0", "1.15.0", "1.16.0", "1.16.1", "1.17.0", "1.17.1", "1.18.0", "1.18.1", "1.18.2", "1.18.3", "1.18.4"):
+        for version in ("1.0.0", "1.1.0", "1.2.0", "1.3.0", "1.4.0", "1.5.0", "1.6.0", "1.7.0", "1.8.0", "1.9.0", "1.10.0", "1.11.0", "1.12.0", "1.13.0", "1.13.1", "1.14.0", "1.15.0", "1.16.0", "1.16.1", "1.17.0", "1.17.1", "1.18.0", "1.18.1", "1.18.2", "1.18.3", "1.18.4", "1.18.5", "1.19.0", "1.19.1", "1.20.0", "1.20.1", "1.21.0", "1.21.1", "1.21.2"):
             assert version in lines, (
                 f"SUPPORTED manifest is missing '{version}'.\n"
                 f"Got: {lines!r}\n"
                 f"ICD {version} must remain in SUPPORTED — kept as a prior version."
             )
-        assert "1.18.5" in lines, (
-            f"SUPPORTED manifest is missing '1.18.5'.\n"
+        assert "1.21.3" in lines, (
+            f"SUPPORTED manifest is missing '1.21.3'.\n"
             f"Got: {lines!r}\n"
-            "ICD 1.18.5 must be added to SUPPORTED after the patch bump."
+            "ICD 1.21.3 must be added to SUPPORTED after the patch bump."
         )
 
 
@@ -1141,12 +1152,12 @@ class TestSupportTableMirror:
 
 
 class TestSupportTableMirrorCli:
-    """main() runs the mirror check beside check_compat() and exits 1 on drift.
+    """main() runs the mirror check beside check_compat() and reports drift as findings.
 
     The ICD and its baselines are minimal fixtures under ``tmp_path`` (no paths,
     so the compatibility rules pass), and ``--main-ref`` names a ref that does
     not exist so the published-baseline rule skips; only the mirror check can
-    change the exit status.
+    produce a finding.  main() exits 0 whatever it finds.
     """
 
     @staticmethod
@@ -1169,23 +1180,58 @@ class TestSupportTableMirrorCli:
             "--support-doc", str(support_doc),
         ]
 
-    def test_drift_exits_1_with_remedy_block(
+    def test_drift_records_finding_and_exits_0_with_remedy_block(
         self, tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        """A missing row makes main() return 1 and print causes, fix and rule."""
+        """A missing row prints causes, fix and rule, is written as one finding, and main() returns 0."""
         argv = self._fixture_tree(tmp_path, [("1.0.0", "supported")])
+        findings_file = tmp_path / "findings" / "icd_compat.json"
 
-        assert _lint.main(argv) == 1
+        assert _lint.main(argv + ["--findings-file", str(findings_file)]) == 0
 
         err = capsys.readouterr().err
         assert "missing: version 1.1.0" in err, err
         assert "| 1.1.0 | supported |" in err, err
         assert "To fix:" in err and "Rule:" in err, err
+        assert "error:   lint.icd-compat" in err, err
+        findings = json.loads(findings_file.read_text(encoding="utf-8"))
+        assert len(findings) == 1, findings
+        assert findings[0]["lint"] == "icd_compat"
+        assert findings[0]["severity"] == "quality"
+        assert findings[0]["cause"].startswith("missing: version 1.1.0"), findings[0]
+        assert "--support-doc" in findings[0]["remedy"], findings[0]
+
+    def test_compat_violation_records_one_finding_per_break(
+        self, tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Each path a baseline has and the current ICD lost is its own finding; exit 0."""
+        argv = self._fixture_tree(
+            tmp_path, [("1.0.0", "supported"), ("1.1.0", "supported")]
+        )
+        baseline = pathlib.Path(argv[3]) / "icd-v1.0.0.json"
+        _write_icd(
+            baseline,
+            {
+                "openapi": "3.1.0",
+                "info": {"title": "fixture", "version": "1.0.0"},
+                "paths": {"/a": {"get": {}}, "/b": {"get": {}}},
+            },
+        )
+        findings_file = tmp_path / "findings.json"
+
+        assert _lint.main(argv + ["--findings-file", str(findings_file)]) == 0
+
+        findings = json.loads(findings_file.read_text(encoding="utf-8"))
+        causes = [f["cause"] for f in findings]
+        assert len(findings) == 2, causes
+        assert any("'/a'" in c for c in causes) and any("'/b'" in c for c in causes), causes
+        assert all(f["lint"] == "icd_compat" for f in findings)
+        capsys.readouterr()
 
     def test_drift_leaves_check_compat_passing(
         self, tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        """Drift changes only the script's exit status; check_compat() still returns True."""
+        """Drift is reported by the mirror check alone; check_compat() still returns True."""
         argv = self._fixture_tree(tmp_path, [("1.0.0", "supported")])
         icd, baselines_dir = pathlib.Path(argv[1]), pathlib.Path(argv[3])
 
@@ -1197,12 +1243,71 @@ class TestSupportTableMirrorCli:
     def test_mirrored_table_exits_0(
         self, tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        """A table mirroring SUPPORTED lets main() return 0 with an ok line."""
+        """A table mirroring SUPPORTED lets main() return 0 with an ok line and no findings."""
         argv = self._fixture_tree(
             tmp_path, [("1.0.0", "supported"), ("1.1.0", "supported")]
         )
+        findings_file = tmp_path / "findings.json"
 
-        assert _lint.main(argv) == 0
+        assert _lint.main(argv + ["--findings-file", str(findings_file)]) == 0
 
         out = capsys.readouterr().out
         assert "mirrors" in out, out
+        assert json.loads(findings_file.read_text(encoding="utf-8")) == []
+
+
+class TestResolveMainRefRefusedPrefix:
+    """_resolve_main_ref() treats a prefix pp_branch_prefix refuses as an
+    unreadable project.cfg: it names the fallback ``ai_main``, never a branch
+    built from the refused value and never a traceback.  Each kanban root is
+    a throwaway directory under tmp_path."""
+
+    _PROJECT = "pgai-agent-kanban"
+
+    def _kanban_root(self, tmp_path: pathlib.Path, cfg_body: str | None) -> pathlib.Path:
+        root = tmp_path / "kanban"
+        project = root / "projects" / self._PROJECT
+        project.mkdir(parents=True)
+        if cfg_body is not None:
+            (project / "project.cfg").write_text(cfg_body, encoding="utf-8")
+        return root
+
+    @pytest.mark.parametrize("value", ["'zz_'", "zz/"], ids=["single-quoted", "invalid"])
+    def test_refused_prefix_reads_as_an_unreadable_project_cfg(
+        self, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch, value: str
+    ) -> None:
+        monkeypatch.setenv(
+            "PGAI_AGENT_KANBAN_ROOT_PATH", str(self._kanban_root(tmp_path / "none", None))
+        )
+        unreadable = _lint._resolve_main_ref()
+
+        monkeypatch.setenv(
+            "PGAI_AGENT_KANBAN_ROOT_PATH",
+            str(self._kanban_root(tmp_path / "refused", f"[project]\nbranch_prefix = {value}\n")),
+        )
+        refused = _lint._resolve_main_ref()
+
+        assert refused == unreadable == "ai_main"
+        assert value not in refused
+
+    def test_inline_comment_is_stripped(
+        self, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv(
+            "PGAI_AGENT_KANBAN_ROOT_PATH",
+            str(self._kanban_root(tmp_path, "[project]\nbranch_prefix = zz_  # note\n")),
+        )
+        assert _lint._resolve_main_ref() == "zz_main"
+
+
+class TestResolveMainRefUnimportableReader:
+    """_resolve_main_ref() has no fallback for an unimportable branch-prefix
+    reader: the ImportError reaches the caller instead of a branch name."""
+
+    def test_unimportable_reader_raises_import_error(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setitem(sys.modules, "pgai_agent_kanban.lib.branch_prefix", None)
+
+        with pytest.raises(ImportError, match="branch_prefix"):
+            _lint._resolve_main_ref()

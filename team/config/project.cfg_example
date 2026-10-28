@@ -185,6 +185,42 @@ max_priorities_per_run = 1
 # Default: true
 # defer_piggyback = true
 
+# --- Deferral bounds and bundle mixing ---------------------------------------
+# Four more keys (project.cfg > kanban.cfg > default), validated when
+# resolved like the three above. A DEFER-LOW-BUGS campaign file never
+# changes them.
+
+# deferred_max_age_days: when every open bug is deferred and the oldest
+# one's **Date:** is more than this many days ago, discovery opens a bugfix
+# bundle of the deferred bugs even with requirements still queued. A bug
+# with no parseable date never fires it. Unset means no bound.
+# Accepted: a non-negative whole number
+# Inherits: project.cfg > kanban.cfg > unset
+# Default: unset (no bound)
+# deferred_max_age_days =
+
+# deferred_max_count: when every open bug is deferred and more than this
+# many are, discovery opens a bugfix bundle of the deferred bugs even with
+# requirements still queued. Unset means no bound.
+# Accepted: a non-negative whole number
+# Inherits: project.cfg > kanban.cfg > unset
+# Default: unset (no bound)
+# deferred_max_count =
+
+# bundle_mixing: whether deferred bugs may ride in a requirement RC.
+# separate keeps them out; ride-along lets the PM add up to ride_along_max.
+# Accepted: separate|ride-along
+# Inherits: project.cfg > kanban.cfg > separate
+# Default: separate
+# bundle_mixing = separate
+
+# ride_along_max: the most deferred bugs one requirement RC may carry when
+# bundle_mixing is ride-along.
+# Accepted: a non-negative whole number
+# Inherits: project.cfg > kanban.cfg > 3
+# Default: 3
+# ride_along_max = 3
+
 # deep_verify: this project's DEEP-VERIFY scheduled-dispatch cadence. Only
 # [release] deep_verify is honored; the key under any other section is
 # reported and ignored. Commented out, the kanban.cfg value applies. An
@@ -209,26 +245,30 @@ max_priorities_per_run = 1
 # through the triggers the posture covers and records what they would have
 # stopped on (kanban.cfg_example describes both in full). Blank counts as
 # absent; an unrecognized value resolves to matrix with one warning line.
+# On a push_to_remote = true lane always also needs
+# ship_posture_confirm_remote = true, else it resolves to matrix.
 # Accepted: matrix|always
-# Example (local-only lane, push_to_remote = false): ship_posture = always
-# Inherits: project.cfg > kanban.cfg > matrix
-# Default: matrix
-# ship_posture = matrix
+# Example (lane that stops on every HALT row): ship_posture = matrix
+# Inherits: project.cfg > kanban.cfg > always
+# Default: always
+# ship_posture = always
 
 # ship_posture_confirm_remote: required alongside ship_posture = always when
-# push_to_remote is true; without it always resolves to matrix with one
-# warning line, so a lane that publishes to a remote never slips into always
-# by accident. Not consulted when push_to_remote is false.
+# push_to_remote is true, the built-in default always included; without it
+# the posture resolves to matrix (with one warning line when a cfg file set
+# always), so a lane that publishes to a remote never slips into always by
+# accident. Not consulted when push_to_remote is false.
 # Accepted: true|false
 # Example (remote lane deliberately opting in): ship_posture_confirm_remote = true
 # Inherits: project.cfg > kanban.cfg > false
 # Default: false
 # ship_posture_confirm_remote = false
 
-# overwatch_resolve: this project's override of whether OVERWATCH may act
-# autonomously on a resolvable CM block, rather than only observing and
-# raising Needs Human as today — read by pp_overwatch_resolve()
-# (team/scripts/lib/project_paths.sh) and its Python counterpart
+# overwatch_resolve: this project's override of whether OVERWATCH's
+# resolution stage may run its lanes on a CM ship-policy HALT its matrix
+# does not resolve, rather than leave that HALT to the matrix alone — read
+# by pp_overwatch_resolve() (team/scripts/lib/project_paths.sh) and its
+# Python counterpart
 # resolve_overwatch_resolve() (team/pgai_agent_kanban/overwatch/
 # resolution_matrix.py). Checked here first; falls back to the kanban-wide
 # default in kanban.cfg when commented out.
@@ -237,8 +277,12 @@ max_priorities_per_run = 1
 # playbooks (Lane A: rewrite-and-recycle a bad-fix regression; Lane B: ship
 # a HALT whose cause matches a declared operator INTENT.md entry) for THIS
 # project without waiting for a human — see team/roles/OVERWATCH.md,
-# "Autonomous Block Resolution". Everything else still escalates to Needs
-# Human exactly as today, unconditionally.
+# "Autonomous Block Resolution". Everything else (Lane C) becomes one
+# operator-inbox entry reading the cause and the options; nothing is
+# executed. Whatever this key is set to, the blocked CM task behind a HALT
+# the stage leaves in place is decided like any other block: its
+# classifier row's verb while the row's budget allows, then its
+# operator-inbox question, with Needs Human cleared.
 #
 # Left commented out so a fresh project ships dark: absent, blank, or
 # unreadable resolves to false — never an error, never "true". Only an
@@ -282,13 +326,43 @@ max_priorities_per_run = 1
 # block_triage = true
 
 # requeue_budget: how many times block triage may return one blocked task to
-# its owner over the life of its Block Record, across every block reason,
-# before escalating it to a human. 0 requeues nothing. A value that is not a
-# whole number refuses loud.
+# its owner over the life of its Block Record, across every block reason.
+# Once spent, the block goes to its classifier row's decision instead: the
+# row's verb while the row's own budget allows, then its operator-inbox
+# question, which clears Needs Human and leaves the task BLOCKED. A project
+# with no release-state.md runs plain block triage, where a spent budget
+# escalates the block with an OVERWATCH Diagnosis. 0 requeues nothing. A
+# value that is not a whole number refuses loud.
 # Accepted: a non-negative whole number.
 # Inherits: project.cfg > kanban.cfg [overwatch] > 3
 # Default: 3
 # requeue_budget = 3
+
+# runaway_releases_per_hour, runaway_rc_cycles_per_day,
+# runaway_reason_repeats, runaway_inbox_entries_per_day: the runaway
+# detector's thresholds for this project. When the events inside a
+# counter's window exceed its threshold, OVERWATCH halts this project
+# alone (a chain HALT naming the counter and its last events) and writes
+# one operator inbox entry. 0 turns a counter off. A value that is not a
+# whole number refuses loud. See kanban.cfg_example for each counter.
+# Accepted: a non-negative whole number.
+# Inherits: project.cfg > kanban.cfg [overwatch] > 5 / 2 / 3 / 20
+# Default: 5
+# runaway_releases_per_hour = 5
+# Default: 2
+# runaway_rc_cycles_per_day = 2
+# Default: 3
+# runaway_reason_repeats = 3
+# Default: 20
+# runaway_inbox_entries_per_day = 20
+
+# halt_after_auto_resume: whether a HALT-AFTER HALT whose drain completed
+# may be cleared by OVERWATCH to an inbox entry instead of waiting for
+# unhalt.sh. An unrecognized value refuses loud.
+# Accepted: true|false
+# Inherits: project.cfg > kanban.cfg [overwatch] > false
+# Default: false
+# halt_after_auto_resume = false
 
 
 # ---------------------------------------------------------------------------
@@ -406,3 +480,38 @@ reasoning_trace = false
 # Accepted: any of pm, coder, writer, tester, cm, po, overwatch.
 # Default: empty (no roles)
 training_agents =
+
+
+# ---------------------------------------------------------------------------
+# [testing] — the project's own test-runner commands
+# ---------------------------------------------------------------------------
+# Read by the PM materializer (resolve_test_runner_config in
+# pm-agent/pm_materialize.py; pp_targeted_test_command and
+# pp_pre_merge_command in scripts/lib/project_paths.sh) when it writes this
+# project's CODER and WRITER tickets. Each key is optional: empty adds no
+# criterion, and nothing falls back to kanban.cfg, whose [testing] keys are
+# a different, kanban-wide set.
+[testing]
+
+# targeted_test_command: the command that runs only the named test files.
+# Each CODER and WRITER ticket gets the acceptance criterion "`<command>`
+# exits 0." and a constraint to run only the tests it changed, and a plan
+# criterion naming this runner without its targeted option (with no file
+# list, for a runner that has no option) is rewritten to it. {files} marks
+# where the test files go (at the end when absent); the option written
+# just before {files} is the targeted option. Join several
+# runners that take files the same way with &&, each with its own {files}.
+# Examples:
+#   scripts/run-unit-tests.sh {files}
+#   bash team/scripts/run-unit-tests.sh --files {files} && bash team/scripts/run-integration-tests.sh --files {files}
+# Accepted: a command template, or empty.
+# Default: empty (no targeted-run criterion, constraint or rewrite)
+targeted_test_command =
+
+# pre_merge_command: the whole-tree check a ticket runs once before it
+# merges. Each CODER and WRITER ticket's acceptance criteria end with
+# "`<command>` exits 0 before merging."
+# Example: bash team/scripts/run-unit-tests.sh --pre-merge
+# Accepted: a command, or empty.
+# Default: empty (no pre-merge criterion)
+pre_merge_command =

@@ -16,29 +16,30 @@ blocked-task dispatch guard calls):
                            pgai_agent_kanban.discovery.items task-state,
                            which reads through task_status)
   wake_task_id_gate.sh     check_prerequisites: ## Prerequisites, prerequisite ## State
+                           (read through read_md_field, lib/md_field.sh)
   wake_autonomous_scan.sh  get_release_state_field
                            (_disc_get_release_field and get_release_state_field
                            read through release_state_section in
                            lib/cm/common.sh, so they are covered at behavior
                            level only)
-  wake_lifecycle.sh        close_intake_on_finalize_report: ## Inputs (path + census)
+  wake_lifecycle.sh        close_intake_on_finalize_report: ## Inputs (path + census,
+                           _intake_requirement_path / _intake_sibling_census)
   wake_readme_meta.sh      get_role_from_readme, get_assigned_agent_from_readme
+                           (both libs read through read_md_field)
   wake_driver_finalize.sh  narrate_model_mismatch: ## Model (behavior level
                            only -- the read is task_status read --raw; its
                            empty/populated variants are pinned in
                            test_discovery_finalize_module_parity.py)
 
-Two levels of coverage:
-  * Pattern level -- each reader's regex literal is read out of the shipped
-    lib, compiled exactly as the lib compiles it, and run against empty,
-    populated and edge-shaped fixtures. The same level checks that every
-    literal carries the section-body boundary _status_section_re
-    (wake_task_state.sh) produces, so the readers cannot drift apart.
+Coverage:
+  * Pattern level -- no scoped lib carries a section regex of the old shape
+    whose lazy body a blank line lets run into the next section. The rules
+    of read_md_field itself are pinned by its own tests.
   * Behavior level -- the real bash function (sourced, or extracted by name
-    with its collaborators stubbed) or the real python heredoc is run against
-    a fixture whose FOLLOWING section would change the observable result if
-    it were misread, so the assertion discriminates a correct boundary from
-    one that runs past it.
+    with its collaborators stubbed) is run against a fixture whose
+    FOLLOWING section would change the observable result if it were
+    misread, so the assertion discriminates a correct boundary from one
+    that runs past it.
 
 Every fixture lives under pytest's tmp_path; no live task folder or kanban
 install is read or written.
@@ -83,76 +84,11 @@ _SCOPED_LIBS = [
 
 _TASK_ID = "CODER-20260101-001-demo"
 
-# (lib, heading as written in the regex literal, heading as a file writes it,
-#  value bound to ``field`` when the literal is an rf-string)
-_SITES = [
-    (_TASK_ID_GATE, "## Prerequisites", "## Prerequisites", None),
-    (_TASK_ID_GATE, "## State", "## State", None),
-    (_LIFECYCLE, r"##[^\S\n]+Inputs", "## Inputs", None),
-    (_README_META, "## Role", "## Role", None),
-    (_README_META, "## Assigned Agent", "## Assigned Agent", None),
-]
-_SITE_IDS = [f"{lib.name}:{written}" for lib, _h, written, _f in _SITES]
-
-# The boundary's body group, as it appears in a raw-string literal.
-_BODY_GROUP = r"((?:\n(?!##)[^\n]*)*?)"
-_LITERAL_RE = re.compile(r"re\.search\(\s*(rf?)'(\(\^[^']*)'\s*,\s*\w+\s*,\s*flags=([\w.| ]+?)\s*\)")
+_MD_FIELD = _LIB / "md_field.sh"
 
 
 def _explain(result) -> str:
     return f"rc={result.returncode}\nstdout={result.stdout!r}\nstderr={result.stderr!r}"
-
-
-def _site_literals(lib: pathlib.Path, head: str) -> list[tuple[str, str, str]]:
-    """Every (prefix, literal body, flags) in *lib* whose pattern opens with
-    ``(^`` + *head* and carries the section-body boundary."""
-    found = []
-    for m in _LITERAL_RE.finditer(lib.read_text(encoding="utf-8")):
-        prefix, body, flags = m.groups()
-        if body.startswith("(^" + head) and _BODY_GROUP in body:
-            found.append((prefix, body, flags.replace(" ", "")))
-    return found
-
-
-def _compile_site(lib: pathlib.Path, head: str, field: str | None) -> re.Pattern:
-    literals = _site_literals(lib, head)
-    assert literals, f"no section-reader regex opening with {head!r} found in {lib}"
-    prefix, body, flags = literals[0]
-    assert flags == "re.M", f"{lib}: {head!r} reader must compile with re.M only, found {flags}"
-    pattern = eval(f"{prefix}'{body}'", {"re": re, "field": field})  # literal taken from the lib
-    return re.compile(pattern, re.M)
-
-
-def _canonical_boundary_tail(tmp_path: pathlib.Path) -> str:
-    """What _status_section_re prints after its heading argument."""
-    result = run_bash(
-        tmp_path,
-        f"""set -euo pipefail
-eval "$(awk '/^_status_section_re\\(\\)/{{f=1}} f{{print}} f&&/^}}/{{exit}}' '{_WAKE_TASK_STATE}')"
-_status_section_re 'HEADING'
-""",
-    )
-    assert result.returncode == 0, _explain(result)
-    assert result.stdout.startswith("(^HEADING"), _explain(result)
-    return result.stdout[len("(^HEADING"):]
-
-
-def _heredoc_containing(lib: pathlib.Path, marker: str) -> str:
-    """Return the python source of the one ``<<'PY'`` heredoc in *lib* that
-    contains *marker*."""
-    bodies = [
-        m.group(1)
-        for m in re.finditer(r"<<'PY'\n(.*?)\n[ \t]*PY[ \t]*$", lib.read_text(encoding="utf-8"), re.S | re.M)
-        if marker in m.group(1)
-    ]
-    assert len(bodies) == 1, f"expected one heredoc containing {marker!r} in {lib}, found {len(bodies)}"
-    return bodies[0]
-
-
-def _run_heredoc(source: str, *args: str) -> subprocess.CompletedProcess:
-    return subprocess.run(
-        ["python3", "-", *args], input=source, capture_output=True, text=True, timeout=30, cwd=str(_TEAM_DIR)
-    )
 
 
 def _extract_fn(name: str, lib: pathlib.Path) -> str:
@@ -185,74 +121,6 @@ def test_scoped_libs_carry_no_section_reader_of_the_old_shape() -> None:
         if old_shape.search(line)
     ]
     assert hits == [], "section readers must stop the body at the next '##' line:\n" + "\n".join(hits)
-
-
-@pytest.mark.parametrize(("lib", "head", "written", "field"), _SITES, ids=_SITE_IDS)
-def test_reader_regex_uses_the_status_section_boundary(
-    tmp_path: pathlib.Path, lib: pathlib.Path, head: str, written: str, field: str | None
-) -> None:
-    tail = _canonical_boundary_tail(tmp_path)
-    literals = _site_literals(lib, head)
-    assert literals, f"no section-reader regex opening with {head!r} in {lib}"
-    for prefix, body, _flags in literals:
-        evaluated = eval(f"{prefix}'{body}'", {"re": re, "field": field or "X"})
-        assert evaluated.endswith(tail), (
-            f"{lib.name} {head!r} reader diverges from _status_section_re's boundary\n"
-            f"  reader: {evaluated}\n  expect: (^<heading>{tail}"
-        )
-
-
-@pytest.mark.parametrize(("lib", "head", "written", "field"), _SITES, ids=_SITE_IDS)
-@pytest.mark.parametrize(
-    "shape",
-    [
-        "{h}\n\n## Summary\nDONE\n\n## Blockers\nnone\n",
-        "{h}\n## Summary\nDONE\n",
-        "{h}   \n\n\n## Summary\nDONE\n",
-        "## Task\nx\n\n{h}\n",
-        "## Task\nx\n\n{h}",
-    ],
-    ids=["blank-line-then-next", "next-heading-directly", "trailing-space-and-blank-lines", "last-section", "last-line-no-newline"],
-)
-def test_reader_regex_reads_empty_body_as_empty(
-    lib: pathlib.Path, head: str, written: str, field: str | None, shape: str
-) -> None:
-    rx = _compile_site(lib, head, field)
-    m = rx.search(shape.format(h=written))
-    assert m is not None, f"{lib.name}: heading {written!r} must still be found"
-    assert m.group(2).strip() == "", f"{lib.name}: empty {written!r} read as {m.group(2)!r}"
-
-
-@pytest.mark.parametrize(("lib", "head", "written", "field"), _SITES, ids=_SITE_IDS)
-@pytest.mark.parametrize(
-    ("shape", "expected"),
-    [
-        ("{h}\nBLOCKED\n\n## Summary\nDONE\n", "BLOCKED"),
-        ("## Task\nx\n\n{h}\nvalue one\n", "value one"),
-        ("{h}\n\nspaced value\n\n\n## Next\nx\n", "spaced value"),
-        ("{h}\r\nwindows\r\n\r\n## Next\r\nx\r\n", "windows"),
-        ("{h}\n- line a\n- line b\n\n### Sub\nz\n", "- line a\n- line b"),
-    ],
-    ids=["single-value", "last-section", "leading-blank-lines", "crlf", "multi-line-stops-at-subheading"],
-)
-def test_reader_regex_reads_populated_body_as_before(
-    lib: pathlib.Path, head: str, written: str, field: str | None, shape: str, expected: str
-) -> None:
-    rx = _compile_site(lib, head, field)
-    text = shape.format(h=written)
-    m = rx.search(text)
-    assert m is not None and m.group(2).strip().replace("\r", "") == expected, (
-        f"{lib.name}: populated {written!r} misread: {m.group(2) if m else None!r}"
-    )
-
-
-@pytest.mark.parametrize(("lib", "head", "written", "field"), _SITES, ids=_SITE_IDS)
-def test_reader_regex_misses_absent_heading_and_same_named_subheading(
-    lib: pathlib.Path, head: str, written: str, field: str | None
-) -> None:
-    rx = _compile_site(lib, head, field)
-    assert rx.search("## Other\nvalue\n") is None, lib.name
-    assert rx.search(f"## Other\nx\n\n#{written}\nvalue\n") is None, f"{lib.name}: '#{written}' is not the section"
 
 
 # --- wake_task_id_gate.sh: check_prerequisites --------------------------------
@@ -472,6 +340,7 @@ def test_model_mismatch_reads_stamped_model_section(tmp_path: pathlib.Path, stat
 log() {{ printf 'LOG: %s\\n' "$*"; }}
 resolve_dominant_output_token_model() {{ echo model-b; }}
 source scripts/lib/pp_run_ops.sh
+source scripts/lib/md_field.sh
 {_extract_fn("narrate_model_mismatch", _FINALIZE)}
 narrate_model_mismatch '{status}' '{tmp_path / "tokens.json"}' demo
 """,
@@ -531,10 +400,16 @@ def test_blocked_dispatch_guard_counts_by_section_body(tmp_path: pathlib.Path, s
 # --- wake_lifecycle.sh: ## Inputs readers ---------------------------------------
 
 
+def _run_lifecycle_fn(tmp_path: pathlib.Path, name: str, *args: str) -> subprocess.CompletedProcess:
+    """Run wake_lifecycle.sh's *name* (extracted by name, beside md_field.sh)."""
+    quoted = " ".join(f"'{a}'" for a in args)
+    return run_bash(tmp_path, f"source '{_MD_FIELD}'\n{_extract_fn(name, _LIFECYCLE)}\n{name} {quoted}\n")
+
+
 def test_inputs_path_reader_empty_inputs_reads_no_path(tmp_path: pathlib.Path) -> None:
     readme = tmp_path / "README.md"
     readme.write_text("# Task\n\n## Inputs\n\n## Context Paths\n- /abs/requirements/req.md\n", encoding="utf-8")
-    proc = _run_heredoc(_heredoc_containing(_LIFECYCLE, "line.endswith('.md')"), str(readme))
+    proc = _run_lifecycle_fn(tmp_path, "_intake_requirement_path", str(readme))
     assert (proc.returncode, proc.stdout) == (1, ""), f"an empty ## Inputs names no path\n{proc.stdout}{proc.stderr}"
 
 
@@ -544,7 +419,7 @@ def test_inputs_path_reader_populated_reads_first_absolute_md(tmp_path: pathlib.
         "# Task\n\n## Inputs\n- team/rel.md\n- /abs/requirements/req.md\n\n## Context Paths\n- /abs/other.md\n",
         encoding="utf-8",
     )
-    proc = _run_heredoc(_heredoc_containing(_LIFECYCLE, "line.endswith('.md')"), str(readme))
+    proc = _run_lifecycle_fn(tmp_path, "_intake_requirement_path", str(readme))
     assert (proc.returncode, proc.stdout) == (0, "/abs/requirements/req.md\n"), proc.stdout + proc.stderr
 
 
@@ -560,8 +435,6 @@ def test_inputs_census_reader(tmp_path: pathlib.Path, inputs_body: str, expected
         f"# Task\n\n## Inputs\n{inputs_body}\n## Notes\n- /abs/requirements/req.md\n", encoding="utf-8"
     )
     (task / "status.md").write_text("## State\nDONE\n", encoding="utf-8")
-    proc = _run_heredoc(
-        _heredoc_containing(_LIFECYCLE, "TERMINAL = {"), str(tmp_path / "tasks"), "/abs/requirements/req.md"
-    )
+    proc = _run_lifecycle_fn(tmp_path, "_intake_sibling_census", str(tmp_path / "tasks"), "/abs/requirements/req.md")
     assert proc.returncode == 0, proc.stderr
     assert proc.stdout.strip() == expected, proc.stdout + proc.stderr

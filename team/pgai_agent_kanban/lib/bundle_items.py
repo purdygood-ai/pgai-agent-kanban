@@ -13,9 +13,11 @@ Discovery sets an item's ``## Status`` to ``running`` when it bundles it, and
 the release that ships the bundle (cm-release Step 16b) promotes the item to
 ``done`` only when a DONE task claims its fix. An item no DONE task claims is
 left at ``running`` while the bundle itself becomes ``done``: the item was
-carried. A carried item is a candidate for the next bundle, exactly as an
-``open`` item is. Discovery's item scan and the bug-backlog cache both read
-that answer from :func:`carried_item_names`.
+carried. The next discovery pass converts a carried item to
+``needs-operator`` with an operator-inbox question
+(:mod:`pgai_agent_kanban.discovery.carried`) instead of bundling it again;
+discovery's item scan never offers one. Both read the answer from
+:func:`carried_item_names` / :func:`listing_bundles`.
 
 What counts as carried
 ----------------------
@@ -58,7 +60,9 @@ still names the same item.
 
 Public API:
     parse_bundled_item_paths(bundle_text) -> list[str]
+    listing_bundles(requirements_dir) -> dict[str, list[ListingBundle]]
     bundle_listings(requirements_dir) -> dict[str, list[str]]
+    bundle_pm_task(bundle_text) -> str
     carried_names_from(listings) -> frozenset[str]
     carried_item_names(requirements_dir) -> frozenset[str]
     is_carried(status, name, carried) -> bool
@@ -115,19 +119,23 @@ from pgai_agent_kanban.lib.terminal_states import (  # noqa: E402
     TERMINAL_STATES,
     canonical_state,
 )
-from pgai_agent_kanban.task_status import read_state  # noqa: E402
+from pgai_agent_kanban.task_status import read_section, read_state  # noqa: E402
 
 __all__ = [
     "CLOSED_BUNDLE_STATUSES",
+    "ListingBundle",
     "SUPERSEDED_ON_CANCEL_MARKER",
     "SlotAnswer",
     "StuckBundle",
     "bundle_listings",
+    "bundle_pm_task",
     "carried_item_names",
     "carried_names_from",
+    "has_bundled_items_section",
     "is_carried",
     "is_orphaned",
     "is_superseded_name",
+    "listing_bundles",
     "parse_bundled_item_paths",
     "pending_bundle",
     "running_items",
@@ -150,8 +158,10 @@ _WONT_DO = "wont-do"
 _NO_RC = "none"
 _INTAKE_DIRS = ("bugs", "priority")
 
-_BUNDLED_ITEMS_HEADING_RE = re.compile(r"^\s*##\s+Bundled Items\s*$", re.IGNORECASE)
-_SECTION_HEADING_RE = re.compile(r"^\s*##")
+#: The heading of a bundle's item list, read through task_status.read_section
+#: with ``end_at_subheading``: a ``###`` line ends the list, as any later
+#: heading does.
+BUNDLED_ITEMS_HEADING = "Bundled Items"
 _ITEM_PATH_RE = re.compile(r"\(`([^`]+)`\)")
 # A ## PM Task value that can name a task folder: one path component.
 _TASK_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
@@ -164,20 +174,26 @@ def parse_bundled_item_paths(bundle_text: str) -> list[str]:
     absent or holds no backtick-in-parentheses path. Each item line reads:
 
         - FILENAME.md (`/absolute/path/to/FILENAME.md`)
+
+    The section is read by ``task_status.read_section`` with
+    ``end_at_subheading`` (see :func:`has_bundled_items_section`).
     """
-    in_section = False
+    body = read_section(bundle_text, BUNDLED_ITEMS_HEADING, end_at_subheading=True) or ""
     item_paths: list[str] = []
-    for line in bundle_text.splitlines():
-        if _BUNDLED_ITEMS_HEADING_RE.match(line):
-            in_section = True
-            continue
-        if in_section:
-            if _SECTION_HEADING_RE.match(line):
-                break
-            m = _ITEM_PATH_RE.search(line)
-            if m:
-                item_paths.append(m.group(1).strip())
+    for line in body.splitlines():
+        m = _ITEM_PATH_RE.search(line)
+        if m:
+            item_paths.append(m.group(1).strip())
     return item_paths
+
+
+def has_bundled_items_section(bundle_text: str) -> bool:
+    """True when *bundle_text* carries a ``## Bundled Items`` heading.
+
+    The same reading as :func:`parse_bundled_item_paths`, so a file this
+    reports as a bundle is one whose item list that function reads.
+    """
+    return read_section(bundle_text, BUNDLED_ITEMS_HEADING, end_at_subheading=True) is not None
 
 
 def is_superseded_name(name: str) -> bool:
@@ -197,16 +213,32 @@ def _bundle_status(name: str, text: str) -> str:
     return _WONT_DO if is_superseded_name(name) else _status_of(text)
 
 
-def bundle_listings(requirements_dir: PathLike) -> dict[str, list[str]]:
-    """Map each item file name a bundle lists to the statuses of the bundles
-    that list it, in file-name order of the bundles.
+@dataclasses.dataclass(frozen=True)
+class ListingBundle:
+    """One bundle that lists an item.
+
+    Attributes:
+        path:   The bundle file in requirements/.
+        status: Its ``## Status`` as :func:`bundle_listings` reads it
+                (lower-cased first token; ``open`` when absent; ``wont-do``
+                for a superseded name).
+    """
+
+    path: pathlib.Path
+    status: str
+
+
+def listing_bundles(requirements_dir: PathLike) -> dict[str, list[ListingBundle]]:
+    """Map each item file name a bundle lists to the bundles that list it,
+    in file-name order of the bundles.
 
     Reads every ``*.md`` file directly under *requirements_dir* that has a
     ``## Bundled Items`` section. A superseded bundle's status reads as
     ``wont-do`` whatever its file says. A missing directory or an unreadable
-    file contributes nothing.
+    file contributes nothing. A bundle that lists one item twice appears
+    twice under its name.
     """
-    listings: dict[str, list[str]] = {}
+    listings: dict[str, list[ListingBundle]] = {}
     root = pathlib.Path(requirements_dir)
     if not root.is_dir():
         return listings
@@ -218,10 +250,20 @@ def bundle_listings(requirements_dir: PathLike) -> dict[str, list[str]]:
         paths = parse_bundled_item_paths(text)
         if not paths:
             continue
-        status = _bundle_status(bundle.name, text)
+        listing = ListingBundle(bundle, _bundle_status(bundle.name, text))
         for item_path in paths:
-            listings.setdefault(pathlib.PurePath(item_path).name, []).append(status)
+            listings.setdefault(pathlib.PurePath(item_path).name, []).append(listing)
     return listings
+
+
+def bundle_listings(requirements_dir: PathLike) -> dict[str, list[str]]:
+    """Map each item file name a bundle lists to the statuses of the bundles
+    that list it, in file-name order of the bundles (see
+    :func:`listing_bundles`, which also keeps each bundle's path)."""
+    return {
+        name: [bundle.status for bundle in bundles]
+        for name, bundles in listing_bundles(requirements_dir).items()
+    }
 
 
 def carried_names_from(listings: Mapping[str, list[str]]) -> frozenset[str]:
@@ -352,14 +394,23 @@ def _bundle_version(name: str, text: str) -> str:
     return semver.from_filename(name)
 
 
+def bundle_pm_task(text: str) -> str:
+    """The bundle *text*'s ``## PM Task`` first token when it can name a task
+    folder (one path component, not ``none``), else ``""``."""
+    tokens = md_fields.field_value(text, "PM Task").split()
+    pm_task = tokens[0] if tokens else ""
+    if not _TASK_ID_RE.match(pm_task) or pm_task.lower() == _NO_RC:
+        return ""
+    return pm_task
+
+
 def _stuck(
     path: pathlib.Path, text: str, tasks_dir: pathlib.Path, active_rc: Optional[str]
 ) -> Optional[StuckBundle]:
     """The :class:`StuckBundle` for a ``running`` bundle, or ``None`` when it
     may still ship (or when anything needed to tell is unknown)."""
-    tokens = md_fields.field_value(text, "PM Task").split()
-    pm_task = tokens[0] if tokens else ""
-    if not _TASK_ID_RE.match(pm_task) or pm_task.lower() == _NO_RC:
+    pm_task = bundle_pm_task(text)
+    if not pm_task:
         return None
     status_file = tasks_dir / pm_task / "status.md"
     if not status_file.is_file():

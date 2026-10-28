@@ -16,10 +16,10 @@ Coverage:
     releases never detect.
   - Step 4c through the real cm_release_apply_ship_policy on a sandbox lane
     under ship_posture=matrix: templated NON-FUNCTIONAL notes plus the
-    active RC's PENDING-RELEASE notes halt with the trigger-8 key and record
-    the window; after the HALT is cleared a re-run over the same three
-    releases does not halt; a newer NON-FUNCTIONAL release forms a new
-    window that halts again.
+    active RC's PENDING-RELEASE notes halt with the trigger-8 key, a remedy
+    naming the installed unhalt script, and record the window; after the
+    HALT is cleared a re-run over the same three releases does not halt; a
+    newer NON-FUNCTIONAL release forms a new window that halts again.
   - The window record writes nothing under a decide-only run.
 
 Every path is under pytest's tmp_path; the sandbox lane has no remote and a
@@ -160,7 +160,11 @@ def test_step_4c_halts_once_per_window_and_again_on_a_new_window(tmp_path, _git)
 
     assert first.returncode != 0, _diag(first)
     assert lane.halt_file.is_file(), _diag(first)
-    assert KEY_T8 in lane.halt_file.read_text(encoding="utf-8")
+    halt_text = lane.halt_file.read_text(encoding="utf-8")
+    assert KEY_T8 in halt_text
+    # The remedy lifts the HALT through the installed script under the kanban root.
+    unhalt = f"{lane.root / 'scripts' / 'unhalt.sh'} --project {lane.project_root.name}"
+    assert f"then run: {unhalt} (the next release" in halt_text, halt_text
     assert _window_file(lane).read_text(encoding="utf-8").strip() == "v1.0.0.md,v1.1.0.md,v1.2.0.md"
 
     # The operator clears the HALT; the same three releases now pass.

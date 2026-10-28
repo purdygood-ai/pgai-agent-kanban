@@ -32,6 +32,12 @@ Coverage:
   - Captured output where no pair built, every pair was narrate-skipped and
     one non-build cold test failed files a bug naming the failing test,
     and the report does not claim the builds were recorded as built.
+  - A needs-operator bug for the same failing pair is cited like an open
+    one: the CLI prints its ID and nothing is filed.
+  - A hand-filed open or running bug whose slug differs from the drafted
+    report's only by a re-file marker is cited although no pair or
+    test set matches it; closed bugs (done, wont-do, duplicate) matching
+    by pair set or slug never suppress a filing.
 
 Every assertion is against the pure file_or_cite_bug() / extract_failing_
 pairs() functions operating on a tmp_path bugs/ directory -- no subprocess,
@@ -48,13 +54,15 @@ from __future__ import annotations
 
 import pathlib
 
+import pytest
+
 from pgai_agent_kanban.deep_verify.bug_filer import (
     FilingResult,
     file_or_cite_bug,
-    find_existing_bug_for_pairs,
     main,
 )
 from pgai_agent_kanban.deep_verify.classify import FailingPair, extract_failing_pairs
+from pgai_agent_kanban.lib.bug_filing import find_existing_bug
 from tests.fixtures.deep_verify_lane_output import (
     ENGINE_UNAVAILABLE_FAILING_TEST_FILE,
     ENGINE_UNAVAILABLE_FAILING_TEST_ID,
@@ -65,6 +73,7 @@ from tests.fixtures.deep_verify_lane_output import (
     NON_BUILD_TEST_ID,
     NON_BUILD_TEST_NODEID,
 )
+from tests.fixtures.hand_filed_bug import CLOSED_STATUSES, write_hand_filed_bug
 
 _DOCKERFILE_FAILURE_OUTPUT = (
     "E       Failed: docker build of docker/claude-code/Dockerfile failed "
@@ -253,11 +262,11 @@ def test_existing_closed_bug_for_the_same_pair_does_not_suppress_a_fresh_filing(
     assert result.bug_id != "BUG-0044"
 
 
-def test_find_existing_bug_for_pairs_returns_none_when_bugs_dir_absent(
+def test_pair_lookup_returns_none_when_bugs_dir_absent(
     tmp_path: pathlib.Path,
 ) -> None:
     missing_dir = tmp_path / "bugs"
-    assert find_existing_bug_for_pairs(str(missing_dir), {"docker/claude-code"}) is None
+    assert find_existing_bug(str(missing_dir), "Deep-Verify Pairs", {"docker/claude-code"}) is None
 
 
 # ---------------------------------------------------------------------------
@@ -433,3 +442,95 @@ def test_non_build_failure_with_build_evidence_still_notes_the_builds_are_record
 
     content = next(bugs_dir.glob("BUG-*.md")).read_text(encoding="utf-8")
     assert "records the builds as `built`" in content
+
+
+# ---------------------------------------------------------------------------
+# Live statuses and the shared same-defect rule
+# ---------------------------------------------------------------------------
+
+
+def test_needs_operator_bug_for_the_same_failing_pair_is_cited_and_nothing_is_filed(
+    tmp_path: pathlib.Path, capsys
+) -> None:
+    bugs_dir = tmp_path / "bugs"
+    bugs_dir.mkdir()
+    existing = _write_bug(bugs_dir, "BUG-9301", status="needs-operator", pairs=("docker/claude-code",))
+    output_file = tmp_path / "lane-output.txt"
+    output_file.write_text(_DOCKERFILE_FAILURE_OUTPUT, encoding="utf-8")
+
+    exit_code = main([str(bugs_dir), "demo", "v2.9.13", "def5678", str(output_file)])
+
+    assert exit_code == 0
+    lines = capsys.readouterr().out.splitlines()
+    assert "outcome=duplicate" in lines
+    assert "bug_id=BUG-9301" in lines
+    assert "bug_path=" in lines
+    assert sorted(bugs_dir.glob("BUG-*.md")) == [existing]
+
+
+@pytest.mark.parametrize("status", ["open", "running"])
+def test_live_bug_with_an_ordinal_variant_slug_is_cited_and_nothing_is_filed(
+    tmp_path: pathlib.Path, status: str
+) -> None:
+    bugs_dir = tmp_path / "bugs"
+    hand_filed = write_hand_filed_bug(
+        bugs_dir, "BUG-9302", "cold-build-claude-code-failure-again", status=status
+    )
+    assert find_existing_bug(str(bugs_dir), "Deep-Verify Pairs", {"docker/claude-code"}) is None
+
+    result = file_or_cite_bug(
+        str(bugs_dir),
+        project="demo",
+        version="v2.9.13",
+        commit="def5678",
+        output_text=_DOCKERFILE_FAILURE_OUTPUT,
+    )
+
+    assert result.outcome == "duplicate"
+    assert result.bug_id == "BUG-9302"
+    assert result.bug_path is None
+    assert result.pairs == ("docker/claude-code",)
+    assert sorted(bugs_dir.glob("BUG-*.md")) == [hand_filed]
+
+
+def test_live_bug_with_an_ordinal_variant_of_a_test_failure_slug_is_cited(
+    tmp_path: pathlib.Path,
+) -> None:
+    bugs_dir = tmp_path / "bugs"
+    module = NON_BUILD_TEST_FILE.rsplit("/", 1)[-1][len("test_"):-len(".py")].replace("_", "-")
+    write_hand_filed_bug(bugs_dir, "BUG-9303", f"second-cold-test-{module}-failure")
+
+    result = file_or_cite_bug(
+        str(bugs_dir),
+        project="demo",
+        version="v2.9.13",
+        commit="def5678",
+        output_text=NON_BUILD_TEST_FAILURE_OUTPUT,
+    )
+
+    assert result.outcome == "duplicate"
+    assert result.bug_id == "BUG-9303"
+    assert result.tests == (NON_BUILD_TEST_NODEID,)
+    assert len(list(bugs_dir.glob("BUG-*.md"))) == 1
+
+
+@pytest.mark.parametrize("status", CLOSED_STATUSES)
+def test_closed_bugs_matching_by_pair_or_slug_do_not_suppress_a_fresh_filing(
+    tmp_path: pathlib.Path, status: str
+) -> None:
+    bugs_dir = tmp_path / "bugs"
+    bugs_dir.mkdir()
+    _write_bug(bugs_dir, "BUG-9304", status=status, pairs=("docker/claude-code",))
+    write_hand_filed_bug(bugs_dir, "BUG-9305", "cold-build-claude-code-failure-again", status=status)
+
+    result = file_or_cite_bug(
+        str(bugs_dir),
+        project="demo",
+        version="v2.9.13",
+        commit="def5678",
+        output_text=_DOCKERFILE_FAILURE_OUTPUT,
+    )
+
+    assert result.outcome == "filed"
+    assert result.bug_id not in ("BUG-9304", "BUG-9305")
+    assert len(list(bugs_dir.glob("BUG-*.md"))) == 3

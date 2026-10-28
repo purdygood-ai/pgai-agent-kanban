@@ -7,12 +7,21 @@ documents the row shape in full) maps each Block Record ``reason_code`` to a
 row::
 
     reason_code -> {action, max_attempts, cooldown_s, backoff,
-                    verification, preconditions}
+                    verification, preconditions, decision}
 
 plus the optional ``params``, ``cooldown_before_first`` and ``otherwise``.
-The action is one of ``ACTIONS``: ``requeue_owner``,
+A row's action is one of ``ROW_ACTIONS``: ``requeue_owner``,
 ``prune_worktree_then_requeue``, ``recompute_gate``,
-``defer_to_resolution_stage``, ``run_allowlisted_verb`` or ``escalate``.
+``defer_to_resolution_stage`` or ``run_allowlisted_verb``. A row whose block
+triage has no step of its own carries ``decision`` alone (a decision-only
+row); it classifies as ``escalate``.
+
+Every row carries a ``decision`` (:class:`RowDecision`): what resolves the
+block once triage itself has nothing (more) to do — one of ``DECISION_VERBS``
+(an existing operator write) used at most ``budget`` times on one task, then
+an operator-inbox question. ``escalate`` is never a decision and never a row
+action; it is only the classifier's verdict that triage takes no step, which
+:mod:`pgai_agent_kanban.overwatch.decide` turns into the row's decision.
 
 This module only decides. It reads the record, the caller's facts and the
 table, and returns a :class:`Decision`; it runs no git command, writes no
@@ -27,7 +36,10 @@ Decision order
 1. no record, an unknown ``owner_role``, or an ``evidence`` line that is
    neither ``none`` nor ``key=value`` pairs           -> ``escalate``
 2. an absent ``reason_code``, or one with no row      -> ``escalate``
-3. a row whose action is ``escalate``                 -> ``escalate``
+3. a decision-only row (no triage step)               -> ``escalate``,
+   unless the table's pipeline ladder names the record's ``owner_role``:
+   the ladder then stands in for the row's triage step and keys, and
+   steps 4-7 read it
 4. ``attempts`` >= the row's ``max_attempts``          -> ``escalate``
    (a ``stage`` ceiling is the resolution stage's to enforce)
 5. now < ``cooldown_until``                            -> ``not_yet``
@@ -40,6 +52,21 @@ Decision order
 :func:`classify` wraps :func:`decide` so that every failure upstream of it
 also fails closed: a table that does not load or validate, and a status.md
 text whose record does not parse, each decide ``escalate``.
+
+Pipeline ladder
+---------------
+The table's optional ``pipeline_ladder`` (:class:`PipelineLadder`) names
+the owner roles a release cannot carry on without (PM, TESTER and CM in the
+shipped table). A block one of them holds on a decision-only row is
+decided as if the row were a ``requeue_owner`` row with the ladder's note,
+``max_attempts``, cool-down and backoff, no verification and no
+preconditions, keeping the row's own ``decision``: the owner is requeued
+until the attempts are spent, and only then does the row's decision apply.
+Every decision made on the ladder carries ``pipeline_ladder`` true, so the
+triage executor can pick its handler. A row with an action of its own is
+never laddered, whatever the role (``ship_policy_halt`` still defers to the
+resolution stage), and a role the ladder does not name takes the row as
+written.
 
 Preconditions
 -------------
@@ -135,6 +162,23 @@ ACTIONS: tuple[str, ...] = (
     ESCALATE,
 )
 
+#: The actions a table row (or an ``otherwise`` step) may declare: every
+#: action but ``escalate``. A row with no triage step omits ``action``.
+ROW_ACTIONS: tuple[str, ...] = tuple(action for action in ACTIONS if action != ESCALATE)
+
+#: Actions that close a task rather than return it to its owner: the
+#: requeue budget (``[overwatch] requeue_budget``) never refuses them and
+#: never counts them.
+REQUEUE_FREE_ACTIONS: tuple[str, ...] = ("recompute_gate",)
+
+#: The operator write a row's decision may name: return the task to BACKLOG
+#: with Needs Human cleared (the status-writer tool's
+#: ``--state BACKLOG --needs-human no``).
+DECISION_VERB_RESET_TO_BACKLOG = "reset-to-backlog"
+
+#: Verbs a row's ``decision`` may name — existing operator writes on one task.
+DECISION_VERBS: tuple[str, ...] = (DECISION_VERB_RESET_TO_BACKLOG,)
+
 #: The decision for a task inside its cool-down window: take no action now.
 #: Never a table action — load_table() refuses a row that declares it.
 NOT_YET = "not_yet"
@@ -186,11 +230,25 @@ _ACTION_PARAMS: dict[str, tuple[frozenset, frozenset]] = {
 _ROW_REQUIRED_KEYS = frozenset(
     {"action", "max_attempts", "cooldown_s", "backoff", "verification", "preconditions"}
 )
-_ROW_OPTIONAL_KEYS = frozenset({"params", "cooldown_before_first", "otherwise"})
+#: Required on every row; checked by _validate_rule itself, so a row with an
+#: action passes it to _validate_step as an accepted key.
+_DECISION_KEY = "decision"
+_DECISION_REQUIRED_KEYS = frozenset({"inbox", "answer"})
+_DECISION_OPTIONAL_KEYS = frozenset({"verb", "budget"})
+#: Uses of a decision verb on one task when the row names no ``budget``.
+DEFAULT_DECISION_BUDGET = 1
+_ROW_OPTIONAL_KEYS = frozenset({"params", "cooldown_before_first", "otherwise", "decision"})
 _STEP_REQUIRED_KEYS = frozenset({"action", "preconditions"})
 _STEP_OPTIONAL_KEYS = frozenset({"params", "otherwise"})
 _BACKOFF_KEYS = frozenset({"factor", "cap_s"})
 _TOP_LEVEL_KEY = "reason_codes"
+#: The optional top-level key holding the pipeline ladder.
+PIPELINE_LADDER_KEY = "pipeline_ladder"
+_PIPELINE_LADDER_KEYS = frozenset(
+    {"roles", "note", "max_attempts", "cooldown_s", "backoff", "cooldown_before_first"}
+)
+#: The action every pipeline-ladder step takes.
+PIPELINE_LADDER_ACTION = "requeue_owner"
 
 #: Placeholder a note gets for a key neither the facts nor the evidence carry.
 UNKNOWN_VALUE = "unknown"
@@ -245,8 +303,28 @@ class Step:
 
 
 @dataclasses.dataclass(frozen=True)
+class RowDecision:
+    """What resolves a block once triage has no step (left) to take.
+
+    Fields:
+        inbox   the operator-inbox question asked when no verb applies or the
+                verb's budget is spent; ``{key}`` placeholders are filled by
+                :mod:`pgai_agent_kanban.overwatch.decide`.
+        answer  what the human does to answer it (the first step; decide
+                adds the runnable return-to-BACKLOG and close commands).
+        verb    one of DECISION_VERBS, tried first; None for inbox only.
+        budget  times the verb may be used on one task (0 without a verb).
+    """
+
+    inbox: str
+    answer: str
+    verb: Optional[str] = None
+    budget: int = 0
+
+
+@dataclasses.dataclass(frozen=True)
 class Rule:
-    """One validated table row."""
+    """One validated table row; ``decision`` is None only for a hand-built Rule."""
 
     reason_code: str
     step: Step
@@ -255,6 +333,14 @@ class Rule:
     backoff: Optional[Backoff]
     verification: Optional[str]
     cooldown_before_first: bool = False
+    decision: Optional[RowDecision] = None
+    #: True for the stand-in a pipeline ladder makes of a decision-only row.
+    pipeline_ladder: bool = False
+
+    @property
+    def has_triage_step(self) -> bool:
+        """False for a decision-only row: triage takes no step of its own."""
+        return self.step.action != ESCALATE
 
     @property
     def action(self) -> str:
@@ -270,11 +356,49 @@ class Rule:
 
 
 @dataclasses.dataclass(frozen=True)
+class PipelineLadder:
+    """The requeue ladder put in front of a decision-only row for ``roles``.
+
+    Fields mirror a row's triage keys (see the table's header); the step is
+    always ``requeue_owner`` with ``note``, no verification and no
+    preconditions.
+    """
+
+    roles: tuple[str, ...]
+    note: str
+    max_attempts: int
+    cooldown_s: int
+    backoff: Optional[Backoff]
+    cooldown_before_first: bool
+
+    def applies_to(self, rule: Rule, owner_role: str) -> bool:
+        """True when *rule* is a decision-only row and *owner_role* is laddered."""
+        return not rule.has_triage_step and owner_role in self.roles
+
+    def rule_for(self, rule: Rule) -> Rule:
+        """The stand-in for decision-only *rule*: the ladder's step and keys,
+        the row's own reason_code and decision."""
+        return Rule(
+            reason_code=rule.reason_code,
+            step=Step(action=PIPELINE_LADDER_ACTION, params={"note": self.note}, preconditions=()),
+            max_attempts=self.max_attempts,
+            cooldown_s=self.cooldown_s,
+            backoff=self.backoff,
+            verification=None,
+            cooldown_before_first=self.cooldown_before_first,
+            decision=rule.decision,
+            pipeline_ladder=True,
+        )
+
+
+@dataclasses.dataclass(frozen=True)
 class ClassifierTable:
-    """A validated table: ``rules`` keyed by reason_code, and where it came from."""
+    """A validated table: ``rules`` keyed by reason_code, where it came from,
+    and the pipeline ladder (None when the table declares none)."""
 
     path: str
     rules: Mapping[str, Rule]
+    pipeline_ladder: Optional[PipelineLadder] = None
 
 
 def default_table_path() -> str:
@@ -384,8 +508,14 @@ def _validate_step(where: str, raw: Mapping, required: frozenset, optional: froz
             f"(accepted: {', '.join(sorted(required | optional))})"
         )
     action = raw.get("action")
-    if action not in ACTIONS:
-        problems.append(f"{where}: action {action!r} is not one of {', '.join(ACTIONS)}")
+    if action == ESCALATE:
+        problems.append(
+            f"{where}: {ESCALATE!r} is not a row action — a row whose block triage has no step omits "
+            f"'action' and carries only its decision"
+        )
+    elif action not in ROW_ACTIONS:
+        problems.append(f"{where}: action {action!r} is not one of {', '.join(ROW_ACTIONS)}")
+    if action not in ROW_ACTIONS:
         action = ESCALATE
     params = _validate_params(where, action, raw.get("params"), problems)
     preconditions = _validate_preconditions(where, raw.get("preconditions", []), problems)
@@ -417,6 +547,62 @@ def _validate_backoff(where: str, raw: Any, cooldown_s: int, problems: list) -> 
     return Backoff(factor=factor, cap_s=cap_s)
 
 
+_DECISION_SHAPE = "{inbox: QUESTION, answer: TEXT} or {verb: NAME, budget: N, inbox: QUESTION, answer: TEXT}"
+
+
+def _validate_decision(where: str, raw: Any, problems: list) -> Optional[RowDecision]:
+    """Validate a row's ``decision``; None (with a problem recorded) when it is unusable."""
+    where = f"{where} decision"
+    if not isinstance(raw, dict):
+        shown = raw if isinstance(raw, str) else type(raw).__name__
+        problems.append(
+            f"{where}: must be a mapping {_DECISION_SHAPE}, got {shown!r}"
+            + (f"; {ESCALATE!r} is not a decision" if raw == ESCALATE else "")
+        )
+        return None
+    keys = set(raw)
+    missing = _DECISION_REQUIRED_KEYS - keys
+    extra = keys - _DECISION_REQUIRED_KEYS - _DECISION_OPTIONAL_KEYS
+    if missing:
+        problems.append(f"{where}: missing key(s) {', '.join(sorted(missing))} (shape: {_DECISION_SHAPE})")
+    if extra:
+        problems.append(
+            f"{where}: unrecognized key(s) {', '.join(sorted(extra))} "
+            f"(accepted: {', '.join(sorted(_DECISION_REQUIRED_KEYS | _DECISION_OPTIONAL_KEYS))})"
+        )
+    texts: dict = {}
+    for key in sorted(_DECISION_REQUIRED_KEYS & keys):
+        value = raw[key]
+        if not isinstance(value, str) or not value.strip():
+            problems.append(f"{where}: {key!r} must be non-empty text")
+        else:
+            texts[key] = " ".join(value.split())
+    verb = raw.get("verb")
+    budget = raw.get("budget")
+    if "verb" in raw and verb not in DECISION_VERBS:
+        problems.append(
+            f"{where}: verb {verb!r} is not one of {', '.join(DECISION_VERBS)}"
+            + (f"; {ESCALATE!r} is not a decision" if verb == ESCALATE else "")
+        )
+    if "budget" in raw:
+        if "verb" not in raw:
+            problems.append(f"{where}: budget is only for a decision that names a verb")
+        elif not _is_whole(budget) or budget < 1:
+            problems.append(f"{where}: budget {budget!r} must be a whole number of at least 1")
+    if missing or set(texts) != _DECISION_REQUIRED_KEYS:
+        return None
+    if "verb" not in raw:
+        return RowDecision(inbox=texts["inbox"], answer=texts["answer"])
+    if verb not in DECISION_VERBS or ("budget" in raw and (not _is_whole(budget) or budget < 1)):
+        return None
+    return RowDecision(
+        inbox=texts["inbox"],
+        answer=texts["answer"],
+        verb=verb,
+        budget=budget if "budget" in raw else DEFAULT_DECISION_BUDGET,
+    )
+
+
 def _validate_rule(reason_code: Any, raw: Any, problems: list) -> Optional[Rule]:
     where = f"row {reason_code!r}"
     if reason_code not in REASON_CODES:
@@ -424,6 +610,26 @@ def _validate_rule(reason_code: Any, raw: Any, problems: list) -> Optional[Rule]
     if not isinstance(raw, dict):
         problems.append(f"{where}: must be a mapping, got {type(raw).__name__}")
         return None
+    if _DECISION_KEY not in raw:
+        problems.append(f"{where}: missing key {_DECISION_KEY!r} — every row says what resolves its block")
+    decision = _validate_decision(where, raw[_DECISION_KEY], problems) if _DECISION_KEY in raw else None
+    if "action" not in raw and _DECISION_KEY in raw:
+        # A decision-only row: block triage has no step of its own.
+        extra = set(raw) - {_DECISION_KEY}
+        if extra:
+            problems.append(
+                f"{where}: a row without 'action' carries only {_DECISION_KEY!r}; unrecognized key(s) "
+                f"{', '.join(sorted(extra))} (add 'action' and the triage keys, or remove them)"
+            )
+        return Rule(
+            reason_code=str(reason_code),
+            step=Step(action=ESCALATE, params={}, preconditions=()),
+            max_attempts=0,
+            cooldown_s=0,
+            backoff=None,
+            verification=None,
+            decision=decision,
+        )
     step = _validate_step(where, raw, _ROW_REQUIRED_KEYS, _ROW_OPTIONAL_KEYS, problems)
 
     max_attempts = raw.get("max_attempts")
@@ -454,6 +660,59 @@ def _validate_rule(reason_code: Any, raw: Any, problems: list) -> Optional[Rule]
         backoff=backoff,
         verification=verification,
         cooldown_before_first=before_first,
+        decision=decision,
+    )
+
+
+def _validate_pipeline_ladder(raw: Any, problems: list) -> Optional[PipelineLadder]:
+    """Validate the table's ``pipeline_ladder``; None (with a problem recorded) when unusable."""
+    where = PIPELINE_LADDER_KEY
+    if not isinstance(raw, dict):
+        problems.append(f"{where}: must be a mapping of {', '.join(sorted(_PIPELINE_LADDER_KEYS))}")
+        return None
+    count = len(problems)
+    missing = _PIPELINE_LADDER_KEYS - set(raw)
+    extra = set(raw) - _PIPELINE_LADDER_KEYS
+    if missing:
+        problems.append(f"{where}: missing key(s) {', '.join(sorted(missing))}")
+    if extra:
+        problems.append(
+            f"{where}: unrecognized key(s) {', '.join(sorted(extra))} "
+            f"(accepted: {', '.join(sorted(_PIPELINE_LADDER_KEYS))})"
+        )
+    roles = raw.get("roles")
+    if not isinstance(roles, list) or not roles or not all(isinstance(r, str) for r in roles):
+        problems.append(f"{where}: roles must be a non-empty list of owner roles ({', '.join(OWNER_ROLES)})")
+        roles = []
+    else:
+        unknown = [r for r in roles if r not in OWNER_ROLES]
+        if unknown:
+            problems.append(f"{where}: unknown owner role(s) {', '.join(unknown)} (accepted: {', '.join(OWNER_ROLES)})")
+        if len(set(roles)) != len(roles):
+            problems.append(f"{where}: roles repeat a name")
+    note = raw.get("note")
+    if not isinstance(note, str) or not note.strip():
+        problems.append(f"{where}: note must be non-empty text")
+    max_attempts = raw.get("max_attempts")
+    if not _is_whole(max_attempts) or max_attempts < 1:
+        problems.append(f"{where}: max_attempts {max_attempts!r} must be a whole number of at least 1")
+    cooldown_s = raw.get("cooldown_s")
+    if not _is_whole(cooldown_s):
+        problems.append(f"{where}: cooldown_s {cooldown_s!r} must be a whole number of seconds")
+        cooldown_s = 0
+    backoff = _validate_backoff(where, raw.get("backoff"), cooldown_s, problems)
+    before_first = raw.get("cooldown_before_first")
+    if not isinstance(before_first, bool):
+        problems.append(f"{where}: cooldown_before_first must be true or false")
+    if len(problems) != count:
+        return None
+    return PipelineLadder(
+        roles=tuple(roles),
+        note=note.strip(),
+        max_attempts=max_attempts,
+        cooldown_s=cooldown_s,
+        backoff=backoff,
+        cooldown_before_first=before_first,
     )
 
 
@@ -477,8 +736,13 @@ def load_table(table_path: "str | Path | None" = None) -> ClassifierTable:
         data = yaml.load(text, Loader=_UniqueKeyLoader)  # noqa: S506 — a SafeLoader subclass
     except yaml.YAMLError as exc:
         raise TableError(f"classifier table {path} is not valid YAML: {exc}") from exc
-    if not isinstance(data, dict) or set(data) != {_TOP_LEVEL_KEY}:
-        raise TableError(f"classifier table {path} must be a mapping with exactly one key, {_TOP_LEVEL_KEY!r}")
+    if not isinstance(data, dict) or _TOP_LEVEL_KEY not in data or not set(data) <= {
+        _TOP_LEVEL_KEY, PIPELINE_LADDER_KEY,
+    }:
+        raise TableError(
+            f"classifier table {path} must be a mapping with the key {_TOP_LEVEL_KEY!r} and, optionally, "
+            f"{PIPELINE_LADDER_KEY!r}"
+        )
     raw_rows = data[_TOP_LEVEL_KEY]
     if not isinstance(raw_rows, dict):
         raise TableError(f"classifier table {path}: {_TOP_LEVEL_KEY!r} must map reason_code to a row")
@@ -488,9 +752,10 @@ def load_table(table_path: "str | Path | None" = None) -> ClassifierTable:
         rule = _validate_rule(code, raw, problems)
         if rule is not None:
             rules[rule.reason_code] = rule
+    ladder = _validate_pipeline_ladder(data[PIPELINE_LADDER_KEY], problems) if PIPELINE_LADDER_KEY in data else None
     if problems:
         raise TableError(f"classifier table {path} is invalid: " + "; ".join(problems))
-    return ClassifierTable(path=path, rules=rules)
+    return ClassifierTable(path=path, rules=rules, pipeline_ladder=ladder)
 
 
 # ---------------------------------------------------------------------------
@@ -520,6 +785,10 @@ class Decision:
                         a first-sighting not_yet, the window end. None means
                         leave the field as it is.
         not_before      for not_yet, the earliest time to decide again.
+        pipeline_ladder true when the matched row is decision-only and the
+                        table's pipeline ladder stood in for its triage
+                        step (the action, ceiling and windows are the
+                        ladder's; the row's decision follows it).
     """
 
     action: str
@@ -534,6 +803,7 @@ class Decision:
     verification: Optional[str] = None
     cooldown_until: Optional[str] = None
     not_before: Optional[str] = None
+    pipeline_ladder: bool = False
 
     @property
     def is_escalate(self) -> bool:
@@ -560,8 +830,14 @@ def _rule_fields(record: Optional[BlockRecord], rule: Optional[Rule]) -> dict:
             cooldown_s=rule.cooldown_s,
             backoff=rule.backoff,
             verification=rule.verification,
+            pipeline_ladder=rule.pipeline_ladder,
         )
     return fields
+
+
+def _ladder_phrase(rule: Rule, record: BlockRecord) -> str:
+    """`` on the pipeline ladder (<ROLE> task)`` for a laddered rule, else blank."""
+    return f" on the pipeline ladder ({record.owner_role} task)" if rule.pipeline_ladder else ""
 
 
 def _as_utc(now: "datetime.datetime | str | None") -> datetime.datetime:
@@ -596,7 +872,9 @@ def _precondition_holds(name: str, record: BlockRecord, evidence: Mapping[str, s
     return False
 
 
-def _render_note(template: str, evidence: Mapping[str, str], facts: Mapping[str, Any]) -> str:
+def render_note(template: str, evidence: Mapping[str, str], facts: Mapping[str, Any]) -> str:
+    """Fill ``{key}`` in *template*: the caller's fact first, then the evidence, else ``unknown``."""
+
     def _value(match: "re.Match[str]") -> str:
         key = match.group(1)
         supplied = facts.get(key)
@@ -654,13 +932,24 @@ def decide(
             f"reason_code {record.reason_code!r} has no row in the classifier table {table.path}",
             record,
         )
+    ladder = table.pipeline_ladder
+    if ladder is not None and ladder.applies_to(rule, record.owner_role):
+        # A decision-only row for an owner the release cannot carry on
+        # without: the ladder's requeues come before the row's decision.
+        rule = ladder.rule_for(rule)
+        facts = {**facts, "reason_code": record.reason_code, "owner_role": record.owner_role}
     if rule.action == ESCALATE:
-        return _escalate(WHY_ALWAYS_HUMAN, f"{rule.reason_code} blocks always stay with a human", record, rule)
+        return _escalate(
+            WHY_ALWAYS_HUMAN,
+            f"{rule.reason_code} has no block-triage step; the row's decision says what resolves it",
+            record,
+            rule,
+        )
     if rule.max_attempts != STAGE_CEILING and record.attempts >= rule.max_attempts:
         return _escalate(
             WHY_ATTEMPTS_EXHAUSTED,
             f"{record.attempts} triage attempt(s) already made on this block; {rule.reason_code} allows "
-            f"{rule.max_attempts}",
+            f"{rule.max_attempts}{_ladder_phrase(rule, record)}",
             record,
             rule,
         )
@@ -679,7 +968,10 @@ def decide(
         return Decision(
             action=NOT_YET,
             why=WHY_FIRST_COOLDOWN,
-            detail=f"{rule.reason_code} waits one cool-down window before its first action, until {window_end}",
+            detail=(
+                f"{rule.reason_code} waits one cool-down window before its first action"
+                f"{_ladder_phrase(rule, record)}, until {window_end}"
+            ),
             cooldown_until=window_end,
             not_before=window_end,
             **_rule_fields(record, rule),
@@ -705,7 +997,7 @@ def decide(
 
     params = dict(step.params)
     if "note" in params:
-        params["note"] = _render_note(params["note"], evidence, facts)
+        params["note"] = render_note(params["note"], evidence, facts)
     next_window = rule.window_s(record.attempts + 1)
     ceiling = (
         "under the resolution stage's own ceiling"
@@ -715,7 +1007,10 @@ def decide(
     return Decision(
         action=step.action,
         why=WHY_ROW_MATCHED,
-        detail=f"{rule.reason_code}: {step.action}, attempt {record.attempts + 1} {ceiling}",
+        detail=(
+            f"{rule.reason_code}: {step.action}, attempt {record.attempts + 1} {ceiling}"
+            f"{_ladder_phrase(rule, record)}"
+        ),
         params=params,
         attempt=record.attempts + 1,
         cooldown_until=(

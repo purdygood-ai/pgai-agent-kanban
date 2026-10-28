@@ -108,7 +108,7 @@
 #   - durations following "in "/"took "       -> <DURATION>
 #   - PIDs ("pid 12345", "PID=12345")         -> "pid <PID>"
 #   - absolute paths under the active temp root
-#     (PGAI_AGENT_KANBAN_TEMP_DIR, default /tmp) -> <TMPPATH>
+#     (the framework temp root, see ENVIRONMENT) -> <TMPPATH>
 #   - git commit SHAs (7-40 lowercase hex chars, at least one a-f letter,
 #     so plain numeric run/date/version literals are never touched)
 #                                             -> <SHA>
@@ -116,9 +116,9 @@
 # ===========================================================================
 # ENVIRONMENT
 # ===========================================================================
-#   PGAI_AGENT_KANBAN_TEMP_DIR   Scratch root for ephemeral fixtures built
-#                                during capture (default: /tmp/pgai_kanban_tmp).
-#                                Never written to bare /tmp.
+#   PGAI_AGENT_KANBAN_TEMP_DIR   Overrides the framework temp root (resolved by
+#                                team/scripts/lib/temp.sh) that holds capture
+#                                fixtures. Never written to bare /tmp.
 #
 # The wake-log surface's capture step pins its own MAX_TASK_SECONDS and
 # KILL_GRACE_SECONDS (see _GOLDEN_MAX_TASK_SECONDS / _GOLDEN_KILL_GRACE_SECONDS
@@ -157,7 +157,26 @@ _GOLDEN_KILL_GRACE_SECONDS="30"
 
 SURFACE_NAMES=(board-render wake-log ship-summary)
 
-TEMP_ROOT="${PGAI_AGENT_KANBAN_TEMP_DIR:-/tmp/pgai_kanban_tmp}"
+# The scratch root comes from the shared temp wrapper (scripts/lib/temp.sh,
+# one directory up in the repo and the installed layout alike). A missing
+# copy refuses here, before any fixture is built, rather than guessing a root.
+_BASELINE_TEMP_SH="$(cd "${SCRIPT_DIR}/.." && pwd)/lib/temp.sh"
+if [[ ! -f "$_BASELINE_TEMP_SH" ]]; then
+  # shellcheck source=../lib/error_contract.sh
+  source "${SCRIPT_DIR}/../lib/error_contract.sh"
+  # BLOCK-WORTHY: no temp root means no capture can run; nothing was written.
+  # Exit 2 is this harness's capture-failure code.
+  pgai_emit_error_contract "engine-behavior-baseline.temp-sh-missing" \
+    "engine-behavior-baseline.sh needs the temp-root wrapper at ${_BASELINE_TEMP_SH} and it does not exist; nothing was captured or compared." \
+    "ls -l '${_BASELINE_TEMP_SH}'"
+  # CENSUS-ANCHOR: engine-behavior-baseline-temp-sh-missing-01
+  exit 2
+fi
+# shellcheck source=../lib/temp.sh
+source "$_BASELINE_TEMP_SH"
+unset _BASELINE_TEMP_SH
+
+TEMP_ROOT="$(pgai_temp_dir)"
 SCRATCH_PARENT="${TEMP_ROOT}/harness/engine-behavior-baseline"
 
 # ---------------------------------------------------------------------------
@@ -491,8 +510,13 @@ none
 none
 EOF
 
-  mkdir -p "${root}/pgai_agent_kanban/cm"
+  # read_state_field.py reads sections through task_status.py, so that module
+  # and the lib modules it imports sit beside cm/ as on a live install.
+  mkdir -p "${root}/pgai_agent_kanban/cm" "${root}/pgai_agent_kanban/lib"
   cp "${_CM_PY_DIR}"/*.py "${root}/pgai_agent_kanban/cm/" 2>/dev/null || true
+  cp "${_CM_PY_DIR}/../task_status.py" "${root}/pgai_agent_kanban/" 2>/dev/null || true
+  cp "${_CM_PY_DIR}/../lib/atomic_write.py" "${_CM_PY_DIR}/../lib/error_contract.py" \
+     "${_CM_PY_DIR}/../lib/markdown_fence.py" "${root}/pgai_agent_kanban/lib/" 2>/dev/null || true
 
   local open_out release_out rc
 

@@ -33,6 +33,14 @@ Acceptance criteria exercised:
   8. The impl column: every row carries a value, both readers expose it,
      parse_impl() accepts exactly its grammar, and the reconciliation
      check reports a malformed or missing value.
+  9. Route coverage: the reconciliation check's route inventory equals the
+     routes create_app() registers (GET /health included); every one is a
+     manifest twin or a reasoned route entry in
+     team/config/operator_verb_census_exempt.txt, the routes the board and
+     dashboard parity names among them; a seeded uncovered route is reported
+     by method and path and exits 1; a script entry never covers a route;
+     stale, repeated, redundant and reasonless route entries are reported;
+     and a route entry exempts no script in lint_api_parity.py.
 
 Tests that mutate a script or a router file do so on a throwaway copy of
 just the subtrees the checks need (config/, scripts/, pgai_agent_kanban/),
@@ -616,3 +624,280 @@ def test_reconciliation_check_reports_impl_that_does_not_fit_row_status(
     result = _run_reconciliation_with_manifest(_TEAM_DIR, manifest)
     assert result.returncode == 1, result.stdout + result.stderr
     assert "verb 'halt': impl '-' is only valid on a planned row" in result.stdout
+
+
+# ---------------------------------------------------------------------------
+# 9 -- route coverage: every registered route is a twin or a reasoned entry
+# ---------------------------------------------------------------------------
+
+_SCRIPTS_DIR = _TEAM_DIR / "scripts"
+if str(_SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(_SCRIPTS_DIR))
+
+import lint_operator_verb_manifest as _lovm  # noqa: E402
+
+_EXEMPT_FILE = _TEAM_DIR / "config" / "operator_verb_census_exempt.txt"
+
+# The routes the board-and-dashboard parity requirement names one by one.
+_NAMED_ROUTES = (
+    ("GET", "/board"),
+    ("GET", "/projects/{name}"),
+    ("GET", "/logs/{kind}"),
+    ("GET", "/traces"),
+    ("GET", "/traces/{trace_id}"),
+    ("GET", "/dashboard/{pane}"),
+    ("GET", "/approvals"),
+    ("GET", "/auto-resolutions"),
+)
+
+
+def _built_app_routes(kanban_root: pathlib.Path) -> set[tuple[str, str]]:
+    """(method, path) for every route create_app() registers, minus FastAPI's
+    own schema and docs pages."""
+    from pgai_agent_kanban.api.app import create_app
+    from pgai_agent_kanban.api.config import ApiConfig
+
+    app = create_app(ApiConfig(host="127.0.0.1", port=0, kanban_root=kanban_root))
+    framework_paths = {
+        app.openapi_url,
+        app.docs_url,
+        app.redoc_url,
+        app.swagger_ui_oauth2_redirect_url,
+    }
+    pairs: set[tuple[str, str]] = set()
+    for route in app.routes:
+        if route.path in framework_paths:
+            continue
+        for method in getattr(route, "methods", None) or ():
+            pairs.add((method, route.path))
+    return pairs
+
+
+def _write_seeded_router(fixture_team: pathlib.Path) -> pathlib.Path:
+    """Drop a router file declaring GET /seeded/probe into the fixture copy."""
+    router = fixture_team / "pgai_agent_kanban" / "api" / "routers" / "seeded_probe.py"
+    router.write_text(
+        "from fastapi import APIRouter\n\n"
+        'router = APIRouter(prefix="/seeded")\n\n\n'
+        '@router.get("/probe")\n'
+        "def probe() -> dict:\n"
+        '    return {"ok": True}\n',
+        encoding="utf-8",
+    )
+    return router
+
+
+def test_route_inventory_equals_routes_the_built_app_registers(tmp_path: pathlib.Path):
+    routes, violations = _lovm._registered_routes(_TEAM_DIR)
+    inventory = {(r.method, r.route) for r in routes}
+
+    assert violations == []
+    assert ("GET", "/health") in inventory
+    assert inventory == _built_app_routes(tmp_path)
+
+
+def test_verbose_run_lists_every_registered_route_with_what_covers_it():
+    result = subprocess.run(
+        [sys.executable, str(_RECONCILIATION_LINT), "--verbose"],
+        capture_output=True, text=True,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "0 drift finding(s)" in result.stdout
+
+    route_lines = [
+        line.strip()[len("route: "):]
+        for line in result.stdout.splitlines()
+        if line.strip().startswith("route: ")
+    ]
+    routes, _ = _lovm._registered_routes(_TEAM_DIR)
+    assert len(route_lines) == len(routes)
+    for r in routes:
+        matching = [line for line in route_lines if line.startswith(f"{r.method} {r.route} -- ")]
+        assert len(matching) == 1, f"{r.method} {r.route} not listed once:\n{result.stdout}"
+        assert "manifest verb '" in matching[0] or "exempt entry, " in matching[0]
+
+
+@pytest.mark.parametrize("method,route", _NAMED_ROUTES)
+def test_named_board_and_dashboard_route_is_covered(method: str, route: str):
+    twins = {(v.rest_method, v.rest_route) for v in load_manifest().values()}
+    entries = [
+        e for e in _lovm._load_route_exemptions(_EXEMPT_FILE)
+        if (e.method, e.route) == (method, route)
+    ]
+    assert (method, route) in twins or (len(entries) == 1 and entries[0].has_reason), (
+        f"{method} {route} is neither a manifest REST twin nor a reasoned route "
+        f"entry in {_EXEMPT_FILE}"
+    )
+
+
+def test_seeded_uncovered_route_is_reported_then_cleared_by_a_reasoned_entry(
+    tmp_path: pathlib.Path,
+):
+    fixture_team = _copy_reconciliation_fixture(tmp_path)
+    _write_seeded_router(fixture_team)
+
+    result = _run_reconciliation(fixture_team)
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "route GET /seeded/probe (" in result.stdout
+    assert "seeded_probe.py" in result.stdout
+    assert "1 drift finding(s)" in result.stdout
+
+    exempt = fixture_team / "config" / "operator_verb_census_exempt.txt"
+    exempt.write_text(
+        exempt.read_text(encoding="utf-8")
+        + "# A probe route the seeded router declares for this test.\nGET /seeded/probe\n",
+        encoding="utf-8",
+    )
+    result = _run_reconciliation(fixture_team)
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+_SEEDED_REGISTRATION_FORMS = (
+    "from fastapi import APIRouter\n\n"
+    'router = APIRouter(prefix="/seeded")\n\n\n'
+    '@router.delete("/delete-probe")\n'
+    "def delete_probe() -> dict:\n"
+    "    return {}\n\n\n"
+    '@router.put("/put-probe")\n'
+    "def put_probe() -> dict:\n"
+    "    return {}\n\n\n"
+    '@router.patch("/patch-probe")\n'
+    "def patch_probe() -> dict:\n"
+    "    return {}\n\n\n"
+    '@router.api_route("/api-route-probe", methods=["GET", "POST"])\n'
+    "def api_route_probe() -> dict:\n"
+    "    return {}\n\n\n"
+    "def add_api_route_probe() -> dict:\n"
+    "    return {}\n\n\n"
+    'router.add_api_route("/add-api-route-probe", add_api_route_probe, methods=["PUT"])\n'
+)
+
+_SEEDED_FORM_ROUTES = (
+    "DELETE /seeded/delete-probe",
+    "PUT /seeded/put-probe",
+    "PATCH /seeded/patch-probe",
+    "GET /seeded/api-route-probe",
+    "POST /seeded/api-route-probe",
+    "PUT /seeded/add-api-route-probe",
+)
+
+
+def test_uncovered_route_in_every_registration_form_is_reported(tmp_path: pathlib.Path):
+    """Check 6 sees routes registered by delete/put/patch decorators,
+    api_route and add_api_route, not only get/post."""
+    fixture_team = _copy_reconciliation_fixture(tmp_path)
+    router = fixture_team / "pgai_agent_kanban" / "api" / "routers" / "seeded_forms.py"
+    router.write_text(_SEEDED_REGISTRATION_FORMS, encoding="utf-8")
+
+    result = _run_reconciliation(fixture_team)
+
+    assert result.returncode == 1, result.stdout + result.stderr
+    for label in _SEEDED_FORM_ROUTES:
+        assert f"route {label} (" in result.stdout, f"{label} not reported:\n{result.stdout}"
+    assert f"{len(_SEEDED_FORM_ROUTES)} drift finding(s)" in result.stdout
+
+
+def test_script_entry_does_not_cover_a_route(tmp_path: pathlib.Path):
+    """A basename entry exempts a script, never a route: dropping a route's own
+    entry while its script's basename entry stays reports the route."""
+    fixture_team = _copy_reconciliation_fixture(tmp_path)
+    exempt = fixture_team / "config" / "operator_verb_census_exempt.txt"
+    text = exempt.read_text(encoding="utf-8")
+    assert "\nkanban-status.sh\n" in text
+    exempt.write_text(text.replace("\nGET /status\n", "\n"), encoding="utf-8")
+
+    result = _run_reconciliation(fixture_team)
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "route GET /status (" in result.stdout
+
+
+def test_stale_repeated_redundant_and_reasonless_route_entries_are_reported(
+    tmp_path: pathlib.Path,
+):
+    fixture_team = _copy_reconciliation_fixture(tmp_path)
+    exempt = fixture_team / "config" / "operator_verb_census_exempt.txt"
+    text = exempt.read_text(encoding="utf-8")
+    reasoned_health = (
+        "# The API server's own liveness probe, declared on the app in create_app();\n"
+        "# it describes the server process, not the kanban.\n"
+        "GET /health\n"
+    )
+    assert reasoned_health in text
+    text = text.replace(reasoned_health, "# ------\nGET /health\n")
+    text += (
+        "# A route this API never registered.\nGET /no-such-route\n"
+        "# Entered a second time.\nGET /board\n"
+        "# Already the halt verb's twin.\npost /operations/halt\n"
+    )
+    exempt.write_text(text, encoding="utf-8")
+
+    result = _run_reconciliation(fixture_team)
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "exempt entry 'GET /health'" in result.stdout and "has no reason" in result.stdout
+    assert "exempt entry 'GET /no-such-route'" in result.stdout
+    assert "names a route the API does not register" in result.stdout
+    assert "exempt entry 'GET /board'" in result.stdout and "repeats the entry on line" in result.stdout
+    assert "exempt entry 'POST /operations/halt'" in result.stdout
+    assert "twin of manifest verb 'halt'" in result.stdout
+    assert "4 drift finding(s)" in result.stdout
+
+
+def test_route_entries_exempt_no_script_in_the_parity_gate():
+    """lint_api_parity.py's exempt loader reads every non-comment line; a route
+    entry can never equal a script basename, so it exempts nothing there."""
+    import lint_api_parity
+
+    loaded = lint_api_parity._load_census_exempt(_TEAM_DIR)
+    route_entries = {f"{e.method} {e.route}" for e in _lovm._load_route_exemptions(_EXEMPT_FILE)}
+    script_names = {
+        p.name for root in ("scripts", "scripts/dashboard", "scripts/cm")
+        for p in (_TEAM_DIR / root).glob("*")
+    }
+    assert route_entries
+    assert route_entries <= loaded
+    assert route_entries.isdisjoint(script_names)
+
+
+def test_manifest_rows_twinning_put_and_delete_routes_pass_every_check(tmp_path: pathlib.Path):
+    """Checks 3, 4 and 6 read one route inventory: a manifest row whose REST
+    twin is a PUT or a DELETE route resolves in check 3 exactly as check 6
+    sees the route, so the seeded tree reconciles with no drift."""
+    fixture_team = _copy_reconciliation_fixture(tmp_path)
+    router = fixture_team / "pgai_agent_kanban" / "api" / "routers" / "seeded_twins.py"
+    router.write_text(
+        "from fastapi import APIRouter\n\n"
+        'router = APIRouter(prefix="/seeded")\n\n\n'
+        '@router.put("/twin-put")\n'
+        "def twin_put() -> dict:\n"
+        "    return {}\n\n\n"
+        '@router.delete("/twin-delete")\n'
+        "def twin_delete() -> dict:\n"
+        "    return {}\n",
+        encoding="utf-8",
+    )
+    manifest = fixture_team / "config" / "operator_verbs.manifest"
+    manifest.write_text(
+        manifest.read_text(encoding="utf-8")
+        + "V\tseeded-put\tactive\tscripts/halt.sh\tproject|help\tyes\tidempotent\tPUT\t/seeded/twin-put"
+        "\tHaltBody\taction\tDualChannelShellEnvelope\tshell\n"
+        + "V\tseeded-delete\tactive\tscripts/halt.sh\tproject|help\tyes\tidempotent\tDELETE\t/seeded/twin-delete"
+        "\tHaltBody\taction\tDualChannelShellEnvelope\tshell\n",
+        encoding="utf-8",
+    )
+
+    routes = {(d.method, d.route) for d in _lovm._all_router_routes(fixture_team)}
+    assert {("PUT", "/seeded/twin-put"), ("DELETE", "/seeded/twin-delete")} <= routes
+
+    result = _run_reconciliation(fixture_team)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "0 drift finding(s)" in result.stdout
+
+
+def test_check_four_reads_the_fronted_script_from_the_handler_body():
+    """The shared inventory keeps check 4's fronted-script reading: an
+    operations route that shells out names its script."""
+    fronted = {
+        (d.method, d.route): d.fronted_script for d in _lovm._all_router_routes(_TEAM_DIR)
+    }
+    assert fronted[("POST", "/operations/halt")] == "halt.sh"
+    assert fronted[("GET", "/health")] is None

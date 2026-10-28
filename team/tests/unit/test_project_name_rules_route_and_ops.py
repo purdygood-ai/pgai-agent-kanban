@@ -9,11 +9,12 @@ dry run, in a real call, and in the ops function the CLI reaches.
     ``my.app`` is 422 ``remove_project.project_invalid`` with and without
     ``dry_run``.
   - POST /operations/create-project runs ``ops.projects.check_create_values``,
-    which now carries create_project's own name rule (a letter, then
-    letters, digits, '-' and '_'), so ``my.app`` is 422
+    which carries the project-name rule (a lowercase letter or digit, then
+    lowercase letters, digits and '-'), so ``my.app`` and ``My_App`` are 422
     ``create_project.project_invalid`` with and without ``dry_run``, and
     ``create_project`` itself refuses it with the same key.
-  - Valid names behave as before: their dry runs answer 200.
+  - Valid names (``my-app``, and ``1app`` with its leading digit) reach
+    their dry runs: 200.
 
 The API runs in process against a throwaway board under tmp_path; no
 script is run (refusals happen first, and dry runs only describe).
@@ -47,9 +48,10 @@ def client(tmp_path: pathlib.Path):
     [
         ("/operations/remove-project", {"project": "my.app"}, "remove_project.project_invalid"),
         ("/operations/create-project", {"project": "my.app"}, "create_project.project_invalid"),
-        ("/operations/create-project", {"project": "1app"}, "create_project.project_invalid"),
+        ("/operations/create-project", {"project": "My_App"}, "create_project.project_invalid"),
+        ("/operations/remove-project", {"project": "My_App"}, "remove_project.project_invalid"),
     ],
-    ids=["remove-dot", "create-dot", "create-leading-digit"],
+    ids=["remove-dot", "create-dot", "create-uppercase-underscore", "remove-uppercase-underscore"],
 )
 def test_an_invalid_name_is_422_in_both_modes(client, route: str, body: dict, key: str, dry_run: bool) -> None:
     payload = dict(body, dry_run=dry_run)
@@ -68,8 +70,9 @@ def test_an_invalid_name_is_422_in_both_modes(client, route: str, body: dict, ke
     [
         ("/operations/remove-project", {"project": _REGISTERED, "dry_run": True}),
         ("/operations/create-project", {"project": "my-app", "dry_run": True}),
+        ("/operations/create-project", {"project": "1app", "dry_run": True}),
     ],
-    ids=["remove-registered", "create-new"],
+    ids=["remove-registered", "create-new", "create-leading-digit"],
 )
 def test_a_valid_name_still_reaches_the_dry_run(client, route: str, body: dict) -> None:
     response = client.post(route, json=body)

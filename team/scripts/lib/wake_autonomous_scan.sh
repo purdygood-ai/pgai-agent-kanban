@@ -43,13 +43,13 @@
 #                        i.e. before this file).
 #   project_paths.sh, projects.sh (sourced transitively by wake_bootstrap.sh)
 #                      — pp_release_state, pp_requirements_dir, pp_bugs_dir,
-#                        pp_queue_path, pp_project_root.
+#                        pp_queue_path, pp_project_root, pp_git_remote_name.
 #   task_ids.sh (sourced transitively by wake_bootstrap.sh) —
 #                        kanban_task_id.
 #   cm/common.sh       — release_state_section, self-sourced below when the
 #                        caller has not already loaded it; it reads through
-#                        the one release-state reader (cm/read_state_field.py),
-#                        so python3 must be on PATH.
+#                        read_md_field (lib/md_field.sh) with the
+#                        release-state reading, so python3 must be on PATH.
 
 if ! declare -F release_state_section >/dev/null 2>&1; then
     # shellcheck source=cm/common.sh
@@ -240,7 +240,12 @@ scan_and_bundle_bugs() {
     if [[ -n "${PP_git_repo_url:-}" ]]; then
         project_git_repo="${PP_git_repo_url}"
     elif [[ -d "${dev_tree_path}/.git" ]]; then
-        project_git_repo="$(git -C "${dev_tree_path}" remote get-url origin 2>/dev/null || echo "none")"
+        # The project's own remote (pp_git_remote_name); an invalid
+        # git_remote_name leaves "none", as a remote with no URL does.
+        local project_remote
+        if project_remote="$(pp_git_remote_name --quiet "${_CURRENT_PROJECT:-}")"; then
+            project_git_repo="$(git -C "${dev_tree_path}" remote get-url "${project_remote}" 2>/dev/null || echo "none")"
+        fi
     fi
 
     cat > "$req_doc_path" <<EOF

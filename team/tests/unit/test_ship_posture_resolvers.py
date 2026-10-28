@@ -16,7 +16,11 @@ or one), and a warning's text after its per-language prefix must be
 identical.
 
 Cases covered:
-  - key absent everywhere -> matrix, silent
+  - key absent everywhere: always on a push_to_remote = false lane; on a
+    remote lane (no config file, an empty one, or push_to_remote = true)
+    the built-in always is unconfirmed -> matrix, silent; confirmed in
+    either file -> always
+  - project.cfg ship_posture = matrix opting a local lane out of the default
   - kanban.cfg only (matrix, and always on a local-only lane)
   - project.cfg overriding kanban.cfg in both directions
   - a blank project.cfg value falling through to kanban.cfg
@@ -76,8 +80,33 @@ _LOCAL = "[project]\npush_to_remote = false\n"
 _REMOTE = "[project]\npush_to_remote = true\n"
 
 _CASES = [
+    # No config file and an empty one both read as a push_to_remote lane, so
+    # the built-in "always" is unconfirmed and resolves to matrix, silently.
     PostureCase("absent_everywhere", None, None, SHIP_POSTURE_MATRIX),
     PostureCase("absent_with_empty_files", "[project]\n", "[release]\n", SHIP_POSTURE_MATRIX),
+    PostureCase("absent_everywhere_local_lane", _LOCAL, None, SHIP_POSTURE_ALWAYS),
+    PostureCase("absent_with_empty_kanban_cfg_local_lane", _LOCAL, "[release]\n", SHIP_POSTURE_ALWAYS),
+    PostureCase("blank_in_both_local_lane", _LOCAL + "[release]\nship_posture =\n", "[release]\nship_posture =\n", SHIP_POSTURE_ALWAYS),
+    PostureCase("project_matrix_opts_local_lane_out_of_default", _LOCAL + "[release]\nship_posture = matrix\n", None, SHIP_POSTURE_MATRIX),
+    PostureCase("absent_everywhere_remote_lane_unconfirmed", _REMOTE, None, SHIP_POSTURE_MATRIX),
+    PostureCase(
+        "absent_everywhere_remote_lane_confirm_false",
+        _REMOTE + "[release]\nship_posture_confirm_remote = false\n",
+        None,
+        SHIP_POSTURE_MATRIX,
+    ),
+    PostureCase(
+        "absent_everywhere_remote_lane_confirmed_in_project",
+        _REMOTE + "[release]\nship_posture_confirm_remote = true\n",
+        None,
+        SHIP_POSTURE_ALWAYS,
+    ),
+    PostureCase(
+        "absent_everywhere_remote_lane_confirmed_in_kanban",
+        _REMOTE,
+        "[release]\nship_posture_confirm_remote = true\n",
+        SHIP_POSTURE_ALWAYS,
+    ),
     PostureCase("kanban_only_matrix", _LOCAL, "[release]\nship_posture = matrix\n", SHIP_POSTURE_MATRIX),
     PostureCase("kanban_only_always_local_lane", _LOCAL, "[release]\nship_posture = always\n", SHIP_POSTURE_ALWAYS),
     PostureCase(
@@ -109,6 +138,13 @@ _CASES = [
         "push_to_remote=false\nship_posture=always\n",
         None,
         SHIP_POSTURE_ALWAYS,
+        project_cfg_name="PROJECT.cfg",
+    ),
+    PostureCase(
+        "legacy_project_cfg_bare_matrix",
+        "push_to_remote=false\nship_posture=matrix\n",
+        "[release]\nship_posture = always\n",
+        SHIP_POSTURE_MATRIX,
         project_cfg_name="PROJECT.cfg",
     ),
     PostureCase(

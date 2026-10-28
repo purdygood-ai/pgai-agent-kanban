@@ -63,8 +63,13 @@ set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/lib/env_bootstrap.sh"
 # shellcheck source=lib/script_common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/lib/script_common.sh"
-# shellcheck source=lib/ini_parser.sh
-source "$(dirname "${BASH_SOURCE[0]}")/lib/ini_parser.sh"
+# pp_branch_prefix, the one bash branch_prefix reader (RC auto-detection)
+# shellcheck source=lib/project_paths.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/project_paths.sh"
+# read_md_field, the one bash section reader (every README and status.md
+# section read below)
+# shellcheck source=lib/md_field.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/md_field.sh"
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -121,8 +126,9 @@ task_is_artifact_only() {
   local readme="$1"
   local req_body con_body
 
-  req_body=$(awk '/^## Required Output/{flag=1; next} /^## /{flag=0} flag' "$readme")
-  con_body=$(awk '/^## Constraints/{flag=1; next} /^## /{flag=0} flag' "$readme")
+  # Each body is read by read_md_field; an absent heading reads as empty.
+  req_body="$(read_md_field "$readme" "Required Output" 2>/dev/null)" || req_body=""
+  con_body="$(read_md_field "$readme" "Constraints" 2>/dev/null)" || con_body=""
 
   # Both sections must be present.
   [[ -n "$req_body" && -n "$con_body" ]] || return 1
@@ -199,13 +205,21 @@ fi
 # ---------------------------------------------------------------------------
 
 if [[ -z "$RC_BRANCH" ]]; then
-  # Auto-detect: prefer the project's OWN configured branch_prefix (read
-  # straight from project.cfg -- the same [project] branch_prefix source
-  # pp_prefix_branch resolves) then fall back to a bare rc/*. This routes
-  # through the project's actual prefix instead of hardcoding "ai_"
-  # specifically, so a project configured with any other prefix (or no
-  # prefix at all) still auto-detects its own RC branch correctly.
-  _configured_branch_prefix="$(read_ini "${PROJECT_ROOT}/project.cfg" project branch_prefix "")"
+  # Auto-detect: prefer the project's OWN configured branch_prefix, then
+  # fall back to a bare rc/*. The prefix comes from pp_branch_prefix (the
+  # [project] branch_prefix pp_prefix_branch resolves), so a project
+  # configured with any prefix (or none) auto-detects its own RC branch.
+  # pp_branch_prefix finds a project as <kanban_root>/projects/<name>, so
+  # a project root at that shape is split into the two; any other root has
+  # no project.cfg it can address and reads as unprefixed. An invalid
+  # stored prefix is named on stderr and also reads as unprefixed.
+  _configured_branch_prefix=""
+  _project_root_dir="${PROJECT_ROOT%/}"
+  _project_name="${_project_root_dir##*/}"
+  if [[ "$_project_root_dir" == */projects/"$_project_name" ]]; then
+    _configured_branch_prefix="$(KANBAN_ROOT="${_project_root_dir%/projects/"$_project_name"}" \
+      pp_branch_prefix "$_project_name")" || _configured_branch_prefix=""
+  fi
   if [[ -n "$_configured_branch_prefix" ]]; then
     RC_BRANCH=$(git branch --list "${_configured_branch_prefix}rc/*" --format='%(refname:short)' | sort -V | tail -1)
   fi
@@ -246,14 +260,14 @@ for task_dir in "$TASKS_DIR"/*/; do
   readme_file="$task_dir/README.md"
   [[ -f "$status_file" && -f "$readme_file" ]] || continue
 
-  # Must be DONE
-  state=$(awk '/^## State/{getline; gsub(/^[[:space:]]+|[[:space:]]+$/,""); print; exit}' \
-           "$status_file")
+  # Must be DONE. A status.md that never mentions DONE is skipped before
+  # the reader starts, so a non-DONE task costs no interpreter start.
+  grep -q 'DONE' "$status_file" || continue
+  state="$(read_md_field --value "$status_file" State 2>/dev/null)" || state=""
   [[ "$state" == "DONE" ]] || continue
 
   # Must have a named feature branch (not "none")
-  branch=$(awk '/^## Feature Branch/{getline; gsub(/^[[:space:]]+|[[:space:]]+$/,""); print; exit}' \
-            "$readme_file")
+  branch="$(read_md_field --value "$readme_file" "Feature Branch" 2>/dev/null)" || branch=""
   [[ -n "$branch" && "$branch" != "none" ]] || continue
 
   task_id="$(basename "$task_dir")"

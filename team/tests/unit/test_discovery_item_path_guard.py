@@ -50,7 +50,7 @@ _PRELUDE = textwrap.dedent(f"""\
     log() {{ echo "$*" >&2; }}
     """)
 
-_TWO_PATHS = "/abs/project_a/bugs/BUG-0001-one.md\n/abs/project_a/bugs/BUG-0002-two.md"
+_TWO_PATHS = "/abs/project-a/bugs/BUG-0001-one.md\n/abs/project-a/bugs/BUG-0002-two.md"
 
 
 def _diagnostic(result) -> str:

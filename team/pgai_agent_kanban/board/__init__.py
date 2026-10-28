@@ -14,29 +14,34 @@ Columns:
     COLUMN_ORDER, COLUMN_KINDS
 
 Status vocabulary:
-    WONT_DO_STATUS
+    WONT_DO_STATUS, NEEDS_OPERATOR_STATUS, DUPLICATE_STATUS, CARRIED_STATUS
 
 Classification:
-    classify_input_item, classify_queue_item, classify_intake_status,
-    classify_requirement
+    classify_input_item, classify_queue_item, classify_intake_file,
+    classify_intake_status, classify_requirement
 
 Readers:
     get_active_rc_for_project, get_last_released_for_project,
-    get_target_version_for_item, read_intake_status,
+    get_target_version_for_item, intake_carried_names, read_intake_status,
     read_task_state_from_status_md, parse_queue_line, marker_to_state
 """
 
 from pgai_agent_kanban.board.classifier import (
+    CARRIED_STATUS,
     COLUMN_KINDS,
     COLUMN_ORDER,
+    DUPLICATE_STATUS,
+    NEEDS_OPERATOR_STATUS,
     WONT_DO_STATUS,
     classify_input_item,
+    classify_intake_file,
     classify_intake_status,
     classify_queue_item,
     classify_requirement,
     get_active_rc_for_project,
     get_last_released_for_project,
     get_target_version_for_item,
+    intake_carried_names,
     marker_to_state,
     parse_queue_line,
     read_intake_status,
@@ -44,16 +49,21 @@ from pgai_agent_kanban.board.classifier import (
 )
 
 __all__ = [
+    "CARRIED_STATUS",
     "COLUMN_KINDS",
     "COLUMN_ORDER",
+    "DUPLICATE_STATUS",
+    "NEEDS_OPERATOR_STATUS",
     "WONT_DO_STATUS",
     "classify_input_item",
+    "classify_intake_file",
     "classify_intake_status",
     "classify_queue_item",
     "classify_requirement",
     "get_active_rc_for_project",
     "get_last_released_for_project",
     "get_target_version_for_item",
+    "intake_carried_names",
     "marker_to_state",
     "parse_queue_line",
     "read_intake_status",

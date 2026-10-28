@@ -288,7 +288,7 @@ if argparse_has details && [[ -z "${_vr_project}" ]]; then
     pgai_emit_error_contract \
         "verdict_report.details_requires_project" \
         "verdict-report.sh: --details has no project named -- the diagnostic pane is always per-project." \
-        "Set \$PGAI_PROJECT_NAME to a project registered in projects.cfg, or pass --project directly, e.g. team/scripts/verdict-report.sh --project pgai-agent-kanban --details."
+        "Set \$PGAI_PROJECT_NAME to a project registered in projects.cfg, or pass --project directly, e.g. $(printf '%q' "${KANBAN_ROOT}/scripts/verdict-report.sh") --project pgai-agent-kanban --details."
     # CENSUS-ANCHOR: verdict-report-details-requires-project-01
     exit 1
 fi

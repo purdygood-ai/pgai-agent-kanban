@@ -30,7 +30,9 @@ Coverage:
      skipped-unresolved-project line, printed before the repository check,
      and no origin check in the plan. Every scenario that renames the
      requirements file SUPERSEDED, or finds it already renamed, is recorded
-     with that file's ``## Status`` closed to ``wont-do``.
+     with that file's ``## Status`` closed to ``wont-do``. The ``no-halt``
+     refusal is recorded naming the installed halt and unhalt scripts under
+     ``<ROOT>/scripts/``.
   3. The REST twin on its own sandbox: for the scenarios an HTTP caller can
      reach (``confirm`` true, ``force`` as given), the response's exit code,
      stdout and stderr and every on-disk effect equal the CLI's recorded
@@ -71,6 +73,7 @@ if str(_TEAM_DIR) not in sys.path:
 from tests.fixtures.binary_guard import require_binary  # noqa: E402
 from tests.fixtures.git_network_stub import install_git_network_stub  # noqa: E402
 from tests.fixtures.scrubbed_subprocess_env import build_scrubbed_env  # noqa: E402
+from tests.fixtures.section_reader_modules import copy_section_reader_modules
 
 _SCRIPT = _TEAM_DIR / "scripts" / "unwind-rc.sh"
 _CM_PY_SRC = _TEAM_DIR / "pgai_agent_kanban" / "cm"
@@ -384,6 +387,7 @@ def _seed_root(base: pathlib.Path, repo: pathlib.Path, spec: dict) -> pathlib.Pa
     cm_dir.mkdir(parents=True)
     for src in sorted(_CM_PY_SRC.glob("*.py")):
         (cm_dir / src.name).write_text(src.read_text(encoding="utf-8"), encoding="utf-8")
+    copy_section_reader_modules(cm_dir.parent)
     halt = spec.get("halt", "project")
     if halt == "global":
         (root / "HALT").write_text("", encoding="utf-8")

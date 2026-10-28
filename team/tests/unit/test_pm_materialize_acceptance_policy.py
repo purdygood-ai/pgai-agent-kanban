@@ -3,19 +3,24 @@ test_pm_materialize_acceptance_policy.py
 ========================================
 Materializer-level tests for the targeted-test acceptance policy.
 
-When pm_materialize.py emits a CODER or WRITER ticket, full gated-runner
-invocations in its acceptance criteria and constraints are rewritten to
-targeted ``--files`` runs, the fixed targeted-test constraint is appended,
-each rewrite is narrated on stderr and recorded in ``## Notes``, and the
-fixed pre-merge criterion closes the acceptance criteria. TESTER and CM
-tickets render byte-identically to output without the policy. A ticket
-naming a shipped release-notes file gets nothing about CHANGELOG.
+When pm_materialize.py emits a CODER or WRITER ticket, full invocations of
+the project's configured runners in its acceptance criteria and constraints
+are rewritten to the project's targeted run, the targeted-test constraint
+is appended, each rewrite is narrated on stderr and recorded in
+``## Notes``, and the project's pre-merge criterion closes the acceptance
+criteria. The commands come from the project's own project.cfg
+``[testing]`` keys: most tests here write the kanban project's values
+(``_write_runner_cfg``); a project that sets neither key gets no runner
+criterion, constraint or rewrite. TESTER and CM tickets render
+byte-identically to output without the policy. A ticket naming a shipped
+release-notes file gets nothing about CHANGELOG.
 
-Two layers:
+Three layers:
   1. The real CLI entry point as a subprocess (as pm-agent.sh invokes it),
      asserting the rendered CODER README and the stderr narration.
   2. In-process ticket emission into two roots — one with the policy, one
      with it replaced by a pass-through — comparing README bytes per role.
+  3. resolve_test_runner_config against its bash twins in project_paths.sh.
 
 All temp paths use pytest's ``tmp_path`` fixture (never bare /tmp).
 """
@@ -27,6 +32,8 @@ import pathlib
 import re
 import subprocess
 import sys
+
+import pytest
 
 try:
     import pm_agent.pm_materialize as pm  # installed via pm_agent package
@@ -46,6 +53,29 @@ _DEV_TREE_ROOT = _TEAM_DIR.parent
 _MATERIALIZE_SCRIPT = _TEAM_DIR / "pm-agent" / "pm_materialize.py"
 
 BARE_RUNNER_CRITERION = "`bash team/scripts/run-unit-tests.sh` exits 0"
+
+# The kanban project's own [testing] commands, as its project.cfg sets them.
+KANBAN_TARGETED = (
+    "bash team/scripts/run-unit-tests.sh --files {files} && "
+    "bash team/scripts/run-integration-tests.sh --files {files}"
+)
+KANBAN_PRE_MERGE = "bash team/scripts/run-unit-tests.sh --pre-merge"
+KANBAN = ap.RunnerConfig(targeted_command=KANBAN_TARGETED, pre_merge_command=KANBAN_PRE_MERGE)
+TARGETED_RUN_CRITERION = KANBAN.targeted_criterion()
+TARGETED_RUN_CONSTRAINT = KANBAN.targeted_constraint()
+PRE_MERGE_CRITERION = KANBAN.pre_merge_criterion()
+
+
+def _write_runner_cfg(project_root, targeted=KANBAN_TARGETED, pre_merge=KANBAN_PRE_MERGE):
+    """Give *project_root* a project.cfg whose [testing] keys are the given commands."""
+    project_root = pathlib.Path(project_root)
+    project_root.mkdir(parents=True, exist_ok=True)
+    (project_root / "project.cfg").write_text(
+        "[project]\nworkflow_type = release\n\n[testing]\n"
+        f"targeted_test_command = {targeted}\npre_merge_command = {pre_merge}\n",
+        encoding="utf-8",
+    )
+    return project_root
 
 
 def _plan_task(sequence, slug, role, acceptance, constraints=None, notes="none"):
@@ -126,8 +156,7 @@ def _only_folder(tasks_root: pathlib.Path, role: str) -> pathlib.Path:
 def test_real_entry_point_rewrites_bare_runner_acceptance_on_coder_ticket(
     tmp_path: pathlib.Path,
 ) -> None:
-    team_root = tmp_path / "team_root"
-    team_root.mkdir()
+    team_root = _write_runner_cfg(tmp_path / "team_root")
     plan = {
         "workflow_type": "release",
         "target_version": "v1.0.0",
@@ -149,13 +178,13 @@ def test_real_entry_point_rewrites_bare_runner_acceptance_on_coder_ticket(
 
     acceptance = _section(readme, "Acceptance Criteria")
     assert "--files" in acceptance
-    assert f"- [ ] {ap.TARGETED_RUN_CRITERION}" in acceptance
+    assert f"- [ ] {TARGETED_RUN_CRITERION}" in acceptance
     assert f"- [ ] {BARE_RUNNER_CRITERION}\n" not in acceptance
     assert "- [ ] The thing works." in acceptance
 
     constraints = _section(readme, "Constraints")
-    assert f"- {ap.TARGETED_RUN_CONSTRAINT}" in constraints
-    assert constraints.count(ap.TARGETED_RUN_CONSTRAINT) == 1
+    assert f"- {TARGETED_RUN_CONSTRAINT}" in constraints
+    assert constraints.count(TARGETED_RUN_CONSTRAINT) == 1
     assert "- Be careful." in constraints
 
     notes = _section(readme, "Notes")
@@ -172,15 +201,14 @@ def test_real_entry_point_rewrites_bare_runner_acceptance_on_coder_ticket(
 
     # The injected TESTER ticket carries neither the rewrite nor the constraint.
     tester_readme = (_only_folder(team_root / "tasks", "TESTER") / "README.md").read_text()
-    assert ap.TARGETED_RUN_CONSTRAINT not in tester_readme
+    assert TARGETED_RUN_CONSTRAINT not in tester_readme
     assert "Targeted-test policy:" not in tester_readme
 
 
 def test_real_entry_point_closes_coder_and_writer_criteria_with_pre_merge(
     tmp_path: pathlib.Path,
 ) -> None:
-    team_root = tmp_path / "team_root"
-    team_root.mkdir()
+    team_root = _write_runner_cfg(tmp_path / "team_root")
     plan = {
         "workflow_type": "release",
         "target_version": "v1.0.0",
@@ -193,14 +221,14 @@ def test_real_entry_point_closes_coder_and_writer_criteria_with_pre_merge(
             # The plan already wrote the fixed text, mid-list: it still
             # renders once, last.
             _plan_task(2, "document-thing", "WRITER",
-                       [ap.PRE_MERGE_CRITERION, "The guide explains the thing."]),
+                       [PRE_MERGE_CRITERION, "The guide explains the thing."]),
         ],
     }
 
     result = _run_materialize(plan, team_root, tmp_path)
     assert result.returncode == 0, f"STDOUT: {result.stdout}\nSTDERR: {result.stderr}"
 
-    expected_line = f"- [ ] {ap.PRE_MERGE_CRITERION}"
+    expected_line = f"- [ ] {PRE_MERGE_CRITERION}"
     for role in ("CODER", "WRITER"):
         readme = (_only_folder(team_root / "tasks", role) / "README.md").read_text()
         bullets = [
@@ -222,7 +250,7 @@ def test_real_entry_point_closes_coder_and_writer_criteria_with_pre_merge(
 
     for folder in (team_root / "tasks").iterdir():
         if folder.is_dir() and folder.name.split("-", 1)[0] in ("TESTER", "CM"):
-            assert ap.PRE_MERGE_CRITERION not in (folder / "README.md").read_text(), folder.name
+            assert PRE_MERGE_CRITERION not in (folder / "README.md").read_text(), folder.name
 
 
 # ---------------------------------------------------------------------------
@@ -271,8 +299,7 @@ def _workspace(team_root: pathlib.Path) -> pathlib.Path:
 def test_tester_and_cm_readmes_are_byte_identical_to_output_without_policy(
     tmp_path: pathlib.Path, monkeypatch,
 ) -> None:
-    team_root = tmp_path / "team_root"
-    team_root.mkdir()
+    team_root = _write_runner_cfg(tmp_path / "team_root")
 
     with_policy = _emit_plan(tmp_path / "with_policy", team_root)
 
@@ -306,8 +333,7 @@ def test_pre_merge_criterion_changes_only_coder_and_writer_readmes(
     """Against output without the pre-merge criterion, CODER and WRITER
     READMEs differ by exactly that one criterion line and the TESTER and CM
     READMEs (plan-authored and injected bookends) are byte-identical."""
-    team_root = tmp_path / "team_root"
-    team_root.mkdir()
+    team_root = _write_runner_cfg(tmp_path / "team_root")
 
     def _plan():
         return [
@@ -325,7 +351,7 @@ def test_pre_merge_criterion_changes_only_coder_and_writer_readmes(
         result = real_policy(role, acceptance_criteria, constraints, **kwargs)
         return ap.PolicyResult(
             acceptance_criteria=[
-                c for c in result.acceptance_criteria if c != ap.PRE_MERGE_CRITERION
+                c for c in result.acceptance_criteria if c != PRE_MERGE_CRITERION
             ],
             constraints=result.constraints,
             rewrites=result.rewrites,
@@ -336,7 +362,7 @@ def test_pre_merge_criterion_changes_only_coder_and_writer_readmes(
     golden = _emit_plan(tmp_path / "golden", team_root, _plan())
 
     assert set(with_criterion) == set(golden)
-    criterion_line = f"- [ ] {ap.PRE_MERGE_CRITERION}\n".encode()
+    criterion_line = f"- [ ] {PRE_MERGE_CRITERION}\n".encode()
     roles_seen = set()
     for task_id, golden_bytes in golden.items():
         role = task_id.split("-", 1)[0]
@@ -377,8 +403,7 @@ def test_tickets_naming_shipped_release_notes_get_no_changelog_step_or_prerequis
     as any other worker ticket: no CHANGELOG criterion, constraint, note or
     narration, and no prerequisite beyond the RC-open bookend and their own
     depends_on."""
-    team_root = tmp_path / "team_root"
-    team_root.mkdir()
+    team_root = _write_runner_cfg(tmp_path / "team_root")
 
     coder = _plan_task(1, "fix-shipped-notes-bullet", "CODER",
                        ["`release-notes/v2.41.0.md` names the right bug."],
@@ -422,9 +447,148 @@ def test_tickets_naming_shipped_release_notes_get_no_changelog_step_or_prerequis
             line[len("- [ ] "):] for line in _section(readme, "Acceptance Criteria").splitlines()
             if line.startswith("- [ ] ")
         ]
-        assert bullets == task["acceptance_criteria"] + [ap.PRE_MERGE_CRITERION], readme
+        assert bullets == task["acceptance_criteria"] + [PRE_MERGE_CRITERION], readme
         own_depends = [dirs[seq].name for seq in task["depends_on"]]
         assert sorted(_prerequisites(folder)) == sorted(cm_open + own_depends), folder.name
 
     # Materializing writes no bug ledger.
     assert not (team_root / "bugs").exists()
+
+
+# ---------------------------------------------------------------------------
+# The runner commands come from the plan's project's own project.cfg
+# ---------------------------------------------------------------------------
+
+
+def _single_coder_plan(acceptance, constraints=None):
+    return {
+        "workflow_type": "release",
+        "target_version": "v1.0.0",
+        "test_required": "true",
+        "human_approval_required": "auto",
+        "project_name": "acceptance-policy-fixture",
+        "tasks": [_plan_task(1, "implement-thing", "CODER", acceptance, constraints=constraints)],
+    }
+
+
+@pytest.mark.parametrize("cfg_text", [
+    None,
+    "[project]\nworkflow_type = release\n",
+    "[project]\nworkflow_type = release\n\n[testing]\ntargeted_test_command =\npre_merge_command =\n",
+], ids=["no-project-cfg", "no-testing-section", "blank-keys"])
+def test_project_without_runner_commands_gets_no_runner_criterion_or_constraint(
+    tmp_path: pathlib.Path, cfg_text,
+) -> None:
+    team_root = tmp_path / "team_root"
+    team_root.mkdir()
+    if cfg_text is not None:
+        (team_root / "project.cfg").write_text(cfg_text, encoding="utf-8")
+
+    result = _run_materialize(
+        _single_coder_plan(["The thing works.", BARE_RUNNER_CRITERION], ["Be careful."]),
+        team_root, tmp_path,
+    )
+    assert result.returncode == 0, f"STDOUT: {result.stdout}\nSTDERR: {result.stderr}"
+
+    readme = (_only_folder(team_root / "tasks", "CODER") / "README.md").read_text()
+    bullets = [line for line in _section(readme, "Acceptance Criteria").splitlines()
+               if line.startswith("- [ ]")]
+    # The plan's own criteria, a bare runner included, are left as written.
+    assert bullets == ["- [ ] The thing works.", f"- [ ] {BARE_RUNNER_CRITERION}"], readme
+    constraints = _section(readme, "Constraints")
+    assert "- Be careful." in constraints
+    assert "Run only the tests" not in constraints
+    assert "Targeted-test policy:" not in _section(readme, "Notes")
+    assert "acceptance-policy:" not in result.stderr
+    assert "team/scripts/run-unit-tests.sh --" not in readme
+
+
+def test_project_with_its_own_runner_commands_gets_exactly_those_criteria(
+    tmp_path: pathlib.Path,
+) -> None:
+    team_root = _write_runner_cfg(
+        tmp_path / "team_root",
+        targeted="scripts/test.sh --only {files}",
+        pre_merge="scripts/test.sh --quick",
+    )
+    result = _run_materialize(
+        _single_coder_plan(["The thing works.", "`scripts/test.sh` exits 0", BARE_RUNNER_CRITERION]),
+        team_root, tmp_path,
+    )
+    assert result.returncode == 0, f"STDOUT: {result.stdout}\nSTDERR: {result.stderr}"
+
+    readme = (_only_folder(team_root / "tasks", "CODER") / "README.md").read_text()
+    bullets = [line for line in _section(readme, "Acceptance Criteria").splitlines()
+               if line.startswith("- [ ]")]
+    assert bullets == [
+        "- [ ] The thing works.",
+        "- [ ] `scripts/test.sh --only <the test files this ticket adds or changes>` exits 0.",
+        # The kanban's runner is not this project's: left as written.
+        f"- [ ] {BARE_RUNNER_CRITERION}",
+        "- [ ] `scripts/test.sh --quick` exits 0 before merging.",
+    ], readme
+    constraints = _section(readme, "Constraints")
+    assert (
+        "- Run only the tests for the files you changed using `--only`. "
+        "The full gated suites run once per RC in the TESTER task."
+    ) in constraints
+    assert PRE_MERGE_CRITERION not in readme
+    assert TARGETED_RUN_CRITERION not in readme
+    narration = [line for line in result.stderr.splitlines() if "acceptance-policy:" in line]
+    assert len(narration) == 1 and "`scripts/test.sh` exits 0" in narration[0], result.stderr
+
+
+# ---------------------------------------------------------------------------
+# Layer 3 — the Python resolver answers what the bash accessors answer
+# ---------------------------------------------------------------------------
+
+
+_PROJECT_PATHS = _TEAM_DIR / "scripts" / "lib" / "project_paths.sh"
+
+
+def _bash_accessors(kanban_root: pathlib.Path, project: str, tmp_path: pathlib.Path):
+    home = tmp_path / "home"
+    home.mkdir(exist_ok=True)
+    env = build_scrubbed_env(
+        home_dir=home,
+        extra_env={
+            "KANBAN_ROOT": str(kanban_root),
+            "PGAI_AGENT_KANBAN_ROOT_PATH": str(kanban_root),
+            "PGAI_AGENT_KANBAN_TEMP_DIR": str(tmp_path / "scratch"),
+        },
+    )
+    script = (
+        'source "$1"; printf "%s\\n" "$(pp_targeted_test_command "$2")"; '
+        'printf "%s\\n" "$(pp_pre_merge_command "$2")"'
+    )
+    done = subprocess.run(
+        ["bash", "-c", script, "bash", str(_PROJECT_PATHS), project],
+        capture_output=True, text=True, env=env, timeout=30,
+    )
+    assert done.returncode == 0, done.stderr
+    return done.stdout.split("\n")[:2]
+
+
+@pytest.mark.parametrize("cfg_name, cfg_text, expected", [
+    ("project.cfg", "[testing]\ntargeted_test_command = " + KANBAN_TARGETED
+     + "\npre_merge_command = " + KANBAN_PRE_MERGE + "\n",
+     (KANBAN_TARGETED, KANBAN_PRE_MERGE)),
+    ("project.cfg", "[testing]\ntargeted_test_command = x.sh -f {files}  # note\n",
+     ("x.sh -f {files}", "")),
+    ("project.cfg", "[testing]\ntargeted_test_command =\npre_merge_command =\n", ("", "")),
+    ("project.cfg", "[release]\npre_merge_command = elsewhere\n", ("", "")),
+    ("PROJECT.cfg", "pre_merge_command = make check\n", ("", "make check")),
+    (None, None, ("", "")),
+], ids=["kanban", "inline-comment", "blank", "wrong-section", "legacy", "no-cfg"])
+def test_resolver_matches_the_project_paths_accessors(
+    tmp_path: pathlib.Path, cfg_name, cfg_text, expected,
+) -> None:
+    kanban_root = tmp_path / "kanban"
+    project_root = kanban_root / "projects" / "demo"
+    project_root.mkdir(parents=True)
+    if cfg_name:
+        (project_root / cfg_name).write_text(cfg_text, encoding="utf-8")
+
+    config = pm.resolve_test_runner_config(str(project_root))
+    assert (config.targeted_command, config.pre_merge_command) == expected
+    assert _bash_accessors(kanban_root, "demo", tmp_path) == list(expected)

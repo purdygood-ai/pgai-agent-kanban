@@ -91,7 +91,8 @@ from typing import Any, Callable, Mapping, Optional
 
 from pgai_agent_kanban.lib import ini
 from pgai_agent_kanban.lib.atomic_write import atomic_write
-from pgai_agent_kanban.lib.timeutil import format_iso
+from pgai_agent_kanban.lib.branch_prefix import InvalidBranchPrefixError, ini_branch_prefix_for_project_root
+from pgai_agent_kanban.lib.timeutil import compact_utc_stamp, format_iso
 from pgai_agent_kanban.overwatch.block_evidence import latest_dispatch
 from pgai_agent_kanban.overwatch.block_record import NONE_VALUE, BlockRecord, parse_evidence
 from pgai_agent_kanban.overwatch.readonly_git import run_readonly_git
@@ -263,7 +264,11 @@ def resolve_git_target(task_dir: Path, record: BlockRecord, *, require_source: b
     source_written = _readme_value(task_dir, "Source Branch")
     if not source_written:
         raise GitTargetError("the task README names no ## Source Branch")
-    source = _resolve_source(repo, source_written, _project_cfg_value(project_root, "branch_prefix"))
+    try:
+        prefix = ini_branch_prefix_for_project_root(project_root)
+    except InvalidBranchPrefixError:
+        prefix = ""  # a refused prefix reads as none, as an unreadable project.cfg does
+    source = _resolve_source(repo, source_written, prefix)
     if source is None and require_source:
         raise GitTargetError(f"the source branch {source_written} does not exist in {repo}")
     worktree_value = evidence.get("worktree", "")
@@ -299,10 +304,6 @@ def _unique_path(directory: Path, base: str, suffix: str) -> Path:
         target = directory / f"{base}-{n}{suffix}"
         n += 1
     return target
-
-
-def _compact_stamp(moment: datetime.datetime) -> str:
-    return moment.astimezone(datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
 
 
 def snapshot_commits_ahead(
@@ -364,7 +365,7 @@ def snapshot_commits_ahead(
         if len(patch) > SNAPSHOT_PATCH_LIMIT:
             lines.append(f"[patch cut at {SNAPSHOT_PATCH_LIMIT} bytes of {len(patch)}]")
     evidence_dir.mkdir(parents=True, exist_ok=True)
-    target = _unique_path(evidence_dir, f"commits-ahead-{_compact_stamp(now)}", ".txt")
+    target = _unique_path(evidence_dir, f"commits-ahead-{compact_utc_stamp(now)}", ".txt")
     atomic_write(target, "\n".join(lines) + "\n", prefix=_ATOMIC_PREFIX)
     return CommitSnapshot(
         path=target, repo=str(repo), branch=branch, source=source, ahead=ahead,

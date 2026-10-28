@@ -2,8 +2,9 @@
 """
 lint_engine_size_dupe.py
 =========================
-Quality-class lint (never blocks a runner) that guards the engine
-decomposition's two structural invariants:
+Quality-class lint (never blocks a runner, always exits 0 on findings)
+that guards the engine decomposition's two structural invariants, and
+reports the Python copy a shared helper was meant to replace:
 
   1. **Engine size** -- none of the files this decomposition reduced to a
      thin driver, or extracted into a single-concern lib stage, may grow
@@ -15,6 +16,10 @@ decomposition's two structural invariants:
      turn that into a load-order-dependent argument-misrouting bug (the
      defect class this lint's narrower predecessor, ``lint_lib_function_
      dedupe.py``, was built to catch for ``lib/*.sh`` alone).
+  3. **Python def duplication** -- no module-level Python function may be
+     defined, under the same name and with the same body, in two or more
+     modules of the package: the second copy is a helper that belongs in
+     one module and is imported.
 
 WHY THIS EXISTS
 ---------------
@@ -27,22 +32,37 @@ monolithic engine files -- ``cm/release.sh`` (~3.9k lines),
 in the tree stopped any of those files from silently growing back into a
 monolith, or a future edit from reintroducing a duplicate helper across two
 files that get sourced together. This lint is that guardrail, wired into
-both gated runners via ``gated_runner_run_quality_lint`` so a regression
-prints in full but never fails the suite.
+both gated runners, which merge its per-instance findings with
+``gated_runner_merge_findings_file``, so a regression prints in full and is
+recorded but never fails the suite.
 
 CHECK 1: ENGINE SIZE
 ---------------------
 Scope is deliberately an explicit, named manifest (``ENGINE_FILES`` below)
 of the exact drivers and lib stages the engine decomposition produced
-or reduced -- NOT a blanket "every file under team/scripts/must
-stay under 800 lines" policy. Several pre-existing, unrelated utility
-libraries (``lib/project_paths.sh``, ``lib/projects.sh``, ``lib/temp.sh``,
-``lib/token_capture.sh``) already exceed 800 lines today and are out of
-scope for this regression guard -- they were never part of the five named
-monoliths and policing their size is a different ticket's job. A file in
-the manifest that no longer exists (renamed or deleted in a later refactor)
-is silently skipped, not an error -- this lint tracks a decomposition's
-shape, not a fixed set of paths that must exist forever.
+or reduced -- NOT a blanket "every file under team/scripts/ must
+stay under 800 lines" policy, and nothing outside ``--scripts-dir`` is
+checked at all. Files over 800 lines that are not in the manifest are out
+of scope for this regression guard; the known large ones, and why each
+sits outside it:
+
+  - ``team/pm-agent/pm_materialize.py`` -- the PM plan materializer, the
+    largest module in the tree; it lives outside ``--scripts-dir`` and was
+    never one of the decomposed engines, so its size is unpoliced here.
+  - ``team/pgai_agent_kanban/api/routers/operations.py`` -- the REST
+    mutation router, one handler per operator verb; package code outside
+    ``--scripts-dir``.
+  - ``team/pgai_agent_kanban/ops/write.py`` -- the ops library's write
+    operations; package code outside ``--scripts-dir``.
+  - ``lib/project_paths.sh``, ``lib/projects.sh``, ``lib/temp.sh`` --
+    pre-existing utility libraries, never part of the five monoliths.
+  - The standalone lints and test runners (``lint_*.py``,
+    ``run-unit-tests.sh``, ``run-integration-tests.sh``) -- single-purpose
+    tools, not engine drivers or stages.
+
+A file in the manifest that no longer exists (renamed or deleted in a
+later refactor) is silently skipped, not an error -- this lint tracks a
+decomposition's shape, not a fixed set of paths that must exist forever.
 
 ``--size-allow-file`` exempts a manifest entry (by its path relative to
 ``--scripts-dir``, or by basename) from the ceiling entirely -- for a thin
@@ -78,11 +98,32 @@ false collision). Under-connection trades a small false-negative risk for
 a hard guarantee against false positives, which is the right trade for a
 lint that must stay quiet on an already-clean tree.
 
+CHECK 3: PYTHON DEF DUPLICATION
+-------------------------------
+Scope is every non-test ``*.py`` file under ``--python-dir`` (default: the
+``pgai_agent_kanban/`` package beside ``--scripts-dir``, skipped when there
+is none), recursive; a directory named ``tests``, ``test`` or
+``__pycache__`` is left out. Only module-level ``def``/``async def`` count,
+not methods or nested functions. Two definitions are the same when they
+share a name and their bodies normalise to the same hash under
+``lint_python_duplicates.py``'s ``body_digest`` (docstring dropped,
+parameters renamed by position, formatting and comments ignored) -- the
+rule is imported from that lint, never restated. A body that is only
+``pass`` or ``...`` is a stub, not a copy, and is skipped. One finding is
+recorded per name and body shared by two or more modules. A file that does
+not parse is warned about on stderr and skipped.
+
+``lint_python_duplicates.py`` ratchets large copied bodies under any name
+against an allowlist; this check has no allowlist and no size floor, so a
+copied one-line helper is reported on every run until it is replaced by an
+import.
+
 ALLOW-LIST
 ----------
-``--allow-file`` exempts a file (by basename) from the duplication check
-entirely -- its own function definitions never count toward a violation,
-regardless of what the reachability graph says. Default allow-list:
+``--allow-file`` exempts a shell file (by basename) from the CHECK 2
+duplication check entirely -- its own function definitions never count
+toward a violation, regardless of what the reachability graph says.
+Default allow-list:
 
     provider_claude.sh   -- provider-interface implementation; deliberately
     provider_codex.sh       defines the same four function names as its
@@ -110,7 +151,7 @@ This lint supersedes ``lint_lib_function_dedupe.py`` as a gated-runner call
 site: both ``run-unit-tests.sh`` and ``run-integration-tests.sh`` invoke
 this file instead (its tree-wide, reachability-aware scan is a strict
 superset of the old flat ``lib/*.sh`` check in coverage). ``lint_lib_
-function_dedupe.py`` itself is UNCHANGED and still exists -- it keeps its
+function_dedupe.py`` itself still exists -- it keeps its
 own passing test suite, its own census row (row 40), and its one remaining
 caller, ``audit_coding_standards.sh``'s D01 check (a manually-run
 compliance audit, not a per-run quality gate) -- rather than being deleted
@@ -121,35 +162,52 @@ quality-lint pipeline is exactly the duplication this lint exists to catch;
 keeping the narrower tool alive for its own separate, non-gated audit
 surface is not that.
 
+FINDINGS
+--------
+CONVERT (docs/blocking-site-census.md row 53; team/SOP-core.md "Blocking
+Severity"): a size reading is advisory, and a collision is a latent
+shadowing hazard the run that finds it does not suffer, as is a copied
+Python helper. Each oversized engine file, each colliding shell function
+name and each copied Python def is printed and recorded as one finding,
+whose ``kind`` tells the classes apart without re-parsing the output:
+``engine-size`` (``file``, ``lines``, ``ceiling``), ``duplicate-function``
+(``function``, ``files``) or ``duplicate-python-def`` (``function``,
+``files``). With --findings-file the findings are written as a JSON array
+(the shape pgai_agent_kanban.lint.findings defines); the gated runners
+merge it per instance. The pre-merge engine's engine-size ratchet fails on
+an ``engine-size`` or ``duplicate-function`` entry and narrates a
+``duplicate-python-def`` one without failing.
+
 EXIT CODES
 ----------
-  0   No violations in either check.
-  1   A duplicate-function collision (CHECK 2) was found -- real damage,
-      the hard class, returned even when a size finding rode along too.
-  2   Usage error, or --scripts-dir does not exist.
-  3   Only the size ceiling (CHECK 1) was exceeded -- an advisory reading
-      (docs/blocking-site-census.md row 53: CONVERT), never the hard
-      class. ``gated_runner_run_quality_lint`` treats any nonzero exit
-      identically (a non-fatal quality finding), so this split matters to
-      direct callers, not the gated runners.
+  0   Scan ran, whatever it found (every class is a finding).
+  2   Usage error, or --scripts-dir (or a --python-dir passed) does not
+      exist.
 
 USAGE
 -----
   python3 team/scripts/lint_engine_size_dupe.py [--scripts-dir PATH]
+                                                 [--python-dir PATH]
                                                  [--max-lines N]
                                                  [--allow-file FILENAME]
                                                  [--size-allow-file ENTRY]
+                                                 [--findings-file PATH]
                                                  [--verbose]
 
   --scripts-dir PATH     Directory to scan (default: team/scripts/ resolved
                           from this script's own location).
+  --python-dir PATH      Python package to scan for copied defs (default:
+                          pgai_agent_kanban/ beside --scripts-dir, skipped
+                          when absent).
   --max-lines N          Engine-size ceiling in lines (default: 800).
-  --allow-file FILENAME  Basename whose functions are exempt from the
-                          duplication check. May be repeated. Replaces the
+  --allow-file FILENAME  Basename whose shell functions are exempt from
+                          the duplication check. May be repeated. Replaces the
                           default allow-list when passed at least once.
   --size-allow-file ENTRY
                           Manifest entry (relative path or basename) exempt
                           from the size ceiling. May be repeated.
+  --findings-file PATH   Write the findings as a JSON array to PATH (parent
+                          directories created; written even when empty).
   --verbose, -v          Print per-file scan detail for both checks.
 
 EXAMPLES
@@ -160,15 +218,24 @@ EXAMPLES
   # Explicit scripts dir (e.g. a seeded test fixture):
   python3 team/scripts/lint_engine_size_dupe.py --scripts-dir /path/to/fixture
 
+  # Explicit Python package to scan for copied defs:
+  python3 team/scripts/lint_engine_size_dupe.py \\
+      --python-dir team/pgai_agent_kanban
+
   # Custom duplication allow-list (replaces defaults):
   python3 team/scripts/lint_engine_size_dupe.py \\
       --allow-file provider_claude.sh \\
       --allow-file provider_codex.sh
+
+  # Record findings for a downstream merge:
+  python3 team/scripts/lint_engine_size_dupe.py \\
+      --findings-file "${PGAI_AGENT_KANBAN_TEMP_DIR}/lint/engine_size_dupe.json"
 """
 
 from __future__ import annotations
 
 import argparse
+import ast
 import re
 import sys
 from collections import defaultdict, deque
@@ -183,6 +250,22 @@ if _team_str not in sys.path:
     sys.path.insert(0, _team_str)
 
 from pgai_agent_kanban.lib.error_contract import emit_error_contract  # noqa: E402
+from pgai_agent_kanban.lint.findings import (  # noqa: E402
+    display_path,
+    quality_finding,
+    write_findings_file,
+)
+
+# The body normaliser and the non-test file walk live in
+# lint_python_duplicates.py beside this file; they are imported, never
+# copied, so the two lints agree on what "the same body" means.
+_SCRIPTS_DIR = str(Path(__file__).resolve().parent)
+if _SCRIPTS_DIR not in sys.path:
+    sys.path.insert(0, _SCRIPTS_DIR)
+
+import lint_python_duplicates as _python_dupes  # noqa: E402
+
+_LINT_NAME = "engine_size_dupe"
 
 # ---------------------------------------------------------------------------
 # CHECK 1: engine-size manifest
@@ -205,8 +288,9 @@ ENGINE_FILES: tuple[str, ...] = (
     # cm/release.sh's lib stages (the five original stages plus the
     # closing-summary formatter, Fixed-In stage and archive stage
     # release_finalize.sh calls, the ship-posture stage release_ship_policy.sh calls into, the
-    # VERSION-file stage release_notes.sh calls, and the --decide-only
-    # stage).
+    # VERSION-file stage release_notes.sh calls, the --decide-only
+    # stage, and the squash-conflict / push-lag / tag-on-remote stage
+    # release_squash.sh and release_finalize.sh call).
     "lib/cm/release_preflight.sh",
     "lib/cm/release_ship_policy.sh",
     "lib/cm/release_ship_posture.sh",
@@ -218,6 +302,7 @@ ENGINE_FILES: tuple[str, ...] = (
     "lib/cm/release_fixed_in.sh",
     "lib/cm/release_archive.sh",
     "lib/cm/release_decide_only.sh",
+    "lib/cm/release_resolve.sh",
     # lib/discovery.sh's lib stages.
     "lib/discovery_guards.sh",
     "lib/discovery_state.sh",
@@ -255,8 +340,10 @@ ENGINE_FILES: tuple[str, ...] = (
     "lib/wake_driver_worktree.sh",
     "lib/wake_driver_invoke.sh",
     "lib/wake_driver_finalize.sh",
+    "lib/wake_agent_block_scan.sh",  # sourced by wake_driver_finalize.sh
     "lib/wake_driver_task_setup.sh",
     "lib/wake_driver_discovery.sh",
+    "lib/wake_driver_idle.sh",
     "lib/wake_lock_wait.sh",
     "lib/wake_governance_composer.sh",
     "lib/wake_safeguard_refusal.sh",
@@ -591,6 +678,67 @@ def find_duplicate_functions(
 
 
 # ---------------------------------------------------------------------------
+# CHECK 3: Python def duplication
+# ---------------------------------------------------------------------------
+
+#: The package scanned by default, as a sibling of --scripts-dir.
+DEFAULT_PYTHON_PACKAGE = "pgai_agent_kanban"
+
+
+def _is_stub(fn: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
+    """True when *fn*'s body, docstring aside, is only ``pass`` or ``...``."""
+    return all(
+        isinstance(stmt, ast.Pass)
+        or (
+            isinstance(stmt, ast.Expr)
+            and isinstance(stmt.value, ast.Constant)
+            and (stmt.value.value is Ellipsis or isinstance(stmt.value.value, str))
+        )
+        for stmt in fn.body
+    )
+
+
+def find_duplicate_python_defs(
+    python_dir: Path,
+    verbose: bool = False,
+) -> list[tuple[str, list[str]]]:
+    """Scan every non-test ``*.py`` file under *python_dir* for module-level
+    functions defined in two or more modules under the same name with the
+    same normalised body (see the module docstring's "CHECK 3" section).
+
+    Returns one ``(name, files)`` pair per copied definition, *files* being
+    the sorted paths of the defining modules relative to *python_dir*;
+    pairs are sorted by name, then files. Two different bodies sharing a
+    name are two pairs only when each has its own copy.
+
+    Raises FileNotFoundError if *python_dir* does not exist.
+    """
+    if not python_dir.is_dir():
+        raise FileNotFoundError(f"python directory not found: {python_dir}")
+
+    groups: dict[tuple[str, str], set[str]] = defaultdict(set)
+    for path in _python_dupes.iter_scan_files(python_dir):
+        if verbose:
+            print(f"  python: scanning {path}", flush=True)
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"), filename=str(path))
+        except (OSError, SyntaxError, ValueError) as exc:
+            print(f"WARNING: could not parse {path}: {exc}", file=sys.stderr)
+            continue
+        rel = path.relative_to(python_dir).as_posix()
+        for node in tree.body:
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) or _is_stub(node):
+                continue
+            digest = _python_dupes.body_digest(node, 1)
+            if digest is not None:
+                groups[(node.name, digest)].add(rel)
+
+    return sorted(
+        (name, sorted(files)) for (name, _digest), files in groups.items() if len(files) > 1
+    )
+
+
+# ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
 
@@ -600,10 +748,11 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         prog="lint_engine_size_dupe.py",
         description=(
             "Quality-class lint: warns when an engine-decomposition file "
-            "exceeds the line ceiling, or when a shell function name is "
+            "exceeds the line ceiling, when a shell function name is "
             "defined in two or more files reachable from a common bash "
-            "process. Never exits fatally on a violation from the caller's "
-            "perspective when wrapped through gated_runner_run_quality_lint."
+            "process, or when a module-level Python function is defined "
+            "with the same name and body in two or more modules. Each is a "
+            "finding; the lint exits 0 whatever it finds (2 on a usage error)."
         ),
     )
     parser.add_argument(
@@ -612,6 +761,15 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help=(
             "Directory to scan (default: team/scripts/ resolved from this "
             "script's own location)."
+        ),
+    )
+    parser.add_argument(
+        "--python-dir",
+        metavar="PATH",
+        help=(
+            "Python package to scan for module-level functions copied under "
+            f"the same name (default: {DEFAULT_PYTHON_PACKAGE}/ beside "
+            "--scripts-dir, skipped when absent; a PATH passed must exist)."
         ),
     )
     parser.add_argument(
@@ -626,7 +784,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="append",
         dest="allow_files",
         help=(
-            "Basename whose functions are exempt from the duplication "
+            "Basename whose shell functions are exempt from the duplication "
             "check. May be repeated. Passing this flag once REPLACES the "
             "defaults; list all desired files when using this flag. "
             "Default: provider_claude.sh, provider_codex.sh, harness.sh."
@@ -643,33 +801,99 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--findings-file",
+        metavar="PATH",
+        help=(
+            "Write the findings as a JSON array to PATH (parent directories "
+            "created; written even when empty). Findings are printed either way."
+        ),
+    )
+    parser.add_argument(
         "--verbose",
         "-v",
         action="store_true",
-        help="Print per-file scan detail for both checks.",
+        help="Print per-file scan detail for every check.",
     )
     return parser.parse_args(argv)
+
+
+def _findings(
+    size_violations: dict[str, int],
+    dupe_violations: dict[str, list[str]],
+    *,
+    scripts_dir: Path,
+    max_lines: int,
+    python_dupes: list[tuple[str, list[str]]] | None = None,
+    python_dir: Path | None = None,
+) -> list[dict]:
+    """One quality finding per oversized engine file (``kind``
+    ``engine-size``), per colliding function name (``kind``
+    ``duplicate-function``) and per copied Python def (``kind``
+    ``duplicate-python-def``). Each remedy names the exact files and ends
+    with the re-check: how to split a file or which definition survives is
+    a design choice no command can make."""
+    repo_root = _TEAM_DIR.parent
+    relint = f'python3 "{Path(__file__).resolve()}" --scripts-dir "{scripts_dir}"'
+    if python_dir is not None:
+        relint += f' --python-dir "{python_dir}"'
+    findings = []
+    for rel, count in sorted(size_violations.items()):
+        path = display_path(scripts_dir / rel, repo_root)
+        findings.append(
+            quality_finding(
+                _LINT_NAME,
+                f"{path} is {count} lines, over the {max_lines}-line engine ceiling",
+                f"split {path} into single-concern lib stages of at most {max_lines} "
+                f"lines each, or exempt it with --size-allow-file {rel} if it is a "
+                f"composition table, then re-check: {relint}",
+                file=path,
+                kind="engine-size",
+                lines=count,
+                ceiling=max_lines,
+            )
+        )
+    for name, files in sorted(dupe_violations.items()):
+        paths = [display_path(scripts_dir / rel, repo_root) for rel in files]
+        findings.append(
+            quality_finding(
+                _LINT_NAME,
+                f"{name}() is defined in {len(paths)} files that share a bash process: "
+                f"{', '.join(paths)}",
+                f"keep one {name}() definition and remove or rename it in "
+                f"{', '.join(paths[1:])}, then re-check: {relint}",
+                file=paths[0],
+                kind="duplicate-function",
+                function=name,
+                files=paths,
+            )
+        )
+    for name, files in python_dupes or ():
+        paths = [display_path(python_dir / rel, repo_root) for rel in files]
+        findings.append(
+            quality_finding(
+                _LINT_NAME,
+                f"{name}() is defined with the same body in {len(paths)} modules: {', '.join(paths)}",
+                f"keep one {name}() (in a lib/ module when several packages use it), import it in place "
+                f"of the copy in {', '.join(paths[1:])}, then re-check: {relint}",
+                file=paths[0],
+                kind="duplicate-python-def",
+                function=name,
+                files=paths,
+            )
+        )
+    return findings
 
 
 def main(argv: list[str] | None = None) -> int:
     """Entry point.
 
-    Returns 0 (clean) or 2 (usage: --scripts-dir not found) unconditionally.
-    A violation returns one of two distinct nonzero codes so a caller can
-    tell which class fired without re-parsing the printed findings:
-
-      1  a cross-file function-name collision (CHECK 2) was found -- real
-         damage (bash's last-sourced-wins semantics silently shadow an
-         implementation), a hard failure regardless of what else ran.
-      3  only the size ceiling (CHECK 1) was exceeded -- an advisory
-         reading, never evidence of breakage
-         (docs/blocking-site-census.md row 53: CONVERT).
-
-    ``gated_runner_run_quality_lint`` already discards this process's exit
-    code and records a quality finding on any nonzero value, so the split
-    changes nothing about the gated runners; it exists for direct callers
-    -- notably this module's own test suite -- that need to tell the two
-    classes apart.
+    Returns 0 whatever was found, or 2 on a usage error (--scripts-dir, or
+    a --python-dir passed, not found). Each oversized engine file, each
+    cross-file function-name collision and each copied Python def is a
+    quality finding, printed and written to --findings-file; a caller tells
+    the classes apart by each finding's ``kind`` (``engine-size``,
+    ``duplicate-function`` or ``duplicate-python-def``), not by the exit
+    code.
     """
     args = _parse_args(argv)
 
@@ -686,6 +910,20 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 2
 
+    if args.python_dir:
+        python_dir: Path | None = Path(args.python_dir).resolve()
+        if not python_dir.is_dir():
+            print(
+                f"ERROR: python directory not found: {python_dir}\n"
+                "Pass an existing package directory to --python-dir, or omit it.",
+                file=sys.stderr,
+            )
+            return 2
+    else:
+        python_dir = scripts_dir.parent / DEFAULT_PYTHON_PACKAGE
+        if not python_dir.is_dir():
+            python_dir = None
+
     dupe_allow: frozenset[str] = (
         frozenset(args.allow_files) if args.allow_files is not None else _DEFAULT_ALLOW_FILES
     )
@@ -699,6 +937,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"lint_engine_size_dupe: scanning {scripts_dir}", flush=True)
         print(f"  duplication allow-list: {', '.join(sorted(dupe_allow)) or '(none)'}", flush=True)
         print(f"  size allow-list: {', '.join(sorted(size_allow)) or '(none)'}", flush=True)
+        print(f"  python package: {python_dir or '(none beside the scripts dir)'}", flush=True)
 
     size_violations = check_engine_sizes(
         scripts_dir, max_lines=args.max_lines, allow_files=size_allow, verbose=args.verbose
@@ -712,18 +951,28 @@ def main(argv: list[str] | None = None) -> int:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 2
 
-    if not size_violations and not dupe_violations:
+    python_dupes = find_duplicate_python_defs(python_dir, verbose=args.verbose) if python_dir else []
+
+    findings = _findings(
+        size_violations, dupe_violations, scripts_dir=scripts_dir, max_lines=args.max_lines,
+        python_dupes=python_dupes, python_dir=python_dir,
+    )
+    write_findings_file(args.findings_file, findings, lint="lint_engine_size_dupe")
+
+    if not size_violations and not dupe_violations and not python_dupes:
         print(
             f"lint_engine_size_dupe: ok -- {len(ENGINE_FILES)} engine file(s) "
             f"within the {args.max_lines}-line ceiling, no cross-file "
-            "function-name collisions found.",
+            "function-name collisions"
+            + (", no copied Python defs" if python_dir else "")
+            + " found.",
             flush=True,
         )
         return 0
 
     if size_violations:
         print(
-            f"\nlint_engine_size_dupe: FAIL -- {len(size_violations)} engine "
+            f"\nlint_engine_size_dupe: {len(size_violations)} engine "
             f"file(s) exceed the {args.max_lines}-line ceiling:\n",
             flush=True,
         )
@@ -739,7 +988,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if dupe_violations:
         print(
-            f"\nlint_engine_size_dupe: FAIL -- {len(dupe_violations)} function "
+            f"\nlint_engine_size_dupe: {len(dupe_violations)} function "
             "name(s) defined in files that share a bash process:\n",
             flush=True,
         )
@@ -754,34 +1003,37 @@ def main(argv: list[str] | None = None) -> int:
             flush=True,
         )
 
+    if python_dupes:
+        print(
+            f"\nlint_engine_size_dupe: {len(python_dupes)} Python function(s) "
+            "defined with the same name and body in two or more modules:\n",
+            flush=True,
+        )
+        for name, files in python_dupes:
+            print(f"  {name}() -- defined in: {', '.join(files)}", flush=True)
+        print(
+            "\nA helper lives in one module and every caller imports it. Fix: "
+            "keep one definition (in a lib/ module when several packages use "
+            "it) and import it in place of each copy.",
+            flush=True,
+        )
+
     # Precompute the dual-channel message/remedy text (kept out of the
     # refusal's own backward window below, which only needs the
     # classification comment and the emitter call itself close together).
     _finding_message = (
         "the engine-decomposition size/duplication lint found "
-        f"{len(size_violations)} oversized engine file(s) and "
-        f"{len(dupe_violations)} cross-file function-name collision(s); see "
+        f"{len(size_violations)} oversized engine file(s), "
+        f"{len(dupe_violations)} cross-file function-name collision(s) and "
+        f"{len(python_dupes)} copied Python def(s); see "
         "the findings printed above for the exact files and names"
-    )
-    _finding_remedy = (
-        "split the named file further (size) or rename/remove the "
-        "duplicate definition (dupe), or run with --verbose for per-file "
-        "detail; this is a non-blocking quality finding and does not fail "
-        "the gated runner"
     )
     # CENSUS-ANCHOR: engine-size-dupe-01
     # CONVERT (SOP-core.md "Gates and Refusals" / CODER.md "Authoring a
     # new gate"): a quality-class finding with zero runtime-failure risk
-    # -- gated_runner_run_quality_lint always returns 0 regardless of
-    # this exit code, so the finding prints in full but never fails the runner.
-    emit_error_contract("lint.engine-size-dupe", _finding_message, _finding_remedy)
-    # Duplication is the hard class: return 1 whenever it fired, even
-    # alongside a size finding, so a caller that treats 1 as fatal is never
-    # blind to real damage riding along with an advisory reading. A
-    # size-only run returns the distinct code 3 (see main()'s docstring).
-    if dupe_violations:
-        return 1
-    return 3
+    # -- recorded per instance as findings; the lint returns 0 below.
+    emit_error_contract("lint.engine-size-dupe", _finding_message, findings[0]["remedy"])
+    return 0
 
 
 if __name__ == "__main__":

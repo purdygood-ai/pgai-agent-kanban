@@ -4,7 +4,8 @@ test_dispatch_hold_systemic_blocks.py
 Sandbox wakes for the blocked-task guard in run_project_chain
 (team/scripts/lib/wake_driver.sh): a project's task dispatch is held only
 while its human-gated blocks (BLOCKED, Needs Human: yes) are systemic, never
-for OVERWATCH, and the WAITING/BLOCKED re-checks run on a held wake too.
+for OVERWATCH (whose chain ends before the guard), and the WAITING/BLOCKED
+re-checks run on a held wake too.
 
 Each test drives the real production entry point -- a
 `bash scripts/wake/claude.sh --agent=<agent>` subprocess -- against a
@@ -27,7 +28,9 @@ Behaviours:
     lifts; the same two blocks further apart than the window do not;
   - one block whose reason_code is on the systemic list holds dispatch on
     its own;
-  - AGENT=overwatch is never held;
+  - AGENT=overwatch is never held: its chain ends after the resolution
+    stage, before the guard, and never dispatches a model, even from a
+    BACKLOG entry left in an old overwatch_backlog.md;
   - recheck_waiting_tasks and recheck_blocked_tasks run on a held wake: a
     WAITING task whose prerequisite is DONE returns to BACKLOG, and a
     transient-error BLOCKED task whose backoff has passed is promoted.
@@ -61,7 +64,7 @@ _TRANSIENT = "CODER-20260101-006-transient-error"
 
 _HELD = "not dispatching new tasks"
 _TASK_LOCAL = "dispatching (a task-local block holds only its dependents)"
-_OVERWATCH_NOT_HELD = "overwatch is never held, dispatching"
+_OVERWATCH_CHAIN_DONE = "overwatch keeps no queue and dispatches no model -- chain done"
 _HOLD_ERROR_KEY = "wake.dispatch_held_systemic_block"
 
 #: A block time long past every backoff window.
@@ -322,12 +325,26 @@ def test_overwatch_is_never_held(tmp_path):
 
     assert result.returncode == 0, _output(result)
     output = result.stdout + result.stderr
-    lines = _hold_lines(result)
-    assert lines and all(_OVERWATCH_NOT_HELD in line for line in lines), _output(result)
+    assert not _hold_lines(result), _output(result)
     assert _HELD not in output
     assert _HOLD_ERROR_KEY not in output
-    # The dispatch loop ran: it asked the overwatch queue for work.
-    assert "no more BACKLOG tasks in overwatch queue" in output, _output(result)
+    # The chain ended after the resolution stage, before the guard.
+    assert _OVERWATCH_CHAIN_DONE in output, _output(result)
+
+
+def test_overwatch_dispatches_no_model_from_a_leftover_queue_entry(tmp_path):
+    """OVERWATCH keeps no queue: a BACKLOG entry left in an old
+    overwatch_backlog.md is never served, so no provider CLI is invoked."""
+    box = _Sandbox(tmp_path)
+    leftover = "OVERWATCH-20260101-007-leftover-queue-entry"
+    box.add_task(leftover, state="BACKLOG")
+
+    result = box.wake("overwatch")
+
+    assert result.returncode == 0, _output(result)
+    assert call_count(box.control_dir) == 0, _output(result)
+    assert box.state(leftover) == "BACKLOG", _output(result)
+    assert _OVERWATCH_CHAIN_DONE in result.stdout + result.stderr, _output(result)
 
 
 # ---------------------------------------------------------------------------

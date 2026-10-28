@@ -43,11 +43,12 @@ _DEFER_SH = _TEAM_DIR / "scripts" / "defer.sh"
 _UNDEFER_SH = _TEAM_DIR / "scripts" / "undefer.sh"
 _PROJECT = "demo-app"
 
-# The bytes defer.sh has always written for a fresh arm.
+# The bytes defer.sh writes for a fresh arm: a comment header naming the
+# installed scripts, then the target line.
 _ARMED_BODY = (
-    "# DEFER-LOW-BUGS campaign file -- armed by team/scripts/defer.sh,\n"
-    "# cleared by team/scripts/undefer.sh, read by\n"
-    "# team/scripts/lib/defer_posture.sh.\n"
+    "# DEFER-LOW-BUGS campaign file -- armed by scripts/defer.sh,\n"
+    "# cleared by scripts/undefer.sh, read by\n"
+    "# scripts/lib/defer_posture.sh (paths under the kanban root).\n"
     "until={until}\n"
 )
 

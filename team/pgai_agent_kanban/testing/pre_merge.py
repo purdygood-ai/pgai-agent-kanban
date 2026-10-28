@@ -20,7 +20,7 @@ With ``--suite unit`` (the default), in this order:
    by-path module test over the whole ``pgai_agent_kanban`` package: every
    package module with a ``__main__`` block runs by file path with no
    PYTHONPATH.
-2. **The five ratchet lints, in fail-on-regression mode.** Each lint is run
+2. **The six ratchet lints, in fail-on-regression mode.** Each lint is run
    exactly as the gated runners run it, plus a findings file of this run's
    own:
 
@@ -29,23 +29,27 @@ With ``--suite unit`` (the default), in this order:
    ``engine-size``        ``team/scripts/lint_engine_size_dupe.py``
    ``api-route-impl``     ``team/scripts/lint_api_route_impl.py``
    ``echo-pipe-grep-q``   ``team/scripts/lint_echo_pipe_grep_q.py``
+   ``section-parsers``    ``team/scripts/lint_section_parsers.py``
 
    The lints themselves are unchanged and keep their quality class: they
-   exit 0 whatever they find (``lint_engine_size_dupe.py`` reports through
-   its exit code instead, as it always has). This run judges what they
-   report. Any finding fails the check: a file over its recorded allowance,
+   exit 0 whatever they find and write it to a findings file. This run
+   judges what they report. Any finding fails the check: a file over its recorded allowance,
    an unlisted new file, an allowlist entry left above the measured count
    (the ratchet's "tighten in the same change"), a malformed allowlist line,
    an engine file over its line ceiling, a cross-file shell function
-   collision, or an ``echo``/``printf`` piped into ``grep -q`` (a pipeline
-   that can miss a match under ``pipefail``). Each finding's own summary
+   collision, an ``echo``/``printf`` piped into ``grep -q`` (a pipeline
+   that can miss a match under ``pipefail``), or a ``## `` section parser
+   outside the section reader the section-parser allowlist does not name
+   (or an entry of it naming no site). Each finding's own summary
    line is printed, so the output names the file and the allowance it
-   broke.
+   broke. One kind is narrated instead: the engine-size lint's
+   ``duplicate-python-def`` (a module-level Python function copied under
+   the same name) is counted in the row's note and never fails it.
 
    After them runs ``tracked-ignored`` (``team/scripts/lint_tracked_ignored.py``),
    judged the same way: a tracked file an ignore rule matches, or a tracked
    generated file (a log, a lock, coverage output), fails the check. It is
-   not a ratchet -- it keeps no allowlist -- and like the five it exits 0
+   not a ratchet -- it keeps no allowlist -- and like the six it exits 0
    whatever it finds on a certification run.
 3. **The four always-run whole-tree guards** (:data:`WHOLE_TREE_GUARDS`).
    Each checks the real tree for a property any change can break, so each
@@ -54,8 +58,9 @@ With ``--suite unit`` (the default), in this order:
    guard is the script the gated runners' quality-class block already runs,
    run the same way; the script itself is unchanged and keeps its class on
    a certification run. Here, exit 0 passes the guard, and anything else
-   fails it, with the guard's own output and its fix printed beneath its
-   row:
+   fails it -- as does any entry in the findings file of a guard that
+   reports through one (``env-bootstrap``) -- with the guard's own output
+   and its fix printed beneath its row:
 
    ``guard: env-bootstrap``          ``team/scripts/lint_env_bootstrap.py``
        every Python module reads the kanban root through
@@ -134,8 +139,10 @@ another, so no more than N pytest workers are ever alive at once.
 What a run writes
 -----------------
 Nothing outside its own scratch directory. That directory is created under
-``$PGAI_AGENT_KANBAN_TEMP_DIR`` (the system temp directory when the
-variable is unset) and removed when the run ends. It holds the lints'
+the framework temp root (``$PGAI_AGENT_KANBAN_TEMP_DIR``, else kanban.cfg
+``[paths]``, else the documented last-resort root, as
+:func:`pgai_agent_kanban.lib.temp_root.resolve_temp_root` resolves it) and
+removed when the run ends. It holds the lints'
 findings files and pytest's basetemp. The guards only read the tree
 (``--check`` renders in memory and writes nothing). The run never writes the
 certification surfaces: not ``lint/findings-unit.json`` or
@@ -160,7 +167,7 @@ tighten the allowlist, update the stale test) and run again.
 Command line
 ------------
     python3 team/pgai_agent_kanban/testing/pre_merge.py
-    python3 team/pgai_agent_kanban/testing/pre_merge.py --base ai_rc/v2.35.0 --workers 3 --cap 60
+    python3 team/pgai_agent_kanban/testing/pre_merge.py --base ai_rc/v1.2.3 --workers 3 --cap 60
     python3 team/pgai_agent_kanban/testing/pre_merge.py --suite integration --base ai_main
 
 ``--repo DIR`` is the repository to check. It defaults to the git
@@ -202,6 +209,7 @@ if not __package__:
 
 from pgai_agent_kanban.lib import semver  # noqa: E402
 from pgai_agent_kanban.lib.error_contract import format_error_contract  # noqa: E402
+from pgai_agent_kanban.lib import temp_root  # noqa: E402
 from pgai_agent_kanban.testing.affected import (  # noqa: E402
     DiffReadError,
     _git as git_output,
@@ -246,31 +254,27 @@ _FAILED_NODE_RE = re.compile(r"^(?:FAILED|ERROR)\s+(?P<node>\S+?)(?:\s+-\s+.*)?$
 
 @dataclass(frozen=True)
 class RatchetLint:
-    """One ratchet lint, how it is invoked, and how its verdict is read.
-
-    ``reports_by`` is ``"findings"`` for a lint that always exits 0 and
-    writes a JSON findings file (any entry fails the check), or ``"exit"``
-    for a lint that reports through its exit code (non-zero fails it).
-    """
+    """One ratchet lint and how it is invoked. Every ratchet lint exits 0
+    and writes a JSON findings file; any entry fails the check, except an
+    entry whose ``kind`` is in ``narrated_kinds``, which is counted in the
+    row's note and never fails it."""
 
     name: str
     script: str
-    reports_by: str
+    narrated_kinds: tuple[str, ...] = ()
 
 
-#: The five ratchet lints, then the tracked-files lint, in run order. Paths
+#: The six ratchet lints, then the tracked-files lint, in run order. Paths
 #: are relative to team/.
 RATCHET_LINTS: tuple[RatchetLint, ...] = (
-    RatchetLint("inline-python", "scripts/lint_inline_python.py", "findings"),
-    RatchetLint("python-duplicates", "scripts/lint_python_duplicates.py", "findings"),
-    RatchetLint("engine-size", "scripts/lint_engine_size_dupe.py", "exit"),
-    RatchetLint("api-route-impl", "scripts/lint_api_route_impl.py", "findings"),
-    RatchetLint("echo-pipe-grep-q", "scripts/lint_echo_pipe_grep_q.py", "findings"),
-    RatchetLint("tracked-ignored", "scripts/lint_tracked_ignored.py", "findings"),
+    RatchetLint("inline-python", "scripts/lint_inline_python.py"),
+    RatchetLint("python-duplicates", "scripts/lint_python_duplicates.py"),
+    RatchetLint("engine-size", "scripts/lint_engine_size_dupe.py", narrated_kinds=("duplicate-python-def",)),
+    RatchetLint("api-route-impl", "scripts/lint_api_route_impl.py"),
+    RatchetLint("echo-pipe-grep-q", "scripts/lint_echo_pipe_grep_q.py"),
+    RatchetLint("section-parsers", "scripts/lint_section_parsers.py"),
+    RatchetLint("tracked-ignored", "scripts/lint_tracked_ignored.py"),
 )
-
-#: lint_engine_size_dupe.py's exit code for a usage error (no findings).
-_ENGINE_LINT_USAGE_EXIT = 2
 
 
 @dataclass(frozen=True)
@@ -280,14 +284,17 @@ class WholeTreeGuard:
 
     ``argv`` is the guard script, relative to team/, then its arguments.
     The script reports through its exit code: 0 clean, 1 a finding (printed
-    on its output), anything else the guard could not run. ``fix`` is
-    printed beneath a failing row: what clears the finding, as a command
-    run from the repository root.
+    on its output), anything else the guard could not run. A guard with
+    ``findings_file`` set is a quality-class lint that exits 0 on findings
+    instead: it is also given ``--findings-file``, and any entry in that
+    file is a finding. ``fix`` is printed beneath a failing row: what clears
+    the finding, as a command run from the repository root.
     """
 
     name: str
     argv: tuple[str, ...]
     fix: str
+    findings_file: bool = False
 
     @property
     def script(self) -> str:
@@ -309,6 +316,7 @@ WHOLE_TREE_GUARDS: tuple[WholeTreeGuard, ...] = (
         "read the kanban root through resolve_kanban_root() from pgai_agent_kanban.env "
         "(Python) or source scripts/lib/env_bootstrap.sh (bash) at each site named above, "
         "then re-check: python3 team/scripts/lint_env_bootstrap.py",
+        findings_file=True,
     ),
     WholeTreeGuard(
         "operator-verb-docs", ("scripts/generate_operator_verb_docs.py", "--check"),
@@ -648,27 +656,9 @@ def check_ratchet_lint(
     if not script.is_file():
         result.detail = [f"team/{lint.script} is missing; the {lint.name} lint cannot run"]
         return result
-    argv = [sys.executable, str(script)]
     findings_file = scratch / f"findings-{lint.name}.json"
-    if lint.reports_by == "findings":
-        argv += ["--findings-file", str(findings_file)]
+    argv = [sys.executable, str(script), "--findings-file", str(findings_file)]
     done = _run(argv, team_dir.parent, env=_lint_env())
-
-    if lint.reports_by == "exit":
-        if done.returncode == 0:
-            result.passed = True
-            return result
-        if done.returncode == _ENGINE_LINT_USAGE_EXIT:
-            result.note = "the lint could not run"
-            result.detail = _tail(done.stdout)
-            return result
-        result.note = f"exit {done.returncode}"
-        # The lint prints each finding indented two spaces under its FAIL line.
-        result.detail = [
-            line.strip() for line in done.stdout.splitlines()
-            if line.startswith("  ") and line.strip()
-        ] or _tail(done.stdout)
-        return result
 
     try:
         findings = json.loads(findings_file.read_text(encoding="utf-8"))
@@ -680,10 +670,22 @@ def check_ratchet_lint(
         result.note = "the lint could not run"
         result.detail = [f"lint exited {done.returncode}", *_tail(done.stdout, 10)]
         return result
-    result.passed = not findings
-    if findings:
-        result.note = f"{len(findings)} finding(s)"
-        result.detail = [f"[{f.get('kind', '?')}] {f.get('summary', f)}" for f in findings]
+    # A narrated kind is a quality finding no requirement authorised to fail
+    # this check; it is counted, not judged.
+    def _narrated(finding) -> bool:
+        return isinstance(finding, dict) and finding.get("kind") in lint.narrated_kinds
+
+    narrated = [f for f in findings if _narrated(f)]
+    failing = [f for f in findings if not _narrated(f)]
+    result.passed = not failing
+    notes = []
+    if failing:
+        notes.append(f"{len(failing)} finding(s)")
+        result.detail = [f"[{f.get('kind', '?')}] {f.get('summary', f)}" for f in failing]
+    if narrated:
+        kinds = ", ".join(sorted({f["kind"] for f in narrated}))
+        notes.append(f"{len(narrated)} narrated finding(s) ({kinds}; not failing)")
+    result.note = "; ".join(notes)
     return result
 
 
@@ -696,21 +698,52 @@ def _head(text: str, lines: int, rerun: str) -> list[str]:
     return [*kept[:lines], f"... {len(kept) - lines} more line(s); to see them all: {rerun}"]
 
 
-def check_whole_tree_guard(team_dir: pathlib.Path, guard: WholeTreeGuard) -> CheckResult:
-    """Run one always-run whole-tree guard over the tree and judge its exit
-    code: 0 passes, anything else fails, with the guard's output and fix
-    beneath the row."""
+def _guard_findings(findings_file: pathlib.Path) -> list | None:
+    """The entries of a guard's findings file, or None when it is missing
+    or is not a JSON array (the guard could not report)."""
+    try:
+        findings = json.loads(findings_file.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return findings if isinstance(findings, list) else None
+
+
+def check_whole_tree_guard(
+    team_dir: pathlib.Path, guard: WholeTreeGuard, *, scratch: pathlib.Path | None = None,
+) -> CheckResult:
+    """Run one always-run whole-tree guard over the tree and judge it: exit
+    0 passes, anything else fails, and for a guard that writes a findings
+    file (into *scratch*, or a scratch directory of its own) any entry
+    fails it too, with the guard's output and fix beneath the row."""
     result = CheckResult(f"guard: {guard.name}", passed=False, guard=True)
     script = team_dir / guard.script
     if not script.is_file():
         result.note = "the guard could not run"
         result.detail = [f"team/{guard.script} is missing; the {guard.name} guard cannot run"]
         return result
-    done = _run([sys.executable, str(script), *guard.argv[1:]], team_dir.parent, env=_lint_env())
-    if done.returncode == 0:
+    argv = [sys.executable, str(script), *guard.argv[1:]]
+    own_scratch = None
+    findings_file = None
+    if guard.findings_file:
+        if scratch is None:
+            own_scratch = pathlib.Path(tempfile.mkdtemp(prefix="pre-merge-guard-", dir=_scratch_root()))
+        findings_file = (scratch or own_scratch) / f"guard-{guard.name}.json"
+        argv += ["--findings-file", str(findings_file)]
+    try:
+        done = _run(argv, team_dir.parent, env=_lint_env())
+        findings = _guard_findings(findings_file) if findings_file is not None else []
+    finally:
+        if own_scratch is not None:
+            shutil.rmtree(own_scratch, ignore_errors=True)
+    if done.returncode == 0 and findings == []:
         result.passed = True
         return result
-    result.note = "finding(s)" if done.returncode == 1 else f"the guard could not run (exit {done.returncode})"
+    if done.returncode == 0 and findings is None:
+        result.note = "the guard could not run (no readable findings file)"
+    elif done.returncode in (0, 1):
+        result.note = "finding(s)"
+    else:
+        result.note = f"the guard could not run (exit {done.returncode})"
     result.detail = [
         *_head(done.stdout, _GUARD_OUTPUT_LINES, guard.command),
         f"fix: {guard.fix}",
@@ -790,10 +823,9 @@ def _dirty(repo: pathlib.Path) -> bool:
     return bool(git_output(repo, "status", "--porcelain", "--untracked-files=no").strip())
 
 
-def _scratch_root() -> str | None:
-    temp = os.environ.get("PGAI_AGENT_KANBAN_TEMP_DIR", "").strip()
-    if not temp:
-        return None
+def _scratch_root() -> str:
+    """The framework temp root a run's scratch directory is made under, created if missing."""
+    temp = temp_root.resolve_temp_root()
     pathlib.Path(temp).mkdir(parents=True, exist_ok=True)
     return temp
 
@@ -807,7 +839,7 @@ def run_pre_merge(
 
     Args:
         repo: any directory inside the git repository to check.
-        suite: ``"unit"`` (by-path, the five ratchet lints and the
+        suite: ``"unit"`` (by-path, the six ratchet lints and the
             tracked-files lint, the always-run
             whole-tree guards, affected unit tests) or ``"integration"``
             (affected integration tests only).
@@ -863,7 +895,9 @@ def run_pre_merge(
                 run.checks.append(_timed(lambda lint=lint: check_ratchet_lint(team_dir, lint, scratch=scratch)))
             for guard in WHOLE_TREE_GUARDS:
                 say(f"guard: running {guard.name} ({guard.command})")
-                run.checks.append(_timed(lambda guard=guard: check_whole_tree_guard(team_dir, guard)))
+                run.checks.append(_timed(
+                    lambda guard=guard: check_whole_tree_guard(team_dir, guard, scratch=scratch)
+                ))
         run.checks.append(_timed(lambda: check_affected_tests(
             team_dir, names, suite=suite, cap=cap, workers=workers, scratch=scratch, narrate=say,
         )))
@@ -948,7 +982,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         prog="pre_merge.py",
         description=(
             "Run the pre-merge checks from a worktree: the by-path module test, "
-            "the five ratchet lints in fail-on-regression mode and the tracked-files "
+            "the six ratchet lints in fail-on-regression mode and the tracked-files "
             "lint, the always-run "
             f"whole-tree guards ({_GUARD_NAMES}; whatever the diff, their added "
             f"wall time reported against a {GUARD_BUDGET_SECONDS:.1f}s budget that "
@@ -958,7 +992,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         epilog=(
             "Examples:\n"
             "  python3 team/pgai_agent_kanban/testing/pre_merge.py\n"
-            "  python3 team/pgai_agent_kanban/testing/pre_merge.py --base ai_rc/v2.35.0 --workers 3 --cap 60\n"
+            "  python3 team/pgai_agent_kanban/testing/pre_merge.py --base ai_rc/v1.2.3 --workers 3 --cap 60\n"
             "  python3 team/pgai_agent_kanban/testing/pre_merge.py --suite integration --base ai_main\n"
             "\n"
             "Exit codes: 0 every check passed; 1 a check failed; "
@@ -973,7 +1007,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--suite", choices=tuple(SUITE_TEST_DIRS), default="unit",
-        help=f"unit: by-path, the five ratchet lints and the tracked-files lint, the always-run whole-tree guards "
+        help=f"unit: by-path, the six ratchet lints and the tracked-files lint, the always-run whole-tree guards "
              f"({_GUARD_NAMES}; {GUARD_BUDGET_SECONDS:.1f}s budget) and affected unit tests "
              f"(default); integration: affected integration tests only",
     )

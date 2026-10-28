@@ -18,7 +18,8 @@ Covered:
      that does not exist each leave the task BLOCKED with Needs Human yes and
      a Diagnosis naming the cause; no bug file changes and no verb runs.
      The run itself re-checks its targets, so a target that changed after
-     planning is never written.
+     planning is never written. The Diagnosis's restamp option names the
+     help of the script installed under the kanban root.
   3. Verification on the next block: another operator data action fails it
      and escalates; any other block passes it and restarts the epoch.
   4. Ship-policy HALT (AT10): routed to the resolution stage only. Through
@@ -340,6 +341,19 @@ def test_invalid_operator_data_action_stays_blocked_and_runs_nothing(sandbox, ev
     assert sandbox.bug_bytes() == bugs_before, "a refused action writes no bug file"
     assert load_block_record(sandbox.status).attempts == 0
     assert "block-triage:agent_operator_data_action:escalate" in sandbox.actions
+
+
+def test_an_escalated_operator_data_action_names_the_installed_restamp_help(sandbox):
+    sandbox.add_bug("BUG-9412")
+    sandbox.add_bug("BUG-9415", status="open")
+    sandbox.block("agent_operator_data_action", _restamp_evidence(bugs="BUG-9412,BUG-9415"))
+
+    sandbox.run_check()
+
+    diagnosis = _assert_stays_blocked_with_diagnosis(sandbox, "agent_operator_data_action")
+    restamp = shlex.quote(str(sandbox.root / "scripts" / "restamp-fixed-in.sh"))
+    assert f"(for a restamp, see `{restamp} --help`)" in diagnosis, diagnosis
+    assert "team/scripts/" not in diagnosis
 
 
 def test_the_run_rechecks_its_targets_immediately_before_writing(sandbox):

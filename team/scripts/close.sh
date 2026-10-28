@@ -3,13 +3,14 @@
 # CLI operator tool: close/resolve an item (bug/priority/requirement/task).
 #
 # Usage:
-#   close.sh --project <name> --key <key> [--state <done|wont-do>]
+#   close.sh --project <name> --key <key> [--state <done|wont-do|duplicate>]
 #            [--note <text>] [--dry-run] [--help]
 #
 # DESIGN: resolves the key via close_item (pgai_agent_kanban.ops.write) and
-# performs the close operation.  Refuses in exactly two cases: a --state that
-# is not a closed state (exit 1), and a key that cannot be identified as a
-# single target (ambiguous, exit 2; not found, exit 3).
+# performs the close operation.  Refuses in exactly three cases: a --state
+# that is not a closed state (exit 1), --state duplicate without a --note
+# naming the surviving item (exit 1), and a key that cannot be identified as
+# a single target (ambiguous, exit 2; not found, exit 3).
 #
 # KEY RESOLUTION (via resolve_item, called inside close_item):
 #   1. tasks/<KEY>/          — agent task (closed as DONE; --state is intake-only)
@@ -20,19 +21,28 @@
 # State values (intake terminal states, default: done):
 #   done        — item resolved/addressed
 #   wont-do     — item intentionally not addressed (an item another item
-#                 subsumed closes as wont-do with a --note saying why)
+#                 subsumed, without reporting the same defect, closes as
+#                 wont-do with a --note saying why)
+#   duplicate   — item reports the same defect as another; --note must name
+#                 the surviving item (e.g. --note 'duplicate of BUG-NNNN'),
+#                 and is recorded in ## Close Note as the pointer.  Without
+#                 one: close.duplicate_pointer_missing, exit 1, nothing written
 # The accepted set is lib.terminal_states.CLOSED_STATES, checked by
 # close_item; any other value (including the retired "superseded") is
 # refused dual-channel with exit 1 and a remedy naming a valid --state.
+# Any intake status closes, needs-operator included; closing a
+# needs-operator item also closes its open operator-inbox entries.
 #
 # Optional flags:
-#   --note TEXT   Free-form text recorded in ## Close Note section of item.
+#   --note TEXT   Free-form text recorded in ## Close Note section of item
+#                 (for --state duplicate: names the surviving item).
 #   --dry-run     Report what would change without writing anything.
 #   --help, -h    Show help and exit 0.
 #
 # Exit codes:
 #   0   Item closed (or dry-run reported, or --help shown).
-#   1   Usage error, missing argument, or invalid --state.
+#   1   Usage error, missing argument, invalid --state, or duplicate
+#       without a pointer.
 #   2   Ambiguous key — key matches zero or multiple items.
 #   3   Key not found.
 #   4   State mutation failed.
@@ -70,8 +80,8 @@ OPERATOR_VALID_FLAGS=(project key state note dry-run help)
 # built-in --state line lists, so its line is overridden; --note is outside
 # the canonical vocabulary, so its line is given here too.
 declare -A OPERATOR_FLAG_HELP=(
-    [state]="  --state STATE      Closed state: done|wont-do (default: done)"
-    [note]="  --note TEXT        Free-form text recorded in the item's ## Close Note section (intake items only)"
+    [state]="  --state STATE      Closed state: done|wont-do|duplicate (default: done)"
+    [note]="  --note TEXT        Free-form text recorded in the item's ## Close Note section (intake items only; for duplicate, names the surviving item)"
 )
 _USAGE_TEXT="$(operator_args_render_help_for_flags \
     "$(basename "$0")" \
@@ -83,21 +93,31 @@ _USAGE_TEXT="$(operator_args_render_help_for_flags \
     "                 wont-do     — item intentionally not addressed" \
     "                               (an item another item subsumed closes" \
     "                               as wont-do with a --note saying why)" \
+    "                 duplicate   — item reports the same defect as another;" \
+    "                               --note names the surviving item" \
     "                 (For agent tasks, close always sets state to DONE.)" \
+    "  Any intake status closes, needs-operator included; closing a" \
+    "  needs-operator item also closes its open operator-inbox entries." \
     "" \
-    "  close.sh performs the close operation and refuses in two cases only:" \
-    "    - --state is not a closed state (done|wont-do): close.invalid_state," \
-    "      exit 1, nothing written;" \
+    "  close.sh performs the close operation and refuses in three cases only:" \
+    "    - --state is not a closed state (done|wont-do|duplicate):" \
+    "      close.invalid_state, exit 1, nothing written;" \
+    "    - --state duplicate without a --note naming an existing item other" \
+    "      than this one: close.duplicate_pointer_missing, exit 1, nothing" \
+    "      written;" \
     "    - the key cannot be resolved to a single target: ambiguous (exit 2)" \
     "      or not found (exit 3)." \
     "" \
-    "Example:" \
+    "Examples:" \
     "  close.sh --project myproject --key BUG-NNNN --state wont-do \\" \
     "           --note 'subsumed by PRIORITY-NNNN'" \
+    "  close.sh --project myproject --key BUG-NNNN --state duplicate \\" \
+    "           --note 'duplicate of BUG-NNNN'" \
     "" \
     "Exit codes:" \
     "  0  Item closed (or --help shown, or --dry-run reported)" \
-    "  1  Usage error, missing argument, or --state not done|wont-do" \
+    "  1  Usage error, missing argument, --state not done|wont-do|duplicate," \
+    "     or duplicate without a pointer" \
     "  2  Ambiguous key — key matches zero or multiple items" \
     "  3  Key not found" \
     "  4  State mutation failed")"

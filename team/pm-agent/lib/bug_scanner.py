@@ -53,7 +53,11 @@ _CLAIM_LOCK_RE = re.compile(r'^\.claim-(\d{4,})\.lock$')
 # name starts with BUG- followed by exactly four digits occupies that
 # number, whether or not the rest of the name passes the contract (a slug
 # with dots, uppercase letters or no .md suffix still holds its number), so
-# the claim never hands out a number a visible file already carries.
+# the claim never hands out a number a visible file already carries.  The
+# entries that count are those of every directory ledger_taken_dirs names:
+# the live bugs directory and, for <root>/projects/<project>/bugs, the
+# project's archive bugs directory, so a number an archived bug holds is
+# never handed out either.
 # Exactly four digits keeps malformed shapes from poisoning the next-number
 # arithmetic: a date-first name (e.g. BUG-20260803-001-slug.md) has a fifth
 # digit after the first four, and an under-padded name (e.g. BUG-37-slug.md)
@@ -97,35 +101,25 @@ else:
         r'^BUG-[0-9]{4}(?:-[0-9]{8})?-[a-z0-9][a-z0-9-]*\.md$', re.IGNORECASE
     )
 
-# Which 'running' items a shipped bundle carried (see
-# pgai_agent_kanban.lib.bundle_items). _resolve_ledger_filename_re above has
-# already put this tree's package root on sys.path when it was needed.
-try:
-    from pgai_agent_kanban.lib.bundle_items import carried_item_names as _carried_item_names
-except ImportError:
-    _carried_item_names = None
-
-# The closed states every reader shares (done, wont-do; the retired
-# "superseded" reads as wont-do). The package root is on sys.path by now
-# (see _resolve_ledger_filename_re above).
-from pgai_agent_kanban.lib.terminal_states import TERMINAL_STATES, canonical_state  # noqa: E402
+# The closed states every reader shares (done, wont-do, duplicate; the
+# retired "superseded" reads as wont-do) and the needs-operator state. The
+# package root is on sys.path by now (see _resolve_ledger_filename_re above).
+from pgai_agent_kanban.lib.terminal_states import (  # noqa: E402
+    NEEDS_OPERATOR_STATE,
+    TERMINAL_STATES,
+    canonical_state,
+)
 
 # Which names occupy a BUG number — the shared ledger "taken" rule (see the
 # block above _resolve_ledger_filename_re).  Group 1 is the four-digit number.
-from pgai_agent_kanban.lib.ledger_filename_contract import ledger_taken_re  # noqa: E402
+from pgai_agent_kanban.lib.ledger_filename_contract import ledger_taken_dirs, ledger_taken_re  # noqa: E402
+
+# The one markdown section reader, and the shared bug-file Status reader
+# built on it (first token of the value, lowercased; "open" when absent).
+from pgai_agent_kanban.task_status import read_section  # noqa: E402
+from pgai_agent_kanban.lib.bug_filing import read_status as _read_bug_status  # noqa: E402
 
 _BUG_TAKEN_RE = ledger_taken_re("BUG")
-
-
-def _carried_bug_files(bugs_dir: str) -> frozenset:
-    """File names of the bugs a shipped bundle left at 'running' (carried).
-
-    Read from the ``requirements`` directory beside *bugs_dir*. Empty when
-    the shared module is not importable.
-    """
-    if _carried_item_names is None:
-        return frozenset()
-    return _carried_item_names(Path(bugs_dir).parent / "requirements")
 
 
 # Excluded filenames (compared case-insensitively)
@@ -153,26 +147,11 @@ _SEVERITY_RE = re.compile(
     re.IGNORECASE,
 )
 
-# Extracts ## Status field value.  Matches the first non-whitespace token on
-# the line immediately following the "## Status" heading.
-_STATUS_RE = re.compile(
-    r'^##\s+Status\s*\n\s*(\S+)',
-    re.MULTILINE | re.IGNORECASE,
-)
-
 # Matches a backlog entry line: "- [x] BUG-ID" or "- [ ] BUG-ID"
 # Group 1: checkbox content (x or space), Group 2: bug ID
 _BACKLOG_ENTRY_RE = re.compile(
     r'^\s*-\s+\[([x ])\]\s+(BUG-\S+)',
     re.IGNORECASE,
-)
-
-# Extracts content under ## Resolved By heading up to the next ## heading or
-# end of file.  Captures everything between the heading line and the next
-# top-level heading (##) so we can check whether the field has substantive text.
-_RESOLVED_BY_RE = re.compile(
-    r'^##\s+Resolved\s+By\s*\n(.*?)(?=^##|\Z)',
-    re.MULTILINE | re.IGNORECASE | re.DOTALL,
 )
 
 
@@ -183,20 +162,15 @@ _RESOLVED_BY_RE = re.compile(
 def _extract_summary(text: str) -> str:
     """Return the first non-empty content line under the ## Symptom heading.
 
-    Scans for a line matching '## Symptom' (case-insensitive), then returns
-    the first subsequent non-empty, non-heading line. Returns empty string if
-    not found.
+    The section is read by task_status.read_section (any letter case); its
+    first non-empty line that is not a '#' heading is returned. Returns an
+    empty string when the heading is absent or the section has no such line.
     """
-    lines = text.splitlines()
-    in_symptom = False
-    for line in lines:
-        if re.match(r'^\s*##\s+Symptom\s*$', line, re.IGNORECASE):
-            in_symptom = True
-            continue
-        if in_symptom:
-            stripped = line.strip()
-            if stripped and not stripped.startswith('#'):
-                return stripped
+    body = read_section(text, "Symptom") or ""
+    for line in body.splitlines():
+        stripped = line.strip()
+        if stripped and not stripped.startswith('#'):
+            return stripped
     return ""
 
 
@@ -213,34 +187,29 @@ def _is_excluded(filename: str) -> bool:
     return filename in _EXCLUDED_NAMES
 
 
-def _extract_status(text: str) -> str:
-    """Return the normalized ## Status value from bug file text.
-
-    Returns the lowercase status token ('open', 'running', 'done', etc.).
-    Returns 'open' if the ## Status header is absent.
-    """
-    m = _STATUS_RE.search(text)
-    if m:
-        return m.group(1).strip().lower()
-    return "open"
+# The normalized ## Status value of a bug file's text: the lowercase first
+# token ('open', 'running', 'done', etc.), or 'open' when the heading is
+# absent or carries no value.
+_extract_status = _read_bug_status
 
 
 def _extract_resolved_by(text: str) -> str:
     """Return the content of the ## Resolved By section, stripped of whitespace.
 
     Captures everything between the '## Resolved By' heading and the next
-    '##' heading (or end of file).  Returns an empty string if the section is
-    absent or contains only whitespace / placeholder-style lines.
+    line starting '##' (a ### subheading included) or the end of file, read
+    through ``task_status.read_section``.  The heading matches in any letter
+    case and with any run of blanks around its words.  Returns an empty
+    string if the section is absent or contains only whitespace /
+    placeholder-style lines.
 
     A non-empty return value means the field has been filled in with at least
     one substantive (non-blank, non-placeholder) token.  Callers should check
     ``bool(_extract_resolved_by(text))`` to decide whether the field is
     populated.
     """
-    m = _RESOLVED_BY_RE.search(text)
-    if not m:
-        return ""
-    return m.group(1).strip()
+    body = read_section(text, "Resolved By", free_spacing=True, end_at_subheading=True)
+    return body or ""
 
 
 # ---------------------------------------------------------------------------
@@ -373,17 +342,19 @@ def update_bug_backlog_cache(bugs_dir: str, bug_backlog_path: str) -> None:
     The checkbox state is derived exclusively from each bug file's
     ## Status field:
 
-    - ## Status: running  →  [x]  (bundled into an RC, in flight)
-    - ## Status: running  →  [ ]  when carried: every bundle in the
-                                   requirements/ directory beside bugs_dir
-                                   that lists it is done or wont-do, so a
-                                   release shipped it unfixed and it is a
-                                   candidate for the next bundle
+    - ## Status: running  →  [x]  (bundled into an RC, in flight -- or
+                                   carried: every bundle listing it closed
+                                   with it unfixed, and the next discovery
+                                   pass converts it to needs-operator
+                                   rather than bundling it again)
+    - ## Status: needs-operator → [x]  (waiting on an operator-inbox
+                                   answer; answering sets it back to open)
     - ## Status: done     →  [x]  (already shipped; only when ## Resolved By
                                    is populated — see below)
     - ## Status: wont-do  →  [x]  (closed without a fix; any closed state
                                    other than done, from
-                                   lib.terminal_states, with the retired
+                                   lib.terminal_states -- wont-do,
+                                   duplicate -- with the retired
                                    "superseded" read as wont-do)
     - ## Status: open     →  [ ]  (needs bundling)
     - ## Status absent    →  [ ]  (treat missing as open)
@@ -419,7 +390,6 @@ def update_bug_backlog_cache(bugs_dir: str, bug_backlog_path: str) -> None:
     # The file path is needed so we can read Status from the file content.
     dir_bugs = scan_bugs_directory(bugs_dir)
     bugs_path = Path(bugs_dir)
-    carried = _carried_bug_files(bugs_dir)
 
     # Build new entry list in sorted order, only for bugs in directory.
     # Derive checkbox from file Status — cache prior state is NOT consulted.
@@ -451,8 +421,10 @@ def update_bug_backlog_cache(bugs_dir: str, bug_backlog_path: str) -> None:
                 checkbox = " "
             else:
                 checkbox = "x"
-        elif status == "running":
-            checkbox = " " if file_path.name in carried else "x"
+        elif status == "running" or canonical_state(status) == NEEDS_OPERATOR_STATE:
+            # In flight, carried (discovery converts it), or waiting on an
+            # operator answer: none of them is pending for a bundle.
+            checkbox = "x"
         elif canonical_state(status) in TERMINAL_STATES:
             # Closed without a fix (wont-do, or the retired "superseded"):
             # never offered for bundling again.
@@ -470,8 +442,10 @@ def update_bug_backlog_cache(bugs_dir: str, bug_backlog_path: str) -> None:
 
 
 def get_unbundled_bugs(bugs_dir: str, bug_backlog_path: str) -> list:
-    """Return bugs from the directory whose ## Status is 'open' (or absent),
-    plus every 'running' bug a shipped bundle carried (see
+    """Return bugs from the directory whose ## Status is 'open' (or absent).
+
+    'running' bugs (in flight, or carried and awaiting discovery's
+    conversion), 'needs-operator' bugs and closed bugs are left out (see
     update_bug_backlog_cache).
 
     Calls update_bug_backlog_cache as a side effect so the cache is
@@ -489,8 +463,7 @@ def get_unbundled_bugs(bugs_dir: str, bug_backlog_path: str) -> list:
     Returns
     -------
     list[dict]
-        Bugs from bugs_dir whose ## Status is 'open' (or absent), or
-        'running' and carried. Each dict
+        Bugs from bugs_dir whose ## Status is 'open' (or absent). Each dict
         has keys: id, file, summary, severity.
     """
     update_bug_backlog_cache(bugs_dir, bug_backlog_path)
@@ -503,14 +476,28 @@ def get_unbundled_bugs(bugs_dir: str, bug_backlog_path: str) -> list:
 # Atomic BUG-ID claim
 # ---------------------------------------------------------------------------
 
+def _archived_bug_dirs(bugs_dir: Path) -> list:
+    """Return the archive directories whose bug files hold numbers for bugs_dir.
+
+    For a live ``<root>/projects/<project>/bugs`` this is that root's
+    ``archive/<project>/bugs`` when it exists (``ledger_taken_dirs``, the
+    shared rule ``next_free_number`` also applies); for any other shape it is
+    empty, so a single-project or bare bugs directory is scanned alone.  The
+    archive is only read: claim locks and the claim log stay in bugs_dir.
+    """
+    return [d for d in ledger_taken_dirs(bugs_dir, "BUG")[1:] if d.is_dir()]
+
+
 def _scan_highest_bug_num(bugs_dir: Path) -> int:
     """Scan bugs_dir for the highest BUG number already taken, counting both
-    bug-file names and any active .claim-NNNN.lock files.  Returns 0 if the
-    directory is empty or holds no name that takes a number.
+    bug-file names and any active .claim-NNNN.lock files, plus the bug-file
+    names in the project's archive (``_archived_bug_dirs``).  Returns 0 if
+    no directory holds a name that takes a number.
 
     Both committed bug files and in-flight claim lock files are considered so
     that a concurrent claimer who has locked but not yet written the final file
-    is still visible.
+    is still visible.  Archived bug files count because a number an archived
+    bug holds is not free; the archive holds no claim locks.
 
     A name takes a number when it starts with ``BUG-`` followed by exactly
     four digits and then a non-digit (_BUG_TAKEN_RE, the shared
@@ -539,22 +526,29 @@ def _scan_highest_bug_num(bugs_dir: Path) -> int:
             n = int(m2.group(1))
             if n > highest:
                 highest = n
+    for archived in _archived_bug_dirs(bugs_dir):
+        for entry in archived.iterdir():
+            m = _BUG_TAKEN_RE.match(entry.name)
+            if m and int(m.group(1)) > highest:
+                highest = int(m.group(1))
     return highest
 
 
 def _bug_num_taken_by_name(bugs_dir: Path, num: int) -> bool:
-    """Return True when an entry other than a claim lock in bugs_dir takes
-    BUG number *num* (the shared ``ledger_taken_re`` rule, _BUG_TAKEN_RE).
+    """Return True when an entry other than a claim lock in bugs_dir, or a
+    bug file in the project's archive (``_archived_bug_dirs``), takes BUG
+    number *num* (the shared ``ledger_taken_re`` rule, _BUG_TAKEN_RE).
 
     ``claim_next_bug_id`` asks this after it has created the lock for a
     number, so a file that landed between its scan and its lock is seen: a
     claimer that wrote its file and released the same lock in that window
     leaves no lock behind, only the file.
     """
-    for entry in bugs_dir.iterdir():
-        m = _BUG_TAKEN_RE.match(entry.name)
-        if m and int(m.group(1)) == num:
-            return True
+    for directory in [bugs_dir, *_archived_bug_dirs(bugs_dir)]:
+        for entry in directory.iterdir():
+            m = _BUG_TAKEN_RE.match(entry.name)
+            if m and int(m.group(1)) == num:
+                return True
     return False
 
 
@@ -563,8 +557,8 @@ def _try_claim_num(bugs_path: Path, num: int) -> "Path | None":
 
     Creates ``.claim-NNNN.lock`` with ``O_CREAT | O_EXCL`` (atomic on any
     POSIX filesystem), then checks that no entry already carries the
-    number.  Returns the lock path on success; on failure leaves no lock of
-    its own behind.
+    number, live or archived (``_bug_num_taken_by_name``).  Returns the lock
+    path on success; on failure leaves no lock of its own behind.
     """
     lock_path = bugs_path / f".claim-{num:04d}.lock"
     # os.open is used directly because pathlib.Path.open does not expose
@@ -621,6 +615,12 @@ def claim_next_bug_id(
     holds its lock) the claim falls back to the next free number above the
     highest, exactly as without it.
 
+    A number is taken when a file in ``bugs_dir`` carries it, when another
+    caller holds its lock, or — for a live ``<root>/projects/<project>/bugs``
+    — when a bug file in that root's ``archive/<project>/bugs`` carries it,
+    so a claim never returns an archived bug's number.  The archive is only
+    read; the lock and the claim log are written in ``bugs_dir`` alone.
+
     This function uses POSIX ``O_CREAT | O_EXCL`` semantics to create a
     ``.claim-NNNN.lock`` sentinel file, which is atomic on any POSIX filesystem.
     If two callers race, exactly one wins each numeric slot and the other
@@ -668,7 +668,7 @@ def claim_next_bug_id(
     preferred_num:
         The number to claim when it is free, e.g. ``10`` for ``BUG-0010``
         (an integer from 1 to 9999).  ``None`` (the default) claims the
-        next number above the highest taken.
+        next number above the highest taken, live or archived.
 
     Returns
     -------

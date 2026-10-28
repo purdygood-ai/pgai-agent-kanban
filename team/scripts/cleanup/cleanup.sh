@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # cleanup.sh
 # Standalone cleanup script for the pgai-agent-kanban system.
-# Designed for cron invocation. Pure bash, no LLM involvement.
+# Designed for cron invocation. Bash, no LLM involvement; ## section reads
+# run the python3 section reader through lib/md_field.sh.
 #
 # Actions (full run, default):
 #   0. Purge trivial logs (small AND old) from $KANBAN_ROOT/logs/agents/
@@ -12,12 +13,22 @@
 #      run (scripts/archive.sh, also run after each release), which moves
 #      them to $KANBAN_ROOT/archive/<project>/ with a ledger row and can
 #      restore them. Nothing in that archive is deleted by cleanup.
+#   2b. Delete task-liveness records ($KANBAN_ROOT/locks/task-liveness/)
+#      whose task folder exists in no registered project (the task was
+#      archived or deleted). A record whose task folder exists anywhere, or
+#      whose agent is still alive, is kept; the record of a finished task
+#      that still has its folder is removed by the wake's reconcile pass,
+#      not here. When the project list or any project's tasks directory
+#      cannot be resolved, no record is deleted. The directory is
+#      kanban-wide, so in a run over every project the first run does the
+#      work.
 #   3. (none: requirements are archived by scripts/archive.sh, which also
 #      folds any projects/<p>/tasks/archive/requirements/ left by older
 #      installs into $KANBAN_ROOT/archive/<project>/)
 #   4. Rotate per-project debug logs whose mtime is from a previous UTC date
 #   5. Archive briefs older than N days from PGAI_BRIEFS_DIR
-#   6. Purge contents of PGAI_AGENT_KANBAN_TEMP_DIR (framework temp space)
+#   6. Purge contents of PGAI_AGENT_KANBAN_TEMP_DIR (framework temp space),
+#      stopping the processes running in a directory before removing it
 #   7. Write a summary log to PGAI_LOGS_DIR/cleanup-YYYYMMDD-HHMMSS.log
 #
 # With --trivial-only:
@@ -35,6 +46,11 @@
 #   under a project's worktrees/ is kept while that project's own task is
 #   WORKING, BLOCKED or TESTING. The wake locks are probed before the purge
 #   and again before each project's sweep; a held lock skips the purge.
+#   A directory is removed only after every process whose working directory
+#   is inside it has been stopped (SIGTERM, then SIGKILL after
+#   KILL_GRACE_SECONDS, default 30); each is logged with its pid and command.
+#   One attached to a terminal (an operator's shell) is never signalled: its
+#   directory is kept, with a log line saying so. The same holds for Step 6.
 #
 # Without a project (no --project and PGAI_PROJECT_NAME unset or empty):
 #   Runs once per project registered in projects.cfg, in projects.cfg
@@ -130,21 +146,24 @@ source "${_SCRIPT_DIR}/../lib/projects.sh"
 source "${_SCRIPT_DIR}/../lib/dev_tree.sh"
 # shellcheck source=lib/temp_purge.sh
 source "${_SCRIPT_DIR}/../lib/temp_purge.sh"
+# shellcheck source=lib/md_field.sh
+source "${_SCRIPT_DIR}/../lib/md_field.sh"
 # shellcheck source=lib/config_loader.sh
 source "${_SCRIPT_DIR}/../lib/config_loader.sh"
+# Step 2b reads task-liveness records through the wake's own primitives
+# (task_liveness_record_path, task_liveness_is_alive).
+# shellcheck source=lib/lock_provenance.sh
+source "${_SCRIPT_DIR}/../lib/lock_provenance.sh"
+# shellcheck source=lib/wake_task_state.sh
+source "${_SCRIPT_DIR}/../lib/wake_task_state.sh"
 unset _SCRIPT_DIR
 
 # Source user-wide config first (lowest precedence among files)
 [[ -f "$HOME/.pgairc" ]] && source "$HOME/.pgairc"
 
-# Source user config file using the standard pgai-kanban.cfg name
-[[ -f "$HOME/.config/pgai-kanban.cfg" ]] && source "$HOME/.config/pgai-kanban.cfg"
-
-# Source per-install config — INI format (kanban.cfg) replaces legacy config.cfg
-# read_ini available via project_paths.sh (sourced above).
-if [[ -f "$TEAM_ROOT/kanban.cfg" ]]; then
-    export PGAI_KANBAN_PM_MODE="${PGAI_KANBAN_PM_MODE:-$(read_ini "$TEAM_ROOT/kanban.cfg" chain pm_mode automatic)}"
-fi
+# Operator user config, then kanban.cfg [chain] pm_mode (config_loader.sh,
+# sourced above).
+config_startup_prelude "$TEAM_ROOT"
 # The [cleanup] tunables are resolved after root reconciliation below, so
 # they are read from the same root every other step uses.
 export PGAI_DEV_TREE_PATH="${PGAI_DEV_TREE_PATH:-$(resolve_global_dev_tree)}"
@@ -228,9 +247,15 @@ What a full run does (per project):
   Step 1  delete log files older than the log retention (default 30 days)
   Step 2  report DONE/WONT-DO task folders older than the task retention
           (default 7 days); task folders are never deleted, at any age
+  Step 2b delete task-liveness records (locks/task-liveness/) whose task
+          folder exists in no registered project (archived or deleted);
+          a record whose task exists or whose agent is alive is kept, and
+          none is deleted when a project's tasks directory cannot be read
   Step 4  rotate debug logs from a previous UTC day into logs/debug/archive/
   Step 5  move briefs older than the log retention into the briefs archive
-  Step 6  purge the framework temp directory
+  Step 6  purge the framework temp directory; a directory is removed only
+          after every process running in it is stopped (each one logged
+          with its pid and command); one held by a terminal is kept
   Finished tasks, bugs, priorities and shipped requirements leave the live
   project only through scripts/archive.sh (also run after each release),
   which moves them to archive/<project>/ and can restore them; cleanup never
@@ -246,7 +271,7 @@ Without a project:
   otherwise the exit status of the first project run that failed.
   --trivial-only and --temp-only repeat per project too; their purges are
   framework-wide, so the first project's run does the work and later runs
-  find nothing left to remove.
+  find nothing left to remove. Step 2b is framework-wide in the same way.
 EOF
   exit 0
 fi
@@ -281,7 +306,7 @@ if [[ -n "${KANBAN_ROOT:-}" && -n "${PGAI_AGENT_KANBAN_ROOT_PATH:-}" \
     pgai_emit_error_contract \
         "cleanup.root_mismatch" \
         "KANBAN_ROOT ('${KANBAN_ROOT}') and PGAI_AGENT_KANBAN_ROOT_PATH ('${PGAI_AGENT_KANBAN_ROOT_PATH}') disagree; cleanup.sh will not guess which root to operate on." \
-        "Export both variables to the same root before invoking cleanup.sh, e.g.: env KANBAN_ROOT=<root> PGAI_AGENT_KANBAN_ROOT_PATH=<root> bash team/scripts/cleanup/cleanup.sh --project <name> ..."
+        "Export both variables to the same root before invoking cleanup.sh, e.g. the PGAI_AGENT_KANBAN_ROOT_PATH one: env KANBAN_ROOT=$(printf '%q' "${TEAM_ROOT}") PGAI_AGENT_KANBAN_ROOT_PATH=$(printf '%q' "${TEAM_ROOT}") $(printf '%q' "${TEAM_ROOT}/scripts/cleanup/cleanup.sh") --project pgai-agent-kanban --dry-run"
   )
   # CENSUS-ANCHOR: cleanup-root-mismatch-01
   # BLOCK-WORTHY (docs/blocking-site-census.md): a disagreement here means
@@ -517,6 +542,7 @@ log_action() {
 TRIVIAL_LOGS_DELETED=0
 LOGS_DELETED=0
 TASKS_KEPT=0
+LIVENESS_RECORDS_DELETED=0
 LOGS_ROTATED=0
 BRIEFS_ARCHIVED=0
 TEMP_ITEMS_PURGED=0
@@ -730,6 +756,7 @@ if [[ "$TEMP_ONLY" == "true" ]]; then
   # will be swept individually in step 3, preserving the root.
   log "--- temp-only: purging install-wide framework temp directory (excluding per-project roots): $_temp_root ---"
   if [[ -d "$_temp_root" ]]; then
+    _TEMP_PURGE_SCAN="$(temp_purge_scan_root "$_temp_root")"
     for _item in "${_temp_root}"/*; do
       [[ -e "$_item" ]] || continue
       # Per-project dir exclusion: skip entries whose absolute path is a
@@ -750,15 +777,14 @@ if [[ "$TEMP_ONLY" == "true" ]]; then
         continue
       fi
       log_action "temp-only purge (install-wide): $_item"
-      if [[ "$DRY_RUN" == "false" ]]; then
-        rm -rf "$_item"
+      if temp_purge_remove "$_item"; then
+        TEMP_ITEMS_PURGED=$(( TEMP_ITEMS_PURGED + 1 ))
       fi
-      TEMP_ITEMS_PURGED=$(( TEMP_ITEMS_PURGED + 1 ))
     done
   else
     log "temp-only: install-wide temp root does not exist, skipping: $_temp_root"
   fi
-  unset _item _item_basename
+  unset _item _item_basename _TEMP_PURGE_SCAN
 
   # --- 3. Sweep each per-project dir's CONTENTS (preserving the root dirs) ---
   # Same allowlist and live-task guard as the install-wide sweep: a
@@ -857,24 +883,17 @@ log "logs pruned: $LOGS_DELETED"
 log "--- Step 2: report terminal task folders in $PGAI_TASKS_DIR (none are deleted) ---"
 
 # _task_state <status_file>
-# Print the first non-blank value under the '## State' heading, or nothing
-# when the heading is absent or has no value.
+# Print the first non-blank line under the '## State' heading, trimmed, or
+# nothing when the heading is absent or has no value. The section is read by
+# read_md_field with --free-spacing --end-at-subheading: "##State" and
+# "## State" both match, and the next "##" line ends the section.
 _task_state() {
-  local status_file="$1" line val_line
-  while IFS= read -r line; do
-    if [[ "$line" =~ ^##[[:space:]]*State[[:space:]]*$ ]]; then
-      while IFS= read -r val_line; do
-        val_line="${val_line#"${val_line%%[![:space:]]*}"}"
-        val_line="${val_line%"${val_line##*[![:space:]]}"}"
-        [[ "$val_line" == "##"* ]] && break
-        if [[ -n "$val_line" ]]; then
-          printf '%s\n' "$val_line"
-          break
-        fi
-      done
-      break
-    fi
-  done < "$status_file"
+  local body
+  body="$(read_md_field --free-spacing --end-at-subheading "$1" State 2>/dev/null)" || return 0
+  body="${body%%$'\n'*}"
+  body="${body%"${body##*[![:space:]]}"}"
+  [[ -n "$body" ]] && printf '%s\n' "$body"
+  return 0
 }
 
 if [[ -d "$PGAI_TASKS_DIR" ]]; then
@@ -897,6 +916,81 @@ if [[ -d "$PGAI_TASKS_DIR" ]]; then
 else
   log "tasks directory not found, skipping: $PGAI_TASKS_DIR"
 fi
+
+# ---------------------------------------------------------------------------
+# Step 2b: Delete task-liveness records of tasks that exist in no project
+# ---------------------------------------------------------------------------
+# A record under $KANBAN_ROOT/locks/task-liveness/ is written at each
+# dispatch. The wake's reconcile pass (reconcile_terminal_liveness_records,
+# wake_reconcile_sweeps.sh) removes the record of a DONE or WONT-DO task
+# whose folder is still in its project; once a task folder is archived or
+# deleted no wake pass can see that task again, so this step removes its
+# record. The directory is kanban-wide: every registered project's tasks
+# directory is searched, plus this run's own tasks directory and the
+# single-project tasks/ directory at the root.
+#
+# A record is kept when its task folder exists in any of those directories,
+# or when task_liveness_is_alive reports its agent alive. When the project
+# list is empty or unreadable, or any registered project's tasks directory
+# cannot be resolved, the step deletes nothing: a folder that could not be
+# looked for is never called missing.
+# ---------------------------------------------------------------------------
+log "--- Step 2b: delete task-liveness records of tasks that exist in no project ---"
+
+# _liveness_task_search_dirs
+# Print every tasks directory a task folder may live in, one per line.
+# Returns 1, printing nothing, when the registered project list is empty or
+# unreadable or any registered project's tasks directory cannot be resolved.
+_liveness_task_search_dirs() {
+  local projects proj dir dirs=""
+  projects="$(projects_cfg_list 2>/dev/null)" || return 1
+  [[ -n "$projects" ]] || return 1
+  while IFS= read -r proj; do
+    [[ -n "$proj" ]] || continue
+    dir="$(pp_tasks_dir "$proj" 2>/dev/null)" || return 1
+    [[ -n "$dir" ]] || return 1
+    dirs+="${dir}"$'\n'
+  done <<< "$projects"
+  dirs+="${PGAI_TASKS_DIR}"$'\n'"${KANBAN_ROOT}/tasks"
+  printf '%s\n' "$dirs"
+}
+
+_liveness_probe="$(task_liveness_record_path "path-probe" 2>/dev/null)" || _liveness_probe=""
+_liveness_dir="${_liveness_probe:+$(dirname "$_liveness_probe")}"
+if [[ -z "$_liveness_dir" || ! -d "$_liveness_dir" ]]; then
+  log "task-liveness record directory not found, skipping: ${_liveness_dir:-${KANBAN_ROOT}/locks/task-liveness}"
+elif ! _liveness_search="$(_liveness_task_search_dirs)"; then
+  log "WARNING: Step 2b skipped: the registered project list or a project's tasks directory could not be resolved; no task-liveness record deleted"
+else
+  for record_file in "$_liveness_dir"/*.record; do
+    [[ -f "$record_file" ]] || continue
+    record_task="$(basename "$record_file" .record)"
+    [[ -n "$record_task" && "$record_task" != .* ]] || continue
+    # Only a record at exactly the path the wake's helper gives this id.
+    [[ "$(task_liveness_record_path "$record_task" 2>/dev/null)" == "$record_file" ]] || continue
+    record_task_found=false
+    while IFS= read -r search_dir; do
+      [[ -n "$search_dir" ]] || continue
+      if [[ -d "${search_dir}/${record_task}" ]]; then
+        record_task_found=true
+        break
+      fi
+    done <<< "$_liveness_search"
+    [[ "$record_task_found" == "false" ]] || continue
+    if task_liveness_is_alive "$record_task"; then
+      log "keep task-liveness record of ${record_task}: its task folder exists in no project, but its agent is alive or its record is unreadable"
+      continue
+    fi
+    log_action "delete task-liveness record (task folder exists in no project): $record_file"
+    if [[ "$DRY_RUN" == "false" ]]; then
+      rm -f -- "$record_file"
+    fi
+    LIVENESS_RECORDS_DELETED=$(( LIVENESS_RECORDS_DELETED + 1 ))
+  done
+fi
+unset _liveness_probe _liveness_dir _liveness_search record_file record_task record_task_found search_dir
+
+log "task-liveness records deleted: $LIVENESS_RECORDS_DELETED"
 
 # ---------------------------------------------------------------------------
 # Step 4: Rotate debug logs
@@ -1073,6 +1167,7 @@ log "trivial_log_hours:          $PGAI_CLEANUP_TRIVIAL_LOG_HOURS"
 log "trivial_logs_deleted:  $TRIVIAL_LOGS_DELETED"
 log "logs_deleted:          $LOGS_DELETED"
 log "task_folders_kept:     $TASKS_KEPT (terminal, older than ${PGAI_CLEANUP_TASK_RETENTION_DAYS}d; never deleted)"
+log "liveness_records_deleted: $LIVENESS_RECORDS_DELETED (task folder in no project)"
 log "debug_logs_rotated:    $LOGS_ROTATED"
 log "briefs_archived:       $BRIEFS_ARCHIVED"
 log "temp_items_purged:     $TEMP_ITEMS_PURGED"

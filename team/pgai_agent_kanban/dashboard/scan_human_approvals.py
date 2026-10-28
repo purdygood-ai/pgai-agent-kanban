@@ -61,17 +61,13 @@ if not __package__:
     if _OWN_PACKAGE_ROOT not in sys.path:
         sys.path.insert(0, _OWN_PACKAGE_ROOT)
 
-from pgai_agent_kanban.task_status import section_lines, section_value  # noqa: E402
+from pgai_agent_kanban.task_status import section_lines  # noqa: E402
+from pgai_agent_kanban.task_status import section_value as _read_field  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
 # Field reader helpers (mirrors pattern in scan_attention.py)
 # ---------------------------------------------------------------------------
-
-def _read_field(text: str, heading: str) -> str:
-    """Return the value of the '## heading' section (task_status.section_value)."""
-    return section_value(text, heading)
-
 
 def _format_age(secs: int) -> str:
     """Format elapsed seconds as human-readable age string."""

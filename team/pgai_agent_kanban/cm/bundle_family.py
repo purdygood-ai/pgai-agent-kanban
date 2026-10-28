@@ -24,6 +24,8 @@ it always starts at attempt 1, per the "happy path never exceeds 1" AC.
 Usage (CLI):
     python3 bundle_family.py compute <requirements_dir> <version> <state_dir>
         Prints the compute_bundle_family() result as JSON to stdout.
+    python3 bundle_family.py --help
+        Prints the usage line and exits 0.
 
 Usage (import):
     from pgai_agent_kanban.cm.bundle_family import compute_bundle_family
@@ -38,15 +40,29 @@ import glob
 import hashlib
 import json
 import os
+import pathlib
 import re
 import sys
 from typing import Optional
 
-# Matches CM.md's documented "## Bundled Items" section header and the
-# backtick-paren absolute-path convention already parsed identically in
-# team/scripts/cm/release.sh (Step 16b promotion + release-notes generation).
-_BUNDLED_ITEMS_HEADER_RE = re.compile(r"^\s*##\s+Bundled Items\s*$", re.IGNORECASE)
-_SECTION_HEADER_RE = re.compile(r"^\s*##")
+# Run by file path (``python3 .../bundle_family.py``, as cm/open-rc.sh does)
+# or loaded from a file outside its package, this module has no parent
+# package and the interpreter puts only its own directory on sys.path, so the
+# package import below would not resolve. Put this file's own package root --
+# the directory holding the pgai_agent_kanban/ this file sits in -- at the
+# front of sys.path so the import resolves from the same tree, never another.
+# Imported as a package member, sys.path is left untouched.
+if not __package__:
+    _OWN_PACKAGE_ROOT = str(pathlib.Path(__file__).resolve().parents[2])
+    if _OWN_PACKAGE_ROOT not in sys.path:
+        sys.path.insert(0, _OWN_PACKAGE_ROOT)
+
+from pgai_agent_kanban.task_status import read_section  # noqa: E402
+
+# The "## Bundled Items" section CM.md documents, read the way
+# lib/bundle_items.parse_bundled_item_paths reads it (a "###" line ends the
+# list), and the backtick-paren absolute-path convention of its item lines.
+_BUNDLED_ITEMS_HEADING = "Bundled Items"
 _ITEM_PATH_RE = re.compile(r"\(`([^`]+)`\)")
 
 
@@ -74,8 +90,8 @@ def parse_bundled_item_basenames(bundle_path: str) -> list:
     """Return the basenames of every item referenced in *bundle_path*'s
     `## Bundled Items` section, in file order (not sorted or de-duplicated).
 
-    Uses the same section-detection and backtick-paren path extraction as
-    cm/release.sh's release-notes generator. Returns an empty list when the
+    The section is read by ``task_status.read_section`` with
+    ``end_at_subheading``, the reading lib/bundle_items uses. Returns an empty list when the
     file is missing, unreadable, or carries no `## Bundled Items` section --
     the "operator-authored requirements, no cargo to track" case.
     """
@@ -84,18 +100,12 @@ def parse_bundled_item_basenames(bundle_path: str) -> list:
     except OSError:
         return []
 
+    body = read_section(text, _BUNDLED_ITEMS_HEADING, end_at_subheading=True) or ""
     basenames: list = []
-    in_section = False
-    for line in text.splitlines():
-        if _BUNDLED_ITEMS_HEADER_RE.match(line):
-            in_section = True
-            continue
-        if in_section:
-            if _SECTION_HEADER_RE.match(line):
-                break
-            match = _ITEM_PATH_RE.search(line)
-            if match:
-                basenames.append(os.path.basename(match.group(1).strip()))
+    for line in body.splitlines():
+        match = _ITEM_PATH_RE.search(line)
+        if match:
+            basenames.append(os.path.basename(match.group(1).strip()))
     return basenames
 
 
@@ -224,8 +234,13 @@ def main() -> None:
     """CLI entry point: dispatch the 'compute' subcommand.
 
     Usage: bundle_family.py compute <requirements_dir> <version> <state_dir>
-    Prints compute_bundle_family()'s result as JSON to stdout.
+    Prints compute_bundle_family()'s result as JSON to stdout. ``-h`` or
+    ``--help`` prints the usage on stdout and exits 0; any other argument
+    list prints it on stderr and exits 2.
     """
+    if len(sys.argv) == 2 and sys.argv[1] in ("-h", "--help"):
+        print("Usage: bundle_family.py compute <requirements_dir> <version> <state_dir>")
+        sys.exit(0)
     if len(sys.argv) != 5 or sys.argv[1] != "compute":
         print(
             "Usage: bundle_family.py compute <requirements_dir> <version> <state_dir>",

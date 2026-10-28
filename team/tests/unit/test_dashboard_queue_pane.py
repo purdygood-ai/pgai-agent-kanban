@@ -358,3 +358,18 @@ def test_halt_pair_for_a_project_directory_that_does_not_exist(tmp_path: pathlib
     assert halt_flag_and_text(tmp_path / "projects" / "ghost", tmp_path) == ("no", "")
     (tmp_path / "HALT").write_text("", encoding="utf-8")
     assert halt_flag_and_text(tmp_path / "projects" / "ghost", tmp_path) == ("yes", "HALT")
+
+
+def test_halt_pair_ignores_a_kanban_wide_halt_after(tmp_path: pathlib.Path) -> None:
+    """The queue pane's pair is data.sh's HALT_TEXT, which never reads a kanban-wide HALT-AFTER.
+
+    The board routes' pair (``effective_halt_flag_and_text``) reports it; the
+    pane's stays as data.sh draws it.
+    """
+    from pgai_agent_kanban.dashboard.halt_state import effective_halt_flag_and_text
+
+    project = tmp_path / "projects" / "alpha"
+    project.mkdir(parents=True)
+    (tmp_path / "HALT-AFTER").write_text("rc\n", encoding="utf-8")
+    assert halt_flag_and_text(project, tmp_path) == ("no", "")
+    assert effective_halt_flag_and_text(project, tmp_path) == ("no", "HALT-AFTER rc")

@@ -80,9 +80,9 @@ What each window is for, in creation order. Everything here is orientation: the 
 
 **Window 1: `operator`** — window 2 with somewhere to type. Top to bottom, it holds three rows. First comes the same eight-column board at the same widths: BUGS, PRIORITIES and REQUIREMENTS on the left, and the PM, CODER, WRITER, TESTER and CM queues on the right. Below the board is a full-width command-line shell, opened at the kanban root with the kanban environment already sourced. Last is window 2's colour legend bar. The shell takes 15% of the window height and never fewer than three rows, and the window opens with your cursor in it. For a reminder of the common commands, run `scripts/dashboard/suggested-commands.sh` from that shell. This is the window to live in when your only terminal is an attach — over ssh, or inside a container.
 
-**Window 2: `visibility`** — the same eight board columns, read-only, with a colour legend along the bottom. No shell, nothing to type into. This is the display-on-a-second-monitor window: white items are pending, amber are active, green are settled (done or WONT-DO; see "Board status and WONT-DO" below), and each project keeps the colour it was given in the project registry.
+**Window 2: `visibility`** — the same eight board columns, read-only, with a colour legend along the bottom. No shell, nothing to type into. This is the display-on-a-second-monitor window: white items are pending, amber are active, magenta are waiting on an operator answer (needs-operator), green are settled (done, WONT-DO or duplicate), and a `↻` after an ID marks a carried item (see "Board status and WONT-DO" below). Each project keeps the colour it was given in the project registry.
 
-**Window 3: `attention`** — a single pane listing the items that want a human: tasks sitting in BLOCKED, with the reason each one recorded. An empty pane here is the healthy state, and it is the fastest question the board answers — "is anything waiting on me?"
+**Window 3: `attention`** — a single pane listing the items that want a human: tasks sitting in BLOCKED, with the reason each one recorded, and bugs or priorities waiting at needs-operator. An empty pane here is the healthy state, and it is the fastest question the board answers — "is anything waiting on me?"
 
 **Window 4: `schedule`** — the agents' heartbeat, in two full-width bands, each answering one question. The **list band** on top answers "what did each lane last do, and when does it fire next": one row per agent, in fixed roster order, showing when it last fired, the verdict that firing reached — `completed <N>`, `idle (no BACKLOG)`, `HALT skip` or `contended` — and when it fires next. The list keeps every roster row through a live terminal resize, a first view from a client attached at another size, an explicit `resize-window` and a switch to the window. Its height is re-applied after every size or layout change to the window, except while a schedule pane is zoomed. A band border dragged by hand therefore snaps back, and a short window takes its rows from the event band instead. The **event band** below answers "what has actually happened today", merging every agent's wake log into one chronologic, agent-tagged stream of signal lines only: dispatches, task completions with their state, HALTs, queue promotions, reaped worktrees, error blocks and sweep-census skips. A signal class that declares a collapse identity — the sweep-census skip is the one that does today — is folded across the whole day into a single row per distinct identity, tagged with its occurrence count and first-seen time; a class that declares none renders every occurrence. Idle-cycle boilerplate is filtered out of that stream and repetition is folded within it; neither is discarded — the unfiltered per-agent logs stay readable in window 9 (`logs`) and one agent at a time via `cron-tail.sh <agent>`. Go here when work is not moving and you need to know whether the wake fired at all, and what happened when it did.
 
@@ -110,11 +110,20 @@ What each window is for, in creation order. Everything here is orientation: the 
 
 **WONT-DO renders as one token, `wont-do`, on both the operator API's `GET /board` and the dashboard's board columns.** It is never folded into `done`. A task whose `## State` is `WONT-DO`, and an intake file whose `## Status` is `wont-do`, both classify as `wont-do`.
 
-The closed states are `done` and `wont-do`, and `close.sh` accepts no others. An older file may still carry the retired status `superseded`. It is not rewritten, but the board reads it as `wont-do`: it classifies as `wont-do` and is drawn in the closed green, never in the open white.
+The closed states are `done`, `wont-do` and `duplicate`, and `close.sh` accepts no others. A `duplicate` bug or priority was closed in favour of the item its `## Close Note` names. An older file may still carry the retired status `superseded`. It is not rewritten, but the board reads it as `wont-do`: it classifies as `wont-do` and is drawn in the closed green, never in the open white.
 
-The eight board columns in windows 1 and 2 and `GET /board` classify every item through the same classifier, the `pgai_agent_kanban.board` package, so the two surfaces cannot disagree about an item. `GET /board` returns `"status": "wont-do"` for such an item (the full status vocabulary is in the `/board` row of [operator-api.md](operator-api.md), "Structured reads"). The columns draw it in the same green as a done item, because both are settled and need no action.
+The eight board columns in windows 1 and 2 and `GET /board` classify every item through the same classifier, the `pgai_agent_kanban.board` package, so the two surfaces cannot disagree about an item. `GET /board` returns `"status": "wont-do"` for such an item (the full status vocabulary is in the `/board` row of [operator-api.md](operator-api.md), "Structured reads"). The columns draw `wont-do` and `duplicate` in the same green as a done item, because all three are settled and need no action.
 
-The colour legend therefore has no separate WONT-DO entry: its green covers both. To tell a declined item from a shipped one, read its status through `GET /board`, or open the item with `scripts/show.sh --project <name> --key <key>`.
+Two board states are for bugs and priorities waiting on you:
+
+| Status | Means | Drawn as |
+|---|---|---|
+| `needs-operator` | Waiting on an operator answer in the project's inbox | Magenta, the palette's `status_needs_operator` key. With colour off, ` [needs-op]` follows the ID |
+| `carried` | Still `running`, but every bundle that lists it is closed: the release shipped without fixing it. The next discovery pass converts it to `needs-operator` | The open white, with ` ↻` after the ID (` [carried]` with colour off) |
+
+Markers follow the ID, so every ID still starts in the same column. How an item reaches each state and how to answer one is in [OPERATIONS.md](OPERATIONS.md), "The bug lifecycle".
+
+The colour legend reads `open  running  done  wont-do  blocked  needs-operator  ↻ carried` (`[carried]` with colour off), each word in its own colour. It has no separate `duplicate` entry: the green covers done, wont-do and duplicate. To tell them apart, read the item's status through `GET /board`, or open the item with `scripts/show.sh --project <name> --key <key>`.
 
 ## Refresh cadence
 
@@ -211,7 +220,8 @@ To read them, resolve the temp root and look:
 
 <!-- doc-lint: skip — reads a directory that exists only while a dashboard session is running -->
 ```bash
-tmp_root="${PGAI_AGENT_KANBAN_TEMP_DIR:-/tmp/pgai_kanban_tmp}"
+source "$PGAI_AGENT_KANBAN_ROOT_PATH/scripts/lib/temp.sh"
+tmp_root="$(pgai_temp_dir)"
 
 ls "$tmp_root/dashboard/logs/"
 grep -h 'dashboard-snapshot' "$tmp_root/dashboard/logs/"*.log | tail -n 20
@@ -240,7 +250,7 @@ Window 7: `rc-metrics` is reached with `Ctrl-b 7` and is split into two vertical
 
 | Pane | Script | What it shows |
 |------|--------|---------------|
-| Left | `$KANBAN_ROOT/scripts/dashboard/metrics.sh` | Today's per-project metrics — RCs shipped, wall time, tokens with cache hit %, task count — plus a current-RC block (tasks done, elapsed wall time, tokens so far). Reads `metrics/day/<date>.json` and `metrics/rc/<v>.json`. |
+| Left | `$KANBAN_ROOT/scripts/dashboard/metrics.sh` | Four stacked sections: **Today** (per-project RCs shipped, wall time, tokens with cache hit %, task count), **Current RC** (tasks done, elapsed wall time, blocked minutes, tokens so far), **Reliability** (each project's Hands-off and Clean streaks) and **Bugs** (each project's bug count split open / deferred / needs-operator; see `DASHBOARD-PANES.md`, "Window 7 — rc-metrics"). Reads `metrics/day/<date>.json`, `metrics/rc/<v>.json`, `metrics/reliability.json` and `bugs/`. |
 | Right | `$KANBAN_ROOT/scripts/dashboard/show-metrics.sh` | Historical RC metrics from `metrics/history.csv`: the last N release candidates with token totals, cache hit rate, and task counts. |
 
 The per-agent-per-project averages live one window over, in window 8, and are not repeated here.
@@ -248,6 +258,45 @@ The per-agent-per-project averages live one window over, in window 8, and are no
 Both panes refresh on the standard dashboard interval (`PGAI_DASHBOARD_REFRESH_SECONDS`, default 5 seconds) while the rc-metrics window is the one you're looking at. Refresh cadence is visibility-aware: switch to another window, or detach from the session, and both panes stop rendering until the window is visible again, at which point they repaint immediately. See "Refresh cadence" above for the full behavior.
 
 The rc-metrics window is a dedicated view so operators can scan recent-release economics without leaving the dashboard.
+
+### Reliability (left pane)
+
+The left pane's third section answers "how long has the chain run without a block?" with two streaks per project:
+
+- **Hands-off**: releases shipped and hours elapsed since the last block a human had to clear.
+- **Clean**: the same, measured from the last block of any kind, including the ones the system cleared itself. Clean is never longer than Hands-off.
+
+Example, taken from the pane's test fixture:
+
+```
+=== Reliability ===
+
+  alpha
+    Hands-off: 8 RCs / 248h   since 2026-10-08 03:31 (CM release HALT)
+    Clean:     0 RCs /  16h   since 2026-10-17 19:55 (BLOCKED)
+```
+
+Each line reads `<rcs> RCs / <hours>h   since <when the block was resolved, UTC> (<what the block was>)`. `rcs` counts releases shipped after the resolution and leaves out the block's own RC. `hours` is whole hours, rounded down, from that time to the moment the line is rendered, so it keeps growing between rewrites of `reliability.json`. Lines are at most 70 columns wide, so a long cause is shortened.
+
+Other things the pane can show:
+
+| Line | Meaning |
+|------|---------|
+| `0 RCs / 0h   open since <start> (...)` | The last block is still open. |
+| `since <date> (no block on record)` | No qualifying block yet. The streak counts from the project's first ledger record. |
+| `(no reliability data yet)` | `metrics/reliability.json` does not exist yet. |
+| `(reliability.json unreadable)` | The file does not parse, or a field the line needs is missing. |
+
+**What counts as a block.** Anything that stops a task or the chain and was not an operator's decision:
+
+- a task written `BLOCKED` by any role, the per-task timeout kill included, or flagged `Needs Human: yes` while it is not DONE or WONT-DO;
+- a HALT the chain raised, such as a CM release trigger, an OVERWATCH halt, the zero-progress cap or the substrate.
+
+**What does not count.** An operator-raised HALT: one written by `halt.sh`, one promoted from an operator's `HALT-AFTER`, and the fleet-scoped HALT at the kanban root, which only operators write. The sentinel-writes log decides who wrote a project HALT. With no operator record, it counts as the chain's. Operator HALTs still add to the `Blocked` minutes below; they are only left out of the streaks. DEFER campaigns, version ceilings and HUMAN-APPROVE gates are not recorded as blocks.
+
+**Which blocks a human had to clear.** A block counts against Hands-off in three cases: block triage escalated it, an operator released the task with `reset.sh`, or `unhalt.sh` removed a chain HALT. Any other block counts against Clean only. That covers a block triage requeued to its owner, a task that reached DONE or WONT-DO (`close.sh` and `wontdo.sh` included) or left `BLOCKED`, and a HALT that OVERWATCH or CM removed. Clean counts every block, so a block a human cleared resets both streaks.
+
+The pane reads only `metrics/reliability.json`. For the ledger it is computed from, the file's schema and the `metrics-report.sh --reliability` command that prints these lines without the dashboard, see "Metrics" in [OPERATIONS.md](OPERATIONS.md).
 
 ### Historical view (right pane)
 
@@ -259,7 +308,7 @@ Columns:
 |--------|--------------|---------|
 | `rc` | `rc` | Release-candidate version string (e.g. `v0.29.15`). |
 | `wall_time` | `wall_time_minutes` | RC duration in minutes, measured from `opened_at` to `closed_at`. Renders `--` for any RC whose `wall_time_minutes` field is absent (see below). |
-| `blocked` | `blocked_minutes` | Minutes inside that duration the RC could not proceed — parked under a HALT, or stalled on one of its own tasks in `BLOCKED` awaiting a human. Renders `0` for an RC that was never blocked and `-` for a row carrying no value (see below). |
+| `blocked` | `blocked_minutes` | Minutes inside that duration the RC could not proceed — parked under a HALT, or stalled on one of its own blocked tasks (see "Blocked" below). Renders `0` for an RC that was never blocked and `-` for a row carrying no value (see below). |
 | `input` | `input_tokens` | Total input tokens consumed by every agent invocation for the RC. Comma-separated for readability. |
 | `output` | `output_tokens` | Total output tokens produced across the RC. |
 | `cache_read` | `cache_read_tokens` | Tokens served from the prompt cache rather than re-billed at the input rate. Higher is cheaper. |
@@ -292,13 +341,13 @@ A row renders `wall_time` as `--` only when the `wall_time_minutes` field is abs
 
 ### Blocked
 
-The `blocked` column reads `blocked_minutes` from `history.csv`. It counts the minutes inside the RC's own open-to-ship window during which the release could not move at all, and it has exactly two interval sources: a HALT flag covering the project — the fleet-scoped file at the kanban root, or the project's own under `projects/<name>/` — and any task of that RC sitting in `BLOCKED` with `Needs Human: yes`. Each source opens and closes its own interval, so a HALT and a blocked task in flight at the same time do not interfere with each other's boundaries.
+The `blocked` column reads `blocked_minutes` from `history.csv`. It counts the minutes inside the RC's own open-to-ship window during which the release could not move at all, and it has exactly two interval sources: a HALT flag covering the project — the fleet-scoped file at the kanban root, or the project's own under `projects/<name>/`, whoever wrote it — and any task of that RC that is blocked, as "What counts as a block" above defines it. Each source opens and closes its own interval, so a HALT and a blocked task in flight at the same time do not interfere with each other's boundaries.
 
 Overlapping intervals are counted once. Every interval is first clamped to the RC's `opened_at`/`closed_at` window — a boundary outside the window is cut to the window's own edge, and an interval falling entirely outside it contributes nothing — and then overlapping or touching spans are merged before the total is summed. A HALT and a blocked task covering the same wall-clock minutes therefore contribute those minutes a single time. An interval still open when the RC ships is treated as running to `closed_at`.
 
 **Wall is unchanged.** `wall_time` remains honest open-to-ship elapsed time; `blocked` is a second number printed beside it, never a correction applied to it. Real execution time is Wall minus Blocked, and the subtraction is the reader's to do — which is what lets an RC that straddled an operator ceremony still report the elapsed time it genuinely occupied.
 
-An RC that was never blocked reads a real `0`, never a blank: no blocking observed is a measured result. A row whose `blocked_minutes` cell is empty renders a single `-` — deliberately not wall time's `--` — and when at least one rendered row is missing a value the table prints one footer line, `Blocked tracked from v2.24.0`, below the last row. The left pane's current-RC block prints the same figure beside its elapsed time, reading `0` until the in-flight RC has a ledger reading of its own.
+An RC that was never blocked reads a real `0`, never a blank: no blocking observed is a measured result. A row whose `blocked_minutes` cell is empty renders a single `-` — deliberately not wall time's `--` — and when at least one rendered row is missing a value the table prints one footer line below the last row, `Blocked untracked for <K> RC(s)`, where `<K>` is the number of rendered rows that print `-`. The left pane's current-RC block prints the same figure beside its elapsed time, reading `0` until the in-flight RC has a ledger reading of its own.
 
 A row with no `blocked_minutes` value is an RC that closed before blocked time was recorded; it renders the dash with that footer note, and no value is reconstructed from logs after the fact. An honest absence is worth more than a derived guess, and a number back-filled from evidence that was never collected for this purpose would read exactly like a measured one.
 

@@ -1,0 +1,366 @@
+{
+  "description": "Temp root resolution cases shared by the Python resolver (pgai_agent_kanban.lib.temp_root.resolve_temp_root) and the bash resolver (pgai_temp_dir / pgai_configured_temp_root in scripts/lib/temp.sh). Each case is one environment plus zero, one or two kanban.cfg files, and the root both resolvers must return for it.",
+  "fallback": "/tmp/pgai_kanban_tmp",
+  "layout": {
+    "{sandbox}": "a fresh scratch directory per case (pytest tmp_path); substitute it in every string field",
+    "{fallback}": "the top-level fallback value; substitute it in every string field",
+    "{sandbox}/board": "always created; the kanban root a caller names, holding board_cfg when that is not null",
+    "{sandbox}/install": "the resolver's own install root -- a scratch copy of the resolver laid out as installed, so its self-locate step finds {sandbox}/install/kanban.cfg (install_cfg) and nothing else"
+  },
+  "fields": {
+    "id": "unique, stable case name",
+    "covers": "the tier or rule the case pins",
+    "override": "PGAI_AGENT_KANBAN_TEMP_DIR; null = unset",
+    "root_path": "PGAI_AGENT_KANBAN_ROOT_PATH; null = unset",
+    "kanban_root": "explicit kanban root argument; null = none given. A case that sets it leaves root_path and install_cfg null, so a resolver with no explicit-root form reaches the same answer by exporting it as PGAI_AGENT_KANBAN_ROOT_PATH",
+    "board_cfg": "{sandbox}/board/kanban.cfg: an object is written as a [paths] section of 'key = value' lines in the order given; a string is written verbatim; null = no file",
+    "install_cfg": "{sandbox}/install/kanban.cfg, same forms as board_cfg",
+    "expected": "the root returned with the override honoured (pgai_temp_dir; resolve_temp_root)",
+    "expected_ignoring_override": "present when override is not null: the root returned with the override ignored (pgai_configured_temp_root; resolve_temp_root(honour_override=False))",
+    "note": "optional; why the case exists when the id alone does not say",
+    "cwd_cfg": "optional; {sandbox}/kanban.cfg, the resolvers' working directory, same forms as board_cfg; absent or null = no file"
+  },
+  "cases": [
+    {
+      "id": "override-beats-configured-pair",
+      "covers": "override",
+      "override": "{sandbox}/from-env",
+      "root_path": "{sandbox}/board",
+      "kanban_root": null,
+      "board_cfg": {"tmp_root": "{sandbox}/configured", "tmp_subdir": "scratch"},
+      "install_cfg": null,
+      "expected": "{sandbox}/from-env",
+      "expected_ignoring_override": "{sandbox}/configured/scratch"
+    },
+    {
+      "id": "override-with-no-kanban-cfg",
+      "covers": "override",
+      "override": "{sandbox}/from-env",
+      "root_path": null,
+      "kanban_root": null,
+      "board_cfg": null,
+      "install_cfg": null,
+      "expected": "{sandbox}/from-env",
+      "expected_ignoring_override": "{fallback}"
+    },
+    {
+      "id": "empty-override-reads-as-unset",
+      "covers": "override",
+      "override": "",
+      "root_path": "{sandbox}/board",
+      "kanban_root": null,
+      "board_cfg": {"tmp_root": "{sandbox}/configured", "tmp_subdir": "scratch"},
+      "install_cfg": null,
+      "expected": "{sandbox}/configured/scratch",
+      "expected_ignoring_override": "{sandbox}/configured/scratch"
+    },
+    {
+      "id": "blank-override-reads-as-unset",
+      "covers": "override",
+      "override": "   ",
+      "root_path": "{sandbox}/board",
+      "kanban_root": null,
+      "board_cfg": {"tmp_root": "{sandbox}/configured", "tmp_subdir": "scratch"},
+      "install_cfg": null,
+      "expected": "{sandbox}/configured/scratch",
+      "expected_ignoring_override": "{sandbox}/configured/scratch",
+      "note": "the override applies only when set and non-blank; a whitespace-only value is not a directory anyone meant"
+    },
+    {
+      "id": "explicit-kanban-root-reads-paths",
+      "covers": "config via explicit kanban root",
+      "override": null,
+      "root_path": null,
+      "kanban_root": "{sandbox}/board",
+      "board_cfg": {"tmp_root": "{sandbox}/configured", "tmp_subdir": "scratch"},
+      "install_cfg": null,
+      "expected": "{sandbox}/configured/scratch"
+    },
+    {
+      "id": "root-path-reads-paths",
+      "covers": "config via PGAI_AGENT_KANBAN_ROOT_PATH",
+      "override": null,
+      "root_path": "{sandbox}/board",
+      "kanban_root": null,
+      "board_cfg": {"tmp_root": "{sandbox}/configured", "tmp_subdir": "scratch"},
+      "install_cfg": null,
+      "expected": "{sandbox}/configured/scratch"
+    },
+    {
+      "id": "root-path-pair-beats-self-located-pair",
+      "covers": "config via PGAI_AGENT_KANBAN_ROOT_PATH",
+      "override": null,
+      "root_path": "{sandbox}/board",
+      "kanban_root": null,
+      "board_cfg": {"tmp_root": "{sandbox}/configured", "tmp_subdir": "scratch"},
+      "install_cfg": {"tmp_root": "{sandbox}/self-located", "tmp_subdir": "own"},
+      "expected": "{sandbox}/configured/scratch"
+    },
+    {
+      "id": "self-locate-when-root-path-unset",
+      "covers": "config via self-located install root",
+      "override": null,
+      "root_path": null,
+      "kanban_root": null,
+      "board_cfg": null,
+      "install_cfg": {"tmp_root": "{sandbox}/self-located", "tmp_subdir": "own"},
+      "expected": "{sandbox}/self-located/own"
+    },
+    {
+      "id": "self-locate-when-root-path-has-no-kanban-cfg",
+      "covers": "config via self-located install root",
+      "override": null,
+      "root_path": "{sandbox}/board",
+      "kanban_root": null,
+      "board_cfg": null,
+      "install_cfg": {"tmp_root": "{sandbox}/self-located", "tmp_subdir": "own"},
+      "expected": "{sandbox}/self-located/own"
+    },
+    {
+      "id": "self-locate-when-root-path-tmp-root-is-blank",
+      "covers": "config via self-located install root",
+      "override": null,
+      "root_path": "{sandbox}/board",
+      "kanban_root": null,
+      "board_cfg": {"tmp_root": "", "tmp_subdir": "pgai_kanban_tmp/temp-root-cases-unused"},
+      "install_cfg": {"tmp_root": "{sandbox}/self-located", "tmp_subdir": "own"},
+      "expected": "{sandbox}/self-located/own",
+      "note": "the self-locate step runs whenever the root-path kanban.cfg leaves tmp_root blank, not only when that file is missing; read alone (explicit-config form) the board's tmp_subdir sits under the default tmp_root, so it nests inside the default temp root rather than leaving a directory in bare /tmp"
+    },
+    {
+      "id": "root-only-takes-default-subdir-not-self-located-subdir",
+      "covers": "per-key default",
+      "override": null,
+      "root_path": "{sandbox}/board",
+      "kanban_root": null,
+      "board_cfg": {"tmp_root": "{sandbox}/root-only", "tmp_subdir": ""},
+      "install_cfg": {"tmp_root": "{sandbox}/self-located", "tmp_subdir": "own"},
+      "expected": "{sandbox}/root-only/pgai_kanban_tmp",
+      "note": "a blank tmp_subdir takes its default, pgai_kanban_tmp; a set tmp_root stops the self-locate step, so the install's tmp_subdir is never borrowed"
+    },
+    {
+      "id": "root-only-subdir-key-absent-takes-default-subdir",
+      "covers": "per-key default",
+      "override": null,
+      "root_path": null,
+      "kanban_root": "{sandbox}/board",
+      "board_cfg": {"tmp_root": "{sandbox}/root-only"},
+      "install_cfg": null,
+      "expected": "{sandbox}/root-only/pgai_kanban_tmp"
+    },
+    {
+      "id": "root-path-root-only-takes-default-subdir",
+      "covers": "per-key default",
+      "override": null,
+      "root_path": "{sandbox}/board",
+      "kanban_root": null,
+      "board_cfg": {"tmp_root": "{sandbox}/bigdisk"},
+      "install_cfg": null,
+      "expected": "{sandbox}/bigdisk/pgai_kanban_tmp",
+      "note": "an operator moving temp space off /tmp by setting tmp_root alone, read the way a wake reads it"
+    },
+    {
+      "id": "subdir-only-takes-default-root",
+      "covers": "per-key default",
+      "override": null,
+      "root_path": null,
+      "kanban_root": "{sandbox}/board",
+      "board_cfg": {"tmp_root": "", "tmp_subdir": "pgai_kanban_tmp/temp-root-cases-subdir-only"},
+      "install_cfg": null,
+      "expected": "/tmp/pgai_kanban_tmp/temp-root-cases-subdir-only",
+      "note": "a blank tmp_root takes its default, /tmp; the subdir nests inside the default temp root so the directory the bash resolver creates never lands in bare /tmp"
+    },
+    {
+      "id": "kanban-cfg-without-paths-section",
+      "covers": "per-key default",
+      "override": null,
+      "root_path": null,
+      "kanban_root": "{sandbox}/board",
+      "board_cfg": "[api]\nport = 8300\n",
+      "install_cfg": null,
+      "expected": "{fallback}",
+      "note": "neither key set: the two defaults join to the fallback root"
+    },
+    {
+      "id": "explicit-kanban-root-without-kanban-cfg",
+      "covers": "no readable kanban.cfg",
+      "override": null,
+      "root_path": null,
+      "kanban_root": "{sandbox}/board",
+      "board_cfg": null,
+      "install_cfg": null,
+      "expected": "{fallback}"
+    },
+    {
+      "id": "root-path-and-install-without-kanban-cfg",
+      "covers": "no readable kanban.cfg",
+      "override": null,
+      "root_path": "{sandbox}/board",
+      "kanban_root": null,
+      "board_cfg": null,
+      "install_cfg": null,
+      "expected": "{fallback}"
+    },
+    {
+      "id": "fresh-environment-nothing-set",
+      "covers": "no readable kanban.cfg",
+      "override": null,
+      "root_path": null,
+      "kanban_root": null,
+      "board_cfg": null,
+      "install_cfg": null,
+      "expected": "{fallback}"
+    },
+    {
+      "id": "shipped-paths-defaults",
+      "covers": "config via PGAI_AGENT_KANBAN_ROOT_PATH",
+      "override": null,
+      "root_path": "{sandbox}/board",
+      "kanban_root": null,
+      "board_cfg": {"tmp_root": "/tmp", "tmp_subdir": "pgai_kanban_tmp"},
+      "install_cfg": null,
+      "expected": "/tmp/pgai_kanban_tmp",
+      "note": "the [paths] values kanban.cfg_example ships"
+    },
+    {
+      "id": "inline-comments-are-not-part-of-the-value",
+      "covers": "config via PGAI_AGENT_KANBAN_ROOT_PATH",
+      "override": null,
+      "root_path": "{sandbox}/board",
+      "kanban_root": null,
+      "board_cfg": "[paths]\ntmp_root = {sandbox}/configured  # where scratch lives\ntmp_subdir = scratch\t; the framework's own\n",
+      "install_cfg": null,
+      "expected": "{sandbox}/configured/scratch"
+    },
+    {
+      "id": "crlf-kanban-cfg-reads-like-lf",
+      "covers": "config via explicit kanban root",
+      "override": null,
+      "root_path": null,
+      "kanban_root": "{sandbox}/board",
+      "board_cfg": "[paths]\r\ntmp_root = {sandbox}/configured\r\ntmp_subdir = scratch\r\n",
+      "install_cfg": null,
+      "expected": "{sandbox}/configured/scratch"
+    },
+    {
+      "id": "configured-spelling-is-returned-unchanged",
+      "covers": "filesystem-root invariant",
+      "override": null,
+      "root_path": "{sandbox}/board",
+      "kanban_root": null,
+      "board_cfg": {"tmp_root": "{sandbox}/real", "tmp_subdir": "root/"},
+      "install_cfg": null,
+      "expected": "{sandbox}/real/root/",
+      "note": "only the canonical form is compared with '/'; a root that passes keeps its spelling"
+    },
+    {
+      "id": "override-bare-slash-is-replaced",
+      "covers": "filesystem-root invariant",
+      "override": "/",
+      "root_path": "{sandbox}/board",
+      "kanban_root": null,
+      "board_cfg": {"tmp_root": "{sandbox}/configured", "tmp_subdir": "scratch"},
+      "install_cfg": null,
+      "expected": "{fallback}",
+      "expected_ignoring_override": "{sandbox}/configured/scratch",
+      "note": "an override naming the filesystem root is replaced by the fallback, not by the configured pair"
+    },
+    {
+      "id": "override-slash-run-is-replaced",
+      "covers": "filesystem-root invariant",
+      "override": "///",
+      "root_path": "{sandbox}/board",
+      "kanban_root": null,
+      "board_cfg": {"tmp_root": "{sandbox}/configured", "tmp_subdir": "scratch"},
+      "install_cfg": null,
+      "expected": "{fallback}",
+      "expected_ignoring_override": "{sandbox}/configured/scratch"
+    },
+    {
+      "id": "override-slash-dot-is-replaced",
+      "covers": "filesystem-root invariant",
+      "override": "/.",
+      "root_path": "{sandbox}/board",
+      "kanban_root": null,
+      "board_cfg": {"tmp_root": "{sandbox}/configured", "tmp_subdir": "scratch"},
+      "install_cfg": null,
+      "expected": "{fallback}",
+      "expected_ignoring_override": "{sandbox}/configured/scratch"
+    },
+    {
+      "id": "override-parent-reference-is-replaced",
+      "covers": "filesystem-root invariant",
+      "override": "/tmp/..",
+      "root_path": "{sandbox}/board",
+      "kanban_root": null,
+      "board_cfg": {"tmp_root": "{sandbox}/configured", "tmp_subdir": "scratch"},
+      "install_cfg": null,
+      "expected": "{fallback}",
+      "expected_ignoring_override": "{sandbox}/configured/scratch"
+    },
+    {
+      "id": "configured-slash-plus-slash-is-replaced",
+      "covers": "filesystem-root invariant",
+      "override": null,
+      "root_path": "{sandbox}/board",
+      "kanban_root": null,
+      "board_cfg": {"tmp_root": "/", "tmp_subdir": "/"},
+      "install_cfg": null,
+      "expected": "{fallback}"
+    },
+    {
+      "id": "configured-parent-reference-is-replaced",
+      "covers": "filesystem-root invariant",
+      "override": null,
+      "root_path": "{sandbox}/board",
+      "kanban_root": null,
+      "board_cfg": {"tmp_root": "/tmp", "tmp_subdir": ".."},
+      "install_cfg": null,
+      "expected": "{fallback}"
+    },
+    {
+      "id": "configured-double-slash-dot-is-replaced",
+      "covers": "filesystem-root invariant",
+      "override": null,
+      "root_path": "{sandbox}/board",
+      "kanban_root": null,
+      "board_cfg": {"tmp_root": "//", "tmp_subdir": "."},
+      "install_cfg": null,
+      "expected": "{fallback}"
+    },
+    {
+      "id": "configured-filesystem-root-via-explicit-kanban-root-is-replaced",
+      "covers": "filesystem-root invariant",
+      "override": null,
+      "root_path": null,
+      "kanban_root": "{sandbox}/board",
+      "board_cfg": {"tmp_root": "/", "tmp_subdir": "/"},
+      "install_cfg": null,
+      "expected": "{fallback}"
+    },
+    {
+      "id": "empty-kanban-root-reads-no-cfg",
+      "covers": "explicit kanban root",
+      "override": null,
+      "root_path": null,
+      "kanban_root": "",
+      "board_cfg": null,
+      "install_cfg": null,
+      "cwd_cfg": {"tmp_root": "{sandbox}/from-cwd"},
+      "expected": "{fallback}",
+      "note": "an empty or blank kanban root names no kanban.cfg, so neither resolver reads one relative to the working directory, as pgai_temp_dir with an empty path reads none"
+    },
+    {
+      "id": "blank-kanban-root-reads-no-cfg",
+      "covers": "explicit kanban root",
+      "override": null,
+      "root_path": null,
+      "kanban_root": "  ",
+      "board_cfg": null,
+      "install_cfg": null,
+      "cwd_cfg": {"tmp_root": "{sandbox}/from-cwd"},
+      "expected": "{fallback}",
+      "note": "an empty or blank kanban root names no kanban.cfg, so neither resolver reads one relative to the working directory, as pgai_temp_dir with an empty path reads none"
+    }
+  ]
+}

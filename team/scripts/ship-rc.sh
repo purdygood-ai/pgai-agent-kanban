@@ -219,15 +219,14 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH}"
 [[ -f "$KANBAN_ROOT/bashrc" ]] && source "$KANBAN_ROOT/bashrc"
 [[ -f "$KANBAN_ROOT/env" ]] && source "$KANBAN_ROOT/env"
-# $HOME/.config/pgai-kanban.cfg is operator-local bash config; sourced as-is.
-[[ -f "$HOME/.config/pgai-kanban.cfg" ]] && source "$HOME/.config/pgai-kanban.cfg"
+# Operator user config, then [chain] pm_mode (config_loader.sh).
+# shellcheck source=lib/config_loader.sh
+source "${SCRIPT_DIR}/lib/config_loader.sh"
+config_startup_prelude "$KANBAN_ROOT"
 # shellcheck source=lib/ini_parser.sh
 [[ -f "${SCRIPT_DIR}/lib/ini_parser.sh" ]] && source "${SCRIPT_DIR}/lib/ini_parser.sh"
 # shellcheck source=lib/dev_tree.sh
 source "${SCRIPT_DIR}/lib/dev_tree.sh"
-if [[ -f "$KANBAN_ROOT/kanban.cfg" ]]; then
-    export PGAI_KANBAN_PM_MODE="${PGAI_KANBAN_PM_MODE:-$(read_ini "$KANBAN_ROOT/kanban.cfg" chain pm_mode automatic)}"
-fi
 # kanban.cfg [paths] dev_tree_path backs PGAI_DEV_TREE_PATH when it is unset;
 # ship_rc uses it for a project whose config names no dev tree.
 export PGAI_DEV_TREE_PATH="${PGAI_DEV_TREE_PATH:-$(resolve_global_dev_tree)}"

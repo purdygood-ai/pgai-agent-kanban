@@ -207,3 +207,14 @@ def test_control_character_fault_names_the_first_control_character(value: str, c
 )
 def test_control_character_fault_passes_a_one_line_value_with_separators(value: str) -> None:
     assert control_character_fault(value) is None
+
+
+def test_read_and_action_routes_share_one_component_refusal() -> None:
+    """The read routes and the action routes bind the same refusal helper,
+    so a change to the refusal reaches both."""
+    from pgai_agent_kanban.api import component_refusal, reads
+    from pgai_agent_kanban.api.routers import operations
+
+    assert reads._component_refusal is component_refusal._component_refusal
+    assert operations._component_refusal is component_refusal._component_refusal
+    assert operations._example_curl is component_refusal.example_body_curl

@@ -17,6 +17,10 @@ not just diagnose", classified as follows:
   - feature-greps suite  — partial (must-find): names the missing token;
                             authoring the doc section is free-form.
 
+Every suite is quality class: a finding is printed (and, with
+--findings-file, recorded as one per-instance finding) and the harness
+exits 0; only a malformed command line exits 2.
+
 Each test builds a synthetic doc-root under tmp_path containing only the
 audited-doc-surface file(s) needed for that scenario (doc-lint.sh's
 AUDITED_DOCS array is fixed; files it does not find are silently skipped, so
@@ -26,6 +30,8 @@ or the live kanban root is touched.
 
 from __future__ import annotations
 
+import json
+import os
 import pathlib
 import subprocess
 
@@ -37,6 +43,13 @@ import pytest
 _TEAM_DIR = pathlib.Path(__file__).parent.parent.parent
 _REPO_ROOT = _TEAM_DIR.parent
 _DOC_LINT_SH = _TEAM_DIR / "scripts" / "harness" / "doc-lint.sh"
+
+
+# Every required feature token doc-lint.sh's FEATURE_PATTERNS names.
+_ALL_FEATURE_TOKENS = (
+    "debian rocky9 branch_prefix push_to_remote dev_tree_path "
+    "wake-batch.sh install.sh blocked_minutes"
+)
 
 
 def _run(args: list[str], *, cwd: pathlib.Path = _REPO_ROOT) -> subprocess.CompletedProcess:
@@ -51,8 +64,11 @@ def _run(args: list[str], *, cwd: pathlib.Path = _REPO_ROOT) -> subprocess.Compl
     later test in the same process); the cwd is scoped to this one
     subprocess call.
     """
+    # Without PGAI_PROJECT_NAME a usage refusal's dual-channel emitter
+    # records nothing in any project's refusal ledger.
+    env = {k: v for k, v in os.environ.items() if k != "PGAI_PROJECT_NAME"}
     return subprocess.run(
-        args, capture_output=True, text=True, timeout=30, cwd=str(cwd)
+        args, capture_output=True, text=True, timeout=30, cwd=str(cwd), env=env
     )
 
 
@@ -69,11 +85,17 @@ def _diagnostic(result: subprocess.CompletedProcess) -> str:
 
 
 def _run_doc_lint(
-    doc_root: pathlib.Path, suite: str, *, verbose: bool = False
+    doc_root: pathlib.Path,
+    suite: str,
+    *,
+    verbose: bool = False,
+    findings_file: pathlib.Path | None = None,
 ) -> subprocess.CompletedProcess:
     args = ["bash", str(_DOC_LINT_SH), "--suite", suite, "--doc-root", str(doc_root)]
     if verbose:
         args.append("--verbose")
+    if findings_file is not None:
+        args += ["--findings-file", str(findings_file)]
     return _run(args)
 
 
@@ -101,7 +123,7 @@ class TestCmdSuiteRemedy:
         )
 
         result = _run_doc_lint(doc_root, "cmd")
-        assert result.returncode == 1, _diagnostic(result)
+        assert result.returncode == 0, _diagnostic(result)
         assert "Cause:" in result.stdout
         assert "Next diagnostic step:" in result.stdout
         # The re-run pointer is a real, verbatim-runnable diagnostic command.
@@ -128,6 +150,7 @@ class TestCmdSuiteRemedy:
         result = _run_doc_lint(doc_root, "cmd")
         assert result.returncode == 0, _diagnostic(result)
         assert "SKIP-BLOCK" in result.stdout or "skip=1" in result.stdout
+        assert "fail=0" in result.stdout, _diagnostic(result)
 
     def test_passing_command_reports_pass_with_no_remedy(
         self, tmp_path: pathlib.Path
@@ -157,7 +180,7 @@ class TestLinksSuiteRemedy:
         )
 
         result = _run_doc_lint(doc_root, "links")
-        assert result.returncode == 1, _diagnostic(result)
+        assert result.returncode == 0, _diagnostic(result)
         assert "DEAD LINK: does-not-exist.md" in result.stdout
         assert "Cause:" in result.stdout
         assert "To fix:" in result.stdout
@@ -178,7 +201,7 @@ class TestLinksSuiteRemedy:
         )
 
         result = _run_doc_lint(doc_root, "links")
-        assert result.returncode == 1, _diagnostic(result)
+        assert result.returncode == 0, _diagnostic(result)
 
         locate = _run(["grep", "-n", "-F", "does-not-exist.md", str(readme)])
         assert locate.returncode == 0, _diagnostic(locate)
@@ -211,7 +234,7 @@ class TestFossilGrepsSuiteRemedy:
         )
 
         result = _run_doc_lint(doc_root, "fossil-greps")
-        assert result.returncode == 1, _diagnostic(result)
+        assert result.returncode == 0, _diagnostic(result)
         assert "FOSSIL HIT: pattern=/home/alice/pgai_agent_kanban" in result.stdout
         assert "Cause:" in result.stdout
         assert "To fix:" in result.stdout
@@ -231,7 +254,8 @@ class TestFossilGrepsSuiteRemedy:
         )
 
         first = _run_doc_lint(doc_root, "fossil-greps")
-        assert first.returncode == 1, _diagnostic(first)
+        assert first.returncode == 0, _diagnostic(first)
+        assert "FOSSIL HIT" in first.stdout, _diagnostic(first)
 
         # Step 1: locate (verbatim, deterministic).
         locate = _run(["sed", "-n", "3p", str(readme)])
@@ -245,6 +269,7 @@ class TestFossilGrepsSuiteRemedy:
 
         second = _run_doc_lint(doc_root, "fossil-greps")
         assert second.returncode == 0, _diagnostic(second)
+        assert "FOSSIL HIT" not in second.stdout, _diagnostic(second)
 
     def test_clean_doc_passes_with_no_remedy(self, tmp_path: pathlib.Path) -> None:
         doc_root = tmp_path / "docs9"
@@ -268,7 +293,7 @@ class TestFeatureGrepsSuiteRemedy:
         _write(doc_root, "README.md", "# Test doc\n\nNothing feature-related here.\n")
 
         result = _run_doc_lint(doc_root, "feature-greps")
-        assert result.returncode == 1, _diagnostic(result)
+        assert result.returncode == 0, _diagnostic(result)
         assert "FEATURE MISSING: pattern=debian" in result.stdout
         assert "Cause:" in result.stdout
         assert "To fix:" in result.stdout
@@ -280,7 +305,7 @@ class TestFeatureGrepsSuiteRemedy:
         _write(doc_root, "README.md", "# Test doc\n\nNothing feature-related here.\n")
 
         result = _run_doc_lint(doc_root, "feature-greps")
-        assert result.returncode == 1, _diagnostic(result)
+        assert result.returncode == 0, _diagnostic(result)
 
         confirm = _run(["grep", "-rniE", "debian", str(doc_root)])
         assert confirm.returncode == 1, _diagnostic(confirm)  # truly absent — grep found nothing
@@ -319,6 +344,102 @@ class TestFeatureGrepsSuiteRemedy:
         result = _run_doc_lint(doc_root, "feature-greps")
         assert result.returncode == 0, _diagnostic(result)
         assert "Cause:" not in result.stdout
+
+
+# ---------------------------------------------------------------------------
+# Exit contract: findings print, are recorded per instance, and exit 0
+# ---------------------------------------------------------------------------
+
+# One seeded finding per suite: (suite, README.md content, finding kind,
+# text the printed report carries for it).
+_SEEDED_FINDINGS = [
+    ("cmd", "# T\n\n```bash\nfalse\n```\n", "command-failed", "FAIL (exit 1): false"),
+    ("links", "# T\n\nSee [gone](gone.md).\n", "dead-link", "DEAD LINK: gone.md"),
+    (
+        "fossil-greps",
+        "# T\n\nleft over: /home/alice/pgai_agent_kanban/x\n",
+        "fossil-hit",
+        "FOSSIL HIT: pattern=/home/alice/pgai_agent_kanban",
+    ),
+    (
+        "feature-greps",
+        # Every required token but install.sh, so exactly one is missing.
+        "# T\n\n" + _ALL_FEATURE_TOKENS.replace(" install.sh", "") + "\n",
+        "feature-missing",
+        "FEATURE MISSING: pattern=install.sh",
+    ),
+]
+
+
+class TestFindingsExitContract:
+    @pytest.mark.parametrize(
+        ("suite", "content", "kind", "printed"),
+        _SEEDED_FINDINGS,
+        ids=[case[0] for case in _SEEDED_FINDINGS],
+    )
+    def test_seeded_finding_is_printed_recorded_and_exits_zero(
+        self, tmp_path: pathlib.Path, suite: str, content: str, kind: str, printed: str
+    ) -> None:
+        doc_root = tmp_path / "docs"
+        _write(doc_root, "README.md", content)
+        findings_file = tmp_path / "out" / "findings.json"
+
+        result = _run_doc_lint(doc_root, suite, findings_file=findings_file)
+
+        assert result.returncode == 0, _diagnostic(result)
+        assert printed in result.stdout, _diagnostic(result)
+        findings = json.loads(findings_file.read_text(encoding="utf-8"))
+        assert len(findings) == 1, findings
+        finding = findings[0]
+        assert finding["lint"] == "doc_lint"
+        assert finding["severity"] == "quality"
+        assert finding["suite"] == suite
+        assert finding["kind"] == kind
+        assert finding["summary"] == finding["cause"]
+        assert f"--suite {suite}" in finding["remedy"]
+
+    def test_fossil_finding_names_file_and_line(self, tmp_path: pathlib.Path) -> None:
+        doc_root = tmp_path / "docs"
+        _write(doc_root, "README.md", "# T\n\nok\nleft over: /home/alice/pgai_agent_kanban/x\n")
+        findings_file = tmp_path / "findings.json"
+
+        result = _run_doc_lint(doc_root, "fossil-greps", findings_file=findings_file)
+
+        assert result.returncode == 0, _diagnostic(result)
+        (finding,) = json.loads(findings_file.read_text(encoding="utf-8"))
+        assert finding["file"] == "README.md"
+        assert finding["line"] == 4
+
+    def test_clean_run_writes_an_empty_findings_array(self, tmp_path: pathlib.Path) -> None:
+        doc_root = tmp_path / "docs"
+        _write(doc_root, "README.md", "# T\n\n" + _ALL_FEATURE_TOKENS + "\n")
+        findings_file = tmp_path / "findings.json"
+
+        result = _run_doc_lint(doc_root, "feature-greps", findings_file=findings_file)
+
+        assert result.returncode == 0, _diagnostic(result)
+        assert json.loads(findings_file.read_text(encoding="utf-8")) == []
+
+    @pytest.mark.parametrize(
+        ("args", "error_key"),
+        [([], "doc_lint.suite_required"), (["--suite", "nonesuch"], "doc_lint.suite_unknown")],
+        ids=["suite-missing", "suite-unknown"],
+    )
+    def test_malformed_command_line_still_exits_two(
+        self, args: list[str], error_key: str
+    ) -> None:
+        result = _run(["bash", str(_DOC_LINT_SH), *args])
+
+        assert result.returncode == 2, _diagnostic(result)
+        assert f"error:   {error_key}" in result.stderr, _diagnostic(result)
+        assert "Usage: doc-lint.sh --suite" in result.stderr, _diagnostic(result)
+
+    def test_help_states_the_exit_contract(self) -> None:
+        result = _run(["bash", str(_DOC_LINT_SH), "--help"])
+
+        assert result.returncode == 0, _diagnostic(result)
+        assert "0   The selected suite ran, whatever it found" in result.stdout
+        assert "--findings-file" in result.stdout
 
 
 # ---------------------------------------------------------------------------

@@ -152,6 +152,8 @@ from pgai_agent_kanban.lib import refusal_ledger
 from pgai_agent_kanban.lib import semver as _semver
 from pgai_agent_kanban.lib.branch_prefix import release_tag_name
 from pgai_agent_kanban.lib.error_contract import format_error_contract
+from pgai_agent_kanban.lib.stdio import write_stderr as _write_stderr
+from pgai_agent_kanban.lib.stdio import write_stdout as _write_stdout
 from pgai_agent_kanban.ops import resolve as ops_resolve
 from pgai_agent_kanban.ops.context import OpsContext
 from pgai_agent_kanban.ops.errors import Ambiguous, CliRefusal, NotFound, OpsError
@@ -243,16 +245,6 @@ class ShipRcError(CliRefusal):
 def ship_exit_code(exc: OpsError) -> int:
     """Return the exit code ``ship-rc.sh`` exits with for *exc* (1 when it names none)."""
     return getattr(exc, "exit_code", EXIT_REFUSED)
-
-
-def _write_stdout(text: str) -> None:
-    sys.stdout.write(text)
-    sys.stdout.flush()
-
-
-def _write_stderr(text: str) -> None:
-    sys.stderr.write(text)
-    sys.stderr.flush()
 
 
 # ---------------------------------------------------------------------------

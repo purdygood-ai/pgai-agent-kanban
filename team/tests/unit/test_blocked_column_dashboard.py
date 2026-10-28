@@ -157,7 +157,7 @@ class TestHistoryTableBlockedColumn:
         row_line = next(l for l in result.stdout.splitlines() if l.startswith("v2.23.9"))
         blocked_cell = row_line.split()[2]
         assert blocked_cell == "-"
-        footer_lines = [l for l in result.stdout.splitlines() if "Blocked tracked from v2.24.0" in l]
+        footer_lines = [l for l in result.stdout.splitlines() if "Blocked untracked for 1 RC" in l]
         assert len(footer_lines) == 1
 
     def test_no_pre_era_row_prints_no_footer_line(self, fixture_kanban_root, tmp_path):
@@ -170,7 +170,7 @@ class TestHistoryTableBlockedColumn:
         )
         result = _run_show_metrics(csv_path, fixture_kanban_root)
         assert result.returncode == 0, result.stderr
-        assert "Blocked tracked from v2.24.0" not in result.stdout
+        assert "Blocked untracked for 1 RC" not in result.stdout
 
     def test_six_figure_blocked_value_comma_formatted(self, fixture_kanban_root, tmp_path):
         csv_path = tmp_path / "history.csv"
@@ -194,7 +194,53 @@ class TestHistoryTableBlockedColumn:
         assert result.returncode == 0, result.stderr
         row_line = next(l for l in result.stdout.splitlines() if l.startswith("v2.23.9"))
         assert row_line.split()[2] == "-"
-        assert "Blocked tracked from v2.24.0" in result.stdout
+        assert "Blocked untracked for 1 RC" in result.stdout
+
+    def test_footer_counts_the_untracked_rows_rendered(self, fixture_kanban_root, tmp_path):
+        """The footer is computed from the rendered rows: two dash rows give
+        a plural count, and it names no release version."""
+        csv_path = tmp_path / "history.csv"
+        csv_path.write_text(
+            _HISTORY_HEADER + "\n"
+            + _history_row("v1.0.0", "") + "\n"
+            + _history_row("v1.0.1", "") + "\n"
+            + _history_row("v1.1.0", "12") + "\n",
+            encoding="utf-8",
+        )
+        result = _run_show_metrics(csv_path, fixture_kanban_root)
+        assert result.returncode == 0, result.stderr
+        footer_lines = [l for l in result.stdout.splitlines() if l.startswith("Blocked untracked")]
+        assert footer_lines == ["Blocked untracked for 2 RCs"]
+
+
+class TestBlockedUntrackedFooter:
+    """blocked_untracked_footer derives its text from the Blocked cells."""
+
+    @pytest.mark.parametrize(
+        "cells, expected",
+        [
+            (["0", "45"], ""),
+            (["-", "45"], "Blocked untracked for 1 RC"),
+            (["-", "-", "-", "1,234"], "Blocked untracked for 3 RCs"),
+            ([], ""),
+        ],
+    )
+    def test_footer_text(self, cells, expected):
+        from pgai_agent_kanban.lib.metrics.history import blocked_untracked_footer
+
+        assert blocked_untracked_footer(cells) == expected
+
+    def test_render_counts_only_rows_inside_the_last_n_window(self):
+        from pgai_agent_kanban.lib.metrics.common import colors_for
+        from pgai_agent_kanban.lib.metrics.history import render_history_table
+
+        rows = [
+            {"rc": "v1.0.0", "blocked_minutes": ""},
+            {"rc": "v1.0.1", "blocked_minutes": ""},
+            {"rc": "v1.1.0", "blocked_minutes": "3"},
+        ]
+        lines = render_history_table(rows, "demo", 2, colors_for(False))
+        assert lines[-1] == "Blocked untracked for 1 RC"
 
 
 # ---------------------------------------------------------------------------

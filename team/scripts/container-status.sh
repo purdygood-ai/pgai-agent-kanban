@@ -65,6 +65,8 @@ source "${_SCRIPT_DIR}/lib/pp_run_ops.sh"
 source "${_SCRIPT_DIR}/lib/ini_parser.sh"
 # shellcheck source=lib/temp.sh
 source "${_SCRIPT_DIR}/lib/temp.sh"
+# shellcheck source=lib/container_common.sh
+source "${_SCRIPT_DIR}/lib/container_common.sh"
 
 _MODULE="pgai_agent_kanban.container.lifecycle"
 _DEFAULT_NAME="pgai-kanban"
@@ -124,28 +126,6 @@ _refuse_engine() {
     pgai_emit_error_contract "container_status.engine_failed" "${message}" "${3}"
     # CENSUS-ANCHOR: container-status-engine-failed-01
     exit 1
-}
-
-# _first_line FILE -- the first non-blank line of FILE (empty when none).
-_first_line() {
-    [[ -r "$1" ]] || return 0
-    local line
-    while IFS= read -r line || [[ -n "${line}" ]]; do
-        [[ -n "${line//[[:space:]]/}" ]] && { printf '%s\n' "${line}"; return 0; }
-    done < "$1"
-    return 0
-}
-
-# _kv_get KEY TEXT -- the value of the first "KEY=value" line in TEXT.
-_kv_get() {
-    local key="$1" line
-    while IFS= read -r line; do
-        if [[ "${line}" == "${key}="* ]]; then
-            printf '%s\n' "${line#"${key}="}"
-            return 0
-        fi
-    done <<< "$2"
-    return 0
 }
 
 # ---------------------------------------------------------------------------
@@ -223,23 +203,6 @@ docker_use_session_begin "${_SCRIPT_NAME}" "-"
 # Engine queries
 # ---------------------------------------------------------------------------
 
-# _query_state: inspects the container into ${_WORK}/inspect.{out,err,rc}
-# and sets _STATE (running|stopped|absent). A failed query that is not
-# "no such container" is refused.
-_query_state() {
-    local rc=0 prc=0 parsed
-    pgai_docker "${ENGINE}" container inspect "${NAME}" \
-        >"${_WORK}/inspect.out" 2>"${_WORK}/inspect.err" || rc=$?
-    printf '%s\n' "${rc}" > "${_WORK}/inspect.rc"
-    parsed="$(pp_run_ops "${_MODULE}" container-state --name "${NAME}" --input "${_WORK}/inspect.out" \
-        --exit-code "${rc}" --stderr-file "${_WORK}/inspect.err" 2>"${_WORK}/state.err")" || prc=$?
-    if [[ "${prc}" -ne 0 && "${prc}" -ne 3 ]]; then
-        _refuse_engine "the state query for container '${NAME}'" \
-            "$(_first_line "${_WORK}/state.err")" "$(printf '%q info' "${ENGINE}")"
-    fi
-    _STATE="$(_kv_get state "${parsed}")"
-}
-
 # _list_processes: writes the container's process table to ${_WORK}/ps.out.
 # Returns the engine's exit status (stderr in ${_WORK}/ps.err).
 _list_processes() {
@@ -248,7 +211,7 @@ _list_processes() {
     return "${rc}"
 }
 
-_query_state
+container_query_state
 _ps_args=()
 if [[ "${_STATE}" == "running" ]]; then
     if _list_processes; then
@@ -258,10 +221,10 @@ if [[ "${_STATE}" == "running" ]]; then
         # that fails on a container that still runs leaves the scheduler
         # and the sessions unknown.
         cp "${_WORK}/ps.err" "${_WORK}/ps-first.err"
-        _query_state
+        container_query_state
         if [[ "${_STATE}" == "running" ]]; then
             _refuse_engine "listing the processes in container '${NAME}' (to find its scheduler and agent sessions)" \
-                "$(_first_line "${_WORK}/ps-first.err")" \
+                "$(container_first_line "${_WORK}/ps-first.err")" \
                 "$(printf '%q exec %q ps -eo pid=,args=' "${ENGINE}" "${NAME}")"
         fi
     fi
@@ -289,7 +252,7 @@ pp_run_ops "${_MODULE}" status --format "${FORMAT}" --name "${NAME}" \
     >"${_WORK}/report.out" 2>"${_WORK}/report.err" || _report_rc=$?
 
 if [[ "${_report_rc}" -ne 0 && "${_report_rc}" -ne 3 ]]; then
-    _message="${_SCRIPT_NAME}: the status report for container '${NAME}' could not be assembled (${_MODULE} status exited ${_report_rc}): $(_first_line "${_WORK}/report.err" || true). Nothing was changed."
+    _message="${_SCRIPT_NAME}: the status report for container '${NAME}' could not be assembled (${_MODULE} status exited ${_report_rc}): $(container_first_line "${_WORK}/report.err" || true). Nothing was changed."
     _remedy="$(printf 'PYTHONPATH=%q python3 -m %s status --help' "$(pp_pythonpath)" "${_MODULE}")"
     # BLOCK-WORTHY: verification unable to run -- the report cannot be built.
     pgai_emit_error_contract "container_status.report_failed" "${_message}" "${_remedy}"

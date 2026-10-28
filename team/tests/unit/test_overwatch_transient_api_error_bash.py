@@ -54,6 +54,14 @@ Fixtures exercised:
       match under set -euo pipefail.
   (S) The real matcher run 200 times in sequence under set -euo pipefail on
       a span whose signature is not on the last line → zero misses.
+  (X) A block its agent wrote itself (Block Record reason_code
+      agent_unclassified, Needs Human yes, a question in ## Blockers) whose
+      span carries transient words only in the agent's own reply (a file
+      rate_limit.sh, "500 chars") → left exactly as found.
+  (Y) The same block with a provider error line ("API Error: 529 ...") in
+      its span → still requeued to BACKLOG with a ## Transient Retry record.
+  (Z) A block with any other reason code and the same prose span → classed
+      on the whole span, as before: requeued.
 
 All tests run against synthetic environments and never touch the live kanban root.
 """
@@ -255,6 +263,7 @@ def _write_batch_log_with_error(
     *,
     following: str = "",
     record_span: bool = True,
+    span: str | None = None,
 ) -> pathlib.Path:
     """Write a wake batch log whose recorded span for task_dir carries error_text.
 
@@ -262,7 +271,9 @@ def _write_batch_log_with_error(
     and carries a wake preamble before the task's span and ``following``
     (another task's output) after it. The span is recorded as closed in the
     task's dispatch ledger unless record_span is False (no ledger written at
-    all). Returns the batch log path.
+    all). ``span``, when given, is the task's whole span verbatim instead of
+    the default lines wrapped around ``ERROR: <error_text>``. Returns the
+    batch log path.
     """
     global _BATCH_LOG_SEQ
     _BATCH_LOG_SEQ += 1
@@ -271,11 +282,12 @@ def _write_batch_log_with_error(
     batch_log = agents_dir / f"coder-batch-20260101-{_BATCH_LOG_SEQ:06d}.log"
 
     preamble = "[wake] preamble: batch started\n"
-    span = (
-        "Agent started.\nProcessing task...\n"
-        f"ERROR: {error_text}\n"
-        "Agent exited.\n"
-    )
+    if span is None:
+        span = (
+            "Agent started.\nProcessing task...\n"
+            f"ERROR: {error_text}\n"
+            "Agent exited.\n"
+        )
     batch_log.write_text(preamble + span + following, encoding="utf-8")
     offset_start = len(preamble.encode("utf-8"))
     offset_end = offset_start + len(span.encode("utf-8"))
@@ -1605,3 +1617,124 @@ def test_escalation_at_the_ceiling_keeps_the_worktree(tmp_path: pathlib.Path) ->
     assert wt_path.is_dir(), "the escalated task keeps the worktree a human is asked to investigate"
     assert not observations.exists(), "no removal was attempted"
     assert not _actions_rows(proj_dir, "worktree-pruned")
+
+
+# ---------------------------------------------------------------------------
+# (X)-(Z) A block its agent wrote itself is classed on the provider's own
+# error lines only
+# ---------------------------------------------------------------------------
+#
+# An agent that blocks a task records ## Block Record reason_code
+# agent_unclassified, Needs Human yes and its question in ## Blockers. Its
+# span ends with its own final reply, which can carry words the transient
+# signatures also match. Only a provider error line (agent_block_provider_lines
+# in scripts/lib/wake_agent_block_scan.sh) may turn that block into a
+# transient retry; any other reason code is classed on the whole span.
+
+_AGENT_QUESTION = "Merge conflict in team/scripts/lib/rate_limit.sh: which side should win for the retry window?"
+
+# The agent's own final reply: transient signature words, no provider failure.
+_AGENT_PROSE_REPLIES = {
+    "rate_limit_path": ("BLOCKED: git merge reported a conflict in team/scripts/lib/rate_limit.sh; "
+                        "left the feature branch in place for inspection."),
+    "500_chars": ("BLOCKED: requirements doc missing; the summary was cut at 500 chars and the "
+                  "PM ticket is unparseable."),
+}
+
+
+def _build_agent_blocked_task(tasks_root: pathlib.Path, task_id: str,
+                              reason_code: str = "agent_unclassified") -> pathlib.Path:
+    """A BLOCKED task as its agent records a block: a Block Record, Needs Human yes and a question.
+
+    last_blocked_at lies far in the past, so a requeue is never held back by
+    the backoff window.
+    """
+    task_dir = tasks_root / task_id
+    (task_dir / "logs").mkdir(parents=True)
+    (task_dir / "status.md").write_text(
+        "# Status\n\n"
+        f"## Task\n{task_id}\n\n"
+        "## State\nBLOCKED\n\n"
+        "## Summary\nAgent: CODER. Blocked on a merge conflict.\n\n"
+        f"## Blockers\n{_AGENT_QUESTION}\n\n"
+        "## Needs Human\nyes\n\n"
+        "## Block Record\n"
+        f"reason_code: {reason_code}\nowner_role: CODER\nattempts: 0\n"
+        "first_blocked_at: 2026-01-01T10:00:00+00:00\nlast_blocked_at: 2026-01-01T10:00:00+00:00\n"
+        "cooldown_until: none\nevidence: worktree=gone; branch=none; ahead=0; merged=no\nresume: fresh\n",
+        encoding="utf-8",
+    )
+    return task_dir
+
+
+def _run_check_on_agent_block(tmp_path: pathlib.Path, span: str, reason_code: str = "agent_unclassified"):
+    """Run the check over one agent-blocked task whose recorded span is *span*.
+
+    Returns (result, proj_dir, task_dir, status_before).
+    """
+    kanban_root = tmp_path / "kanban"
+    project_name = "test-project-agent-block"
+    task_id = "CODER-20260101-040-agent-block"
+    proj_dir = _build_kanban(kanban_root, project_name)
+    tasks_root = proj_dir / "tasks"
+    task_dir = _build_agent_blocked_task(tasks_root, task_id, reason_code)
+    _build_queue_with_blocked(tasks_root / "queues", task_id)
+    _write_batch_log_with_error(kanban_root, task_dir, "", span=span)
+    before = _read_status(task_dir)
+
+    script = _stub_header(proj_dir) + textwrap.dedent(f"""\
+        set -euo pipefail
+        export KANBAN_ROOT="{kanban_root}"
+        export OVERWATCH_PROJECT="{project_name}"
+        source {_CHECK_TRANSIENT}
+        overwatch_check_transient_api_error
+    """)
+    return run_bash(tmp_path, script), proj_dir, task_dir, before
+
+
+@pytest.mark.parametrize("reply", list(_AGENT_PROSE_REPLIES.values()), ids=list(_AGENT_PROSE_REPLIES))
+def test_agent_block_with_signature_words_only_in_its_reply_is_left_as_found(
+    tmp_path: pathlib.Path, reply: str,
+) -> None:
+    """(X) Transient words in the agent's own reply requeue nothing."""
+    span = f"Agent started.\nWorking on the merge.\n{reply}\n"
+    result, proj_dir, task_dir, before = _run_check_on_agent_block(tmp_path, span)
+
+    assert result.returncode == 0, result.stderr
+    status = _read_status(task_dir)
+    assert status == before, f"the agent's block must be left exactly as found\nstatus:\n{status}\nstderr={result.stderr}"
+    assert _section_body(status, "State") == "BLOCKED", status
+    assert _section_body(status, "Blockers") == _AGENT_QUESTION, "the agent's question must not be overwritten"
+    assert _section_body(status, "Needs Human") == "yes", status
+    assert "## Transient Retry" not in status, status
+    assert "TRANSIENT" not in status, status
+    assert "transient-auto-requeued" not in _action_log(proj_dir), _action_log(proj_dir)
+    assert "provider error line" in result.stderr, result.stderr
+
+
+def test_agent_block_with_a_provider_error_line_is_still_requeued(tmp_path: pathlib.Path) -> None:
+    """(Y) A real provider failure still turns the agent's block into a transient retry."""
+    span = (
+        "Agent started.\n"
+        "API Error: 529 {\"type\":\"error\",\"error\":{\"type\":\"overloaded_error\",\"message\":\"Overloaded\"}}\n"
+        f"{_AGENT_PROSE_REPLIES['rate_limit_path']}\n"
+    )
+    result, proj_dir, task_dir, _before = _run_check_on_agent_block(tmp_path, span)
+
+    assert result.returncode == 0, result.stderr
+    status = _read_status(task_dir)
+    assert _section_body(status, "State") == "BACKLOG", f"status:\n{status}\nstderr={result.stderr}"
+    assert "## Transient Retry" in status, status
+    assert "retry_count: 1" in status, status
+    assert "transient-auto-requeued" in _action_log(proj_dir), _action_log(proj_dir)
+
+
+def test_block_with_another_reason_code_is_classed_on_the_whole_span(tmp_path: pathlib.Path) -> None:
+    """(Z) Only agent_unclassified is narrowed; any other code is classed as before."""
+    span = f"Agent started.\n{_AGENT_PROSE_REPLIES['500_chars']}\n"
+    result, proj_dir, task_dir, _before = _run_check_on_agent_block(tmp_path, span, reason_code="zero_progress")
+
+    assert result.returncode == 0, result.stderr
+    status = _read_status(task_dir)
+    assert _section_body(status, "State") == "BACKLOG", f"status:\n{status}\nstderr={result.stderr}"
+    assert "## Transient Retry" in status, status

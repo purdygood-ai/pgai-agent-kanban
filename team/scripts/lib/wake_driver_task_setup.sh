@@ -35,12 +35,17 @@
 # functions run)
 # -----------------------------------------------------------------------
 #   log() (wake_bootstrap.sh, via wake_common.sh) for the FATAL narration in
-#   setup_project_directories; pp_run_ops (wake_bootstrap.sh) for the two
-#   README readers, which read the field's first value line through
-#   pgai_agent_kanban.lib.md_fields.
+#   setup_project_directories. The two README readers read their section
+#   through read_md_field (md_field.sh, loaded below from beside this file
+#   unless the caller already defines it) and take the field's value: the
+#   first line of the section, trimmed, with a whole-line **bold** or
+#   __bold__ wrapper removed.
 #
 # wake/harness.sh carries its own self-contained copies of these three
 # functions and sources neither this file nor wake_driver.sh.
+
+# shellcheck source=md_field.sh
+declare -F read_md_field >/dev/null || source "$(dirname "${BASH_SOURCE[0]}")/md_field.sh"
 
 # ---------------------------------------------------------------------------
 # setup_project_directories <task_log_dir> <task_artifact_dir>
@@ -56,13 +61,32 @@ setup_project_directories() {
   fi
 }
 
+# --- _wd_readme_field <readme_path> <heading> ---
+# Print the value of a task README's "## <heading>" field: the first line of
+# the section (which ends at the next "##" line, "###" included), trimmed,
+# with a whole-line **bold** or __bold__ wrapper removed; an empty line when
+# the section is empty. Returns non-zero with no output when the heading is
+# absent or the README cannot be read.
+_wd_readme_field() {
+  local value
+  value="$(read_md_field --end-at-subheading "$1" "$2" 2>/dev/null)" || return 1
+  value="${value%%$'\n'*}"
+  value="${value%"${value##*[![:space:]]}"}"
+  if [[ "$value" =~ ^\*\*(.+)\*\*$ || "$value" =~ ^__(.+)__$ ]]; then
+    value="${BASH_REMATCH[1]}"
+    value="${value#"${value%%[![:space:]]*}"}"
+    value="${value%"${value##*[![:space:]]}"}"
+  fi
+  printf '%s\n' "$value"
+}
+
 # --- get_workflow_type_from_readme <readme_path> ---
 # Extract "## Workflow Type" from a task README.
 # Prints the value (release, feature, or document) to stdout.
 # Defaults to "release" when the field is absent or unreadable.
 get_workflow_type_from_readme() {
   local readme="$1" value
-  value="$(pp_run_ops pgai_agent_kanban.lib.md_fields read "$readme" "Workflow Type" 2>/dev/null)" || value=""
+  value="$(_wd_readme_field "$readme" "Workflow Type")" || value=""
   value="${value,,}"
   printf '%s\n' "${value:-release}"
 }
@@ -72,7 +96,7 @@ get_workflow_type_from_readme() {
 # Prints the value to stdout; returns non-zero with no output if field is absent.
 get_source_branch_from_readme() {
   local readme="$1" value
-  value="$(pp_run_ops pgai_agent_kanban.lib.md_fields read "$readme" "Source Branch" 2>/dev/null)" || return 1
+  value="$(_wd_readme_field "$readme" "Source Branch")" || return 1
   [[ -n "$value" && "${value,,}" != "none" ]] || return 1
   printf '%s\n' "$value"
 }

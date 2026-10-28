@@ -11,14 +11,22 @@ to distinguish individual subtypes.
     ├── Refused     — operation was rejected by a policy or guard (e.g. HALT)
     ├── IoError     — underlying I/O failure reading kanban files
     ├── MountPinned — stale worktree path is an active mount target; cannot rm -rf
-    └── CliRefusal  — a verb stopped with the exact stderr text and exit code
-                      its CLI wrapper prints and exits with
+    ├── CliRefusal  — a verb stopped with the exact stderr text and exit code
+    │                 its CLI wrapper prints and exits with
+    └── ContractError — a refusal carrying the dual-channel fields (error,
+                      message, remedy); a module's own refusal family
+                      derives from it and mixes in NotFound / Refused /
+                      IoError for its exit code
+        └── SameDefectRefused (also a Refused) — deposit_intake refused a
+                      bug draft reporting the same defect as a live bug
 
 cli_exit_code(exc) maps any of them to the exit code the ops CLI uses, so
 every surface that reports an ops failure as an exit code agrees with it.
 """
 
 from __future__ import annotations
+
+from pgai_agent_kanban.lib.error_contract import format_error_contract
 
 
 class OpsError(Exception):
@@ -119,6 +127,51 @@ class CliRefusal(OpsError):
         self.exit_code = exit_code
 
 
+class ContractError(OpsError):
+    """An operation that did not happen, carrying the dual-channel fields.
+
+    ``str(exc)`` is the three-line house-shape block
+    (``lib.error_contract.format_error_contract``), so a surface that re-reads
+    refusals from text (``parse_error_contract``) sees the same three fields.
+
+    Attributes:
+        error:   Stable machine key, ``<module>.<reason>``.
+        message: What did not happen and why.
+        remedy:  A command that shows or fixes the cause, runnable as printed.
+    """
+
+    def __init__(self, error: str, message: str, remedy: str) -> None:
+        super().__init__(format_error_contract(error, message, remedy))
+        self.error = error
+        self.message = message
+        self.remedy = remedy
+
+    def contract(self) -> dict[str, str]:
+        """Return ``{"error", "message", "remedy"}`` for a JSON surface."""
+        return {"error": self.error, "message": self.message, "remedy": self.remedy}
+
+
+class SameDefectRefused(ContractError, Refused):
+    """deposit_intake refused a bug draft that reports the same defect as a
+    live bug (status open, running or needs-operator); nothing was written.
+
+    The one Refused with an exit code of its own (``SAME_DEFECT_EXIT_CODE``),
+    so intake.sh and the operator API tell a same-defect refusal apart from a
+    routing or name refusal.
+
+    Attributes (beyond ContractError's):
+        existing_id: The live bug's ID, ``BUG-NNNN``.
+    """
+
+    def __init__(self, error: str, message: str, remedy: str, existing_id: str) -> None:
+        super().__init__(error, message, remedy)
+        self.existing_id = existing_id
+
+
+# Exit code for SameDefectRefused: intake.sh exits with it.
+SAME_DEFECT_EXIT_CODE = 5
+
+
 # Text an OpsError carries when deposit_intake refuses to overwrite an
 # existing target; the one OpsError message that selects its own exit code.
 NO_CLOBBER_MARKER = "already exists (no clobber)"
@@ -133,6 +186,8 @@ def cli_exit_code(exc: OpsError) -> int:
     the CLI wrapper exits with.
 
     Mapping:
+        SameDefectRefused -> 5  (deposit_intake: a bug draft reporting the
+                                 same defect as a live bug)
         Ambiguous   -> 2  (key prefix matched more than one item)
         NotFound    -> 3  (no item matched)
         Refused     -> 2  (a guard rejected the operation)
@@ -145,8 +200,10 @@ def cli_exit_code(exc: OpsError) -> int:
         exc: The exception an ops function raised.
 
     Returns:
-        The exit code, 1 through 4.
+        The exit code, 1 through 5.
     """
+    if isinstance(exc, SameDefectRefused):
+        return SAME_DEFECT_EXIT_CODE
     if isinstance(exc, (Ambiguous, Refused)):
         return 2
     if isinstance(exc, NotFound):

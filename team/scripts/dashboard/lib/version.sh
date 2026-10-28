@@ -11,7 +11,8 @@
 #
 #       git -C <repo_root> tag --merged <remote>/<branch_prefix>main | sort -V | tail -1
 #
-#     <remote> defaults to origin and <branch_prefix> to none, so the
+#     <remote> defaults to PP_GIT_REMOTE_NAME_DEFAULT (origin, defined in
+#     scripts/lib/git_remote_default.sh) and <branch_prefix> to none, so the
 #     one-argument form reads origin/main and bare vX.Y.Z tags.
 #
 #     Best-effort: returns empty string on any failure (no git repo, no tags,
@@ -39,10 +40,11 @@
 #                                               git_remote_name and branch_prefix
 #                                               (<kanban_root>/projects/pgai-agent-kanban/
 #                                               project.cfg, via project_paths.sh when the
-#                                               caller has sourced it); origin and no
-#                                               prefix without that file or without
-#                                               project_paths.sh; an invalid
-#                                               git_remote_name skips the tier.
+#                                               caller has sourced it); the default
+#                                               remote and no prefix without that file
+#                                               or without project_paths.sh; an invalid
+#                                               git_remote_name or branch_prefix skips
+#                                               the tier.
 #       Tier 4: last_released argument        — caller-supplied value from data.sh's
 #                                               LAST_RELEASED field; used when no
 #                                               VERSION file and no git tags are
@@ -67,16 +69,25 @@
 [[ -n "${_PGAI_DASHBOARD_VERSION_SH_LOADED:-}" ]] && return 0
 _PGAI_DASHBOARD_VERSION_SH_LOADED=1
 
+# The remote both functions fall back to is PP_GIT_REMOTE_NAME_DEFAULT, from
+# its one bash definition in scripts/lib/git_remote_default.sh. project_paths.sh
+# loads it too; when that library has not been sourced, the constant file is
+# sourced here on its own, so this file never needs all of project_paths.sh.
+if [[ -z "${PP_GIT_REMOTE_NAME_DEFAULT:-}" ]]; then
+    # shellcheck source=../../lib/git_remote_default.sh
+    source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../../lib/git_remote_default.sh"
+fi
+
 # get_latest_released_tag <repo_root> [<remote>] [<branch_prefix>]
 #
 # Returns the highest <branch_prefix>vX.Y.Z tag (prefix stripped) merged into
 # <remote>/<branch_prefix>main using a reachability-independent query.
-# <remote> defaults to origin, <branch_prefix> to none. Returns empty string
+# <remote> defaults to PP_GIT_REMOTE_NAME_DEFAULT, <branch_prefix> to none. Returns empty string
 # on any failure. Never returns a describe commit-offset string. Never fails
 # the caller.
 get_latest_released_tag() {
     local repo_root="${1:-}"
-    local remote="${2:-origin}"
+    local remote="${2:-$PP_GIT_REMOTE_NAME_DEFAULT}"
     local prefix="${3:-}"
 
     if [[ -z "$repo_root" ]] || [[ ! -d "${repo_root}/.git" ]]; then
@@ -102,26 +113,21 @@ PGAI_DASHBOARD_FRAMEWORK_PROJECT="pgai-agent-kanban"
 #
 # Echoes "<remote> <branch_prefix>" for get_latest_released_tag: the
 # framework project's git_remote_name (pp_git_remote_name --quiet) and
-# branch_prefix (one surrounding double quote stripped) read from
-# <kanban_root>/projects/pgai-agent-kanban/project.cfg. "origin" and no
-# prefix when that file is absent or project_paths.sh is not loaded.
-# Returns 1 (no output) when git_remote_name is invalid. Local file reads
-# only.
+# branch_prefix (pp_branch_prefix) read from
+# <kanban_root>/projects/pgai-agent-kanban/project.cfg. The default remote
+# and no prefix when that file is absent or project_paths.sh is not loaded.
+# Returns 1 (no output) when git_remote_name or branch_prefix is invalid.
+# Local file reads only.
 _pgai_framework_release_refs() {
     local kanban_root="${1:-}"
     local name="$PGAI_DASHBOARD_FRAMEWORK_PROJECT"
     if ! declare -F pp_git_remote_name >/dev/null 2>&1 || [[ -z "$kanban_root" ]]; then
-        echo "origin "
+        echo "${PP_GIT_REMOTE_NAME_DEFAULT} "
         return 0
     fi
-    local remote cfg_file prefix=""
+    local remote prefix
     remote="$(KANBAN_ROOT="$kanban_root" pp_git_remote_name --quiet "$name" 2>/dev/null)" || return 1
-    cfg_file="$(_pp_project_cfg_file "${kanban_root}/projects/${name}")"
-    if [[ -n "$cfg_file" ]]; then
-        prefix="$(_pp_read_cfg_key "$cfg_file" project branch_prefix "" 2>/dev/null || true)"
-        prefix="${prefix%\"}"
-        prefix="${prefix#\"}"
-    fi
+    prefix="$(KANBAN_ROOT="$kanban_root" pp_branch_prefix "$name" 2>/dev/null)" || return 1
     echo "${remote} ${prefix}"
 }
 

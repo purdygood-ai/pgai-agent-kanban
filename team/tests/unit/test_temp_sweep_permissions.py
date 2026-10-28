@@ -44,6 +44,7 @@ temp root, exactly the failure mode under test here.
 
 from __future__ import annotations
 
+import json
 import os
 import pathlib
 import stat
@@ -413,3 +414,52 @@ exit 0
     assert result.returncode == 0
     assert "[gated-runner] scratch_sweep: OK" in result.stdout, result.stdout
     assert not tests_root.exists()
+
+
+def test_instance_check_records_each_sweep_leftover_as_its_own_finding(
+    tmp_path: pathlib.Path,
+) -> None:
+    """The runners' call shape: `gated_runner_run_instance_check
+    "scratch_sweep" PGAI_TEMP_CLEANUP_LEFTOVERS
+    gated_runner_scratch_sweep_finding -- pgai_temp_cleanup_tests`. With
+    chmod shadowed so the read-only leftover survives, the sweep fails, the
+    caller still reaches its own exit 0, and the leftover is one finding
+    naming its path with a remedy that clears it."""
+    sandbox = tmp_path / "sandbox"
+    tests_root = sandbox / "tests"
+    leftover = tests_root / "stuck"
+    leftover.mkdir(parents=True)
+    (leftover / "file.txt").write_text("")
+    leftover.chmod(0o555)
+
+    script = f"""
+set -euo pipefail
+chmod() {{ return 0; }}
+source {_TEMP_LIB}
+source {_GATED_RUNNER_LIB}
+gated_runner_run_instance_check "scratch_sweep" PGAI_TEMP_CLEANUP_LEFTOVERS \\
+  gated_runner_scratch_sweep_finding -- pgai_temp_cleanup_tests
+printf 'FINDING=%s\\n' "${{GATED_RUNNER_FINDINGS[@]}}"
+exit 0
+"""
+
+    try:
+        result = run_bash(
+            tmp_path,
+            script,
+            extra_env={"PGAI_AGENT_KANBAN_TEMP_DIR": str(sandbox)},
+        )
+    finally:
+        _restore_writable(tests_root)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    findings = [
+        json.loads(line.removeprefix("FINDING="))
+        for line in result.stdout.splitlines()
+        if line.startswith("FINDING=")
+    ]
+    assert [(f["lint"], f["kind"], f["path"]) for f in findings] == [
+        ("scratch_sweep", "scratch-leftover", str(leftover))
+    ], result.stdout
+    assert f"rm -rf -- {leftover}" in findings[0]["remedy"], findings[0]
+    assert "scratch_sweep: quality-class finding(s) (1 per-instance)" in result.stderr

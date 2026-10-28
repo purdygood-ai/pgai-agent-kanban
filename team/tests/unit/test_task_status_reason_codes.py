@@ -5,9 +5,11 @@ The status-writer tool keeps a task's ``## Block Record`` in step with its
 state:
 
   - a BLOCKED write records the block, with ``--reason-code`` from the
-    closed agent list (``agent_unclassified`` when omitted) and owner_role
-    taken from the task's ``## Role``; ``agent_operator_data_action``
-    carries typed ``--action-args`` in a parseable evidence line;
+    closed agent list of three codes (``agent_unclassified`` when omitted,
+    ``agent_transient_provider_error`` for a transient provider error) and
+    owner_role taken from the task's ``## Role``;
+    ``agent_operator_data_action`` carries typed ``--action-args`` in a
+    parseable evidence line;
   - an unknown code, malformed or unknown action arguments, or the flags in
     a combination that does not fit, refuse dual-channel and leave status.md
     byte-identical;
@@ -29,6 +31,7 @@ from __future__ import annotations
 
 import dataclasses
 import pathlib
+import re
 import subprocess
 
 import pytest
@@ -50,6 +53,9 @@ _TEAM_DIR = pathlib.Path(__file__).resolve().parent.parent.parent
 _WRAPPER = _TEAM_DIR / "scripts" / "task-status.sh"
 _PROJECT = "demo"
 _TASK_ID = "CODER-20260101-001-example-task"
+
+# The closed agent list, written out by hand in the order --help prints it.
+_AGENT_CODES = ("agent_operator_data_action", "agent_transient_provider_error", "agent_unclassified")
 
 _ACTION_ARGS = [
     "verb=restamp-fixed-in",
@@ -226,6 +232,20 @@ def test_blocked_without_reason_code_records_agent_unclassified(tmp_path: pathli
     assert record.evidence == "none"
 
 
+def test_transient_provider_error_block_records_its_code(tmp_path: pathlib.Path) -> None:
+    sb = _make_sandbox(tmp_path, readme_role="CM")
+    result = sb.run(
+        "--state", "BLOCKED", "--needs-human", "no", "--reason-code", "agent_transient_provider_error",
+        "--blockers", "The provider aborted the model call twice before the release ran.",
+    )
+    assert result.returncode == 0, result.stderr
+    assert "reason_code: agent_transient_provider_error\n" in sb.status.read_text(encoding="utf-8")
+    record = load_block_record(sb.status)
+    assert record is not None
+    assert (record.reason_code, record.owner_role, record.evidence) == ("agent_transient_provider_error", "CM", "none")
+    assert "Block Record written: reason_code=agent_transient_provider_error" in result.stdout
+
+
 def test_blocked_rewrite_without_code_keeps_existing_record(tmp_path: pathlib.Path) -> None:
     sb = _make_sandbox(tmp_path, state="BLOCKED", record_between=True)
     result = sb.run("--state", "BLOCKED", "--summary", "Still blocked.")
@@ -264,6 +284,7 @@ def test_unknown_reason_code_refuses_and_writes_nothing(tmp_path: pathlib.Path) 
     result = sb.run("--state", "BLOCKED", "--reason-code", "agent_made_up")
     _assert_refused_unchanged(result, before, sb, "task-status.unknown-reason-code")
     assert "agent_unclassified" in result.stderr  # the remedy names a real code
+    assert f"({', '.join(_AGENT_CODES)})" in result.stderr, "the refusal names all three accepted codes"
 
 
 def test_wake_reason_code_is_not_an_agent_code(tmp_path: pathlib.Path) -> None:
@@ -399,3 +420,13 @@ def test_help_documents_reason_code_and_action_args(tmp_path: pathlib.Path) -> N
     assert "--action-args" in result.stdout
     assert "agent_operator_data_action" in result.stdout
     assert "agent_unclassified" in result.stdout
+
+
+def test_help_lists_exactly_the_three_agent_reason_codes(tmp_path: pathlib.Path) -> None:
+    sb = _make_sandbox(tmp_path)
+    env = build_scrubbed_env(home_dir=sb.root / "home")
+    result = subprocess.run(["bash", str(_WRAPPER), "--help"], capture_output=True, text=True, env=env, timeout=60)
+    assert result.returncode == 0, result.stderr
+    flat = " ".join(result.stdout.split())  # argparse wraps the help text
+    assert f"closed agent list ({', '.join(_AGENT_CODES)})" in flat, flat
+    assert sorted(set(re.findall(r"\bagent_[a-z_]+", flat))) == list(_AGENT_CODES)

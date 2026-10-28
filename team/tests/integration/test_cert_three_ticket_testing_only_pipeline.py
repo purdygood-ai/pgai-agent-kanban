@@ -79,7 +79,7 @@ _WORKFLOW_PLUGINS = ["release", "document", "testing-only"]
 
 def _build_testing_only_kanban_root(
     parent: pathlib.Path,
-    project_name: str = "cert_proj",
+    project_name: str = "cert-proj",
     source_branch: str = "rc/v1.22.4",
 ) -> pathlib.Path:
     """Build a minimal kanban root for a testing-only project.
@@ -324,7 +324,7 @@ def _run_pm_materialize(
 
 def _build_harness_kanban_root(
     parent: pathlib.Path,
-    project_name: str = "cert_proj",
+    project_name: str = "cert-proj",
     source_branch: str = "rc/v1.22.4",
 ) -> pathlib.Path:
     """Build a kanban root configured for the harness wake provider.
@@ -496,11 +496,11 @@ class TestThreeTicketWakeDispatchClosure:
         """
         source_branch = "rc/v1.22.4"
         root = _build_harness_kanban_root(tmp_path, source_branch=source_branch)
-        proj = root / "projects" / "cert_proj"
+        proj = root / "projects" / "cert-proj"
         req_path = proj / "requirements" / "v1.0.0-three-ticket-testing-run.md"
 
         plan = _build_three_tester_plan(
-            project_name="cert_proj",
+            project_name="cert-proj",
             source_branch=source_branch,
             requirements_path=str(req_path),
         )
@@ -573,11 +573,11 @@ class TestThreeTicketWakeDispatchClosure:
         """
         source_branch = "rc/v1.22.4"
         root = _build_harness_kanban_root(tmp_path, source_branch=source_branch)
-        proj = root / "projects" / "cert_proj"
+        proj = root / "projects" / "cert-proj"
         req_path = proj / "requirements" / "v1.0.0-three-ticket-testing-run.md"
 
         plan = _build_three_tester_plan(
-            project_name="cert_proj",
+            project_name="cert-proj",
             source_branch=source_branch,
             requirements_path=str(req_path),
         )
@@ -645,11 +645,11 @@ class TestThreeTicketWakeDispatchClosure:
         """
         source_branch = "rc/v1.22.4"
         root = _build_harness_kanban_root(tmp_path, source_branch=source_branch)
-        proj = root / "projects" / "cert_proj"
+        proj = root / "projects" / "cert-proj"
         req_path = proj / "requirements" / "v1.0.0-three-ticket-testing-run.md"
 
         plan = _build_three_tester_plan(
-            project_name="cert_proj",
+            project_name="cert-proj",
             source_branch=source_branch,
             requirements_path=str(req_path),
         )

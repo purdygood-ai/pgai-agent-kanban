@@ -18,7 +18,7 @@ process:
       _max_rows
     pp_tasks_dir, pp_bugs_dir, ...,    <kanban_root>/projects/<name>/...
       pp_queue_path, pp_release_state  (string concatenation, as the bash does)
-    release_state_active_rc            cm.read_state_field.read_state_section
+    release_state_active_rc            task_status.read_section and first_value_line
     pp_last_released_version           lib.released_version.last_released_version
     column_render_defer_multi_line     lib.defer_posture.resolve_defer_posture and
                                        dashboard.status_line.deferred_bug_ids
@@ -46,12 +46,12 @@ from __future__ import annotations
 import os
 import pathlib
 import re
-from typing import Mapping, Optional
+from typing import Iterable, Mapping, Optional
 
 from pgai_agent_kanban.dashboard.column_render.board_snapshot import BOARD_COLUMNS, column_env_suffix
 from pgai_agent_kanban.dashboard.column_render.multi import sources_from_env
 
-__all__ = ["BoardGatherUnavailable", "gather_board_env", "gather_board_sources"]
+__all__ = ["BoardGatherUnavailable", "gather_board_env", "gather_board_sources", "requirements_last_released"]
 
 #: The field separator of a deferral-info line (``DFS_SEP`` in defer_scope.sh).
 _DFS_SEP = "\x1f"
@@ -77,13 +77,21 @@ def _gray_fallback() -> str:
 
 
 def _active_rc(release_state: pathlib.Path) -> str:
-    """``release_state_active_rc <file> none``: a vX.Y.Z version, else ``none``."""
-    from pgai_agent_kanban.cm.read_state_field import read_state_section
+    """``release_state_active_rc <file> none``: a vX.Y.Z version, else ``none``.
+
+    The section is read the release-state way (``exact_heading`` and
+    ``comments``, as ``cm/read_state_field`` reads it) and its value taken
+    by ``first_value_line``; an absent or unreadable file reads as ``none``.
+    """
+    from pgai_agent_kanban.task_status import first_value_line, read_section
 
     try:
-        value = read_state_section(str(release_state), "Active RC") or ""
+        body = read_section(
+            release_state.read_text(encoding="utf-8"), "Active RC", exact_heading=True, comments=True
+        )
     except (OSError, UnicodeDecodeError, ValueError):
-        value = ""
+        body = None
+    value = first_value_line(body) if body else ""
     value = "".join(value.split())
     return value if _VERSION_RE.fullmatch(value) else "none"
 
@@ -97,6 +105,18 @@ def _last_released(kanban_root: pathlib.Path, project: str) -> str:
     except (OSError, UnicodeDecodeError, ValueError):
         return "none"
     return "none" if not value or value == "v0.0.0" else value
+
+
+def requirements_last_released(kanban_root: "pathlib.Path | str", project: str) -> str:
+    """The last release the requirements pane classifies *project*'s requirements against.
+
+    :func:`_last_released` -- the git-tag reader -- with ``none`` read as
+    ``""``, the value ``multi.sources_from_env`` hands the pane.  GET /board
+    classifies its REQUIREMENTS column against this value, so a requirement
+    has one status on the board and on the pane.
+    """
+    value = _last_released(pathlib.Path(kanban_root), project)
+    return "" if value == "none" else value
 
 
 def _defer_line(kanban_root: pathlib.Path, project: str, bugs_dir: str) -> str:
@@ -134,14 +154,19 @@ def gather_board_env(
     *,
     dashboard_max_rows: str = "",
     environ: Optional[Mapping[str, str]] = None,
+    column_types: Optional[Iterable[str]] = None,
 ) -> dict:
     """Return the environment mapping ``column_render_gather_board_multi`` exports.
 
     *dashboard_max_rows* is the caller's ``DASHBOARD_MAX_ROWS`` (empty when
     unset; ``20`` then applies); the deferral glyphs are taken from
     *environ* (``GLYPH_DEFERRED_BUG`` / ``GLYPH_DEFER_WARNING``, which the
-    bash caller exports from status_glyphs.sh).  Raises
-    :class:`BoardGatherUnavailable` as the module docstring describes.
+    bash caller exports from status_glyphs.sh).  *column_types* limits the
+    column-specific lists to those board columns (default: all eight), so
+    a caller rendering one column reads only what that column needs -- the
+    requirements column's last release, which may run ``git``, is read only
+    when that column is asked for.  Raises :class:`BoardGatherUnavailable`
+    as the module docstring describes.
     """
     from pgai_agent_kanban.ops.projects import dashboard_registry_rows
 
@@ -164,7 +189,10 @@ def gather_board_env(
         "GLYPH_DEFERRED_BUG": env_in.get("GLYPH_DEFERRED_BUG", ""),
         "GLYPH_DEFER_WARNING": env_in.get("GLYPH_DEFER_WARNING", ""),
     }
+    wanted = None if column_types is None else frozenset(column_types)
     for _subcommand, column_type in BOARD_COLUMNS:
+        if wanted is not None and column_type not in wanted:
+            continue
         sfx = column_env_suffix(column_type)
         input_dirs, backlog_files, defer_info = [], [], []
         active_rcs, last_released = [], []
@@ -198,10 +226,19 @@ def gather_board_sources(
     *,
     dashboard_max_rows: str = "",
     environ: Optional[Mapping[str, str]] = None,
+    column_types: Optional[Iterable[str]] = None,
 ) -> dict:
-    """Map every board column type to its per-project ``ProjectSource`` list (registry order)."""
-    env = gather_board_env(kanban_root, dashboard_max_rows=dashboard_max_rows, environ=environ)
+    """Map each board column type to its per-project ``ProjectSource`` list (registry order).
+
+    Every board column by default; only *column_types* when given (see
+    :func:`gather_board_env`).
+    """
+    env = gather_board_env(
+        kanban_root, dashboard_max_rows=dashboard_max_rows, environ=environ, column_types=column_types,
+    )
+    wanted = None if column_types is None else frozenset(column_types)
     return {
         column_type: sources_from_env(env, column_env_suffix(column_type))
         for _subcommand, column_type in BOARD_COLUMNS
+        if wanted is None or column_type in wanted
     }

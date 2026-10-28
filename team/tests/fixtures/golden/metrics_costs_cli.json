@@ -75,7 +75,7 @@
       "stderr": "ERROR: --month requires YYYY-MM argument\n",
       "stdout": ""
     },
-    "cost month no pricing": {
+    "cost month no dev tree": {
       "exit_code": 0,
       "stderr": "WARNING: token_pricing.json not found; subscription comparison unavailable.\n",
       "stdout": "=== Token Usage: 2026-05 — quiet ===\nDays with activity: 1 / 31\nRCs shipped:        0\nTotal invocations:  1\n\nToken totals:\n  Input (new):                          500 tokens\n  Cache writes:                           0 tokens\n  Cache reads:                            0 tokens\n  Output:                               100 tokens\n\nBy agent (cost share):\n  PM      $0.05 (100%)  — 1 invocations/day avg\n\nBy model:\n  claude-sonnet-4-6            $0.05 (100%)\n\nTotal cost:         $0.05\nDaily average:      $0.05\nProjected monthly:  $1.50 (extrapolated from observed days)\n\n\n--- New metrics surface (per-RC rollup + streaming) ---\n  metrics-report.sh --rc <version>   per-RC JSON rollup\n  metrics-report.sh --csv             cumulative RC history CSV\n  metrics-report.sh --format jsonl    JSON Lines for streaming\n  metrics-report.sh --tail            live-tail RC close events\n  metrics-report.sh --help            full usage\n"
@@ -178,17 +178,17 @@
     "show all projects": {
       "exit_code": 0,
       "stderr": "",
-      "stdout": "=== RC Metrics: demo (last 10) ===\n\nRC           Wall        Blocked      Input     Output   Cache Read   Cache Write  Tasks\nv1.0.0       --                -      1,000        500            0             0      3\nv1.1.0       95                0    120,000     30,000      400,000         8,000      2\nv1.2.0       120.5            45  1,234,567     32,500    3,400,000        10,000      5\nv0.9.0       10            1,234         10          5           --            --      1\nBlocked tracked from v2.24.0\nNo data\n=== RC Metrics: fresh ===\n\n  (no releases yet)\n\n"
+      "stdout": "=== RC Metrics: demo (last 10) ===\n\nRC           Wall        Blocked      Input     Output   Cache Read   Cache Write  Tasks\nv1.0.0       --                -      1,000        500            0             0      3\nv1.1.0       95                0    120,000     30,000      400,000         8,000      2\nv1.2.0       120.5            45  1,234,567     32,500    3,400,000        10,000      5\nv0.9.0       10            1,234         10          5           --            --      1\nBlocked untracked for 1 RC\nNo data\n=== RC Metrics: fresh ===\n\n  (no releases yet)\n\n"
     },
     "show all projects color": {
       "exit_code": 0,
       "stderr": "",
-      "stdout": "\u001b[0;36m\u001b[1m=== RC Metrics: demo (last 10) ===\u001b[0m\n\n\u001b[1mRC           Wall        Blocked      Input     Output   Cache Read   Cache Write  Tasks\u001b[0m\nv1.0.0       --                -      1,000        500            0             0      3\nv1.1.0       95                0    120,000     30,000      400,000         8,000      2\nv1.2.0       120.5            45  1,234,567     32,500    3,400,000        10,000      5\nv0.9.0       10            1,234         10          5           --            --      1\n\u001b[2mBlocked tracked from v2.24.0\u001b[0m\nNo data\n\u001b[0;36m\u001b[1m=== RC Metrics: fresh ===\u001b[0m\n\n  \u001b[2m(no releases yet)\u001b[0m\n\n"
+      "stdout": "\u001b[0;36m\u001b[1m=== RC Metrics: demo (last 10) ===\u001b[0m\n\n\u001b[1mRC           Wall        Blocked      Input     Output   Cache Read   Cache Write  Tasks\u001b[0m\nv1.0.0       --                -      1,000        500            0             0      3\nv1.1.0       95                0    120,000     30,000      400,000         8,000      2\nv1.2.0       120.5            45  1,234,567     32,500    3,400,000        10,000      5\nv0.9.0       10            1,234         10          5           --            --      1\n\u001b[2mBlocked untracked for 1 RC\u001b[0m\nNo data\n\u001b[0;36m\u001b[1m=== RC Metrics: fresh ===\u001b[0m\n\n  \u001b[2m(no releases yet)\u001b[0m\n\n"
     },
     "show dumb term": {
       "exit_code": 0,
       "stderr": "",
-      "stdout": "=== RC Metrics: demo (last 10) ===\n\nRC           Wall        Blocked      Input     Output   Cache Read   Cache Write  Tasks\nv1.0.0       --                -      1,000        500            0             0      3\nv1.1.0       95                0    120,000     30,000      400,000         8,000      2\nv1.2.0       120.5            45  1,234,567     32,500    3,400,000        10,000      5\nv0.9.0       10            1,234         10          5           --            --      1\nBlocked tracked from v2.24.0\n"
+      "stdout": "=== RC Metrics: demo (last 10) ===\n\nRC           Wall        Blocked      Input     Output   Cache Read   Cache Write  Tasks\nv1.0.0       --                -      1,000        500            0             0      3\nv1.1.0       95                0    120,000     30,000      400,000         8,000      2\nv1.2.0       120.5            45  1,234,567     32,500    3,400,000        10,000      5\nv0.9.0       10            1,234         10          5           --            --      1\nBlocked untracked for 1 RC\n"
     },
     "show fresh": {
       "exit_code": 0,
@@ -218,7 +218,7 @@
     "show kanban root flag": {
       "exit_code": 0,
       "stderr": "",
-      "stdout": "=== RC Metrics: demo (last 10) ===\n\nRC           Wall        Blocked      Input     Output   Cache Read   Cache Write  Tasks\nv1.0.0       --                -      1,000        500            0             0      3\nv1.1.0       95                0    120,000     30,000      400,000         8,000      2\nv1.2.0       120.5            45  1,234,567     32,500    3,400,000        10,000      5\nv0.9.0       10            1,234         10          5           --            --      1\nBlocked tracked from v2.24.0\n"
+      "stdout": "=== RC Metrics: demo (last 10) ===\n\nRC           Wall        Blocked      Input     Output   Cache Read   Cache Write  Tasks\nv1.0.0       --                -      1,000        500            0             0      3\nv1.1.0       95                0    120,000     30,000      400,000         8,000      2\nv1.2.0       120.5            45  1,234,567     32,500    3,400,000        10,000      5\nv0.9.0       10            1,234         10          5           --            --      1\nBlocked untracked for 1 RC\n"
     },
     "show last": {
       "exit_code": 0,
@@ -228,7 +228,7 @@
     "show no color env": {
       "exit_code": 0,
       "stderr": "",
-      "stdout": "=== RC Metrics: demo (last 10) ===\n\nRC           Wall        Blocked      Input     Output   Cache Read   Cache Write  Tasks\nv1.0.0       --                -      1,000        500            0             0      3\nv1.1.0       95                0    120,000     30,000      400,000         8,000      2\nv1.2.0       120.5            45  1,234,567     32,500    3,400,000        10,000      5\nv0.9.0       10            1,234         10          5           --            --      1\nBlocked tracked from v2.24.0\n"
+      "stdout": "=== RC Metrics: demo (last 10) ===\n\nRC           Wall        Blocked      Input     Output   Cache Read   Cache Write  Tasks\nv1.0.0       --                -      1,000        500            0             0      3\nv1.1.0       95                0    120,000     30,000      400,000         8,000      2\nv1.2.0       120.5            45  1,234,567     32,500    3,400,000        10,000      5\nv0.9.0       10            1,234         10          5           --            --      1\nBlocked untracked for 1 RC\n"
     },
     "show per agent": {
       "exit_code": 0,
@@ -253,12 +253,12 @@
     "show project": {
       "exit_code": 0,
       "stderr": "",
-      "stdout": "=== RC Metrics: demo (last 10) ===\n\nRC           Wall        Blocked      Input     Output   Cache Read   Cache Write  Tasks\nv1.0.0       --                -      1,000        500            0             0      3\nv1.1.0       95                0    120,000     30,000      400,000         8,000      2\nv1.2.0       120.5            45  1,234,567     32,500    3,400,000        10,000      5\nv0.9.0       10            1,234         10          5           --            --      1\nBlocked tracked from v2.24.0\n"
+      "stdout": "=== RC Metrics: demo (last 10) ===\n\nRC           Wall        Blocked      Input     Output   Cache Read   Cache Write  Tasks\nv1.0.0       --                -      1,000        500            0             0      3\nv1.1.0       95                0    120,000     30,000      400,000         8,000      2\nv1.2.0       120.5            45  1,234,567     32,500    3,400,000        10,000      5\nv0.9.0       10            1,234         10          5           --            --      1\nBlocked untracked for 1 RC\n"
     },
     "show project color": {
       "exit_code": 0,
       "stderr": "",
-      "stdout": "\u001b[0;36m\u001b[1m=== RC Metrics: demo (last 10) ===\u001b[0m\n\n\u001b[1mRC           Wall        Blocked      Input     Output   Cache Read   Cache Write  Tasks\u001b[0m\nv1.0.0       --                -      1,000        500            0             0      3\nv1.1.0       95                0    120,000     30,000      400,000         8,000      2\nv1.2.0       120.5            45  1,234,567     32,500    3,400,000        10,000      5\nv0.9.0       10            1,234         10          5           --            --      1\n\u001b[2mBlocked tracked from v2.24.0\u001b[0m\n"
+      "stdout": "\u001b[0;36m\u001b[1m=== RC Metrics: demo (last 10) ===\u001b[0m\n\n\u001b[1mRC           Wall        Blocked      Input     Output   Cache Read   Cache Write  Tasks\u001b[0m\nv1.0.0       --                -      1,000        500            0             0      3\nv1.1.0       95                0    120,000     30,000      400,000         8,000      2\nv1.2.0       120.5            45  1,234,567     32,500    3,400,000        10,000      5\nv0.9.0       10            1,234         10          5           --            --      1\n\u001b[2mBlocked untracked for 1 RC\u001b[0m\n"
     },
     "show quiet": {
       "exit_code": 0,
@@ -284,6 +284,18 @@
           "status": 200
         },
         "reason": "The route passed per_agent=true to show-metrics.sh as --per_agent, which the script refused as an unknown argument (HTTP 500). The route now calls show_metrics(per_agent=True), the --per-agent view its own documentation and docs/operator-api.md describe."
+      },
+      "GET /costs no dev tree": {
+        "outcome": {
+          "status": 200,
+          "body": {
+            "exit_code": 0,
+            "stdout": "=== Token Usage: 2026-05 — quiet ===\nDays with activity: 1 / 31\nRCs shipped:        0\nTotal invocations:  1\n\nToken totals:\n  Input (new):                          500 tokens\n  Cache writes:                           0 tokens\n  Cache reads:                            0 tokens\n  Output:                               100 tokens\n\nBy agent (cost share):\n  PM      $0.05 (100%)  — 1 invocations/day avg\n\nBy model:\n  claude-sonnet-4-6            $0.05 (100%)\n\nTotal cost:         $0.05\nDaily average:      $0.05\nProjected monthly:  $1.50 (extrapolated from observed days)\n\nSubscription comparison:\n  Anthropic Pro programmatic credit ($20.00):   $18 surplus\n  Anthropic Max programmatic credit ($200.00):  $198 surplus\n  Anthropic API direct (pay-as-you-go):           $1.50\n  Codex via ChatGPT Plus ($20.00):              $18 surplus\n  Codex via ChatGPT Pro ($200.00):               $198 surplus\n\nCheapest if mixed:\n  Max subscription + API overflow: $200.00 (costs $198 MORE vs. pure API at low usage)\n\n--- New metrics surface (per-RC rollup + streaming) ---\n  metrics-report.sh --rc <version>   per-RC JSON rollup\n  metrics-report.sh --csv             cumulative RC history CSV\n  metrics-report.sh --format jsonl    JSON Lines for streaming\n  metrics-report.sh --tail            live-tail RC close events\n  metrics-report.sh --help            full usage\n",
+            "stderr": "",
+            "warnings": []
+          }
+        },
+        "reason": "The project names no dev_tree_path. The report used to look for token_pricing.json only under a project's dev tree and <kanban root>/team/scripts/lib/, so it left the subscription comparison out and warned. It now reads the kanban's own table, <kanban root>/scripts/lib/token_pricing.json (the one the aggregator prices with), so every project gets the comparison and no warning."
       }
     },
     "cli": {
@@ -294,6 +306,22 @@
           "stderr": ""
         },
         "reason": "--help printed the '#!' shebang as its first help line ('!/usr/bin/env bash'). The header extraction now drops it, so help opens on the script name and the fixed line-count slice reaches one header line further. The slice now ends at the last line of the usage header, so help no longer carries the implementation comments that follow it in the script body (a shellcheck directive, divider rules and a 'Resolve script directory' note)."
+      },
+      "cost month no dev tree": {
+        "outcome": {
+          "exit_code": 0,
+          "stdout": "=== Token Usage: 2026-05 — quiet ===\nDays with activity: 1 / 31\nRCs shipped:        0\nTotal invocations:  1\n\nToken totals:\n  Input (new):                          500 tokens\n  Cache writes:                           0 tokens\n  Cache reads:                            0 tokens\n  Output:                               100 tokens\n\nBy agent (cost share):\n  PM      $0.05 (100%)  — 1 invocations/day avg\n\nBy model:\n  claude-sonnet-4-6            $0.05 (100%)\n\nTotal cost:         $0.05\nDaily average:      $0.05\nProjected monthly:  $1.50 (extrapolated from observed days)\n\nSubscription comparison:\n  Anthropic Pro programmatic credit ($20.00):   $18 surplus\n  Anthropic Max programmatic credit ($200.00):  $198 surplus\n  Anthropic API direct (pay-as-you-go):           $1.50\n  Codex via ChatGPT Plus ($20.00):              $18 surplus\n  Codex via ChatGPT Pro ($200.00):               $198 surplus\n\nCheapest if mixed:\n  Max subscription + API overflow: $200.00 (costs $198 MORE vs. pure API at low usage)\n\n--- New metrics surface (per-RC rollup + streaming) ---\n  metrics-report.sh --rc <version>   per-RC JSON rollup\n  metrics-report.sh --csv             cumulative RC history CSV\n  metrics-report.sh --format jsonl    JSON Lines for streaming\n  metrics-report.sh --tail            live-tail RC close events\n  metrics-report.sh --help            full usage\n",
+          "stderr": ""
+        },
+        "reason": "The project names no dev_tree_path. The report used to look for token_pricing.json only under a project's dev tree and <kanban root>/team/scripts/lib/, so it left the subscription comparison out and warned. It now reads the kanban's own table, <kanban root>/scripts/lib/token_pricing.json (the one the aggregator prices with), so every project gets the comparison and no warning."
+      },
+      "cost help": {
+        "outcome": {
+          "exit_code": 0,
+          "stdout": "team/scripts/cost-report.sh\nBackward-compatible cost reporting wrapper.\n\nThis script preserves the existing cost-by-day / cost-by-RC interface for\noperators and cron jobs that depend on it.  The human-readable output now\nincludes a footer pointing to the new metrics-report.sh CLI, which provides\nricher per-RC JSON rollup, cumulative CSV, JSONL streaming, and live-tail\nsurfaces.\n\nNew code should use metrics-report.sh directly.  cost-report.sh is retained\nfor backward compatibility.\n\nReads roll-up files produced by pm-agent/aggregate_tokens.py and\npricing data from the kanban's scripts/lib/token_pricing.json to produce\nhuman-readable or CSV cost reports.\n\nUSAGE:\n  cost-report.sh [--month YYYY-MM] [--day YYYY-MM-DD] [--rc <version>]\n                 [--week [YYYY-Www|current]] [--year [YYYY|current]]\n                 [--since YYYY-MM-DD] [--until YYYY-MM-DD]\n                 [--last N] [--last-N-days N]\n                 [--project <name>] [--csv]\n                 [--kanban-root <path>] [-h|--help]\n\nSCOPE FLAGS (at most one group; default is month-to-date):\n  --month YYYY-MM       Report on a specific calendar month.\n                        Default (no flag): current month-to-date.\n  --day YYYY-MM-DD      Report on a single day.\n  --rc <version>        Report on a single RC (e.g. v0.23.22).\n  --week [YYYY-Www|current]\n                        Report on an ISO week (Monday through Sunday).\n                        \"current\" or no argument = Monday through today.\n                        Example: --week 2026-W19\n  --year [YYYY|current]\n                        Report on a calendar year. \"current\" or no argument\n                        = Jan 1 through today. Example: --year 2026.\n  --since YYYY-MM-DD    Report from a specific date through today.\n                        May be combined with --until for an explicit range.\n  --until YYYY-MM-DD    Report from the earliest available day through the\n                        specified date. May be combined with --since.\n  --last N              Report on the N most recent days through today.\n                        --last 1 is today only; --last 7 is today + 6 prior.\n  --last-N-days N       Alias for --last N.\n\nOTHER FLAGS:\n  --project <name>      Project name (required; or set PGAI_PROJECT_NAME env).\n  --csv                 Emit machine-readable CSV rows instead of the\n                        human-readable block. Column order is stable.\n  --kanban-root <path>  Override PGAI_AGENT_KANBAN_ROOT_PATH.\n  -h, --help            Show this help and exit.\n\nAUTO-AGGREGATION:\n  If the required roll-up file is missing, the script invokes\n  aggregate_tokens.py to build it on demand, then produces the report.\n\nPRICING:\n  Reads the kanban's own pricing table, the one aggregate_tokens.py prices\n  with: <kanban root>/scripts/lib/token_pricing.json, else the copy beside\n  this script's tree (team/scripts/lib/ in a source checkout). A project's\n  dev_tree_path is never read, so every project gets the comparison. With\n  no table the comparison is left out and a warning names the expected path.\n  Subscription comparison block values come from the \"subscriptions\" key.\n  Dollar amounts are never hardcoded in this script.\n\nAUTHORITATIVE COST SOURCE:\n  The Total cost displayed is sourced directly from the aggregator's cost_usd\n  field, which sums total_cost_usd from each tokens.json (the CLI's\n  authoritative per-invocation cost).  No recomputation from token counts\n  is performed at report time.  When legacy-schema tokens.json files are\n  present (legacy-schema data lacking total_cost_usd), the aggregator falls\n  back to pricing-table computation; a visible WARNING is shown at the top\n  of the report in that case.\n\nGRACEFUL DEGRADATION:\n  - If a model in a roll-up lacks a pricing entry, a warning is emitted to\n    stderr and cost_usd for that entry is treated as 0.\n  - If no data is available for the requested scope, prints a clear message\n    and exits 0.\n\nEXIT CODES:\n  0 -- success (warnings may appear on stderr)\n  1 -- usage error or unrecoverable configuration failure\n\n",
+          "stderr": ""
+        },
+        "reason": "cost-report.sh's header, which --help prints, states the kanban-side pricing and aggregator lookup instead of the project's dev_tree_path."
       }
     }
   },
@@ -413,7 +441,7 @@
       },
       "status": 200
     },
-    "GET /costs no pricing": {
+    "GET /costs no dev tree": {
       "body": {
         "exit_code": 0,
         "stderr": "WARNING: token_pricing.json not found; subscription comparison unavailable.\n",
@@ -444,7 +472,7 @@
       "body": {
         "exit_code": 0,
         "stderr": "",
-        "stdout": "\u001b[0;36m\u001b[1m=== RC Metrics: demo (last 10) ===\u001b[0m\n\n\u001b[1mRC           Wall        Blocked      Input     Output   Cache Read   Cache Write  Tasks\u001b[0m\nv1.0.0       --                -      1,000        500            0             0      3\nv1.1.0       95                0    120,000     30,000      400,000         8,000      2\nv1.2.0       120.5            45  1,234,567     32,500    3,400,000        10,000      5\nv0.9.0       10            1,234         10          5           --            --      1\n\u001b[2mBlocked tracked from v2.24.0\u001b[0m\n",
+        "stdout": "\u001b[0;36m\u001b[1m=== RC Metrics: demo (last 10) ===\u001b[0m\n\n\u001b[1mRC           Wall        Blocked      Input     Output   Cache Read   Cache Write  Tasks\u001b[0m\nv1.0.0       --                -      1,000        500            0             0      3\nv1.1.0       95                0    120,000     30,000      400,000         8,000      2\nv1.2.0       120.5            45  1,234,567     32,500    3,400,000        10,000      5\nv0.9.0       10            1,234         10          5           --            --      1\n\u001b[2mBlocked untracked for 1 RC\u001b[0m\n",
         "warnings": []
       },
       "status": 200
@@ -453,7 +481,7 @@
       "body": {
         "exit_code": 0,
         "stderr": "",
-        "stdout": "\u001b[0;36m\u001b[1m=== RC Metrics: demo (last 10) ===\u001b[0m\n\n\u001b[1mRC           Wall        Blocked      Input     Output   Cache Read   Cache Write  Tasks\u001b[0m\nv1.0.0       --                -      1,000        500            0             0      3\nv1.1.0       95                0    120,000     30,000      400,000         8,000      2\nv1.2.0       120.5            45  1,234,567     32,500    3,400,000        10,000      5\nv0.9.0       10            1,234         10          5           --            --      1\n\u001b[2mBlocked tracked from v2.24.0\u001b[0m\nNo data\n\u001b[0;36m\u001b[1m=== RC Metrics: fresh ===\u001b[0m\n\n  \u001b[2m(no releases yet)\u001b[0m\n\n",
+        "stdout": "\u001b[0;36m\u001b[1m=== RC Metrics: demo (last 10) ===\u001b[0m\n\n\u001b[1mRC           Wall        Blocked      Input     Output   Cache Read   Cache Write  Tasks\u001b[0m\nv1.0.0       --                -      1,000        500            0             0      3\nv1.1.0       95                0    120,000     30,000      400,000         8,000      2\nv1.2.0       120.5            45  1,234,567     32,500    3,400,000        10,000      5\nv0.9.0       10            1,234         10          5           --            --      1\n\u001b[2mBlocked untracked for 1 RC\u001b[0m\nNo data\n\u001b[0;36m\u001b[1m=== RC Metrics: fresh ===\u001b[0m\n\n  \u001b[2m(no releases yet)\u001b[0m\n\n",
         "warnings": []
       },
       "status": 200

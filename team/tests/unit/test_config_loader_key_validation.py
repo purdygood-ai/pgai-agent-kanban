@@ -9,6 +9,9 @@ load_config() performs before it reads a single value:
     dual-channel (stable error key, message naming the key and value,
     runnable remedy) so no wake reaches bash arithmetic with a non-number.
     A blank value reads as absent and takes the key's default.
+  - Every [overwatch] runaway_* threshold present in the file must be a
+    whole number (0 turns the counter off); anything else refuses
+    dual-channel naming the key, in a kanban.cfg or a project.cfg alike.
   - A key the Key Registry does not list under a known section, or a
     section it does not list at all, produces one WARNING naming the
     nearest known key or section — and never refuses.
@@ -349,6 +352,84 @@ def test_systemic_block_reasons_environment_override_wins(tmp_path: pathlib.Path
     )
     assert result.returncode == 0, result.stderr
     assert "SYSTEMIC_BLOCK_REASONS=[none]" in result.stdout
+
+
+# ---------------------------------------------------------------------------
+# [overwatch] runaway_* thresholds refuse anything but a whole number
+# ---------------------------------------------------------------------------
+
+_RUNAWAY_ERROR_KEY = "config_loader.overwatch.invalid_runaway_threshold"
+
+#: Each runaway threshold key and its default (runaway.py's CounterSpec).
+_RUNAWAY_KEYS = {
+    "runaway_releases_per_hour": "5",
+    "runaway_rc_cycles_per_day": "2",
+    "runaway_reason_repeats": "3",
+    "runaway_inbox_entries_per_day": "20",
+}
+
+#: A kanban.cfg and a project.cfg, each as the text ahead of its [overwatch]
+#: section, so both files a threshold can live in are validated.
+_RUNAWAY_CFG_FILES = {
+    "kanban.cfg": "[wake]\nmax_tasks_per_wake = 3\n\n",
+    "project.cfg": "[project]\nproject_name = alpha\nbranch_prefix = ai_\n\n",
+}
+
+
+@pytest.mark.parametrize("cfg_name", sorted(_RUNAWAY_CFG_FILES))
+@pytest.mark.parametrize("key", sorted(_RUNAWAY_KEYS))
+def test_runaway_threshold_that_is_not_a_whole_number_refuses_naming_the_key(
+    tmp_path: pathlib.Path, cfg_name: str, key: str
+) -> None:
+    """'abc' refuses with the stable error key, a message naming the key, the
+    value and the file, and a runnable remedy naming the key and the file."""
+    cfg = _write_cfg(tmp_path / cfg_name, f"{_RUNAWAY_CFG_FILES[cfg_name]}[overwatch]\n{key} = abc\n")
+    result = _load_config(cfg)
+    assert result.returncode != 0, result.stderr
+    fields = _contract(result.stderr)
+    assert fields.get("error") == _RUNAWAY_ERROR_KEY, result.stderr
+    assert f"[overwatch] {key}='abc'" in fields["message"] and str(cfg) in fields["message"], fields["message"]
+    assert f"{key} = {_RUNAWAY_KEYS[key]}/" in fields["remedy"] and str(cfg) in fields["remedy"], fields["remedy"]
+    assert "<" not in fields["remedy"], "remedy must be runnable as printed"
+
+
+@pytest.mark.parametrize("cfg_name", sorted(_RUNAWAY_CFG_FILES))
+@pytest.mark.parametrize("value", ["0", "7", ""])
+def test_runaway_thresholds_accept_zero_a_whole_number_and_blank(
+    tmp_path: pathlib.Path, cfg_name: str, value: str
+) -> None:
+    """0 (counter off), a positive whole number and a blank value all load."""
+    body = "".join(f"{key} = {value}\n" for key in sorted(_RUNAWAY_KEYS))
+    cfg = _write_cfg(tmp_path / cfg_name, f"{_RUNAWAY_CFG_FILES[cfg_name]}[overwatch]\n{body}")
+    result = _load_config(cfg)
+    assert result.returncode == 0, result.stderr
+    assert _RUNAWAY_ERROR_KEY not in result.stderr, result.stderr
+
+
+@pytest.mark.parametrize("value", ["-5", "1.5", "5 per hour", "five"])
+def test_runaway_threshold_signs_fractions_and_text_refuse(tmp_path: pathlib.Path, value: str) -> None:
+    """Only decimal digits are a whole number: runaway.py refuses the same values."""
+    cfg = _write_cfg(tmp_path / "kanban.cfg", f"[overwatch]\nrunaway_reason_repeats = {value}\n")
+    result = _load_config(cfg)
+    assert result.returncode != 0, result.stderr
+    assert _contract(result.stderr).get("error") == _RUNAWAY_ERROR_KEY, result.stderr
+
+
+def test_runaway_threshold_remedy_is_runnable_and_edits_overwatch_alone(tmp_path: pathlib.Path) -> None:
+    """Pasting the remedy keeps the leading digits ('7x' -> 7), leaves a
+    same-named key in another section as it was, and the file then loads."""
+    cfg = _write_cfg(
+        tmp_path / "kanban.cfg",
+        "[overwatch]\nrunaway_releases_per_hour = 7x\n\n[testing]\nrunaway_releases_per_hour = 7x\n",
+    )
+    fields = _contract(_load_config(cfg).stderr)
+    fixed = _run_bash(fields["remedy"], _base_env())
+    assert fixed.returncode == 0, fixed.stderr
+    assert cfg.read_text(encoding="utf-8") == (
+        "[overwatch]\nrunaway_releases_per_hour = 7\n\n[testing]\nrunaway_releases_per_hour = 7x\n"
+    )
+    result = _load_config(cfg)
+    assert result.returncode == 0, result.stderr
 
 
 def test_overwatch_block_triage_is_a_known_key(tmp_path: pathlib.Path) -> None:

@@ -459,13 +459,17 @@ byte-identical. A GET that mutates fails the RC.
 - All read endpoints in [Section 5](#5-endpoint-table) are GET and mutate
   nothing. Every route, read or mutation, calls the shared Python function
   its CLI twin reaches, in process, except four that start a process:
-  `GET /dashboard/{pane}` runs the pane's dashboard script and waits for
-  it; `POST /operations/wake-now` runs `wake-now.sh`, detached when `bg`
+  `GET /dashboard/{pane}` renders the `input` and `queue` panes in process
+  and, for the `metrics`, `attention`, `header` and `status-window` panes
+  only, runs the pane's dashboard script and waits for it;
+  `POST /operations/wake-now` runs `wake-now.sh`, detached when `bg`
   or `all` is set; and `POST /operations/deep-verify` and
   `POST /operations/cold-build-now` start their script detached. The
   structured-read endpoints (`/board`, `/projects/{name}`,
   `?format=json` on `/metrics` and `/costs`, `/logs/{kind}`, `/traces`,
-  `/traces/{trace_id}`) read the underlying data files directly in Python.
+  `/traces/{trace_id}`) read the underlying data files directly in Python;
+  `/board` and `/projects/{name}` read them through the dashboard's own
+  column, HALT and task-count modules.
 - All mutation endpoints are POST under `/operations/*`, with parameters
   in the JSON body (not the query string). This keeps mutations out of
   browser history, referer headers, and access logs that record URLs.
@@ -482,7 +486,9 @@ twin** — the operator script named in the table — reaches, and returns the
 text and exit code that script would produce for the same arguments. No
 script is started, with four exceptions:
 
-- `GET /dashboard/{pane}` runs the pane's dashboard script and waits for it.
+- `GET /dashboard/{pane}` renders the `input` and `queue` panes in process;
+  for `metrics`, `attention`, `header` and `status-window` it runs the pane's
+  dashboard script and waits for it.
 - `POST /operations/wake-now` runs `wake-now.sh` — detached when `bg` or
   `all` is set, in the foreground otherwise.
 - `POST /operations/deep-verify` and `POST /operations/cold-build-now`
@@ -508,8 +514,8 @@ CLI twin paths are relative to `<kanban_root>/scripts/`.
 | `GET /costs` | `cost-report.sh` | `project`, `month`, `day`, `rc` (at most one of month/day/rc) |
 | `GET /rejected` | `list-rejected.sh` | `project` |
 | `GET /projects` | (none — reads `projects.cfg` directly) | none |
-| `GET /dashboard/input` | `dashboard/column-render.sh` | `column_type` (required: `bugs`, `priorities` or `requirements`; passed as `--column-type`). Positional `input`, plus `--all-projects` against kanban root |
-| `GET /dashboard/queue` | `dashboard/column-render.sh` | `column_type` (required: `pm`, `coder`, `writer`, `tester` or `cm`; passed as `--column-type`). Positional `queue`, plus `--all-projects` against kanban root |
+| `GET /dashboard/input` | `dashboard/column-render.sh` (twin only; rendered in process) | `column_type` (required): the column to render, `bugs`, `priorities` or `requirements` |
+| `GET /dashboard/queue` | `dashboard/column-render.sh` (twin only; rendered in process) | `column_type` (required): the column to render, `pm`, `coder`, `writer`, `tester` or `cm` |
 | `GET /dashboard/metrics` | `dashboard/show-metrics.sh` | `project` |
 | `GET /dashboard/attention` | `dashboard/show-attention.sh` | `project` |
 | `GET /dashboard/header` | `dashboard/show-header.sh` | `project` |
@@ -526,11 +532,22 @@ is not one of the six values above.
 with `column_type`: `input` renders `bugs`, `priorities` or
 `requirements`; `queue` renders `pm`, `coder`, `writer`, `tester` or `cm`.
 The value is matched case-insensitively, so a `GET /board` column name
-such as `CODER` works too. The handler runs
+such as `CODER` works too. The handler renders the column in process
+through `pgai_agent_kanban.dashboard.column_render.board_pane`, the
+dashboard's own renderer, and runs no script. The `requirements` column
+runs `git` against each project's dev tree (`dev_tree_path`, when it is a
+git repository) to read that project's last release, from local refs
+only; every other column starts no process. Only `metrics`, `attention`,
+`header` and `status-window` run a dashboard script. `stdout` is the text
 `column-render.sh <pane> none --kanban-root <root> --all-projects --column-type <column>`
-and returns what it prints: one row per item in that column across every
-registered project, drawn in the colour of the status `GET /board` reports
-for it. `project` does not narrow a column pane.
+prints for the server's kanban root: one row per item in that column across
+every registered project, drawn in the colour of the status `GET /board`
+reports for it. `project` does not narrow a column pane. When the tree
+cannot be read — `projects.cfg` absent, in colon format or registering no
+project, or the board read failing — the route answers `500` with a
+non-zero `exit_code`, an empty `stdout` and the dual-channel
+`dashboard_pane.gather_unavailable` block on `stderr`; nothing falls back
+to the script.
 
 ```bash
 curl -sS "http://127.0.0.1:8300/dashboard/queue?column_type=coder"
@@ -538,7 +555,7 @@ curl -sS "http://127.0.0.1:8300/dashboard/queue?column_type=coder"
 
 A column-pane request that names no column — `column_type` absent or
 blank — or names one the pane does not render (an unknown value, or the
-other pane's column) is refused `422` before any script runs. The body is
+other pane's column) is refused `422` before anything is rendered. The body is
 dual-channel, `{error, message, remedy, warnings}` with no
 `exit_code`/`stdout`/`stderr`: `error` is `dashboard_pane.column_required`,
 `message` names the columns that pane accepts, and `remedy` is a runnable
@@ -643,8 +660,10 @@ and the error codes noted per row otherwise.
 
 | Endpoint | Required params | Optional params | Response shape | Error codes |
 |---|---|---|---|---|
-| `GET /board` | none | — | `{generated_at, projects:[{name,color,halt}], columns:[{name, items:[…], truncated}]}`. Columns in fixed order: `BUGS, PRIORITIES, REQUIREMENTS, PM, CODER, WRITER, TESTER, CM`. Each item: `{id, project, kind, key, title, status, version_label, active_rc, color}` where `id` is the composite `<project>/<kind>/<key>`, `status` ∈ `open \| working \| done \| wont-do \| blocked \| label`, and `color` is the registry hex string verbatim. A `WONT-DO` task and a `wont-do` intake file are `wont-do`, never `done`. An intake file that still carries the retired status `superseded` is also returned as `wont-do`, because the closed states are `done` and `wont-do` only. | `422` when `?project=` is supplied (the board is the unfiltered aggregation view; the UI filters client-side). |
-| `GET /projects/{name}` | `name` (path) | — | `{name, workflow_type, branch_prefix, dev_tree_path, git_repo, priority, color, ceilings:{max_major,max_minor,max_patch}, last_released, active_rc, halt, queue_counts:{PM:{open,working,done}, CODER:{…}, WRITER:{…}, TESTER:{…}, CM:{…}}}`. `active_rc` and `last_released` are `null` when the release-state sentinel is `none`. `dev_tree_path` and `git_repo` are returned verbatim. | `404` `{"error":"project not found","name":"<name>"}` when the name is not in `projects.cfg`. |
+| `GET /board` | none | — | `{generated_at, projects:[{name,color,halt,halt_text}], columns:[{name, items:[…], truncated}]}`. `halt` and `halt_text` report every HALT the dashboard header shows for the project: `halt` is `true` under a HALT of the project's own or, when the project has neither HALT nor HALT-AFTER, the kanban-wide HALT, and `false` while a HALT-AFTER drains; `halt_text` is `""`, `"HALT"` or `"HALT-AFTER <event>"`. A kanban-wide HALT-AFTER is reported as `halt: false` with `halt_text` `"HALT-AFTER <event>"` when the project has no sentinel of its own and the kanban root holds no HALT. Columns in fixed order: `BUGS, PRIORITIES, REQUIREMENTS, PM, CODER, WRITER, TESTER, CM`. Each item: `{id, project, kind, key, title, status, version_label, active_rc, color}` where `id` is the composite `<project>/<kind>/<key>`, `status` ∈ `open \| working \| carried \| needs-operator \| done \| wont-do \| duplicate \| blocked \| label`, and `color` is the project's colour: its `projects.cfg` `dashboard_color` verbatim, else the default-palette entry at the project's ordinal in priority order. A `REQUIREMENTS` item's `status` is classified against the project's active RC and the last release the dashboard's requirements pane reads (the highest release tag in the project's git dev tree, or `release-state.md`'s `## Last Released` when the project has no git dev tree), so the board and the pane agree. A `running` bug or priority is `working` while a live bundle (or none) lists it, and `carried` once every bundle that lists it is closed: the release shipped without fixing it. A `needs-operator` bug or priority is waiting on an operator-inbox answer, and a `duplicate` one was closed as a duplicate of another item. A `WONT-DO` task and a `wont-do` intake file are `wont-do`, never `done`. An intake file that still carries the retired status `superseded` is also returned as `wont-do`, because the closed states are `done`, `wont-do` and `duplicate` only. | `422` when `?project=` is supplied (the board is the unfiltered aggregation view; the UI filters client-side). |
+| `GET /projects/{name}` | `name` (path) | — | `{name, workflow_type, branch_prefix, dev_tree_path, git_repo, priority, color, ceilings:{max_major,max_minor,max_patch}, last_released, active_rc, halt, halt_text, queue_counts:{PM:{open,working,done}, CODER:{…}, WRITER:{…}, TESTER:{…}, CM:{…}}}`. `active_rc` and `last_released` are `null` when the release-state sentinel is `none`. `halt` and `halt_text` are the same pair `GET /board` reports for the project, a kanban-wide HALT-AFTER included. `dev_tree_path` and `git_repo` are returned verbatim. | `404` `{"error":"project not found","name":"<name>"}` when the name is not in `projects.cfg`. |
+| `GET /projects/{name}/reliability` | `name` (path) | — | The project's `metrics/reliability.json` as stored, plus `warnings`: `{schema_version, project, computed_at, first_record_at, hands_off, clean, warnings}`, each streak `{class, status, rcs, hours, since, last_block}` (`status` ∈ `resolved \| open \| no block on record`). These are the Hands-off and Clean streaks the rc-metrics pane shows, read through `pgai_agent_kanban.metrics.reliability_view.load_reliability`, the reader `metrics-report.sh --reliability --format json` uses; the record schema is in `pgai_agent_kanban.metrics.reliability`'s module docstring. Read-only: the route never computes or writes the file, which is rewritten at every block-ledger write and RC close. Added in ICD 1.20.0. | `404` `{"error":"project not found","name":"<name>","warnings":[]}` when the name is not in `projects.cfg`. `404` `{error:"reliability not computed", name, message, remedy, warnings}` when the project is registered but has no `reliability.json` yet; `remedy` is the `python3 -m pgai_agent_kanban.metrics.reliability refresh` command that writes it. `422` with the same keys and `error` `"reliability unreadable"` when the file does not parse or lacks a streak field. |
+| `GET /projects/{name}/inbox` | `name` (path; an exact registered name or an unambiguous prefix, resolved as `--project` is) | — | `{project, open:[entry], done:[entry], warnings}`, each entry `{entry_id, status, date, source, question, meanwhile, how_to_answer, answer, answered_at, closed_at, extra}` (`status` ∈ `open \| done`; `answer`, `answered_at` and `closed_at` are `""` until set). The project's operator inbox (`projects/<name>/operator-inbox.md`): the questions parked for a human answer, open ones in file order and closed ones in the order closed. The read twin of `inbox.sh --project NAME list`, through the same function, `pgai_agent_kanban.overwatch.inbox.read_inbox`; answering is `POST /operations/inbox-answer`. Read-only: a missing inbox file is an empty inbox and is not created. Added in ICD 1.21.0. | `{project, error, message, remedy, warnings}` carrying the triple `inbox.sh list` prints: `404` `project_resolve.not_found` (no registered project matches), `409` `project_resolve.ambiguous`, `404` `inbox.unknown_project` (registered, no directory), `422` `inbox.name_invalid` (not one plain name). |
 | `GET /metrics?format=json` | `project`, `format=json` | `last` | JSON array of per-RC row objects — `[{version, tasks, wall_seconds, blocked_seconds, tokens_in, tokens_out, cache_read_pct, est_cost}, …]`. Fields are omitted when the underlying source has no value. `blocked_seconds` is `history.csv`'s `blocked_minutes` column (the same figure the text renderer's "Blocked" column shows) converted to seconds — resolved through `pgai_agent_kanban.metrics.blocked_ledger.blocked_minutes()` at RC-close time, never recomputed from task folders in this handler. Rows are in CSV order (oldest to newest). | `422` when `format=json` is set without `project`. Omit `format` for the pre-v1.6.0 text envelope (byte-identical). `per_agent` is not applicable to the JSON branch. |
 | `GET /costs?format=json` | `project`, `format=json` | `month`, `day`, `rc` (at most one) | JSON array of per-RC row objects — `[{version, tasks, tokens_in, tokens_out, cache_read_pct, est_cost}, …]`. Fields are omitted when the underlying source has no value. `rc` returns a single-element array; `month` and `day` filter by `shipped_at` prefix; omitting all three returns every RC file under `usage/rc/`. | `422` when `format=json` is set without `project`. Omit `format` for the pre-v1.6.0 text envelope (byte-identical). |
 | `GET /logs/{kind}` | see per-kind table below | `tail` (int, default 200, hard cap 2000) | Standard envelope. `stdout` is the tail text; `exit_code == 0` when the file was read, `exit_code == 1` when the resolved path does not exist on disk (still HTTP 200). | `404` `{"error":"unknown log kind","kind":"<kind>"}` when `{kind}` is not one of the six known values. `422` when a required param is missing, when `agent`/`project` contains a traversal sequence (`..`, `/`, `\`, `%2F`, `%5C`, `%2E`, null bytes), when `agent` is not in the fixed role set, when `project` is not registered (and not `global` for the overwatch kind), or when `tail` is not a positive integer. |
@@ -1357,6 +1376,7 @@ becomes `keep_artifacts`).
 | `POST /operations/cancel-rc` | `cm/cancel-rc.sh` | `project`, `key`, `yes` (`true`, when `dry_run` is not `true`) | `force`, `dry_run` |
 | `POST /operations/release-locks` | `release-locks.sh` (`--release` mode) | `release` | `force`, `dry_run` |
 | `POST /operations/archive` | `archive.sh` | `project` | `dry_run`, `count`, `restore`, `reconcile_queues` (`restore` is refused with `dry_run`, `count` or `reconcile_queues`, and `reconcile_queues` with `count` — `archive.conflicting_options`; see the note below) |
+| `POST /operations/inbox-answer` | `inbox.sh answer` | `project` | `id`, `answer` (both passed as sent, so the module's own `inbox.bad_entry_id` / `inbox.empty_answer` refusals come back; see the note below), `dry_run` |
 
 Notes on specific mutations:
 
@@ -1431,15 +1451,21 @@ Notes on specific mutations:
   before the route resolves the project, builds the dry-run plan, or
   creates any directory or file, so a dry run naming a path is refused the
   same way. The `message` never echoes the refused value, and `remedy` is a
-  runnable `curl` line re-sending the request with a bare example name.
+  runnable `curl` line re-sending the request with a bare example name that
+  keeps the refused name's routing prefix, so it deposits where the refused
+  name would have routed: a `PRIORITY-*` name is offered
+  `PRIORITY-<its number>-example.md`, a requirements name
+  `v<its version>-example.md`, a `BUG-*` name `BUG-<its number>-example.md`,
+  and a name with no routing prefix `BUG-0001-example.md`. It is the same
+  name `intake.sh` offers for that refusal.
 
   A bare name that matches no routing prefix (`notes.md`, say) is refused
   with the deposit's own `deposit_intake: cannot route ...` text as
   `message`, at `409` under the fallback key `intake.refused`, before the
   temp file is written. Its `remedy` says nothing was written and gives a
   runnable `curl` line re-sending the request under the routable example
-  name `BUG-0001-example.md` — the same body the bare-filename refusal
-  offers — so it names no temp file. A deposit that refuses with plain text
+  name `BUG-0001-example.md` (an unroutable name has no routing prefix to
+  keep), so it names no temp file. A deposit that refuses with plain text
   after the temp file is written falls back to the same key, with a remedy
   that re-runs `team/scripts/intake.sh` on the file now in place. A dry run
   applies only the path rule: it does not catch an unroutable bare name.
@@ -1703,6 +1729,19 @@ Notes on specific mutations:
 
   An unknown or ambiguous `project` is refused with the shared resolver's
   `project_resolve.not_found` or `project_resolve.ambiguous` (exit 1).
+
+- **`inbox-answer`** — The REST twin of `inbox.sh answer`. The route calls
+  `pgai_agent_kanban.overwatch.inbox.answer_entry`, the function the script
+  reaches, in process, after resolving `project` as the CLI does. Only
+  `project` is checked at this layer; `id` and `answer` go to the module as
+  sent, so a refusal carries the key the CLI prints for the same call:
+  `inbox.bad_entry_id` (exit 2), `inbox.empty_answer` (exit 2),
+  `inbox.entry_closed` (exit 2), `inbox.unknown_entry` (`404`, exit 3),
+  `inbox.lock_busy` (exit 2), and `inbox.project_required` /
+  `inbox.project_invalid` (`422`) before anything is read. `stdout` is the
+  answered entry in the inbox file's own shape. The entry stays open until
+  `inbox.sh close` moves it to Done, which has no REST twin; reading the
+  inbox is `GET /projects/{name}/inbox`. Added in ICD 1.21.0.
   The worked example is in [Section 7](#archive-example-dry-run-first-then-real);
   `docs/OPERATIONS.md` describes when the release itself archives.
 
@@ -1761,8 +1800,8 @@ route takes, and the response schema its twin returns. Everything else that
 claims to know the verb set derives from that row rather than restating it:
 the generated verb reference in `docs/operator-commands.md`, the generated
 route table below, the reconciliation check that holds each script's own
-flag array to its row (`team/scripts/lint_operator_verb_manifest.py`), and
-the parity gate.
+flag array to its row and every registered route to a row or a sidecar
+entry (`team/scripts/lint_operator_verb_manifest.py`), and the parity gate.
 
 **A verb without a census row fails the parity gate.** The gate,
 `team/scripts/lint_api_parity.py`, walks the census against the tree on
@@ -1771,7 +1810,8 @@ on any of these findings, each naming the verb:
 
 - an operator script in the tree has no census row;
 - a census row names a script that does not exist;
-- a route in the routers has no census row;
+- a route that runs an operator script has no census row and no sidecar
+  entry for that script;
 - a route's response does not match the schema its row declares;
 - an active row declares no REST twin at all (only a `planned` row may);
 - an action-class row has no case in the action-parity ledger
@@ -1802,16 +1842,36 @@ did, or that a malformed parameter was refused with the same `error`,
 `message` and `remedy`.
 
 **What is deliberately outside the census.** The census is the operator
-*verb* set, not every script under `scripts/`. A script outside it is listed,
-with its reason, in `team/config/operator_verb_census_exempt.txt`: the
-read-only convenience endpoints the API also serves (`GET /status`,
-`GET /costs`, `GET /test-report`, `GET /rejected`, the task-README read), the
-second route of an already-censused verb (`GET /release-locks`, the listing
-mode), the thin report script behind `GET /verdicts`, and CLI-only tools with
-no twin — `export-project.sh` and `import-project.sh` (see
-[Section 8](#8-future-work)) among them. The sidecar is the only way to stand
-outside the census without failing the gate, and every entry names its
-reason.
+*verb* set, not every script under `scripts/` or every route the API
+serves. Whatever stands outside it is listed in
+`team/config/operator_verb_census_exempt.txt`, each entry with its reason on
+the comment line directly above it. Entries take two forms:
+
+- **Script entries** name a script basename: the scripts behind the
+  read-only convenience endpoints (`GET /status`, `GET /costs`,
+  `GET /test-report`, `GET /rejected`, the task-README read), the second
+  mode of an already-censused verb (`release-locks.sh`), the thin report
+  script behind `GET /verdicts`, the container lifecycle scripts, and
+  CLI-only tools with no twin — `export-project.sh` and `import-project.sh`
+  (see [Section 8](#8-future-work)) among them.
+- **Route entries** name a method and path exactly as the API registers
+  it: the routes of those convenience reads, the listing route
+  `GET /release-locks`, and the reads that are not operator verbs
+  (`GET /health`, `GET /board`, `GET /projects`, `GET /projects/{name}`,
+  `GET /dashboard/{pane}`, `GET /logs/{kind}`, `GET /traces`,
+  `GET /traces/{trace_id}`, `GET /approvals`, `GET /auto-resolutions`).
+
+A script entry never covers a route, and a route entry never exempts a
+script. The sidecar is the only way to stand outside the census, and every
+entry names its reason.
+
+**Every registered route is covered.** Each route the API registers is
+the REST twin of a manifest row or has a route entry in the sidecar with
+its reason, whether or not it starts a script.
+`team/scripts/lint_operator_verb_manifest.py` checks this on every run and
+reports, naming method and path, a route nothing covers, and a route entry
+that names an unregistered route, duplicates a manifest twin, repeats, or
+has no reason above it.
 
 ### Launchers — verbs whose route starts a process by design
 
@@ -1907,6 +1967,7 @@ Generated from every active row of `team/config/operator_verbs.manifest` (parame
 | `release-state` | read | `GET` | `/release-state` | `project` (required) | none | `ReleaseStateResponse` | `scripts/release-state.sh` | `module:pgai_agent_kanban.ops.read.get_release_state` |
 | `deep-verify-status` | read | `GET` | `/deep-verify-status` | `project` (required) | none | `DeepVerifyStatusResponse` | `scripts/deep-verify-status.sh` | `module:pgai_agent_kanban.ops.read.get_deep_verify_status` |
 | `archive` | action | `POST` | `/operations/archive` | `count`, `dry_run`, `project`, `reconcile_queues`, `restore` | `ArchiveBody` | `DualChannelShellEnvelope` | `scripts/archive.sh` | `module:pgai_agent_kanban.archive.run.run_archive` |
+| `inbox` | action | `POST` | `/operations/inbox-answer` | `answer`, `dry_run`, `id`, `project` | `InboxAnswerBody` | `DualChannelShellEnvelope` | `scripts/inbox.sh` | `module:pgai_agent_kanban.overwatch.inbox.answer_entry` |
 
 Every active census verb has a REST twin.
 <!-- OPERATOR-VERBS-GENERATED:END section=api-reference -->
@@ -2171,6 +2232,12 @@ curl -sS "http://127.0.0.1:8300/board"
 # One project's registry entry, ceilings, release state and queue counts
 curl -sS "http://127.0.0.1:8300/projects/my-app"
 
+# One project's Hands-off and Clean reliability streaks (its metrics/reliability.json)
+curl -sS "http://127.0.0.1:8300/projects/my-app/reliability"
+
+# One project's operator inbox: open questions, then closed ones (inbox.sh list)
+curl -sS "http://127.0.0.1:8300/projects/my-app/inbox"
+
 # The last 100 lines of the coder's cron wake log
 curl -sS "http://127.0.0.1:8300/logs/wake?agent=coder&tail=100"
 
@@ -2341,6 +2408,11 @@ curl -sS -X POST http://127.0.0.1:8300/operations/defer \
 curl -sS -X POST http://127.0.0.1:8300/operations/undefer \
     -H 'Content-Type: application/json' \
     -d '{"project": "my-app"}'
+
+# Answer an open operator inbox entry (inbox.sh answer; it stays open until closed)
+curl -sS -X POST http://127.0.0.1:8300/operations/inbox-answer \
+    -H 'Content-Type: application/json' \
+    -d '{"project": "my-app", "id": "INBOX-0001", "answer": "keep"}'
 
 # Start the cold-build lane (returns as soon as it STARTED — no verdict yet)
 curl -sS -X POST http://127.0.0.1:8300/operations/deep-verify \
@@ -2754,6 +2826,14 @@ runners record that drift as a finding and continue.
 | 1.18.3 | supported | v2.37.12 |
 | 1.18.4 | supported | v2.37.14 |
 | 1.18.5 | supported | v2.38.1 |
+| 1.19.0 | supported | v2.47.0 |
+| 1.19.1 | supported | v2.48.1 |
+| 1.20.0 | supported | v2.49.0 |
+| 1.20.1 | supported | v2.49.2 |
+| 1.21.0 | supported | v2.50.0 |
+| 1.21.1 | supported | v2.52.0 |
+| 1.21.2 | supported | v2.53.1 |
+| 1.21.3 | supported | v2.53.7 |
 
 Column meanings:
 

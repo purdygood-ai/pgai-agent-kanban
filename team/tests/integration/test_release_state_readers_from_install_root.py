@@ -39,12 +39,12 @@ import textwrap
 
 import pytest
 
-from pgai_agent_kanban.cm.read_state_field import read_state_section
 from tests.fixtures.dashboard_render_fixture import (
     build_dashboard_project_root,
     clean_subprocess_env,
     run_dashboard_script,
 )
+from tests.fixtures.release_state_section import release_state_section_value
 from tests.fixtures.scrubbed_subprocess_env import build_scrubbed_env
 
 _TEAM_DIR = pathlib.Path(__file__).resolve().parents[2]
@@ -69,7 +69,7 @@ def kanban_root(tmp_path: pathlib.Path) -> pathlib.Path:
     project.cfg whose last release comes from release-state.md alone."""
     fixture = build_dashboard_project_root(tmp_path, dev_tree_mode="unconfigured")
     root = fixture.kanban_root
-    shutil.copytree(_TEAM_DIR / "scripts", root / "scripts")
+    shutil.copytree(_TEAM_DIR / "scripts", root / "scripts", dirs_exist_ok=True)
     (root / "projects" / fixture.project_name / "release-state.md").write_text(_RC_OPEN, encoding="utf-8")
 
     other = root / "projects" / _OTHER
@@ -186,7 +186,7 @@ def test_stale_active_rc_reset_writes_through_the_release_state_writer_from_an_i
         .replace("## RC Opened At\n2026-01-05T03:00:00Z\n", "## RC Opened At\nnone\n")
         .replace("## RC Opened By Task\nCM-20260105-034-open-rc\n", "## RC Opened By Task\nnone\n")
     )
-    assert read_state_section(str(rs), "Last Released") == "v2.29.2"
+    assert release_state_section_value(str(rs), "Last Released") == "v2.29.2"
     assert rs.stat().st_mode & 0o777 == 0o640
     assert sorted(p.name for p in rs.parent.iterdir() if p.name.startswith(".release-state.")) == []
 

@@ -7,7 +7,7 @@ team/scripts/lib/discovery_state.sh and the status.md ## Model read and
 parsing lives in the shared pgai_agent_kanban modules:
 
   _disc_set_status_field        md_fields render-status
-  _disc_read_bundle_field       md_fields read
+  _disc_read_bundle_field       read_md_field (task_status read)
   _disc_update_bundle_pm_queued md_fields render-status + render-value
   _disc_mark_cache_bundled      ops render_ensure_marker
   narrate_model_mismatch        task_status read --raw (## Model)

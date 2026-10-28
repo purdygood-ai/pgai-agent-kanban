@@ -14,9 +14,9 @@ the retired block — TESTER can see a correct RC tree while CM's squash to
 ai_main produces the wrong result for upgrade.sh.
 
 This lint is a permanent, gated-suite check that those variables stay
-absent.  When a future merge restores the
-retired block, this script exits 1 and the suite catches it before it reaches
-production — the same role lint_api_parity plays for operator-flag parity.
+absent.  When a future merge restores the retired block, each restored line
+is reported as a finding and the gated runners record it before it reaches
+production.
 
 IDENTIFIER-BY-NECESSITY
 ------------------------
@@ -41,20 +41,32 @@ character is '#' are comment lines — past-tense explanatory comments describin
 the retirement are permitted.  Any non-comment line containing one of the three
 identifiers is an executable hit and is reported as a violation.
 
+FINDINGS
+--------
+CONVERT (quality class, team/SOP-core.md "Gates and Refusals"): each
+executable hit is printed and recorded as one finding naming its line; with
+--findings-file the findings are written as a JSON array (the shape
+pgai_agent_kanban.lint.findings defines), which the gated runners merge per
+instance with gated_runner_merge_findings_file.
+
 Exit codes
 ----------
-  0   No retired identifiers found as executable code; lint is green.
-  1   One or more executable hits found; see stdout for details.
+  0   Scan ran, whatever it found (each hit is a finding, not a failure).
   2   Usage error or the target script was not found.
 
 Usage
 -----
-  python3 scripts/lint_upgrade_no_temp_copy_guard.py [--upgrade-sh PATH] [--verbose]
+  python3 scripts/lint_upgrade_no_temp_copy_guard.py [--upgrade-sh PATH]
+                                                     [--findings-file PATH]
+                                                     [--verbose]
 
-  --upgrade-sh PATH  Path to upgrade.sh to scan.  Default: team/scripts/upgrade.sh
-                     resolved from this script's own location.
-  --verbose, -v      Print the number of lines scanned and which identifiers are
-                     being checked.
+  --upgrade-sh PATH     Path to upgrade.sh to scan.  Default:
+                        team/scripts/upgrade.sh resolved from this script's
+                        own location.
+  --findings-file PATH  Write the findings as a JSON array to PATH (parent
+                        directories created; written even when empty).
+  --verbose, -v         Print the number of lines scanned and which
+                        identifiers are being checked.
 
 Examples
 --------
@@ -70,6 +82,21 @@ from __future__ import annotations
 import argparse
 import sys
 from pathlib import Path
+
+# The finding shape and the error-contract emitter live in the team package
+# beside scripts/; this script is run directly as well as imported, so the
+# package root is put on sys.path from this file's own location.
+_TEAM_DIR = Path(__file__).resolve().parent.parent  # team/
+if str(_TEAM_DIR) not in sys.path:
+    sys.path.insert(0, str(_TEAM_DIR))
+from pgai_agent_kanban.lib.error_contract import emit_error_contract  # noqa: E402
+from pgai_agent_kanban.lint.findings import (  # noqa: E402
+    display_path,
+    quality_finding,
+    write_findings_file,
+)
+
+_LINT_NAME = "upgrade_no_temp_copy_guard"
 
 # ---------------------------------------------------------------------------
 # The three retired guard identifiers.  All three must be absent from executable
@@ -129,7 +156,8 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         description=(
             "Pre-flight lint: asserts the retired temp-copy guard variables are "
             "absent from executable lines in team/scripts/upgrade.sh.  "
-            "Exits 1 when any retired identifier appears on a non-comment line."
+            "Quality class: each retired identifier on a non-comment line is a "
+            "finding, and the lint exits 0 whatever it finds (2 on a usage error)."
         ),
     )
     parser.add_argument(
@@ -138,6 +166,14 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help=(
             "Path to the upgrade.sh file to scan.  Default: team/scripts/upgrade.sh "
             "resolved from this script's own directory."
+        ),
+    )
+    parser.add_argument(
+        "--findings-file",
+        metavar="PATH",
+        help=(
+            "Write the findings as a JSON array to PATH (parent directories "
+            "created; written even when empty).  Findings are printed either way."
         ),
     )
     parser.add_argument(
@@ -152,8 +188,9 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     """Run the upgrade temp-copy guard lint over upgrade.sh.
 
-    Exit codes: 0 no retired identifier appears as executable code; 1 one or
-    more do (printed); 2 usage error, or the target script was not found.
+    Exit codes: 0 whatever was found (each executable hit is a quality
+    finding, printed and written to --findings-file); 2 usage error, or the
+    target script was not found.
     """
     args = _parse_args(argv)
 
@@ -189,9 +226,24 @@ def main(argv: list[str] | None = None) -> int:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 2
 
-    if hits:
+    rel = display_path(upgrade_sh, _TEAM_DIR.parent)
+    relint = f"python3 {Path(__file__).resolve()} --upgrade-sh {upgrade_sh}"
+    findings = [
+        quality_finding(
+            _LINT_NAME,
+            f"{rel}:{lineno} carries a retired temp-copy guard identifier on an "
+            f"executable line: {line.strip()}",
+            f"sed -i '{lineno}d' {upgrade_sh} && {relint}",
+            file=rel,
+            line=lineno,
+        )
+        for lineno, line in hits
+    ]
+    write_findings_file(args.findings_file, findings, lint="lint_upgrade_no_temp_copy_guard")
+
+    if findings:
         print(
-            f"\nlint_upgrade_no_temp_copy_guard: FAIL — "
+            f"\nlint_upgrade_no_temp_copy_guard: "
             f"{len(hits)} retired guard identifier(s) found as executable code "
             f"in {upgrade_sh}:\n",
             flush=True,
@@ -204,7 +256,18 @@ def main(argv: list[str] | None = None) -> int:
             "pre-retirement block.  Remove the listed lines and re-run.",
             flush=True,
         )
-        return 1
+        # CENSUS-ANCHOR: upgrade-no-temp-copy-guard-01
+        # CONVERT: a resurrected guard line is recorded as findings with zero
+        # risk to the run that found it; the lint returns 0 below.
+        emit_error_contract(
+            "lint.upgrade-no-temp-copy-guard",
+            f"{len(hits)} retired temp-copy guard line(s) are back in {upgrade_sh} "
+            "as executable code, the signature of a merge restoring the retired "
+            "block; each line is listed above.",
+            f"Read the listed lines in {upgrade_sh}, delete the restored block "
+            f"(for the first listed line: {findings[0]['remedy']})",
+        )
+        return 0
 
     total_lines = len(upgrade_sh.read_text(encoding="utf-8").splitlines())
     print(

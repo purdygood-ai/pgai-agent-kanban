@@ -2,28 +2,40 @@
 # queue-pane.sh
 # Pretty-prints the content and recent task statuses for a single agent queue.
 #
-# Designed to run under `watch -n 5 -- queue-pane.sh <queue_name>`.
+# Designed to run under `watch -n 5 -- queue-pane.sh <queue_name> --project <name>`.
 #
 # Output includes:
-#   - Queue name header with counts (pending / working / done / total)
+#   - Queue name header with counts (done / working / waiting / blocked / pending)
 #   - Per-entry listing with status badges from status.md
 #   - WAITING-eligibility hints (lists prerequisite tasks not yet done)
 #   - Missing-folder warnings for queue entries without a task directory
 #
+# Entries are queue lines "- [M] TASK-ID ..." whose ID has the canonical
+# task-ID shape (kanban_task_id_pattern, lib/task_ids.sh): current
+# role-prefixed IDs and legacy CLAUDE- prefixed IDs. The renderer is
+# pgai_agent_kanban.dashboard.named_queue_pane.
+#
 # Usage:
-#   queue-pane.sh <queue_name> [--kanban-root <path>]
+#   queue-pane.sh <queue_name> [--project <name>] [--kanban-root <path>]
 #
 # Arguments:
 #   queue_name   One of: pm, coder, writer, tester, cm
 #                (also accepts: bug, priority — for the auxiliary backlogs)
 #
 # Options:
+#   --project <name>       The project whose queue is rendered (default:
+#                          $PGAI_PROJECT_NAME), resolved against projects.cfg
+#                          by exact name or unambiguous prefix. With no project,
+#                          or one that does not resolve, the pane prints
+#                          "<queue_name>: empty (queue file not found)" and
+#                          exits 0; it never picks a registered project itself.
 #   --kanban-root <path>   Override the kanban root (default: $PGAI_AGENT_KANBAN_ROOT_PATH
 #                          or ~/pgai_agent_kanban)
 #   -h, --help             Show this help and exit
 #
 # Environment:
 #   PGAI_AGENT_KANBAN_ROOT_PATH  — kanban root directory
+#   PGAI_PROJECT_NAME            — project used when --project is not given
 #   NO_COLOR                            — set non-empty to disable ANSI colors
 #   TERM=dumb                           — also disables ANSI colors
 
@@ -43,6 +55,13 @@ source "${SCRIPT_DIR}/../lib/projects.sh"
 source "${SCRIPT_DIR}/../lib/dev_tree.sh"
 # shellcheck source=lib/script_common.sh
 source "${SCRIPT_DIR}/../lib/script_common.sh"
+# pp_run_ops: runs the renderer module from this tree's own pgai_agent_kanban
+# package.
+# shellcheck source=../lib/pp_run_ops.sh
+source "${SCRIPT_DIR}/../lib/pp_run_ops.sh"
+# kanban_task_id_pattern: the task-ID shape the renderer matches entries with.
+# shellcheck source=../lib/task_ids.sh
+source "${SCRIPT_DIR}/../lib/task_ids.sh"
 
 # ---------------------------------------------------------------------------
 # Valid queue names — map to their backlog filename stem
@@ -62,6 +81,7 @@ VALID_QUEUES="pm coder writer tester cm bug priority"
 # Parse arguments
 # ---------------------------------------------------------------------------
 QUEUE_NAME=""
+PROJECT_ARG=""
 KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH}"
 
 _args=("$@")
@@ -80,9 +100,14 @@ while [[ $_i -lt ${#_args[@]} ]]; do
       KANBAN_ROOT="${_args[$_next]:-$KANBAN_ROOT}"
       _i=$_next
       ;;
+    --project)
+      _next=$(( _i + 1 ))
+      PROJECT_ARG="${_args[$_next]:-}"
+      _i=$_next
+      ;;
     -*)
       echo "ERROR: Unknown option: $arg" >&2
-      echo "Usage: $0 <queue_name> [--kanban-root <path>]" >&2
+      echo "Usage: $0 <queue_name> [--project <name>] [--kanban-root <path>]" >&2
       exit 1
       ;;
     *)
@@ -90,7 +115,7 @@ while [[ $_i -lt ${#_args[@]} ]]; do
         QUEUE_NAME="$arg"
       else
         echo "ERROR: Unexpected extra argument: $arg" >&2
-        echo "Usage: $0 <queue_name> [--kanban-root <path>]" >&2
+        echo "Usage: $0 <queue_name> [--project <name>] [--kanban-root <path>]" >&2
         exit 1
       fi
       ;;
@@ -101,7 +126,7 @@ done
 # Queue name is required
 if [[ -z "$QUEUE_NAME" ]]; then
   echo "ERROR: queue_name is required." >&2
-  echo "Usage: $0 <queue_name> [--kanban-root <path>]" >&2
+  echo "Usage: $0 <queue_name> [--project <name>] [--kanban-root <path>]" >&2
   echo "Valid queues: ${VALID_QUEUES}" >&2
   exit 1
 fi
@@ -113,12 +138,15 @@ if [[ -z "${QUEUE_FILE_MAP[$QUEUE_NAME]:-}" ]]; then
   exit 1
 fi
 
+# Operator user config, then [chain] pm_mode (config_loader.sh).
+# shellcheck source=../lib/config_loader.sh
+source "${SCRIPT_DIR}/../lib/config_loader.sh"
+config_startup_prelude "$KANBAN_ROOT"
 # ---------------------------------------------------------------------------
 # Source config — INI format (kanban.cfg) replaces legacy config.cfg
 # read_ini available via project_paths.sh (sourced above).
 # ---------------------------------------------------------------------------
 if [[ -f "${KANBAN_ROOT}/kanban.cfg" ]]; then
-    export PGAI_KANBAN_PM_MODE="${PGAI_KANBAN_PM_MODE:-$(read_ini "${KANBAN_ROOT}/kanban.cfg" chain pm_mode automatic)}"
     export PGAI_DASHBOARD_COLOR_DONE="${PGAI_DASHBOARD_COLOR_DONE:-$(read_ini "${KANBAN_ROOT}/kanban.cfg" dashboard color_done green)}"
     export PGAI_DASHBOARD_COLOR_WORKING="${PGAI_DASHBOARD_COLOR_WORKING:-$(read_ini "${KANBAN_ROOT}/kanban.cfg" dashboard color_working yellow)}"
     export PGAI_DASHBOARD_COLOR_BLOCKED="${PGAI_DASHBOARD_COLOR_BLOCKED:-$(read_ini "${KANBAN_ROOT}/kanban.cfg" dashboard color_blocked red)}"
@@ -156,15 +184,21 @@ C_WARN="$(ansi_code yellow)"
 
 # ---------------------------------------------------------------------------
 # Resolve paths
-# Explicit-drop: this pane renders a single named queue which is
-# inherently project-scoped.  Without an explicit --project argument there is
-# no safe way to pick the correct project; leaving TASKS_DIR/QUEUE_FILE empty
-# causes the missing-queue-file handler below to render "(queue file not
-# found)" rather than silently substituting the first-registered project.
+# The pane renders one project's queue: the --project value, else
+# PGAI_PROJECT_NAME, resolved against projects.cfg (pp_resolve_project_name).
+# With neither, or a name that does not resolve, TASKS_DIR/QUEUE_FILE stay
+# empty and the missing-queue-file handler below renders "(queue file not
+# found)" rather than substituting the first-registered project.
 # ---------------------------------------------------------------------------
 TASKS_DIR=""
-QUEUES_DIR=""
 QUEUE_FILE=""
+if PROJECT_NAME="$(pp_require_project_context "$PROJECT_ARG" 2>/dev/null)" \
+   && PROJECT_NAME="$(pp_resolve_project_name "$PROJECT_NAME")" \
+   && _qp_tasks_dir="$(pp_tasks_dir "$PROJECT_NAME")" \
+   && _qp_queue_file="$(pp_queue_path "$PROJECT_NAME" "$QUEUE_NAME")"; then
+  TASKS_DIR="$_qp_tasks_dir"
+  QUEUE_FILE="$_qp_queue_file"
+fi
 
 # ---------------------------------------------------------------------------
 # Handle missing queue file
@@ -177,232 +211,10 @@ if [[ ! -f "$QUEUE_FILE" ]]; then
 fi
 
 # ---------------------------------------------------------------------------
-# Parse queue file — extract entries in order
+# Render the queue (pgai_agent_kanban.dashboard.named_queue_pane)
 # ---------------------------------------------------------------------------
-# Each entry line: "- [X] TASK-ID — optional description"
-# Marker meanings:
-#   ' ' (space or empty) → BACKLOG/WAITING (not started)
-#   'W'                  → WAITING
-#   'A'                  → WORKING (actively being worked)
-#   'x'                  → DONE/WONT-DO
-#   'B'                  → BLOCKED (rare marker)
-# ---------------------------------------------------------------------------
-
-# We'll use python3 for the heavy lifting to keep line-by-line parsing clean
-python3 - \
-  "$QUEUE_FILE" \
-  "$TASKS_DIR" \
-  "$QUEUE_NAME" \
-  "$USE_COLOR" \
-  "${C_LABL}" "${C_BOLD}" "${C_DONE}" "${C_WORK}" "${C_BLCK}" \
-  "${C_WAIT}" "${C_DIM}" "${C_WARN}" "${RESET}" \
-<<'PY'
-import os, re, sys, pathlib, datetime
-
-queue_file  = pathlib.Path(sys.argv[1])
-tasks_root  = pathlib.Path(sys.argv[2])
-queue_name  = sys.argv[3]
-use_color   = sys.argv[4].lower() == "true"
-
-# Color codes passed from bash (already empty when color disabled)
-C_LABL, C_BOLD, C_DONE, C_WORK, C_BLCK = sys.argv[5:10]
-C_WAIT, C_DIM,  C_WARN, RESET          = sys.argv[10:14]
-
-DONE_MARKERS    = {"x"}
-WORKING_MARKERS = {"A"}
-WAITING_MARKERS = {"W"}
-BLOCKED_MARKERS = {"B"}
-
-def read_field(text, heading):
-    """Return first non-blank content line after '## heading'."""
-    pat = re.compile(r'##\s+' + re.escape(heading) + r'\s*$', re.M | re.I)
-    m = pat.search(text)
-    if not m:
-        return ""
-    rest = text[m.end():]
-    for line in rest.splitlines():
-        stripped = line.strip()
-        if stripped.startswith("## "):
-            break
-        if stripped:
-            return stripped
-    return ""
-
-def read_prereqs(text):
-    """Return list of prerequisite task IDs from ## Prerequisites field."""
-    pat = re.compile(r'##\s+Prerequisites\s*$', re.M | re.I)
-    m = pat.search(text)
-    if not m:
-        return []
-    rest = text[m.end():]
-    prereqs = []
-    for line in rest.splitlines():
-        stripped = line.strip()
-        if stripped.startswith("## "):
-            break
-        # Match "- TASK-ID" or "TASK-ID" lines
-        tid_m = re.match(r'^-?\s*(CLAUDE-[A-Z0-9]+-\S+)\s*$', stripped)
-        if tid_m:
-            prereqs.append(tid_m.group(1))
-    return prereqs
-
-def get_task_state(task_dir):
-    """Read ## State from status.md, return canonical uppercase state or ''."""
-    status_file = task_dir / "status.md"
-    if not status_file.is_file():
-        return ""
-    try:
-        text = status_file.read_text(errors="replace")
-        s = read_field(text, "State").upper()
-        return s if s else "BACKLOG"
-    except OSError:
-        return ""
-
-def get_prereqs_status(task_id):
-    """Return list of (prereq_id, state) for the task's prerequisites."""
-    task_dir = tasks_root / task_id
-    readme_file = task_dir / "README.md"
-    if not readme_file.is_file():
-        return []
-    try:
-        text = readme_file.read_text(errors="replace")
-        prereqs = read_prereqs(text)
-    except OSError:
-        return []
-    result = []
-    for pid in prereqs:
-        pdir = tasks_root / pid
-        pstate = get_task_state(pdir) if pdir.is_dir() else "MISSING"
-        result.append((pid, pstate))
-    return result
-
-def fmt_state_badge(state):
-    """Return colored state badge string."""
-    if state in ("DONE", "WONT-DO"):
-        return f"{C_DONE}[{state}]{RESET}"
-    elif state == "WORKING":
-        return f"{C_WORK}[{state}]{RESET}"
-    elif state == "BLOCKED":
-        return f"{C_BLCK}[{state}]{RESET}"
-    elif state == "WAITING":
-        return f"{C_WAIT}[{state}]{RESET}"
-    elif state in ("BACKLOG", ""):
-        return f"{C_DIM}[BACKLOG]{RESET}"
-    else:
-        return f"{C_WARN}[{state}]{RESET}"
-
-# ---------------------------------------------------------------------------
-# Parse queue file
-# ---------------------------------------------------------------------------
-queue_line_pat = re.compile(r'^\s*-\s+\[(.)\]\s+(CLAUDE-[A-Z0-9]+-\S+)(.*)?$')
-
-entries = []  # list of (marker, task_id, rest_description)
-try:
-    content = queue_file.read_text(errors="replace")
-except OSError:
-    content = ""
-
-for line in content.splitlines():
-    m = queue_line_pat.match(line)
-    if not m:
-        continue
-    marker   = m.group(1)
-    task_id  = m.group(2)
-    rest_raw = (m.group(3) or "").strip()
-    # Strip optional " — description" prefix
-    desc = re.sub(r'^[—–-]\s*', '', rest_raw).strip()
-    entries.append((marker, task_id, desc))
-
-# ---------------------------------------------------------------------------
-# Build counts
-# ---------------------------------------------------------------------------
-total   = len(entries)
-done    = sum(1 for m, _, __ in entries if m in DONE_MARKERS)
-working = sum(1 for m, _, __ in entries if m in WORKING_MARKERS)
-waiting = sum(1 for m, _, __ in entries if m in WAITING_MARKERS)
-blocked = sum(1 for m, _, __ in entries if m in BLOCKED_MARKERS)
-pending = total - done - working - waiting - blocked
-
-# ---------------------------------------------------------------------------
-# Header
-# ---------------------------------------------------------------------------
-header = f"=== {queue_name} ==="
-count_parts = []
-if done:
-    count_parts.append(f"{C_DONE}{done} done{RESET}")
-if working:
-    count_parts.append(f"{C_WORK}{working} working{RESET}")
-if waiting:
-    count_parts.append(f"{C_WAIT}{waiting} waiting{RESET}")
-if blocked:
-    count_parts.append(f"{C_BLCK}{blocked} blocked{RESET}")
-if pending:
-    count_parts.append(f"{C_DIM}{pending} pending{RESET}")
-
-count_str = ", ".join(count_parts) if count_parts else f"{C_DIM}empty{RESET}"
-print(f"{C_LABL}{C_BOLD}{header}{RESET}  {count_str}")
-print(f"{C_DIM}{'─' * 60}{RESET}")
-
-# ---------------------------------------------------------------------------
-# Per-entry listing
-# ---------------------------------------------------------------------------
-if not entries:
-    print(f"{C_DIM}(no entries){RESET}")
-else:
-    for marker, task_id, desc in entries:
-        task_dir = tasks_root / task_id
-
-        # Determine effective state
-        if marker in DONE_MARKERS:
-            # Quickly confirm via status.md; default to DONE if folder missing
-            if task_dir.is_dir():
-                actual = get_task_state(task_dir)
-                if actual in ("DONE", "WONT-DO", ""):
-                    display_state = actual if actual else "DONE"
-                else:
-                    display_state = actual   # mismatch — show real state
-            else:
-                display_state = "DONE"
-        elif marker in WORKING_MARKERS:
-            display_state = get_task_state(task_dir) if task_dir.is_dir() else "WORKING"
-        elif marker in WAITING_MARKERS:
-            display_state = "WAITING"
-        elif marker in BLOCKED_MARKERS:
-            display_state = "BLOCKED"
-        else:
-            # Space / empty / other — read from status.md
-            display_state = get_task_state(task_dir) if task_dir.is_dir() else "BACKLOG"
-
-        badge   = fmt_state_badge(display_state)
-        tid_str = f"{C_DIM}{task_id}{RESET}"
-
-        if not task_dir.is_dir() and marker not in DONE_MARKERS:
-            warn = f"  {C_WARN}⚠ task folder missing{RESET}"
-        else:
-            warn = ""
-
-        # Short description (trim to keep line readable)
-        short_desc = ""
-        if desc:
-            # Extract slug from task ID for context if no desc
-            parts = task_id.split("-")
-            short_desc = f"  {C_DIM}{desc[:50]}{RESET}" if desc else ""
-
-        print(f"  {badge} {tid_str}{warn}{short_desc}")
-
-        # WAITING-eligibility hints: list unmet prerequisites
-        if display_state == "WAITING" and task_dir.is_dir():
-            prereqs = get_prereqs_status(task_id)
-            unmet = [(pid, ps) for pid, ps in prereqs if ps not in ("DONE", "WONT-DO")]
-            if unmet:
-                print(f"    {C_WAIT}waiting on:{RESET}")
-                for pid, ps in unmet:
-                    ps_badge = fmt_state_badge(ps)
-                    print(f"      {ps_badge} {C_DIM}{pid}{RESET}")
-
-# ---------------------------------------------------------------------------
-# Footer: timestamp
-# ---------------------------------------------------------------------------
-now_str = datetime.datetime.now().strftime("%H:%M:%S")
-print(f"\n{C_DIM}updated {now_str}{RESET}")
-PY
+pp_run_ops pgai_agent_kanban.dashboard.named_queue_pane \
+  "$QUEUE_FILE" "$TASKS_DIR" "$QUEUE_NAME" \
+  --task-id-pattern "$(kanban_task_id_pattern)" \
+  --colors "$C_LABL" "$C_BOLD" "$C_DONE" "$C_WORK" "$C_BLCK" \
+           "$C_WAIT" "$C_DIM" "$C_WARN" "$RESET"

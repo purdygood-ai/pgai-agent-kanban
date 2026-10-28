@@ -105,6 +105,7 @@ if not __package__:
         sys.path.insert(0, _OWN_PACKAGE_ROOT)
 
 from pgai_agent_kanban.lib.atomic_write import atomic_write  # noqa: E402
+from pgai_agent_kanban.lib.text import one_line  # noqa: E402
 from pgai_agent_kanban.lib.timeutil import format_iso, try_parse_iso  # noqa: E402
 
 __all__ = [
@@ -362,10 +363,6 @@ def _read_marker(path: Path) -> dict:
     return fields
 
 
-def _one_line(value: str) -> str:
-    return " ".join(str(value).split())
-
-
 def record(
     kanban_root: "Path | str",
     provider: str,
@@ -389,9 +386,9 @@ def record(
         "paused_at": format_iso(now),
         "resumes_at": format_iso(limit.resumes_at),
         "source": limit.source,
-        "signature": _one_line(limit.signature) or "usage limit",
-        "task": _one_line(task) or "none",
-        "project": _one_line(project) or "none",
+        "signature": one_line(limit.signature) or "usage limit",
+        "task": one_line(task) or "none",
+        "project": one_line(project) or "none",
     }
     path.parent.mkdir(parents=True, exist_ok=True)
     atomic_write(path, "".join(f"{k}={v}\n" for k, v in fields.items()), prefix=".provider-pause-")

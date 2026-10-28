@@ -184,7 +184,10 @@ that key is absent or blank.
     main branch (local)          checked out; fast-forward pulled from <remote> when push_to_remote=true
 
   DOES NOT TOUCH:
-    main branch on <remote>      never pushed (operator pushes via finalize-release.sh if needed)
+    main branch on <remote>      never pushed. With push_to_remote=true the
+                                 push-lag check or the next release pushes
+                                 it; with push_to_remote=false the operator
+                                 pushes it by hand
     git tags                     never created, moved, or deleted
     release-state.md ## Last Released field
                                  read before the rewrite and written back
@@ -288,13 +291,15 @@ KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH}"
 TEAM_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH}"
 [[ -f "$KANBAN_ROOT/bashrc" ]] && source "$KANBAN_ROOT/bashrc"
 [[ -f "$KANBAN_ROOT/env" ]] && source "$KANBAN_ROOT/env"
-[[ -f "$HOME/.config/pgai-kanban.cfg" ]] && source "$HOME/.config/pgai-kanban.cfg"
+# Operator user config, then [chain] pm_mode (config_loader.sh).
+# shellcheck source=../lib/config_loader.sh
+source "${SCRIPT_DIR}/../lib/config_loader.sh"
+config_startup_prelude "$TEAM_ROOT"
 # Source ini_parser.sh for read_ini (needed before project_paths.sh is available).
 # shellcheck source=lib/ini_parser.sh
 [[ -f "${SCRIPT_DIR}/../lib/ini_parser.sh" ]] && source "${SCRIPT_DIR}/../lib/ini_parser.sh"
 # Source kanban.cfg — INI format replaces legacy config.cfg
 if [[ -f "$TEAM_ROOT/kanban.cfg" ]]; then
-    export PGAI_KANBAN_PM_MODE="${PGAI_KANBAN_PM_MODE:-$(read_ini "$TEAM_ROOT/kanban.cfg" chain pm_mode automatic)}"
     export PGAI_DEV_TREE_PATH="${PGAI_DEV_TREE_PATH:-$(read_ini "$TEAM_ROOT/kanban.cfg" paths dev_tree_path "")}"
 fi
 

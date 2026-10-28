@@ -135,9 +135,10 @@ fi
 source "${SCRIPT_DIR}/lib/dev_tree.sh"
 # shellcheck source=lib/pp_run_ops.sh
 declare -F pp_run_ops >/dev/null || source "${SCRIPT_DIR}/lib/pp_run_ops.sh"
-if [[ -f "$KANBAN_ROOT/kanban.cfg" ]]; then
-    export PGAI_KANBAN_PM_MODE="${PGAI_KANBAN_PM_MODE:-$(read_ini "$KANBAN_ROOT/kanban.cfg" chain pm_mode automatic)}"
-fi
+# Operator user config, then [chain] pm_mode (config_loader.sh).
+# shellcheck source=lib/config_loader.sh
+source "${SCRIPT_DIR}/lib/config_loader.sh"
+config_startup_prelude "$KANBAN_ROOT"
 export PGAI_DEV_TREE_PATH="${PGAI_DEV_TREE_PATH:-$(resolve_global_dev_tree)}"
 # Classification (a): recover-rejected moves files between subdirectories of
 # $KANBAN_ROOT/projects/<name>; no dev tree access required.

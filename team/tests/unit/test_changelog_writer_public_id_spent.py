@@ -14,6 +14,8 @@ Covers the changelog writer's treatment of the published artifact:
      title is given a fresh ID; the published line is untouched.
   4. A bug whose published title matches keeps its ID when only its status
      clause moves.
+     A title published with a commit id and RC branch name in it still
+     matches the bug's scrubbed title, so the bug keeps its ID.
   5. Regeneration is a fixed point: rendering the output again reproduces it
      byte-for-byte.
   6. published_changelog=None reserves only the IDs bug files persist.
@@ -343,3 +345,18 @@ class TestSharedReaderAndLint:
         tolerable, _ = lint._diff_is_rc_tolerable(checked_in, regenerated)
 
         assert tolerable is False
+
+
+def test_title_published_with_provenance_still_matches_its_scrubbed_bug(
+    tmp_path: pathlib.Path,
+) -> None:
+    raw_title = "The build fails on ai_rc/v1.0.0 (a1b2c3d4)"
+    published = f"KI-{_ANCHOR}.1 — {raw_title}.; affects {_VERSION} · open"
+    repo_root, bugs_dir = _seed_repo(tmp_path, known_issues=published)
+    _write_bug(bugs_dir, 7, raw_title, public_id=f"KI-{_ANCHOR}.1")
+
+    content = _regenerate(repo_root, bugs_dir)
+
+    assert _known_issue_lines(content) == [
+        f"KI-{_ANCHOR}.1 — The build fails on the release candidate; affects {_VERSION} · open"
+    ]

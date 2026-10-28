@@ -207,18 +207,18 @@ def test_dual_fixture_malformed_active_rc_same_finding_text_on_both_projects(
 
     kanban_root = _build_dual_project_kanban_root(
         tmp_path,
-        "dualtest_prefixed_malformed", prefixed_repo,
-        "dualtest_bare_malformed", bare_repo,
+        "dualtest-prefixed-malformed", prefixed_repo,
+        "dualtest-bare-malformed", bare_repo,
     )
     _write_release_state(
-        kanban_root / "projects" / "dualtest_prefixed_malformed", "NONE"
+        kanban_root / "projects" / "dualtest-prefixed-malformed", "NONE"
     )
     _write_release_state(
-        kanban_root / "projects" / "dualtest_bare_malformed", "NONE"
+        kanban_root / "projects" / "dualtest-bare-malformed", "NONE"
     )
 
-    prefixed_result = _run_verify_rc_state(kanban_root, "dualtest_prefixed_malformed")
-    bare_result = _run_verify_rc_state(kanban_root, "dualtest_bare_malformed")
+    prefixed_result = _run_verify_rc_state(kanban_root, "dualtest-prefixed-malformed")
+    bare_result = _run_verify_rc_state(kanban_root, "dualtest-bare-malformed")
 
     accepted_forms = _ACCEPTED_FORMS[FieldKind.VERSION_OR_NONE]
 
@@ -283,18 +283,18 @@ def test_dual_fixture_same_branch_name_warns_only_on_prefixed_project(
 
     kanban_root = _build_dual_project_kanban_root(
         tmp_path,
-        "dualtest_prefixed_stray", prefixed_repo,
-        "dualtest_bare_stray", bare_repo,
+        "dualtest-prefixed-stray", prefixed_repo,
+        "dualtest-bare-stray", bare_repo,
     )
     _write_release_state(
-        kanban_root / "projects" / "dualtest_prefixed_stray", "v2.11.1"
+        kanban_root / "projects" / "dualtest-prefixed-stray", "v2.11.1"
     )
     _write_release_state(
-        kanban_root / "projects" / "dualtest_bare_stray", "v0.0.9"
+        kanban_root / "projects" / "dualtest-bare-stray", "v0.0.9"
     )
 
-    prefixed_result = _run_verify_rc_state(kanban_root, "dualtest_prefixed_stray")
-    bare_result = _run_verify_rc_state(kanban_root, "dualtest_bare_stray")
+    prefixed_result = _run_verify_rc_state(kanban_root, "dualtest-prefixed-stray")
+    bare_result = _run_verify_rc_state(kanban_root, "dualtest-bare-stray")
 
     # Prefixed project: [OK] for the active branch, [WARN] naming the stray.
     assert prefixed_result.returncode == 0, (
@@ -349,14 +349,14 @@ def test_dual_fixture_exit_code_zero_with_warnings_only(
 
     kanban_root = _build_dual_project_kanban_root(
         tmp_path,
-        "dualtest_prefixed_exit0", prefixed_repo,
-        "dualtest_bare_exit0", bare_repo,
+        "dualtest-prefixed-exit0", prefixed_repo,
+        "dualtest-bare-exit0", bare_repo,
     )
-    _write_release_state(kanban_root / "projects" / "dualtest_prefixed_exit0", "none")
-    _write_release_state(kanban_root / "projects" / "dualtest_bare_exit0", "none")
+    _write_release_state(kanban_root / "projects" / "dualtest-prefixed-exit0", "none")
+    _write_release_state(kanban_root / "projects" / "dualtest-bare-exit0", "none")
 
-    prefixed_result = _run_verify_rc_state(kanban_root, "dualtest_prefixed_exit0")
-    bare_result = _run_verify_rc_state(kanban_root, "dualtest_bare_exit0")
+    prefixed_result = _run_verify_rc_state(kanban_root, "dualtest-prefixed-exit0")
+    bare_result = _run_verify_rc_state(kanban_root, "dualtest-bare-exit0")
 
     assert prefixed_result.returncode == 0, (
         prefixed_result.stdout + prefixed_result.stderr
@@ -379,14 +379,14 @@ def test_dual_fixture_exit_code_one_with_any_error(
 
     kanban_root = _build_dual_project_kanban_root(
         tmp_path,
-        "dualtest_prefixed_exit1", prefixed_repo,
-        "dualtest_bare_exit1", bare_repo,
+        "dualtest-prefixed-exit1", prefixed_repo,
+        "dualtest-bare-exit1", bare_repo,
     )
-    _write_release_state(kanban_root / "projects" / "dualtest_prefixed_exit1", "v9.9.9")
-    _write_release_state(kanban_root / "projects" / "dualtest_bare_exit1", "v9.9.9")
+    _write_release_state(kanban_root / "projects" / "dualtest-prefixed-exit1", "v9.9.9")
+    _write_release_state(kanban_root / "projects" / "dualtest-bare-exit1", "v9.9.9")
 
-    prefixed_result = _run_verify_rc_state(kanban_root, "dualtest_prefixed_exit1")
-    bare_result = _run_verify_rc_state(kanban_root, "dualtest_bare_exit1")
+    prefixed_result = _run_verify_rc_state(kanban_root, "dualtest-prefixed-exit1")
+    bare_result = _run_verify_rc_state(kanban_root, "dualtest-bare-exit1")
 
     assert prefixed_result.returncode == 1, (
         prefixed_result.stdout + prefixed_result.stderr
@@ -409,11 +409,11 @@ def test_dual_fixture_exit_code_two_on_preflight_failure(
 
     kanban_root = _build_dual_project_kanban_root(
         tmp_path,
-        "dualtest_prefixed_exit2", prefixed_repo,
-        "dualtest_bare_exit2", bare_repo,
+        "dualtest-prefixed-exit2", prefixed_repo,
+        "dualtest-bare-exit2", bare_repo,
     )
-    _write_release_state(kanban_root / "projects" / "dualtest_prefixed_exit2", "none")
-    _write_release_state(kanban_root / "projects" / "dualtest_bare_exit2", "none")
+    _write_release_state(kanban_root / "projects" / "dualtest-prefixed-exit2", "none")
+    _write_release_state(kanban_root / "projects" / "dualtest-bare-exit2", "none")
 
     result = _run_verify_rc_state(kanban_root, "does_not_exist_in_this_fixture")
 

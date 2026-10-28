@@ -136,11 +136,13 @@ _REAL_ARGPARSE_SH = _LIB_DIR / "argparse.sh"
 _REAL_ENV_BOOTSTRAP_SH = _LIB_DIR / "env_bootstrap.sh"
 _REAL_INI_PARSER_SH = _LIB_DIR / "ini_parser.sh"
 _REAL_PROJECT_PATHS_SH = _LIB_DIR / "project_paths.sh"
+_REAL_GIT_REMOTE_DEFAULT_SH = _LIB_DIR / "git_remote_default.sh"
 _REAL_ERROR_CONTRACT_SH = _LIB_DIR / "error_contract.sh"
 _REAL_TEMP_SH = _LIB_DIR / "temp.sh"
 _REAL_VERSION_STAMP_SH = _LIB_DIR / "version_stamp.sh"
 _REAL_SUBAGENT_DEPLOY_SH = _LIB_DIR / "subagent_deploy.sh"
 _REAL_SCRIPT_COMMON_SH = _LIB_DIR / "script_common.sh"
+_REAL_CONFIG_LOADER_SH = _LIB_DIR / "config_loader.sh"
 _REAL_SEMVER_SH = _LIB_DIR / "semver.sh"
 
 
@@ -509,10 +511,10 @@ def _populate_upgrade_sandbox(kanban_root: pathlib.Path, dev_tree: pathlib.Path)
         _REAL_ARGPARSE_SH,
         _REAL_ENV_BOOTSTRAP_SH,
         _REAL_INI_PARSER_SH,
-        _REAL_PROJECT_PATHS_SH,
+        _REAL_PROJECT_PATHS_SH, _REAL_GIT_REMOTE_DEFAULT_SH,
         _REAL_ERROR_CONTRACT_SH,
         _REAL_TEMP_SH,
-        _REAL_SCRIPT_COMMON_SH,
+        _REAL_SCRIPT_COMMON_SH, _REAL_CONFIG_LOADER_SH,
         _REAL_SEMVER_SH,
     ]:
         if lib_src.exists():
@@ -551,10 +553,10 @@ def _populate_upgrade_sandbox(kanban_root: pathlib.Path, dev_tree: pathlib.Path)
         _REAL_ARGPARSE_SH,
         _REAL_ENV_BOOTSTRAP_SH,
         _REAL_INI_PARSER_SH,
-        _REAL_PROJECT_PATHS_SH,
+        _REAL_PROJECT_PATHS_SH, _REAL_GIT_REMOTE_DEFAULT_SH,
         _REAL_ERROR_CONTRACT_SH,
         _REAL_TEMP_SH,
-        _REAL_SCRIPT_COMMON_SH,
+        _REAL_SCRIPT_COMMON_SH, _REAL_CONFIG_LOADER_SH,
         _REAL_SEMVER_SH,
     ]:
         if lib_src.exists():

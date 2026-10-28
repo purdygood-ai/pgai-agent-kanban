@@ -1,0 +1,42 @@
+{
+  "combined with day": {
+    "exit_code": 1,
+    "stderr": "error:   metrics_report.inbox_combined\nmessage: --inbox prints open operator-inbox counts on its own and cannot be combined with --day; nothing was printed.\nremedy:  {TEAM}/scripts/metrics-report.sh --kanban-root {ROOT} --inbox --project alpha\n",
+    "stdout": ""
+  },
+  "combined with format": {
+    "exit_code": 1,
+    "stderr": "error:   metrics_report.inbox_combined\nmessage: --inbox prints open operator-inbox counts on its own and cannot be combined with --format; nothing was printed.\nremedy:  {TEAM}/scripts/metrics-report.sh --kanban-root {ROOT} --inbox\n",
+    "stdout": ""
+  },
+  "combined with reliability": {
+    "exit_code": 1,
+    "stderr": "error:   metrics_report.inbox_combined\nmessage: --inbox prints open operator-inbox counts on its own and cannot be combined with --reliability; nothing was printed.\nremedy:  {TEAM}/scripts/metrics-report.sh --kanban-root {ROOT} --inbox\n",
+    "stdout": ""
+  },
+  "every registered project": {
+    "exit_code": 0,
+    "stderr": "",
+    "stdout": "  alpha: 2 open\n  beta: 0 open\n  gamma: 0 open\n"
+  },
+  "one project with only closed entries": {
+    "exit_code": 0,
+    "stderr": "",
+    "stdout": "  beta: 0 open\n"
+  },
+  "one project with open entries": {
+    "exit_code": 0,
+    "stderr": "",
+    "stdout": "  alpha: 2 open\n"
+  },
+  "one project without an inbox file": {
+    "exit_code": 0,
+    "stderr": "",
+    "stdout": "  gamma: 0 open\n"
+  },
+  "unknown project": {
+    "exit_code": 1,
+    "stderr": "error:   metrics_report.inbox_unknown_project\nmessage: project 'nope' has no directory at {ROOT}/projects/nope, so it has no operator inbox; nothing was printed.\nremedy:  ls {ROOT}/projects\n",
+    "stdout": ""
+  }
+}

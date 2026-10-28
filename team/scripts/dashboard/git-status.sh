@@ -12,7 +12,7 @@
 #      blank) for the current branch and <branch_prefix>main
 #   2. Uncommitted changes summary (staged + unstaged counts)
 #   3. In-flight rc/* branches (filtered by branch_prefix when configured)
-#   4. Recent commits on main (top 5)
+#   4. Recent commits on <branch_prefix>main (top 5)
 #   5. Recent tags (last 5, filtered by branch_prefix when configured)
 #
 # Document-workflow projects (workflow_type=document) are omitted.
@@ -292,17 +292,18 @@ render_project_git_status() {
   printf '\n'
 
   # -------------------------------------------------------------------------
-  # Section 4: Recent commits on main (top 5)
+  # Section 4: Recent commits on the project's main branch
+  # (<branch_prefix>main, top 5)
   # -------------------------------------------------------------------------
-  section_header --rule "Recent Commits (main, last 5)"
+  section_header --rule "Recent Commits (${main_branch}, last 5)"
 
-  if git -C "$dev_tree" rev-parse --verify main &>/dev/null; then
-    git -C "$dev_tree" log main --oneline -5 --format="%C(dim)%h%Creset  %s" 2>/dev/null \
+  if git -C "$dev_tree" rev-parse --verify "$main_branch" &>/dev/null; then
+    git -C "$dev_tree" log "$main_branch" --oneline -5 --format="%C(dim)%h%Creset  %s" 2>/dev/null \
       | while IFS= read -r line; do
           printf '  %s\n' "$line"
         done
   else
-    printf '  %s(main branch not found)%s\n' "$DIM" "$RESET"
+    printf '  %s(%s branch not found)%s\n' "$DIM" "$main_branch" "$RESET"
   fi
 
   printf '\n'
@@ -377,15 +378,10 @@ for _proj in "${_PROJECTS[@]}"; do
     _dev_tree="$(_pp_read_cfg_key "$_proj_cfg_file" project dev_tree_path "" 2>/dev/null || true)"
   fi
 
-  # Resolve branch_prefix for this project (best-effort; empty = no prefix).
-  _branch_prefix=""
-  if [[ -n "$_proj_cfg_file" && -f "$_proj_cfg_file" ]]; then
-    _raw_prefix="$(_pp_read_cfg_key "$_proj_cfg_file" project branch_prefix "" 2>/dev/null || true)"
-    # Strip surrounding double-quotes (mirrors pp_branch_prefix strip treatment).
-    _raw_prefix="${_raw_prefix%\"}"
-    _raw_prefix="${_raw_prefix#\"}"
-    _branch_prefix="$_raw_prefix"
-  fi
+  # Resolve branch_prefix for this project (pp_branch_prefix). An invalid
+  # value, which pp_branch_prefix refuses, renders with no prefix -- a
+  # render never refuses.
+  _branch_prefix="$(pp_branch_prefix "$_proj" 2>/dev/null)" || _branch_prefix=""
 
   # Resolve the project's git remote (origin when git_remote_name is absent
   # or blank; empty when it is invalid -- a render never refuses).

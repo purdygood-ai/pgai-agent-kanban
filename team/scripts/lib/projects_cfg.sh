@@ -32,6 +32,14 @@
 #                                     wraps to index 0 when all 8 are consumed
 #   projects_cfg_next_priority      — echo max(existing priorities) + 1,
 #                                     or 1 when projects.cfg is empty
+#   PROJECTS_CFG_NAME_RE            — the project-name rule, an anchored
+#                                     extended regex every registry reader
+#                                     and name check takes (see below)
+#   PROJECTS_CFG_AWK_HEADER         — awk text defining project_section(line),
+#                                     project_section_name(line) and
+#                                     project_header(line), the [project:NAME]
+#                                     header rule; prepend it to an awk
+#                                     program (see below)
 #
 # Color format rules
 # ------------------
@@ -48,8 +56,144 @@
 # This library may be sourced independently, but callers that also need the
 # full projects.sh API should source projects.sh, which sources this file.
 # This file does NOT source projects.sh to avoid circular dependencies.
-# It calls projects_cfg_path() — callers must ensure projects.sh (or at
-# minimum its projects_cfg_path definition) is sourced first.
+# It calls projects_cfg_path() and projects_cfg_format() — callers must
+# ensure projects.sh (or at minimum those two definitions) is sourced first.
+
+# ---------------------------------------------------------------------------
+# PROJECTS_CFG_NAME_RE — the project-name rule, defined here and nowhere
+# else: a lowercase ASCII letter or digit, then lowercase letters, digits
+# and '-'. A [project:NAME] section whose NAME fails it is no project to
+# any registry reader, and the registry verbs (create, add, remove) refuse
+# any other name.
+#
+#   [[ "$name" =~ $PROJECTS_CFG_NAME_RE ]]     # bash (leave it unquoted)
+#
+# Every other reader takes it from this line: PROJECTS_CFG_AWK_HEADER
+# below embeds it in project_header, and project_name_rule in
+# pgai_agent_kanban/lib/ini.py reads this assignment for the Python readers
+# and pgai_agent_kanban/ops/projects.py. Keep it one single-quoted
+# assignment on its own line, written in the syntax bash, awk and Python
+# regexes share (anchors, bracket expressions, '*'), and free of '/' so awk
+# can embed it as a regex literal.
+#
+# Defined before the palette load below, with the header rule, so a missing
+# default_palette.txt leaves the name rule in place.
+# ---------------------------------------------------------------------------
+PROJECTS_CFG_NAME_RE='^[a-z0-9][a-z0-9-]*$'
+
+# ---------------------------------------------------------------------------
+# PROJECTS_CFG_AWK_HEADER — the one [project:NAME] header rule every awk
+# program reading an INI projects.cfg uses. Prepend it to the program text:
+#
+#   awk -v n="$name" "${PROJECTS_CFG_AWK_HEADER}"'
+#       (hdr = project_header($0)) != "" { cur = hdr; next }
+#       ...
+#   ' "$cfg"
+#
+# Recognising a project section and accepting its name are two steps:
+#
+#   project_section(line)       1 when <line> is a [project:...] header of
+#                               any name (an empty one included), else 0.
+#   project_section_name(line)  the text between "[project:" and the last
+#                               "]" of such a header, as written; "" for any
+#                               other line.
+#   project_header(line)        NAME when <line> is a project section whose
+#                               name the registry accepts -- NAME matches
+#                               PROJECTS_CFG_NAME_RE -- and "" otherwise.
+#
+# Every registry reader lists and reads projects through project_header, so
+# a section whose name the registry does not accept ([project:bad.name],
+# [project:bad name], [project:My_App]) is no project; projects_cfg_unaccepted_names
+# (lib/projects.sh) names such sections through project_section, so a
+# caller can report them instead of losing them.
+#
+# Leading and trailing whitespace on the line, the CR of a CRLF line ending
+# included, is ignored, as pgai_agent_kanban.lib.ini.projects_registry
+# ignores it for the same file. Anything else after the closing "]" -- a
+# trailing comment such as "[project:alpha] # first" -- makes the line no
+# project section at all. The line itself is not changed, so a program that
+# prints $0 keeps its bytes.
+#
+# It is defined before the palette load below so that a missing or
+# malformed default_palette.txt stays a colour-only failure: every registry
+# reader in projects.sh still has its header rule.
+#
+# This is the bash header rule: every bash registry reader, project-name
+# resolution in lib/project_paths.sh included (through projects_cfg_list),
+# reads headers through it. The Python rules are _PROJECT_SECTION_RE and
+# _project_header in pgai_agent_kanban/ops/projects.py;
+# tests/unit/test_registry_reader_parity.py feeds the same header variants
+# through both and expects one answer.
+# ---------------------------------------------------------------------------
+PROJECTS_CFG_AWK_HEADER='
+function project_section(line) {
+    sub(/^[[:space:]]+/, "", line)
+    sub(/[[:space:]]+$/, "", line)
+    return (line ~ /^\[project:.*\]$/)
+}
+function project_section_name(line) {
+    if (!project_section(line)) return ""
+    sub(/^[[:space:]]+/, "", line)
+    sub(/[[:space:]]+$/, "", line)
+    return substr(line, 10, length(line) - 10)
+}
+function project_header(line,    name) {
+    name = project_section_name(line)
+    if (name !~ /'"${PROJECTS_CFG_NAME_RE}"'/) return ""
+    return name
+}
+'
+
+# ---------------------------------------------------------------------------
+# _projects_cfg_ini_value <cfg_path> <name> <key>
+# The one per-field reader of an INI projects.cfg. Echoes the value of <key>
+# for project <name>, whitespace-trimmed and otherwise unaltered.
+#
+# A project registered by more than one [project:NAME] section reads per
+# key: the last section that sets <key> wins, and a key only an earlier
+# section sets keeps that earlier value -- as
+# pgai_agent_kanban.lib.ini.projects_registry merges the same file, and as
+# _Registry._ini_field in pgai_agent_kanban/ops/projects.py reads it.
+#
+# Only key=value lines at the start of the line whose key is lowercase
+# letters and underscores are read; '#' lines are comments; a section of
+# another kind ends the project's section.
+#
+# Returns 0 with the value on stdout when some section of <name> sets
+# <key> (the value may be empty), 2 with nothing printed when <name> is
+# registered but no section of it sets <key>, and 1 with nothing printed
+# when no [project:NAME] section exists.
+#
+# Defined before the palette load below, with PROJECTS_CFG_AWK_HEADER, so
+# the field readers in projects.sh keep working when default_palette.txt is
+# missing or malformed.
+# ---------------------------------------------------------------------------
+_projects_cfg_ini_value() {
+    local cfg="$1" name="$2" key="$3"
+    awk -v n="$name" -v f="$key" "${PROJECTS_CFG_AWK_HEADER}"'
+        /^[[:space:]]*#/ { next }
+        /^[[:space:]]*$/ { next }
+        (hdr = project_header($0)) != "" {
+            cur = hdr
+            if (cur == n) section_found = 1
+            next
+        }
+        /^[[:space:]]*\[/ { cur = ""; next }
+        /^[a-z_]+[[:space:]]*=/ && cur == n {
+            eq = index($0, "=")
+            k = substr($0, 1, eq - 1)
+            v = substr($0, eq + 1)
+            gsub(/^[[:space:]]+|[[:space:]]+$/, "", k)
+            gsub(/^[[:space:]]+|[[:space:]]+$/, "", v)
+            if (k == f) { val = v; found = 1 }
+        }
+        END {
+            if (found) { print val; exit 0 }
+            if (section_found) exit 2
+            exit 1
+        }
+    ' "$cfg"
+}
 
 # ---------------------------------------------------------------------------
 # PGAI_DEFAULT_PALETTE — eight visually distinct project colors.
@@ -118,8 +262,9 @@ _projects_cfg_validate_color() {
 # named project, or empty string if the field is absent or not set.
 # Does NOT validate format.
 #
-# Handles both INI format (dashboard_color field) and colon-legacy format
-# (third colon-separated field). Format is detected automatically.
+# Handles both INI format (dashboard_color field, from the last
+# [project:NAME] section that sets it) and colon-legacy format (third
+# colon-separated field). Format is detected automatically.
 # ---------------------------------------------------------------------------
 _projects_cfg_read_raw_color() {
     local name="$1"
@@ -129,49 +274,24 @@ _projects_cfg_read_raw_color() {
     cfg="$(projects_cfg_path)"
     [[ -f "$cfg" ]] || return 1
 
-    # Detect format: check first non-comment, non-blank line
+    # Detect format with the registry's one format detector (projects.sh).
     local fmt
-    fmt="$(awk '
-        /^[[:space:]]*#/ { next }
-        /^[[:space:]]*$/ { next }
-        {
-            if (substr($0, 1, 1) == "[") { print "ini" }
-            else { print "colon-legacy" }
-            found = 1
-            exit
-        }
-        END { if (!found) print "colon-legacy" }
-    ' "$cfg")"
+    fmt="$(projects_cfg_format "$cfg")"
 
     if [[ "$fmt" == "ini" ]]; then
-        # INI format: look for dashboard_color under [project:NAME] section.
-        # Exit 0 with empty stdout when the section exists but has no dashboard_color
-        # (callers such as projects_cfg_color must distinguish between
-        # "project not registered" [exit 1] and "registered but no explicit color"
-        # [exit 0, empty output] so that the palette fallback path is taken).
-        awk -v n="$name" '
-            /^[[:space:]]*#/ { next }
-            /^[[:space:]]*$/ { next }
-            /^\[project:[a-zA-Z0-9_-]+\]$/ {
-                cur = substr($0, 10, length($0) - 10)
-                if (cur == n) section_found = 1
-                next
-            }
-            /^[[:space:]]*\[/ { cur = ""; next }
-            /^[a-z_]+[[:space:]]*=/ && cur == n {
-                eq = index($0, "=")
-                key = substr($0, 1, eq - 1)
-                val = substr($0, eq + 1)
-                gsub(/^[[:space:]]+|[[:space:]]+$/, "", key)
-                gsub(/^[[:space:]]+|[[:space:]]+$/, "", val)
-                if (key == "dashboard_color") { print val; color_found=1; exit }
-            }
-            END {
-                if (color_found) exit 0   # color printed above
-                if (section_found) exit 0 # section exists, no explicit color — return empty
-                exit 1                    # section not found — project not registered
-            }
-        ' "$cfg"
+        # INI format: dashboard_color from the last [project:NAME] section
+        # that sets it (_projects_cfg_ini_value). Exit 0 with empty stdout
+        # when the project is registered but no section of it sets
+        # dashboard_color (callers such as projects_cfg_color must
+        # distinguish between "project not registered" [exit 1] and
+        # "registered but no explicit color" [exit 0, empty output] so that
+        # the palette fallback path is taken).
+        local rc=0
+        _projects_cfg_ini_value "$cfg" "$name" dashboard_color || rc=$?
+        case "$rc" in
+            0|2) return 0 ;;
+            *) return 1 ;;
+        esac
     else
         # Colon-legacy format: third colon-separated field
         awk -F: -v n="$name" '
@@ -201,7 +321,9 @@ _projects_cfg_read_raw_color() {
 # project based on its registration order within projects.cfg (0-based,
 # modulo palette size). Returns the index on stdout.
 #
-# Handles both INI and colon-legacy formats.
+# Handles both INI and colon-legacy formats. In INI, a [project:...]
+# section whose name the registry rejects ends the section before it, as
+# in projects_cfg_list, so a priority under it moves no project's slot.
 # ---------------------------------------------------------------------------
 _projects_cfg_palette_index_for() {
     local name="$1"
@@ -215,29 +337,22 @@ _projects_cfg_palette_index_for() {
 
     # Detect format
     local fmt
-    fmt="$(awk '
-        /^[[:space:]]*#/ { next }
-        /^[[:space:]]*$/ { next }
-        {
-            if (substr($0, 1, 1) == "[") { print "ini" }
-            else { print "colon-legacy" }
-            found = 1
-            exit
-        }
-        END { if (!found) print "colon-legacy" }
-    ' "$cfg")"
+    fmt="$(projects_cfg_format "$cfg")"
 
     if [[ "$fmt" == "ini" ]]; then
         # INI format: collect sections in order, sort by priority, find ordinal of <name>
-        awk -v n="$name" -v psz="$palette_size" '
+        awk -v n="$name" -v psz="$palette_size" "${PROJECTS_CFG_AWK_HEADER}"'
             /^[[:space:]]*#/ { next }
             /^[[:space:]]*$/ { next }
-            /^\[project:[a-zA-Z0-9_-]+\]$/ {
-                cur = substr($0, 10, length($0) - 10)
+            (hdr = project_header($0)) != "" {
+                cur = hdr
                 section_line[cur] = NR
                 section_order[++n_sections] = cur
                 next
             }
+            # A [project:...] section with a rejected name is no project:
+            # its keys belong to none, as in projects_cfg_list.
+            project_section($0) { cur = ""; next }
             /^[[:space:]]*\[/ { next }
             /^[a-z_]+[[:space:]]*=/ && cur != "" {
                 eq = index($0, "=")
@@ -384,17 +499,7 @@ projects_cfg_next_color() {
 
     if [[ -f "$cfg" ]]; then
         local _fmt
-        _fmt="$(awk '
-            /^[[:space:]]*#/ { next }
-            /^[[:space:]]*$/ { next }
-            {
-                if (substr($0, 1, 1) == "[") { print "ini" }
-                else { print "colon-legacy" }
-                found = 1
-                exit
-            }
-            END { if (!found) print "colon-legacy" }
-        ' "$cfg")"
+        _fmt="$(projects_cfg_format "$cfg")"
 
         local palette_size="${#PGAI_DEFAULT_PALETTE[@]}"
 
@@ -413,14 +518,14 @@ projects_cfg_next_color() {
 
             while IFS= read -r line; do
                 used_colors+=("$line")
-            done < <(awk -v psz="$palette_size" -v pal_str="$_awk_palette" '
+            done < <(awk -v psz="$palette_size" -v pal_str="$_awk_palette" "${PROJECTS_CFG_AWK_HEADER}"'
                 BEGIN {
                     n_pal = split(pal_str, pal, " ")
                 }
                 /^[[:space:]]*#/ { next }
                 /^[[:space:]]*$/ { next }
-                /^\[project:[a-zA-Z0-9_-]+\]$/ {
-                    cur = substr($0, 10, length($0) - 10)
+                (hdr = project_header($0)) != "" {
+                    cur = hdr
                     section_line[cur] = NR
                     section_order[++n_sections] = cur
                     next
@@ -588,17 +693,7 @@ projects_cfg_next_priority() {
 
     # Detect format
     local fmt
-    fmt="$(awk '
-        /^[[:space:]]*#/ { next }
-        /^[[:space:]]*$/ { next }
-        {
-            if (substr($0, 1, 1) == "[") { print "ini" }
-            else { print "colon-legacy" }
-            found = 1
-            exit
-        }
-        END { if (!found) print "colon-legacy" }
-    ' "$cfg")"
+    fmt="$(projects_cfg_format "$cfg")"
 
     local max_prio
     if [[ "$fmt" == "ini" ]]; then

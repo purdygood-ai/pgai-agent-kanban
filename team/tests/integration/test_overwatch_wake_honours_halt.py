@@ -41,7 +41,7 @@ def _stage_log(kanban_root: pathlib.Path) -> pathlib.Path:
 
 
 def test_fleet_halt_stops_the_overwatch_wake_before_any_project_is_touched(tmp_path: pathlib.Path) -> None:
-    kanban_root, proj, status = _build(tmp_path, "wd_fleet_halt")
+    kanban_root, proj, status = _build(tmp_path, "wd-fleet-halt")
     halt = kanban_root / "HALT"
     halt.write_text(_OPERATOR_HALT, encoding="utf-8")
     before = status.read_bytes()
@@ -61,7 +61,7 @@ def test_fleet_halt_stops_the_overwatch_wake_before_any_project_is_touched(tmp_p
 
 
 def test_project_halt_skips_block_triage_for_that_project(tmp_path: pathlib.Path) -> None:
-    kanban_root, proj, status = _build(tmp_path, "wd_project_halt")
+    kanban_root, proj, status = _build(tmp_path, "wd-project-halt")
     halt = proj / "HALT"
     halt.write_text(_OPERATOR_HALT, encoding="utf-8")
     before = status.read_bytes()

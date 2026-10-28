@@ -105,7 +105,14 @@
 #                             difference a provenance record attributes to an
 #                             operator or agent write, and the clean verdict.
 #                             Returns 1 when any unattributed difference was
-#                             found, 0 otherwise.
+#                             found, 0 otherwise. Sets the global array
+#                             PGAI_SENTINEL_LEAKS_FOUND to one
+#                             "<kind><TAB><path><TAB><note>" element per
+#                             unattributed difference (kind added, changed
+#                             or removed; note names the test that wrote it,
+#                             or is empty), so a caller running the check in
+#                             its own shell reports each difference as its
+#                             own finding (gated_runner_run_instance_check).
 
 # Basenames a sentinel may carry -- kept in one place so the two functions
 # below and any future reader agree on the set.
@@ -242,6 +249,7 @@ pgai_sentinel_snapshot() {
 # ATTRIBUTED instead of counted.
 # ---------------------------------------------------------------------------
 pgai_sentinel_leak_check() {
+    PGAI_SENTINEL_LEAKS_FOUND=()
     local root
     root="$(_pgai_sentinel_resolve_root "${1:-}")"
     local snapshot_file="${2:-}"
@@ -313,6 +321,7 @@ pgai_sentinel_leak_check() {
         else
             echo "[pgai-sentinel] CHANGED: ${path} -- a live sentinel's content differs from the pre-suite snapshot.${written_by}" >&2
         fi
+        PGAI_SENTINEL_LEAKS_FOUND+=("${kind}"$'\t'"${path}"$'\t'"${written_by# }")
         findings=$((findings + 1))
     done
     for path in "${!before[@]}"; do
@@ -333,6 +342,7 @@ pgai_sentinel_leak_check() {
             written_by=" Removed by ${p_op} under test ${p_test} (pid ${p_pid} at ${p_time})."
         fi
         echo "[pgai-sentinel] REMOVED: ${path} -- a sentinel present before the suite is gone; only the operator removes a HALT file.${written_by}" >&2
+        PGAI_SENTINEL_LEAKS_FOUND+=("removed"$'\t'"${path}"$'\t'"${written_by# }")
         findings=$((findings + 1))
     done
 

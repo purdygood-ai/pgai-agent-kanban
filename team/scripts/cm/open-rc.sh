@@ -50,6 +50,14 @@
 #      in release-state.md is a narrower, latching field consumed only by the
 #      HALT-AFTER rc:vX.Y.Z drain check.
 #   8. git checkout -b rc/<version>
+#   8a. Regenerates the measured-pace blocks in the dev tree's README.md and
+#       HOW_TO.md from the project's shipped rollups (the release that just
+#       shipped wrote its rollup at release.sh Step 15a) and commits them on
+#       rc/<version>, so the RC opens with blocks naming the newest shipped
+#       rollup (lib/cm/measured_pace_refresh.sh). Quality class: a project
+#       whose docs carry no measured-pace block, docs with uncommitted
+#       changes, or a failed render or commit narrate one line, change no
+#       file, and the open continues.
 #   9. git push -u <remote> rc/<version>
 #  10. git checkout main
 #  11. Prints success message and exits 0
@@ -97,6 +105,11 @@ does not set push_to_remote = false. A git_remote_name that is not a valid
 remote name refuses (git_remote_name.invalid) before any git command. Any other project opens the RC
 locally and contacts no remote; an unresolved one logs a
 skipped-unresolved-project line naming the missing piece.
+
+Measured-pace blocks: right after the rc branch is cut, the README.md and
+HOW_TO.md measured-pace blocks are regenerated from the project's shipped
+rollups and committed on the rc branch. A project whose docs carry no such
+block, or a render that fails, changes no file and the open continues.
 
 Arguments:
   --project <name>  project name; overrides PGAI_PROJECT_NAME env var
@@ -177,13 +190,15 @@ KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH}"
 TEAM_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH}"
 [[ -f "$KANBAN_ROOT/bashrc" ]] && source "$KANBAN_ROOT/bashrc"
 [[ -f "$KANBAN_ROOT/env" ]] && source "$KANBAN_ROOT/env"
-[[ -f "$HOME/.config/pgai-kanban.cfg" ]] && source "$HOME/.config/pgai-kanban.cfg"
+# Operator user config, then [chain] pm_mode (config_loader.sh).
+# shellcheck source=../lib/config_loader.sh
+source "${SCRIPT_DIR}/../lib/config_loader.sh"
+config_startup_prelude "$TEAM_ROOT"
 # Source ini_parser.sh for read_ini (needed before project_paths.sh is available).
 # shellcheck source=lib/ini_parser.sh
 [[ -f "${SCRIPT_DIR}/../lib/ini_parser.sh" ]] && source "${SCRIPT_DIR}/../lib/ini_parser.sh"
 # Source kanban.cfg — INI format replaces legacy config.cfg
 if [[ -f "$TEAM_ROOT/kanban.cfg" ]]; then
-    export PGAI_KANBAN_PM_MODE="${PGAI_KANBAN_PM_MODE:-$(read_ini "$TEAM_ROOT/kanban.cfg" chain pm_mode automatic)}"
     export PGAI_DEV_TREE_PATH="${PGAI_DEV_TREE_PATH:-$(read_ini "$TEAM_ROOT/kanban.cfg" paths dev_tree_path "")}"
 fi
 
@@ -194,6 +209,10 @@ source "$(dirname "${BASH_SOURCE[0]}")/../lib/project_paths.sh"
 # --- Source semver helpers ---
 # shellcheck source=lib/semver.sh
 source "$(dirname "${BASH_SOURCE[0]}")/../lib/semver.sh"
+
+# --- Source the measured-pace block refresh (Step 8a) ---
+# shellcheck source=../lib/cm/measured_pace_refresh.sh
+source "$(dirname "${BASH_SOURCE[0]}")/../lib/cm/measured_pace_refresh.sh"
 
 # --- Source pp_run_ops (JSON field reads of the per-RC state records) ---
 # shellcheck source=lib/pp_run_ops.sh
@@ -479,6 +498,11 @@ RELEASE_STATE_WRITTEN=1
 echo "Creating branch $RC_BRANCH from $MAIN_BRANCH..."
 git -C "$REPO_ROOT" checkout -b "$RC_BRANCH"
 RC_BRANCH_CREATED=1
+
+# --- Step 8a: regenerate the measured-pace blocks on the new RC branch ---
+# The shipped release's rollup exists by now, so the blocks committed here
+# name it. Quality class: always returns 0 (lib/cm/measured_pace_refresh.sh).
+cm_refresh_measured_pace_docs "$REPO_ROOT" "$PROJECT_NAME" "$KANBAN_ROOT"
 
 # --- Write per-RC release-state JSON ---
 # Written after successful RC branch creation so it is only present when

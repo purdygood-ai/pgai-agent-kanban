@@ -9,10 +9,15 @@ landing on the branch instead of a task's declared work.
 
 WHERE THIS RUNS
 ----------------
-Wired into ``team/scripts/run-integration-tests.sh`` through
-``gated_runner_run_quality_lint``, so the existing "run the gated suites"
+Wired into ``team/scripts/run-integration-tests.sh``, which passes
+``--findings-file`` and merges the array per instance with
+``gated_runner_merge_findings_file``, so the existing "run the gated suites"
 step every TESTER verification already performs exercises this lint on
-every invocation — no separate command for an agent to remember. Range
+every invocation — no separate command for an agent to remember. The
+CODER/WRITER completion gate (``coder_writer_completion_gate`` in
+``team/scripts/lib/wake_lifecycle.sh``) also runs it over one task's own
+``--range`` and reads a found commit from the stable ``error`` key
+``lint.rc-empty-commits`` this lint prints only when it found one. Range
 discovery is local-branch-based (see ``discover_rc_ranges`` below): a dev
 tree carrying no ``<prefix>rc/vX.Y.Z`` branch has nothing to scan, and the
 lint prints one informational line and exits 0. That is a legitimate
@@ -43,28 +48,31 @@ artefact is byte-for-byte identical whether or not the commit is present
 — zero runtime-failure risk. The cost is to provenance (a commit nothing
 accounts for), exactly the class of finding the gated runner's
 quality-class lane exists to carry forward without stopping the loop (see
-team/SOP-core.md, "Gates and Refusals" and "The Loop"). This lint's own
-process exit code is therefore never treated as fatal by its caller:
-``gated_runner_run_quality_lint`` records a non-zero exit as one finding
-and continues to pytest regardless.
+team/SOP-core.md, "Gates and Refusals" and "The Loop"). Each empty commit
+is printed and recorded as one finding (the shape
+``pgai_agent_kanban.lint.findings`` defines), and the lint exits 0
+whatever it found.
 
 Usage:
     lint_rc_empty_commits.py [--repo PATH] [--range REV_RANGE ...]
+                             [--findings-file PATH]
 
-    --repo PATH        Git repository to inspect (default: this script's
-                        own repo, resolved via
-                        ``git rev-parse --show-toplevel``).
-    --range REV_RANGE  Explicit "main..rc" range to check (e.g.
-                        "ai_main..ai_rc/v9.9.9"). May be repeated. When
-                        omitted, every locally present
-                        ``<prefix>rc/vX.Y.Z`` branch is paired with its
-                        same-prefix ``<prefix>main`` branch and checked
-                        automatically.
+    --repo PATH          Git repository to inspect (default: this script's
+                          own repo, resolved via
+                          ``git rev-parse --show-toplevel``).
+    --range REV_RANGE    Explicit "main..rc" range to check (e.g.
+                          "ai_main..ai_rc/v9.9.9"). May be repeated. When
+                          omitted, every locally present
+                          ``<prefix>rc/vX.Y.Z`` branch is paired with its
+                          same-prefix ``<prefix>main`` branch and checked
+                          automatically.
+    --findings-file PATH Write the findings as a JSON array to PATH
+                          (parent directories created; written even when
+                          empty).
 
 Exit codes:
-    0   No empty non-merge commit found in any range checked (including
-        the no-RC-branch no-op case).
-    1   At least one empty non-merge commit found; each is printed.
+    0   The ranges were checked, whatever was found (including the
+        no-RC-branch no-op case); each empty commit is a finding.
     2   Pre-flight failure — not a git repository, or an explicit
         --range does not resolve.
 """
@@ -87,6 +95,14 @@ if _team_str not in sys.path:
     sys.path.insert(0, _team_str)
 
 from pgai_agent_kanban.lib.error_contract import emit_error_contract  # noqa: E402
+from pgai_agent_kanban.lint.findings import quality_finding, write_findings_file  # noqa: E402
+
+_LINT_NAME = "rc_empty_commits"
+
+# The stable machine key printed (on stderr, through the dual-channel
+# emitter) when at least one empty commit was found -- and only then. The
+# completion gate keys its refusal on it.
+FOUND_ERROR_KEY = "lint.rc-empty-commits"
 
 # ---------------------------------------------------------------------------
 # A local branch named "<prefix>rc/vX.Y.Z" pairs with "<prefix>main". The
@@ -171,9 +187,11 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
+            "Each empty commit is printed and recorded as a quality finding; "
+            "when any is found the error key lint.rc-empty-commits is printed.\n"
+            "\n"
             "Exit codes:\n"
-            "  0  No empty non-merge commit found (including no RC branch present).\n"
-            "  1  At least one empty non-merge commit found.\n"
+            "  0  The ranges were checked, whatever was found (including no RC branch present).\n"
             "  2  Pre-flight failure (bad --repo or an explicit --range does not resolve).\n"
         ),
     )
@@ -194,15 +212,25 @@ def _build_parser() -> argparse.ArgumentParser:
             "auto-discover every local <prefix>rc/vX.Y.Z branch."
         ),
     )
+    parser.add_argument(
+        "--findings-file",
+        metavar="PATH",
+        default=None,
+        help=(
+            "Write the findings as a JSON array to PATH (parent directories "
+            "created; written even when empty). Findings are printed either way."
+        ),
+    )
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     """Run the RC empty-commit lint over each RC branch range (or each ``--range``).
 
-    Exit codes: 0 no empty non-merge commit (including a tree with no RC
-    branch); 1 at least one, each printed; 2 not a git repository, or an
-    explicit ``--range`` does not resolve.
+    Exit codes: 0 the ranges were checked, whatever was found (each empty
+    non-merge commit is printed, recorded as a finding, and announced with
+    ``FOUND_ERROR_KEY``); 2 not a git repository, or an explicit ``--range``
+    does not resolve.
     """
     parser = _build_parser()
     args = parser.parse_args(argv)
@@ -235,6 +263,7 @@ def main(argv: list[str] | None = None) -> int:
             "lint_rc_empty_commits: no <prefix>rc/vX.Y.Z branch found locally "
             "-- nothing to check."
         )
+        write_findings_file(args.findings_file, [], lint="lint_rc_empty_commits")
         return 0
 
     hits: list[EmptyCommit] = []
@@ -244,6 +273,20 @@ def main(argv: list[str] | None = None) -> int:
         except ValueError as exc:
             print(f"lint_rc_empty_commits: {exc}", file=sys.stderr)
             return 2
+
+    findings = [
+        quality_finding(
+            _LINT_NAME,
+            f"empty non-merge commit {hit.sha[:7]} in {hit.rev_range} -- "
+            f"\"{hit.subject}\" changes no file against its parent",
+            f"git -C {repo} show --stat {hit.sha}",
+            sha=hit.sha,
+            range=hit.rev_range,
+            subject=hit.subject,
+        )
+        for hit in hits
+    ]
+    write_findings_file(args.findings_file, findings, lint="lint_rc_empty_commits")
 
     if not hits:
         print(
@@ -259,24 +302,22 @@ def main(argv: list[str] | None = None) -> int:
             "against its parent."
         )
 
-    # gated_runner_run_quality_lint records this exit as one non-fatal
-    # finding and the runner continues to pytest regardless -- see the
-    # module docstring's "CLASSIFICATION" section for the full rationale.
+    # CENSUS-ANCHOR: rc-empty-commits-01
+    # CONVERT: zero runtime-failure risk to the shipped artefact -- an
+    # empty commit changes no file. The cost is to provenance only, so the
+    # commits are recorded as findings and main returns 0 below.
     emit_error_contract(
-        "lint.rc-empty-commits",
+        FOUND_ERROR_KEY,
         f"{len(hits)} empty non-merge commit(s) found in the checked "
         "range(s); each changes no file relative to its parent, so no "
-        "task's declared work accounts for it.",
-        "Read the commit(s) named above with 'git show --stat <sha>' to "
-        "confirm which task session produced it, then record the finding "
-        "in that task's status.md (or file a bug) -- the commit itself is "
+        "task's declared work accounts for it. Read each commit named above "
+        "to confirm which task session produced it, then record the finding "
+        "in that task's status.md (or file a bug); the commit itself is "
         "harmless and rewriting a branch other agents have merged into is "
         "not proposed.",
+        f"git -C {repo} show --stat {hits[0].sha}",
     )
-    # CONVERT: zero runtime-failure risk to the shipped artefact -- an
-    # empty commit changes no file. The cost is to provenance only.
-    # CENSUS-ANCHOR: rc-empty-commits-01
-    return 1
+    return 0
 
 
 if __name__ == "__main__":

@@ -91,8 +91,10 @@ filename conventions):
 same claim bug filers use, so no two bugs share a number. The name must follow
 the ledger filename contract — `BUG-NNNN-<slug>.md`, lower-case kebab slug, an
 optional `-YYYYMMDD-` after the number — or it is refused before anything is
-written. A free number is deposited as named. A taken one is deposited under
-the next free number above the highest in the ledger: the file is renamed, its
+written. A number is taken when a live bug holds it or an archived one does — a
+bug file in `archive/<name>/bugs/` under the kanban root. A free number is
+deposited as named. A taken one is deposited under the next free number above
+the highest taken, live or archived: the file is renamed, its
 `# BUG-NNNN-<slug>` title line and `**Bug ID:**` line are rewritten to match,
 and the printed `intake: deposited <path>` line names the new file.
 `PRIORITY-*` and requirements files are always deposited as named.
@@ -109,6 +111,12 @@ pre-empts that.
 
 - **Unroutable name.** The filename matches none of `BUG-*`, `PRIORITY-*`, or
   `vX.Y.Z-*` and cannot be routed.
+- **Not a bare file name.** The name carries `..`, a backslash, a URL-encoded
+  separator or a NUL byte, whatever its prefix — exit 2,
+  `intake.filename_not_bare`. The remedy renames the staged file to a bare
+  example name that keeps its own prefix, so it routes to the same directory
+  (`PRIORITY-0050-a%2Fb.md` becomes `PRIORITY-0050-example.md`, for example),
+  and re-runs `intake.sh`.
 - **Malformed BUG name.** A `BUG-*` name breaks the ledger filename contract —
   an uppercase letter or a dot in the slug, for example. The message carries
   the text discovery prints for a malformed name; the remedy renames the draft
@@ -1181,15 +1189,15 @@ scripts/cm/release.sh --project my-app --decide-only
 **The output.** Narration goes to stderr. Stdout carries one line:
 
 ```
-ship-policy: decision=<SHIP-…|HALT> posture=<matrix|always> trigger=<n|none> notes_status=<…>
+ship-policy: decision=<SHIP-…|REQUEUE-VERIFICATION|VERIFICATION-PENDING|HALT> posture=<matrix|always> trigger=<n|none> notes_status=<…>
 ```
 
 | Field | Value |
 |---|---|
-| `decision` | The decision a full run would reach: `SHIP-FUNCTIONAL`, `SHIP-KNOWN-BUGS`, `SHIP-NON-FUNCTIONAL`, `SHIP-KNOWN-ISSUE`, or `HALT`. |
+| `decision` | The decision a full run would reach: `SHIP-FUNCTIONAL`, `SHIP-KNOWN-BUGS`, `SHIP-NON-FUNCTIONAL`, `SHIP-KNOWN-ISSUE`, `REQUEUE-VERIFICATION` (verification did not run and the RC's one requeue is available), `VERIFICATION-PENDING` (that requeue is spent and the requeued TESTER task is still `BACKLOG`, `WORKING` or `WAITING`), or `HALT`. |
 | `posture` | The project's resolved ship posture, after the remote-lane guard. |
-| `trigger` | On `HALT`, the trigger number of the stop — `none` for the unrecognized-TESTER-state and no-row-matched stops, which have no number. On a ship, each trigger the `always` posture shipped through, comma-separated in the order they fired (`8,2`); `none` when nothing would have stopped. |
-| `notes_status` | The release-notes `## Status` value the ship would stamp; `none` on `HALT`. |
+| `trigger` | On `HALT`, the trigger number of the stop: `2`, `3` or `8`. `none` on `REQUEUE-VERIFICATION` and `VERIFICATION-PENDING`. On a ship, each trigger the `always` posture shipped through, comma-separated in the order they fired (`8,2`); `none` when nothing would have stopped. |
+| `notes_status` | The release-notes `## Status` value the ship would stamp; `none` on `HALT`, `REQUEUE-VERIFICATION` and `VERIFICATION-PENDING`. |
 
 On `HALT` the line is followed, also on stdout, by the would-be HALT's
 dual-channel contract. Its `error:` line is the key a full run would write to
@@ -1223,6 +1231,7 @@ ship-policy: decision=SHIP-NON-FUNCTIONAL posture=always trigger=2 notes_status=
 |---|---|---|
 | `0` | The decision is a `SHIP-*` decision. | The decision line. |
 | `3` | The decision is `HALT`. No HALT file is written. | The decision line, then `error:`, `message:` and `remedy:`. |
+| `4` | The decision is `REQUEUE-VERIFICATION` or `VERIFICATION-PENDING`. Nothing is requeued. | The decision line. |
 | `1` | No decision was reached: the same preflight failures a full run exits 1 on (no project context, no RC branch, a `release-state.md` that disagrees with the branch), or the override-flag refusal below. | Nothing. |
 
 **It writes nothing.** No fetch, push or checkout; no commit, branch or tag; no
@@ -1258,10 +1267,9 @@ the posture:
 
 | The decider reports | Under `matrix` | Under `always` |
 |---|---|---|
-| `decision=HALT trigger=1` | `--force --reason`, from an operator shell, passes it. | The same. |
+| `decision=REQUEUE-VERIFICATION` or `VERIFICATION-PENDING` | Not a stop; `--force` has nothing to pass. The full run returns the TESTER task to `BACKLOG` once and exits 4, re-exits 4 while that task is unfinished, then ships `NON-FUNCTIONAL` with "Verification did not run" and an inbox entry. | The same. |
 | `decision=HALT trigger=2` or `trigger=3` | `--force --reason` passes it; the release ships `SHIPPED-BY-OPERATOR-OVERRIDE` and leaves an `## Operator Override` record. | Does not occur. The decider reports `SHIP-NON-FUNCTIONAL` with that trigger, and the full run ships that way with no flag, leaving an `## Auto-Ship Event` record. `--force` changes nothing. |
 | `decision=HALT trigger=8` | Out of `--force`'s reach; the pattern is repaired, not passed. | Does not occur. The decider reports a ship with `8` in `trigger`; the full run files a bug naming the pattern and ships. |
-| `decision=HALT trigger=none` | Out of `--force`'s reach; fix the TESTER input. | The same. |
 
 The ship posture's keys, its remote-lane guard, and the records an auto-ship
 leaves are in `docs/OPERATIONS.md`, "Ship posture — shipping through a
@@ -1272,8 +1280,8 @@ ship-policy stop."
 ## cm-release --force — pass a ship-policy stop, on the record
 
 `cm/release.sh` refuses to ship a release the ship-policy matrix stopped. `--force`,
-carrying a mandatory written `--reason`, passes three of those stops and only those
-three. It is the operator's last say on a release decision: loud, single-invocation,
+carrying a mandatory written `--reason`, passes two of those stops and only those
+two. It is the operator's last say on a release decision: loud, single-invocation,
 and permanently recorded in two places.
 
 ```bash
@@ -1288,27 +1296,30 @@ scripts/cm/release.sh --project my-app \
 | `--reason "<text>"` | with `--force` | Why this release must ship despite the stop. Free text, copied verbatim into the permanent record. |
 | `--help`/`-h` | no | Print usage and exit 0. `--force` is deliberately not listed as a flag there — the output names it only to say `--decide-only` refuses it — and an unforced invocation, `--help` included, behaves exactly as it did before the flag existed. |
 
-**What it reaches.** Exactly three stops — the matrix's judgement calls about *this*
-release's own findings:
+**What it reaches.** Triggers 2 and 3 under `ship_posture = matrix` — the matrix's
+judgement calls about *this* release's own findings, and its only rows that halt:
 
 | Trigger | Stop |
 |---|---|
-| 1 | TESTER state is `BLOCKED` |
 | 2 | `systemic_risk = high` and the finding is not clear to ship |
 | 3 | `SHIP-WITH-SERIOUS-CONCERNS` with a finding at `Fix Effort: large` |
 
-Every other stop is out of reach by enumeration, not by omission: the matrix's
-fail-loud rows for untrustworthy input, the three-consecutive-`NON-FUNCTIONAL`
-pattern guard, the release-notes stamp guards, the squash pollution guard, and
-every mechanical gate outside the matrix — squash conflicts, the fidelity gate,
-hook failures, push failures. Those say the machinery or the chain is in a bad
-state, which an opinion about a finding's severity cannot fix.
+Every other stop is out of reach by enumeration, not by omission: the
+three-consecutive-`NON-FUNCTIONAL` pattern guard, the release-notes stamp guards,
+the squash pollution guard, and every mechanical gate outside the matrix — a
+squash conflict whose RC cannot be cancelled, the fidelity gate, hook failures. Those say the machinery or the chain is in a bad state, which an
+opinion about a finding's severity cannot fix.
+
+A TESTER report problem is not a stop, so there is nothing to pass. A `BLOCKED`
+TESTER task, or one `DONE` with no report, is returned to `BACKLOG` once
+(exit 4), and the release ships `NON-FUNCTIONAL` with "Verification did not run"
+if verification still does not run. A TESTER state, or TESTER values, the matrix
+has no row for ships `KNOWN-BUGS` and files a bug.
 
 On a project whose ship posture is `always`, triggers 2 and 3 never halt — the
 release ships `NON-FUNCTIONAL` and records an `## Auto-Ship Event` instead — so
 `--force` has nothing to pass there and leaves no `## Operator Override` record.
-It still passes trigger 1. Run `--decide-only` first to see which stop, if any,
-the release is heading for.
+Run `--decide-only` first to see which stop, if any, the release is heading for.
 
 **The two records a forced ship leaves.** The release notes are stamped
 `SHIPPED-BY-OPERATOR-OVERRIDE` under `## Status`, in place of the ordinary decision,
@@ -1832,7 +1843,11 @@ GIT_REMOTE_NAME=upstream $KANBAN_ROOT/scripts/cm/finalize-release.sh --project m
 
 For every registered project (or one), pushes local main-branch commits the
 remote lacks and release tags (`<branch_prefix>vX.Y.Z`) missing from the
-remote, each tag by its explicit ref; no other tag is ever pushed. It uses each
+remote, each tag by its explicit ref; no other tag is ever pushed. Once main
+is on the remote, it also retries the RC-branch delete a `## Push Lag Event`
+lists as still on the remote: only `<branch_prefix>rc/<Version>` for that
+event's own version, on that remote; any other listed branch is logged as
+skipped, and no other remote branch is deleted. It uses each
 project's `git_remote_name` (`origin` when absent or blank). It skips a
 halted project, a local-only project (`push_to_remote = false`) and one it
 cannot resolve to a dev tree — those last two with one log line each — before
@@ -2143,13 +2158,14 @@ before merging.
 | `lint_icd_freshness.py` | That the checked-in REST interface description matches a fresh regeneration. | Unit and integration runners. |
 | `lint_inline_python.py` | Python embedded in bash scripts; the count may fall but never rise. | Unit and integration runners, pre-merge. |
 | `lint_lib_function_dedupe.py` | Shell function names defined in more than one `lib/*.sh` file. | `audit_coding_standards.sh`; the runners use `lint_engine_size_dupe.py` instead. |
-| `lint_operator_verb_manifest.py` | That the operator verb census matches the scripts and routes it describes. | Unit runner. |
+| `lint_operator_verb_manifest.py` | That the operator verb census matches the scripts and routes it describes, and that every registered API route is covered by a manifest row or by a route entry with a reason in `team/config/operator_verb_census_exempt.txt`. | Unit runner. |
 | `lint_orphan_tests.py` | Test files no gated runner collects. | Unit runner. |
 | `lint_python_duplicates.py` | Copy-pasted Python function bodies and private copies of shared helpers; the count may fall but never rise. | Unit and integration runners, pre-merge. |
 | `lint_python_import_completeness.py` | That every third-party Python import is declared in the requirements files. | Unit runner. |
 | `lint_raw_marker_read.py` | Discovery code that decides by reading a queue-marker character instead of the task's own state. | Unit runner. |
 | `lint_rc_empty_commits.py` | Non-merge commits on a release branch that change no file. | Integration runner, and the wake's completion gate for each finished task. |
 | `lint_runnable_remedy.py` | Error-contract remedies that still carry an angle-bracket placeholder instead of a runnable command. | Unit runner. |
+| `lint_section_parsers.py` | Code that finds a markdown `## ` section by matching its heading itself instead of calling the one section reader (`task_status.read_section` or `read_md_field`); sites that read no value are listed in `team/config/section-parser-allowlist.txt`, a value-reading site never is. Reports only. | Unit and integration runners, pre-merge. |
 | `lint_skip_bug_gate.sh` | That every skipped test citing a follow-up bug names a bug file that exists. | Unit and integration runners. |
 | `lint_status_writer_bypass.py` | Scripts that edit a task's `## State`, `## Needs Human`, `## Summary` or `## Blockers` directly instead of through the status writer. | Unit runner. |
 | `lint_test_anti_patterns.py` | The two worst test anti-patterns in the TESTER guidelines, in tests and runtime scripts. | Unit and integration runners. |
@@ -2190,6 +2206,8 @@ before merging.
 | `cleanup/test-stale-artifact-branches.sh` | Smoke tests for `cleanup-stale-artifact-only-branches.sh`. | On demand. |
 | `migrations/migrate_v2.22.5_to_v2.23.0.sh` | Seeds the commented `overwatch_resolve` key into every existing project's `project.cfg`. | `upgrade.sh`, through `migrations/run-migrations.sh`, when an upgrade crosses that version. |
 | `migrations/migrate_v2.24.7_to_v2.24.8.sh` | Seeds the OVERWATCH queue file into every existing project. | `upgrade.sh`, through `migrations/run-migrations.sh`, when an upgrade crosses that version. |
+| `migrations/migrate_v2.50.9_to_v2.51.0.sh` | Rewrites kanban.cfg's `ship_posture = matrix` to `always` and `stop_on_blocked = true` to `false`, printing each revert line; never writes `project.cfg`. | `upgrade.sh`, through `migrations/run-migrations.sh`, when an upgrade crosses that version. |
+| `migrations/migrate_v2.53.1_to_v2.53.2.sh` | Seeds the kanban's own `[testing]` runner commands (`targeted_test_command`, `pre_merge_command`), each only when missing, into the `project.cfg` of every registered project whose dev tree is the kanban's own source tree (the repository the script sits in; from an installed root, the configured dev tree): the same directory once symlinks are resolved, or another checkout of the same git repository. The registered name plays no part. Every other project is reported as a skip; no other file is written. The keys and what they add to tickets: `docs/OPERATIONS.md`, "Project test runners". | `upgrade.sh`, through `migrations/run-migrations.sh`, when an upgrade crosses that version. |
 
 ---
 
@@ -2436,8 +2454,11 @@ test failed, the verdict is built and a bug naming the failing
 test's file and test id is filed. When no image could be built
 (every pair narrate-skipped) and a non-build cold test failed, the
 verdict is could-not-attempt and the same test bug is filed. An
-open or running bug already covering the same failure is cited
-instead of filing a duplicate. Any other could-not-attempt run
+open, running or needs-operator bug already covering the same
+failure, or reporting the same defect (a slug differing only by
+a re-file word, ordinal or trailing counter, or a body citing it
+as its defect), is
+cited instead of filing a duplicate. Any other could-not-attempt run
 (the lane exited 0, or exited 2 because pytest is not installed)
 files no bug.
 
@@ -2524,7 +2545,7 @@ Usage: wake-now.sh [OPTIONS]
 Fire one or all agents immediately (--sleep=0).
 
 Options:
-  --agent ROLE       Agent role: pm|coder|writer|tester|cm|po
+  --agent ROLE       Agent to fire: pm|coder|cm|writer|tester, or overwatch (runs overwatch-sweep.sh)
   --all              Fire all pipeline agents backgrounded (pm coder cm writer tester)
   --bg               Background the agent process instead of running in foreground
   --help, -h         Show this help and exit
@@ -2868,8 +2889,8 @@ Close/resolve an item (bug/priority/requirement/task) by setting its terminal st
 Options:
   --project NAME     Project name (default: $PGAI_PROJECT_NAME)
   --key KEY          Arbitrary key or identifier
-  --state STATE      Closed state: done|wont-do (default: done)
-  --note TEXT        Free-form text recorded in the item's ## Close Note section (intake items only)
+  --state STATE      Closed state: done|wont-do|duplicate (default: done)
+  --note TEXT        Free-form text recorded in the item's ## Close Note section (intake items only; for duplicate, names the surviving item)
   --dry-run          Report what would happen without making changes
   --help, -h         Show this help and exit
 
@@ -2878,21 +2899,31 @@ Options:
                  wont-do     — item intentionally not addressed
                                (an item another item subsumed closes
                                as wont-do with a --note saying why)
+                 duplicate   — item reports the same defect as another;
+                               --note names the surviving item
                  (For agent tasks, close always sets state to DONE.)
+  Any intake status closes, needs-operator included; closing a
+  needs-operator item also closes its open operator-inbox entries.
 
-  close.sh performs the close operation and refuses in two cases only:
-    - --state is not a closed state (done|wont-do): close.invalid_state,
-      exit 1, nothing written;
+  close.sh performs the close operation and refuses in three cases only:
+    - --state is not a closed state (done|wont-do|duplicate):
+      close.invalid_state, exit 1, nothing written;
+    - --state duplicate without a --note naming an existing item other
+      than this one: close.duplicate_pointer_missing, exit 1, nothing
+      written;
     - the key cannot be resolved to a single target: ambiguous (exit 2)
       or not found (exit 3).
 
-Example:
+Examples:
   close.sh --project myproject --key BUG-NNNN --state wont-do \
            --note 'subsumed by PRIORITY-NNNN'
+  close.sh --project myproject --key BUG-NNNN --state duplicate \
+           --note 'duplicate of BUG-NNNN'
 
 Exit codes:
   0  Item closed (or --help shown, or --dry-run reported)
-  1  Usage error, missing argument, or --state not done|wont-do
+  1  Usage error, missing argument, --state not done|wont-do|duplicate,
+     or duplicate without a pointer
   2  Ambiguous key — key matches zero or multiple items
   3  Key not found
   4  State mutation failed
@@ -2997,12 +3028,29 @@ BUG-* numbering:
   - The name must be BUG-NNNN-<slug>.md (lower-case kebab slug, optional
     -YYYYMMDD- after the number); any other BUG-* name is REFUSED (exit 2)
     before anything is written.
-  - The number is claimed atomically. Free: deposited as named. Taken:
-    deposited as the next free number, with the '# BUG-NNNN-<slug>' title
-    line and '**Bug ID:**' line rewritten to match; the printed path
-    names the new file.
+  - The number is claimed atomically. Free: deposited as named. Taken
+    (a live bug or one in archive/<name>/bugs/ holds it): deposited as
+    the next free number, with the '# BUG-NNNN-<slug>' title line and
+    '**Bug ID:**' line rewritten to match; the printed path names the
+    new file.
+  - A draft reporting the same defect as a live bug (open, running or
+    needs-operator) is REFUSED (exit 5) before anything is written; the
+    message names that bug's ID. Same defect: the body cites the bug as
+    the defect it reports ('same defect as BUG-NNNN', 'duplicate of
+    BUG-NNNN', 'recurrence of BUG-NNNN'), or the slug differs from its
+    slug only by re-file markers at its start or end:
+      re-file words: again, redux, recurring, repeat, repeats,
+                     repeated, repeating, refile, refiles, refiled,
+                     refiling
+      ordinals:      second, third, ... tenth, 2nd, 3rd, ...
+      a counter:     one trailing number (the -3 in lock-leak-3)
+    Every other word or number names the defect: pane-shows-3-columns
+    and pane-shows-4-columns are distinct, and so are slugs differing
+    by first, once or another. An ID mentioned in passing, or a remark
+    on another bug's status, is not a citation.
 
-NOTE: intake.sh does NOT validate file contents or check headings.
+NOTE: intake.sh does NOT validate file contents or check headings
+(a BUG-* draft's body is read only for the same-defect check above).
 The discovery pipeline checks names afterwards and quarantines a file
 it keeps rejecting into
 projects/<name>/rejected/ (legacy fallback: <intake>/.rejected/);
@@ -3019,6 +3067,8 @@ Exit codes:
      name off the ledger filename contract
   3  PRIORITY-* or requirements target already exists (no clobber)
   4  Filesystem error during copy
+  5  Refused: the BUG-* draft reports the same defect as a live bug
+     (the message names its ID); nothing is written
 ```
 <!-- OPERATOR-VERBS-GENERATED:END verb=intake -->
 
@@ -3393,7 +3443,10 @@ that key is absent or blank.
     main branch (local)          checked out; fast-forward pulled from <remote> when push_to_remote=true
 
   DOES NOT TOUCH:
-    main branch on <remote>      never pushed (operator pushes via finalize-release.sh if needed)
+    main branch on <remote>      never pushed. With push_to_remote=true the
+                                 push-lag check or the next release pushes
+                                 it; with push_to_remote=false the operator
+                                 pushes it by hand
     git tags                     never created, moved, or deleted
     release-state.md ## Last Released field
                                  read before the rewrite and written back
@@ -3546,6 +3599,58 @@ Exit codes:
   3  skipped: the project's repo lock is held by another process
 ```
 <!-- OPERATOR-VERBS-GENERATED:END verb=archive -->
+
+<!-- OPERATOR-VERBS-GENERATED:BEGIN verb=inbox -->
+#### `inbox`
+
+Generated from `scripts/inbox.sh --help` and this verb's census row. Do not hand-edit between these markers; run `python3 team/scripts/generate_operator_verb_docs.py` (from the repo root) and commit the result instead.
+
+- **Script:** `scripts/inbox.sh`
+- **Mutates state:** yes
+- **Idempotence:** non-idempotent
+- **Class:** action
+- **REST twin:** `POST /operations/inbox-answer`
+- **Implementation:** `module:pgai_agent_kanban.overwatch.inbox.answer_entry`
+
+```text
+Usage: inbox.sh [OPTIONS]
+
+List, answer and close the questions in a project's operator inbox.
+
+Options:
+  --project NAME     Project whose inbox to use (required; $PGAI_PROJECT_NAME is not read)
+  --id ID            Entry ID for answer and close, e.g. INBOX-0001 (case and leading zeros ignored)
+  --answer TEXT      The answer to record (answer only)
+  --help, -h         Show this help and exit
+
+Commands:
+  list                          Print the open entries (## Open), then the
+                                closed ones (## Done).
+  answer --id ID --answer TEXT  Record an answer on an open entry; it stays
+                                open until closed. A second answer replaces
+                                the first. Answering an entry about a
+                                needs-operator bug or priority also returns
+                                that item to open.
+  close --id ID                 Move an open entry to Done, keeping its answer.
+
+Examples:
+  inbox.sh --project pgai-agent-kanban list
+  inbox.sh --project pgai-agent-kanban answer --id INBOX-0001 --answer keep
+  inbox.sh --project pgai-agent-kanban close --id INBOX-0001
+
+The same inbox over HTTP: GET /projects/{name}/inbox and
+POST /operations/inbox-answer (docs/operator-api.md).
+
+Exit codes:
+  0  Done
+  1  --project names no registered project
+  2  Bad input (command, flag, answer or entry ID), an entry already
+     closed, or the inbox lock stayed busy
+  3  The entry or the project directory does not exist
+  4  The inbox file or its lock could not be read or written
+Every refusal prints error/message/remedy on stderr and writes nothing.
+```
+<!-- OPERATOR-VERBS-GENERATED:END verb=inbox -->
 <!-- OPERATOR-VERBS-GENERATED:END section=verb-reference -->
 
 ---

@@ -41,6 +41,7 @@ from __future__ import annotations
 
 import os
 import pathlib
+import shlex
 import subprocess
 import sys
 
@@ -109,6 +110,11 @@ def ctx(board: pathlib.Path) -> OpsContext:
 
 def _project_dir(board: pathlib.Path) -> pathlib.Path:
     return board / "projects" / _PROJECT
+
+
+def _installed(ctx: OpsContext, script: str) -> str:
+    """*script* as an installed kanban carries it under ctx's root, shell-quoted."""
+    return shlex.quote(str(ctx.kanban_root / "scripts" / script))
 
 
 # ---------------------------------------------------------------------------
@@ -272,7 +278,7 @@ def test_get_queues_refuses_a_missing_project_directory_dual_channel(ctx: OpsCon
     assert str(board / "projects" / "ghost") in contract["message"]
     assert contract["remedy"] == (
         "Check the project name against projects.cfg, or create it first with "
-        "team/scripts/create-project.sh --project ghost."
+        f"{_installed(ctx, 'create-project.sh')} --project ghost."
     )
 
 
@@ -288,7 +294,7 @@ def test_get_queues_refuses_an_empty_project_naming_a_registered_one(
     assert "no project specified; pass --project <name> or set PGAI_PROJECT_NAME" in contract["message"]
     assert contract["remedy"] == (
         f"Name a registered project ({_PROJECT}): "
-        f"team/scripts/dashboard/show-queues.sh --project {_PROJECT} "
+        f"{_installed(ctx, 'dashboard/show-queues.sh')} --project {_PROJECT} "
         f"(REST: GET /show-queues?project={_PROJECT}), or export "
         f"PGAI_PROJECT_NAME={_PROJECT} before running it."
     )
@@ -305,14 +311,18 @@ def test_get_queues_refuses_an_empty_project_on_a_single_project_root_with_real_
     _task(root, _BLOCKED, "DONE")
     _write(root / "tasks" / "queues" / "coder_backlog.md", f"- [ ] {_WORKING}\n- [x] {_BLOCKED}\n")
 
+    legacy_ctx = OpsContext(kanban_root=root)
     with pytest.raises(Refused) as excinfo:
-        ops_read.get_queues(OpsContext(kanban_root=root), "")
+        ops_read.get_queues(legacy_ctx, "")
     contract = parse_error_contract(str(excinfo.value))
     assert contract is not None
     assert contract["error"] == "show_queues.no_project"
     assert str(root.resolve() / "projects.cfg") in contract["message"]
     assert "<" not in contract["remedy"]
-    assert contract["remedy"].startswith("Register the project, then name it: team/scripts/create-project.sh")
+    assert contract["remedy"] == (
+        f"Register the project, then name it: {_installed(legacy_ctx, 'create-project.sh')} --project "
+        f"pgai-agent-kanban && {_installed(legacy_ctx, 'dashboard/show-queues.sh')} --project pgai-agent-kanban"
+    )
 
 
 # ---------------------------------------------------------------------------

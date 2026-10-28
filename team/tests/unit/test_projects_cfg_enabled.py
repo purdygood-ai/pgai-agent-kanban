@@ -19,7 +19,7 @@ Covered:
      ``overwatch-sweep.sh`` process the enabled project only, each with one
      skip line for the disabled one and no lock or state for it.
 
-The wake loop itself (every agent's wake and the daily OVERWATCH wake) is
+The wake loop itself (every agent's wake and the overwatch wake) is
 driven end to end in tests/integration/test_wake_skips_disabled_project.py.
 
 Every fixture is a throwaway kanban root under pytest's tmp_path; discovery

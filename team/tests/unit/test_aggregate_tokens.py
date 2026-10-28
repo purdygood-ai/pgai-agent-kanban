@@ -16,6 +16,10 @@ Covers:
   - load_tokens_json(): graceful handling of absent and malformed tokens.json.
   - read_rc_version() / read_agent(): task metadata extractors.
   - scan_tasks(): task directory walk with schema detection and captured flag.
+  - load_pricing() / pricing_table_path(): the kanban-side pricing table, read
+    from the aggregator's own tree in both the install and source layouts,
+    never from a project's dev tree, through the resolver the cost report
+    shares (pgai_agent_kanban.lib.token_pricing).
 
 Edge cases covered:
   - Empty input (no tasks, no records).
@@ -29,7 +33,8 @@ Edge cases covered:
   - Invalid day format in build_day_rollup (sys.exit path not tested directly;
     the parser logic is tested via ts_in_day helper indirectly via build_day_rollup).
 
-All filesystem interactions use tmp_path.  No subprocess calls, no live kanban tree.
+All filesystem interactions use tmp_path, except one read of this checkout's own
+team/scripts/lib/token_pricing.json.  No subprocess calls, no live kanban tree.
 No bare /tmp paths.
 
 Test function names describe the behavior under test (roles/TESTER.md anti-pattern 6).
@@ -283,12 +288,12 @@ def test_read_field_from_markdown_returns_none_when_no_value_follows(
     assert read_field_from_markdown(text, "Release Version") is None
 
 
-def test_read_field_from_markdown_skips_hash_prefixed_lines_to_find_value() -> None:
-    """read_field_from_markdown skips '#'-prefixed lines and returns the first non-blank non-hash line."""
-    # '## Another Heading' starts with '#' and is skipped; 'v0.1.0' is returned.
+def test_read_field_from_markdown_never_reads_the_next_section_as_the_value() -> None:
+    """read_field_from_markdown returns None for an empty section, not the next section's value."""
+    # '## Another Heading' ends the empty section; its 'v0.1.0' is not the value.
     text = "## Release Version\n## Another Heading\nv0.1.0\n"
     result = read_field_from_markdown(text, "Release Version")
-    assert result == "v0.1.0"
+    assert result is None
 
 
 def test_read_field_from_markdown_handles_empty_text() -> None:
@@ -1071,3 +1076,152 @@ def test_build_day_rollup_sets_date_and_project_fields(
     data = json.loads(out_path.read_text(encoding="utf-8"))
     assert data["date"] == "2026-05-17"
     assert data["project"] == "my-project"
+
+
+# ---------------------------------------------------------------------------
+# load_pricing() / pricing_table_path(): the kanban-side pricing table
+# ---------------------------------------------------------------------------
+
+_AGGREGATOR_SOURCE = pathlib.Path(agg.__file__).resolve()
+
+
+def _install_layout_aggregator(root: pathlib.Path, monkeypatch) -> object:
+    """Lay out root as an installed kanban (pm-agent/ beside scripts/lib/, no
+    team/) holding a copy of the aggregator, and return that copy loaded as a
+    module, so its own-tree resolution runs exactly as it does in an install.
+
+    sys.path is restored after the test: the copy prepends its tree on import.
+    """
+    import importlib.util
+
+    pm_agent = root / "pm-agent"
+    pm_agent.mkdir(parents=True)
+    copy = pm_agent / "aggregate_tokens.py"
+    copy.write_text(_AGGREGATOR_SOURCE.read_text(encoding="utf-8"), encoding="utf-8")
+    monkeypatch.setattr(sys, "path", list(sys.path))
+    spec = importlib.util.spec_from_file_location(f"aggregate_tokens_install_{id(root)}", copy)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _write_install_pricing(root: pathlib.Path, pricing: dict) -> pathlib.Path:
+    """Write pricing as root/scripts/lib/token_pricing.json (the install layout)."""
+    path = root / "scripts" / "lib" / "token_pricing.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(pricing), encoding="utf-8")
+    return path
+
+
+def test_load_pricing_reads_the_install_layout_table_without_warning(
+    tmp_path: pathlib.Path, monkeypatch, capsys
+) -> None:
+    """An installed kanban (scripts/lib/token_pricing.json, no team/) loads its table silently."""
+    root = tmp_path / "kanban"
+    module = _install_layout_aggregator(root, monkeypatch)
+    _write_install_pricing(root, _minimal_pricing())
+
+    pricing = module.load_pricing()
+
+    assert pricing == _minimal_pricing()
+    assert not (root / "team").exists()
+    assert "token_pricing.json" not in capsys.readouterr().err
+
+
+def test_project_dev_tree_without_pricing_is_priced_from_the_kanban_table(
+    tmp_path: pathlib.Path, monkeypatch, capsys
+) -> None:
+    """A project whose dev tree carries no pricing table is priced from the
+    kanban's table, and no message names a path inside the project's tree."""
+    root = tmp_path / "kanban"
+    module = _install_layout_aggregator(root, monkeypatch)
+    _write_install_pricing(root, _minimal_pricing())
+
+    dev_tree = tmp_path / "other-project-repo"
+    (dev_tree / "team" / "scripts" / "lib").mkdir(parents=True)
+    project_dir = root / "projects" / "demo"
+    project_dir.mkdir(parents=True)
+    (project_dir / "project.cfg").write_text(
+        f"[project]\nproject_name = demo\ndev_tree_path = {dev_tree}\n", encoding="utf-8"
+    )
+    task_dir = project_dir / "tasks" / "CODER-20260101-001-slug"
+    task_dir.mkdir(parents=True)
+    _write_tokens_json(task_dir, _minimal_legacy_token(input_tokens=100, output_tokens=50))
+    _write_readme(task_dir, release_version="v1.0.0")
+
+    monkeypatch.setattr(
+        sys, "argv",
+        ["aggregate_tokens.py", "--project", "demo", "--rc", "v1.0.0", "--kanban-root", str(root)],
+    )
+    with pytest.raises(SystemExit) as exit_info:
+        module.main()
+
+    assert exit_info.value.code == 0
+    rollup = json.loads((project_dir / "usage" / "rc" / "v1.0.0-tokens.json").read_text(encoding="utf-8"))
+    # 100 input * $3/1M + 50 output * $15/1M from the kanban table.
+    assert rollup["totals"]["cost_usd"] == pytest.approx(0.00105)
+    captured = capsys.readouterr()
+    assert "token_pricing.json not found" not in captured.err
+    assert str(dev_tree) not in captured.err + captured.out
+
+
+def test_load_pricing_reads_the_source_checkout_table() -> None:
+    """Run from a source checkout, the aggregator loads team/scripts/lib/token_pricing.json."""
+    source_table = _AGGREGATOR_SOURCE.parent.parent / "scripts" / "lib" / "token_pricing.json"
+    assert source_table.is_file(), f"source checkout has no pricing table at {source_table}"
+
+    assert agg.pricing_table_path() == source_table
+    assert agg.load_pricing() == json.loads(source_table.read_text(encoding="utf-8"))
+
+
+def test_missing_pricing_table_warning_names_the_kanban_side_path(
+    tmp_path: pathlib.Path, monkeypatch, capsys
+) -> None:
+    """With no table installed, the warning names <kanban root>/scripts/lib/token_pricing.json
+    and never the project's dev tree."""
+    root = tmp_path / "kanban"
+    module = _install_layout_aggregator(root, monkeypatch)
+    dev_tree = tmp_path / "other-project-repo"
+    dev_tree.mkdir()
+    project_dir = root / "projects" / "demo"
+    project_dir.mkdir(parents=True)
+    (project_dir / "project.cfg").write_text(
+        f"[project]\ndev_tree_path = {dev_tree}\n", encoding="utf-8"
+    )
+
+    pricing = module.load_pricing()
+
+    assert pricing == {}
+    err = capsys.readouterr().err
+    expected = root / "scripts" / "lib" / "token_pricing.json"
+    assert "token_pricing.json not found" in err
+    assert f"Expected at: {expected}" in err
+    assert str(dev_tree) not in err
+
+
+def test_load_pricing_install_root_override_reads_that_tree(
+    tmp_path: pathlib.Path, monkeypatch, capsys
+) -> None:
+    """An explicit install_root reads that tree's scripts/lib table; a malformed
+    table yields {} and one warning naming the file."""
+    monkeypatch.setattr(agg, "_PRICING_WARNED", False)
+    root = tmp_path / "kanban"
+    table = _write_install_pricing(root, _minimal_pricing())
+
+    assert agg.load_pricing(root) == _minimal_pricing()
+
+    table.write_text("{not json", encoding="utf-8")
+    assert agg.load_pricing(root) == {}
+    err = capsys.readouterr().err
+    assert f"token_pricing.json is malformed ({table})" in err
+
+
+def test_pricing_table_path_follows_the_shared_resolver(tmp_path: pathlib.Path, monkeypatch) -> None:
+    """The aggregator names the table through pgai_agent_kanban.lib.token_pricing, the
+    resolver the cost report also uses: moving the table there moves it here too."""
+    from pgai_agent_kanban.lib import token_pricing
+
+    moved = pathlib.Path("elsewhere") / "pricing.json"
+    monkeypatch.setattr(token_pricing, "PRICING_REL_PATH", moved)
+
+    assert agg.pricing_table_path(tmp_path) == tmp_path / moved

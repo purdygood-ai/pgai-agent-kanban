@@ -40,6 +40,12 @@ Coverage (requirements/v2.11.0-single-truth-state-integrity.md, CODER task
   - A LOCK_WAIT_SECONDS set deliberately for the wake -- the operator
     override -- still outranks that cfg value
     (test_lock_wait_seconds_set_for_the_wake_overrides_the_sandbox_cfg).
+  - With a lock-wait budget in force, a first project held by a wake chain
+    is deferred after one attempt while a second project still has ready
+    work: the second project's chain begins (and dispatches its task)
+    before any wait for the first, and the first is waited for only in the
+    retry pass
+    (test_contended_project_defers_at_once_while_another_project_has_work).
 
 Design notes
 ------------
@@ -74,6 +80,7 @@ import time
 
 import pytest
 
+from tests.fixtures.claude_provider_stub import install_claude_provider_stub
 from tests.fixtures.scrubbed_subprocess_env import scrub_wake_tunable_env
 
 _TEAM_DIR = pathlib.Path(__file__).parent.parent.parent  # team/
@@ -601,3 +608,108 @@ def test_lock_wait_seconds_set_for_the_wake_overrides_the_sandbox_cfg(
         "set for the wake did not outrank the sandbox kanban.cfg's "
         f"lock_wait_seconds = 0.\noutput:\n{output}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Fixture 6: two projects, the first held by a wake chain and the second
+# holding ready work -- the first is deferred at once and waited for only in
+# the retry pass.
+# ---------------------------------------------------------------------------
+
+# A budget the wake really spends, real-time, in the retry pass only.
+_DEFER_LOCK_WAIT_SECONDS = 5
+
+
+def _queue_ready_writer_task(kanban_root: pathlib.Path, project_name: str) -> str:
+    """Queue one BACKLOG writer task in *project_name* (document workflow,
+    no working directory or source branch) and return its ID."""
+    task_id = "WRITER-20260101-001-draft-notes"
+    tasks = kanban_root / "projects" / project_name / "tasks"
+    task = tasks / task_id
+    task.mkdir(parents=True)
+    (task / "README.md").write_text(
+        f"# Task: {task_id}\n\n## Task ID\n{task_id}\n\n## Role\nWRITER\n\n"
+        "## Workflow Type\ndocument\n\n## Working Directory\nnone\n\n## Source Branch\nnone\n",
+        encoding="utf-8",
+    )
+    (task / "status.md").write_text(
+        f"# Status\n\n## Task\n{task_id}\n\n## State\nBACKLOG\n\n## Blockers\nnone\n",
+        encoding="utf-8",
+    )
+    (tasks / "queues" / f"{_AGENT}_backlog.md").write_text(
+        f"# {project_name} {_AGENT} backlog\n\n- [ ] {task_id} — draft the notes\n", encoding="utf-8"
+    )
+    return task_id
+
+
+def _first_index(lines: list[str], text: str) -> int:
+    """Index of the first line containing *text*, or -1."""
+    return next((i for i, line in enumerate(lines) if text in line), -1)
+
+
+def test_contended_project_defers_at_once_while_another_project_has_work(
+    tmp_path: pathlib.Path,
+) -> None:
+    locked, ready = "locked-first", "ready-second"
+    kanban_root = _build_kanban_root(tmp_path, [locked, ready])
+    task_id = _queue_ready_writer_task(kanban_root, ready)
+    stub_env = install_claude_provider_stub(tmp_path / "stub-bin", tmp_path / "stub-control")
+    extra_env = {
+        "PATH": stub_env["PATH"],
+        "HOME": str(tmp_path),
+        "LOCK_WAIT_SECONDS": str(_DEFER_LOCK_WAIT_SECONDS),
+    }
+
+    holder, done_file = _start_external_holder(kanban_root, locked)
+    try:
+        result = subprocess.run(
+            ["bash", str(kanban_root / _WAKE_CLAUDE_REL), f"--agent={_AGENT}"],
+            cwd=str(kanban_root),
+            env=_wake_env(kanban_root, extra_env),
+            capture_output=True,
+            text=True,
+            timeout=_SUBPROCESS_TIMEOUT_SECONDS,
+        )
+    finally:
+        _release_external_holder(holder, done_file)
+    output = result.stdout + result.stderr
+    assert result.returncode == 0, f"wake firing exited {result.returncode}.\noutput:\n{output}"
+    lines = output.splitlines()
+
+    ready_begins = _first_index(lines, f"project {ready}: beginning chain")
+    assert ready_begins >= 0, f"project {ready}'s chain never began.\noutput:\n{output}"
+    first_pass = lines[:ready_begins]
+    assert not [line for line in first_pass if f"project {locked}: waiting up to" in line], (
+        f"project {locked} waited for its repo lock before project {ready}'s chain began; "
+        f"a wake-chain holder must not be waited on while another project remains.\noutput:\n{output}"
+    )
+    deferral = (
+        f"project {locked}: not waiting for the repo lock held by wake chain "
+        f"holder={_AGENT} pid={holder.pid} op=wake-chain:{locked} task=none: "
+        "1 other project(s) remain in this batch and go first"
+    )
+    assert _first_index(first_pass, deferral) >= 0, (
+        f"Expected the first-pass deferral line naming the holder's provenance before "
+        f"project {ready}'s chain began.\noutput:\n{output}"
+    )
+    assert _first_index(first_pass, f"project {locked}: repo lock held by holder={_AGENT}") >= 0, output
+
+    retry_begins = _first_index(lines, f"project {locked}: retry pass: retrying after end-of-iteration deferral")
+    assert retry_begins > ready_begins, (
+        f"Expected project {locked} to be attempted again in the retry pass, after "
+        f"project {ready}'s chain.\noutput:\n{output}"
+    )
+    assert _first_index(lines[ready_begins:retry_begins], f"finished task {task_id} with state DONE") >= 0, (
+        f"Expected project {ready}'s ready task to be dispatched before the retry pass.\noutput:\n{output}"
+    )
+    # The retry pass spends the budget the first pass left whole. Its lines
+    # all carry lock_wait_seconds=<N>, whichever of them the host's speed
+    # produces (see _lines_reporting_lock_wait_seconds).
+    retry_waits = _lines_reporting_lock_wait_seconds(
+        "\n".join(lines[retry_begins:]), locked, _DEFER_LOCK_WAIT_SECONDS,
+    )
+    assert retry_waits, (
+        f"Expected the retry pass to wait for project {locked}'s lock within "
+        f"lock_wait_seconds={_DEFER_LOCK_WAIT_SECONDS}.\noutput:\n{output}"
+    )
+    assert f"project {locked}: retry pass: still contended after retry" in output, output

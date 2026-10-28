@@ -12,15 +12,36 @@ cannot disagree about an item.
 
 Board status vocabulary (the dashboard's display term -> board status):
 
-    "running"      -> "working"   task in WORKING state
+    "running"      -> "working"   task in WORKING state, running intake file
+                                  a live bundle (or none) still lists
+    "carried"      -> "carried"   running intake file whose every listing
+                                  bundle is closed -- see below
+    "needs-operator" -> "needs-operator"
+                                  needs-operator intake file (waiting on an
+                                  operator-inbox answer)
     active RC req  -> "label"     requirements item targeting the active RC
     "done"         -> "done"      DONE task, shipped requirement, done intake file
     "wont-do"      -> "wont-do"   WONT-DO task, wont-do intake file (and a
                                   legacy "superseded" one -- see below)
+    "duplicate"    -> "duplicate" duplicate intake file (closed in favour of
+                                  the item its ## Close Note names)
     "blocked"      -> "blocked"   BLOCKED task, blocked intake file
     "open"         -> "open"      BACKLOG, WAITING, unknown, everything else
     quarantine     -> "blocked"   quarantined intake files (the project's rejected/
                                   directory, or a legacy <intake>/.rejected/)
+
+Carried: a running item no live bundle is working
+-------------------------------------------------
+A bug or priority file at ``running`` is ``CARRIED_STATUS`` (``"carried"``)
+when at least one bundle in the project's ``requirements/`` lists it and
+every bundle that lists it is closed: the release shipped without fixing it,
+and the next discovery pass converts it to ``needs-operator``.  The answer is
+``lib.bundle_items.carried_item_names`` / ``is_carried`` -- the reading
+discovery uses -- over the ``requirements/`` directory beside the item's own
+intake directory (``intake_carried_names``).  A running item a bundle still
+open or running lists, or one no bundle lists (orphaned), stays
+``"working"``.  ``duplicate`` keeps its own token for the reason WONT-DO
+does below: folding it into another closed status loses information.
 
 WONT-DO renders as "wont-do" — its own status, never folded into "done"
 -----------------------------------------------------------------------
@@ -57,21 +78,34 @@ from __future__ import annotations
 import logging
 import re
 import pathlib
-from typing import Optional
+from typing import Iterable, Optional
 
 from pgai_agent_kanban.cm.read_state_field import read_release_state_field
+from pgai_agent_kanban.lib import bundle_items
 from pgai_agent_kanban.lib.semver import parse_version
-from pgai_agent_kanban.lib.terminal_states import CLOSED_STATES, canonical_state
+from pgai_agent_kanban.lib.terminal_states import (
+    CLOSED_STATES,
+    DUPLICATE_STATE,
+    NEEDS_OPERATOR_STATE,
+    RUNNING_STATE,
+    canonical_state,
+)
+from pgai_agent_kanban.task_status import read_state, section_value
 
 _log = logging.getLogger(__name__)
 
 __all__ = [
+    "CARRIED_STATUS",
+    "DUPLICATE_STATUS",
+    "NEEDS_OPERATOR_STATUS",
     "WONT_DO_STATUS",
     "classify_input_item",
+    "classify_intake_file",
     "classify_intake_status",
     "classify_queue_item",
     "classify_requirement",
     "get_target_version_for_item",
+    "intake_carried_names",
     "read_intake_status",
     "marker_to_state",
     "parse_queue_line",
@@ -85,6 +119,17 @@ __all__ = [
 #: The board status a WONT-DO task or a wont-do intake file classifies as.
 #: Kept distinct from "done" (see the module docstring for why).
 WONT_DO_STATUS = "wont-do"
+
+#: The board status a needs-operator intake file classifies as.
+NEEDS_OPERATOR_STATUS = NEEDS_OPERATOR_STATE
+
+#: The board status a duplicate intake file classifies as; its own token,
+#: never folded into "wont-do".
+DUPLICATE_STATUS = DUPLICATE_STATE
+
+#: The board status of a running intake file whose every listing bundle is
+#: closed (see the module docstring).
+CARRIED_STATUS = "carried"
 
 # ---------------------------------------------------------------------------
 # Column definitions (canonical order per requirements spec)
@@ -107,17 +152,11 @@ COLUMN_KINDS = {
 }
 
 # ---------------------------------------------------------------------------
-# Regex patterns — intake ## Status, requirements ## Target Version, queue lines
+# Regex patterns — the requirements Target Version shape, queue lines
 # ---------------------------------------------------------------------------
 
-_STATUS_RE = re.compile(
-    r"^##\s+Status\s*\n+\s*(\S+)",
-    re.MULTILINE | re.IGNORECASE,
-)
-_TARGET_VER_RE = re.compile(
-    r"^##\s+Target Version\s*\n+\s*(v?\d+\.\d+\.\d+)",
-    re.MULTILINE | re.IGNORECASE,
-)
+# A ``## Target Version`` value's leading dotted version (``v`` optional).
+_TARGET_VER_RE = re.compile(r"v?\d+\.\d+\.\d+")
 
 # Queue line pattern.
 # Accepts both old format (PARTICIPANT-AGENT-YYYYMMDD-NNN-slug) and
@@ -171,16 +210,18 @@ def _is_shipped(version_str: str, last_released: str) -> bool:
 def read_intake_status(path: pathlib.Path, default: str = "open") -> str:
     """Return an intake file's ``## Status`` value, lowercased, or *default*.
 
-    The value is the first whitespace-delimited token after the heading.
-    *default* is returned when the file has no ``## Status`` heading or
-    cannot be read.  The dashboard's single-project pane passes
-    ``default=""`` so a deferral glyph is drawn only on a card whose file
-    says ``open``; classification treats both answers as ``"open"``.
+    The value is the first whitespace-delimited token of the section's
+    value, read through ``task_status.section_value``.  *default* is
+    returned when the file has no ``## Status`` heading, the section holds
+    no value, or the file cannot be read.  The dashboard's single-project
+    pane passes ``default=""`` so a deferral glyph is drawn only on a card
+    whose file says ``open``; classification treats both answers as
+    ``"open"``.
     """
     try:
         text = path.read_text(encoding="utf-8", errors="replace")
-        m = _STATUS_RE.search(text)
-        return m.group(1).strip().lower() if m else default
+        tokens = section_value(text, "Status").split()
+        return tokens[0].lower() if tokens else default
     except OSError:
         return default
 
@@ -191,11 +232,17 @@ def _get_file_status(path: pathlib.Path) -> str:
 
 
 def _get_target_version(path: pathlib.Path) -> str:
-    """Return the ## Target Version field from a requirements file, or ''."""
+    """Return the ## Target Version field from a requirements file, or ''.
+
+    The field is the dotted version (``v`` optional) that starts the first
+    token of the section's value; '' when the value starts with anything
+    else (``auto``) or the section is absent or empty.
+    """
     try:
         text = path.read_text(encoding="utf-8", errors="replace")
-        m = _TARGET_VER_RE.search(text)
-        return m.group(1).strip() if m else ""
+        tokens = section_value(text, "Target Version").split()
+        m = _TARGET_VER_RE.match(tokens[0]) if tokens else None
+        return m.group(0) if m else ""
     except OSError:
         return ""
 
@@ -230,11 +277,6 @@ def read_task_state_from_status_md(tasks_dir: pathlib.Path, task_id: str) -> str
     status_path = tasks_dir / task_id / "status.md"
     if not status_path.is_file():
         return ""
-    # Imported here, not at module top: task_status pulls in the ops package,
-    # which a render-only importer of this module (a board column drawing a
-    # snapshot) never needs.
-    from pgai_agent_kanban.task_status import read_state
-
     tokens = read_state(status_path).split()
     return tokens[0] if tokens else ""
 
@@ -372,44 +414,103 @@ def classify_input_item(
     column: str,
     active_rc: str,
     last_released: str,
+    carried: Optional[Iterable[str]] = None,
 ) -> str:
     """Classify an input-directory item (bug, priority, or requirement).
 
     Requirements classify by target version (``classify_requirement``);
-    bugs and priorities by their ``## Status`` (``classify_intake_status``).
-    An intake file whose ## Status is ``wont-do`` classifies as
-    ``WONT_DO_STATUS``.
+    bugs and priorities by their ``## Status`` and file name
+    (``classify_intake_status``).  An intake file whose ## Status is
+    ``wont-do`` classifies as ``WONT_DO_STATUS``.
 
     Args:
         path:          Path to the markdown input file.
         column:        Column name ("BUGS", "PRIORITIES", or "REQUIREMENTS").
         active_rc:     Active RC version string (e.g. "v1.6.0") or "" when none.
         last_released: Last released version string (e.g. "v1.5.0") or "" when none.
+        carried:       The carried item names of the file's intake directory
+                       (``intake_carried_names``).  ``None`` reads them for
+                       a running file only; a caller classifying a whole
+                       directory passes them once.
 
     Returns:
-        One of: "open", "working", "done", "wont-do", "blocked", "label".
+        One of: "open", "working", "carried", "needs-operator", "done",
+        "wont-do", "duplicate", "blocked", "label".
     """
     if column == "REQUIREMENTS":
         return classify_requirement(_get_target_version(path), active_rc, last_released)
     # Bugs and priorities: read the ## Status field directly.
-    return classify_intake_status(_get_file_status(path))
+    return classify_intake_file(path, _get_file_status(path), carried)
 
 
-def classify_intake_status(raw_status: str) -> str:
-    """Classify a bug or priority file's ``## Status`` value.
+def classify_intake_file(
+    path: pathlib.Path,
+    raw_status: str,
+    carried: Optional[Iterable[str]] = None,
+) -> str:
+    """Classify the bug or priority file at *path* whose ``## Status`` is *raw_status*.
 
-    ``running`` is ``"working"``; the closed states (``CLOSED_STATES``:
-    ``done``, ``wont-do``) and ``blocked`` pass through, and the retired
-    ``superseded`` reads as ``wont-do``; anything else (``open``, an empty
-    value, an unknown word) is ``"open"``.  Case and surrounding whitespace
-    are ignored.
+    ``classify_intake_status`` with the file's own name.  When *carried* is
+    ``None`` and the file is ``running``, the carried set is read from the
+    bundles beside its directory (``intake_carried_names(path.parent)``), so
+    a caller that classifies one file needs nothing more; a caller
+    classifying a whole directory reads the set once and passes it.
 
     Returns:
-        One of: "working", "done", "wont-do", "blocked", "open".
+        One of: "working", "carried", "needs-operator", "done", "wont-do",
+        "duplicate", "blocked", "open".
+    """
+    if carried is None and canonical_state(raw_status) == RUNNING_STATE:
+        carried = intake_carried_names(path.parent)
+    return classify_intake_status(raw_status, path.name, carried or ())
+
+
+def intake_carried_names(input_dir: pathlib.Path) -> frozenset:
+    """Return the names of *input_dir*'s items whose every listing bundle is closed.
+
+    *input_dir* is a project's ``bugs/`` or ``priority/`` directory; the
+    bundles are the ``requirements/`` directory beside it, read through
+    ``lib.bundle_items.carried_item_names`` (the reading discovery's carried
+    pass uses).  Pass the answer to ``classify_intake_status`` as *carried*:
+    only a ``running`` item in it classifies as ``CARRIED_STATUS``.  A
+    missing ``requirements/`` directory gives an empty set.
+    """
+    return bundle_items.carried_item_names(pathlib.Path(input_dir).parent / "requirements")
+
+
+def classify_intake_status(
+    raw_status: str,
+    name: str = "",
+    carried: Iterable[str] = (),
+) -> str:
+    """Classify a bug or priority file's ``## Status`` value.
+
+    ``running`` is ``CARRIED_STATUS`` (``"carried"``) when the file *name*
+    is in *carried* (``intake_carried_names`` of its directory: every bundle
+    listing it is closed), else ``"working"``.  ``needs-operator`` is
+    ``NEEDS_OPERATOR_STATUS``; the closed states (``CLOSED_STATES``:
+    ``done``, ``wont-do``, ``duplicate``) and ``blocked`` pass through, and
+    the retired ``superseded`` reads as ``wont-do``; anything else
+    (``open``, an empty value, an unknown word) is ``"open"``.  Case and
+    surrounding whitespace are ignored.
+
+    Args:
+        raw_status: The file's ``## Status`` value.
+        name:       The file's name (``BUG-0001-example.md``); only a
+                    running file's name is looked up.
+        carried:    The carried item names of the file's directory.  The
+                    default (none) classifies every running file as
+                    ``"working"``.
+
+    Returns:
+        One of: "working", "carried", "needs-operator", "done", "wont-do",
+        "duplicate", "blocked", "open".
     """
     s = canonical_state(raw_status)
-    if s == "running":
-        return "working"
+    if s == RUNNING_STATE:
+        return CARRIED_STATUS if bundle_items.is_carried(s, name, carried) else "working"
+    if s == NEEDS_OPERATOR_STATE:
+        return NEEDS_OPERATOR_STATUS
     if s in CLOSED_STATES or s == "blocked":
         return s
     return "open"

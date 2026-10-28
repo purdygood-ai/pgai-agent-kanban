@@ -38,7 +38,13 @@ Implements every read endpoint of the operator REST API:
                             team/scripts/dashboard/agent-metrics.sh, calling the
                             EXACT SAME averaging function -- see GET /agent-metrics
                             docstring.
-  GET /dashboard/{pane}   → pane-specific dashboard script (see _PANE_SCRIPTS table)
+  GET /dashboard/{pane}   → input and queue: pgai_agent_kanban.dashboard.
+                            column_render.board_pane.render_board_pane() (no
+                            script), the board column the dashboard draws; the
+                            input pane's requirements column runs git against
+                            each project's dev tree to read its last release;
+                            metrics, attention, header and status-window: the
+                            pane's dashboard script (see _PANE_SCRIPTS table).
   GET /verdicts           → pgai_agent_kanban.ops.verdict.resolve_verdicts() (no
                             shell-out); per-project lane verdicts (RUNNING/BLOCKED/
                             HALTED/STUCK-LOCK/IDLE + cause + remedy) -- the function
@@ -117,7 +123,7 @@ Design:
   - /metrics with no project parameter omits --project, matching show-metrics.sh
     iterate-all behavior.
   - /dashboard/{pane} accepts panes: input, queue, metrics, attention, header,
-    status-window.  input and queue require column_type (column-render.sh's
+    status-window.  input and queue require column_type (the dashboard's
     --column-type) naming the board column to render, and refuse 422
     dual-channel without one.
   - /projects reads projects.cfg directly (no shell-out).
@@ -168,14 +174,17 @@ from .adapter import (
     ValidationError,
     ops_call,
     result_http_status,
-    run_bounded,
     shell_out,
     validate_required,
 )
 from .dependencies import route_kanban_root, warn_unknown_query_params
-from .validation import ComponentRefused, has_traversal, require_component
+from .dependencies import route_script_path as _script_path
+from .component_refusal import _component_refusal
+from .validation import has_traversal
 from ..board import COLUMN_KINDS, COLUMN_ORDER
 from ..dashboard import queue_pane
+from ..dashboard.column_render import board_gather, board_pane
+from ..dashboard.column_render.__main__ import EXIT_GATHER_UNAVAILABLE
 from ..dashboard.queue_details import empty_queue_details
 from ..dashboard.scan_auto_resolutions import collect_auto_resolutions
 from ..dashboard.scan_human_approvals import collect_pending_approvals
@@ -193,7 +202,7 @@ from ..lib.metrics import (
     metrics_rows_for_project,
     show_metrics,
 )
-from ..lib.error_contract import dual_channel_from_text, parse_error_contract
+from ..lib.error_contract import dual_channel_from_text, format_error_contract, parse_error_contract
 from ..ops.context import OpsContext
 from ..ops.errors import NotFound, Refused
 from ..ops import locks as ops_locks
@@ -201,6 +210,7 @@ from ..ops import read as ops_read
 from ..ops import resolve as ops_resolve
 from ..ops import verdict as ops_verdict
 from ..ops.rc_state import verify_rc_state
+from ..overwatch.halt_provenance import installed_script_command
 from ..ops.read import (
     RELEASE_STATE_REFUSAL_ERROR_KEY,
     RELEASE_STATE_REFUSAL_FALLBACK_REMEDY,
@@ -213,32 +223,29 @@ __all__ = ["router"]
 router = APIRouter()
 
 # ---------------------------------------------------------------------------
-# Pane → script table
+# Pane tables
 # ---------------------------------------------------------------------------
-# Maps the {pane} path parameter to the script name relative to:
-#   scripts/dashboard/  (for dashboard-specific scripts)
-#   scripts/            (for top-level scripts)
-#
-# Panes served by column-render.sh use special handling because that script
-# uses positional arguments rather than --flag style.  Those panes are the
-# board's two column kinds (pgai_agent_kanban.board.COLUMN_KINDS: "input"
-# and "queue"), whose item statuses the board classifier defines.
+# The board column panes -- the board's two column kinds
+# (pgai_agent_kanban.board.COLUMN_KINDS: "input" and "queue"), whose item
+# statuses the board classifier defines -- render in process through
+# pgai_agent_kanban.dashboard.column_render.board_pane.  The flag-style
+# panes run their dashboard script, named here relative to scripts/.
+
+#: The board column panes: one per board column kind, rendered in process.
+_COLUMN_PANES = frozenset(COLUMN_KINDS.values())
+
+#: The flag-style panes and the script each one runs.
 _PANE_SCRIPTS: dict[str, str] = {
-    "input": "dashboard/column-render.sh",       # positional-arg script
-    "queue": "dashboard/column-render.sh",        # positional-arg script
     "metrics": "dashboard/show-metrics.sh",
     "attention": "dashboard/show-attention.sh",
     "header": "dashboard/show-header.sh",
     "status-window": "dashboard/show-status-window.sh",
 }
 
-_VALID_PANES = frozenset(_PANE_SCRIPTS)
-
-#: The column-render.sh-backed panes: one per board column kind.
-_COLUMN_PANES = frozenset(COLUMN_KINDS.values())
+_VALID_PANES = _COLUMN_PANES | frozenset(_PANE_SCRIPTS)
 
 #: Per column pane, the ``column_type`` values it renders: the board's
-#: column names of that kind, lower-cased into column-render.sh's
+#: column names of that kind, lower-cased into the dashboard's
 #: ``--column-type`` vocabulary, in board order (``COLUMN_ORDER``).
 _PANE_COLUMN_TYPES: dict[str, tuple[str, ...]] = {
     pane: tuple(name.lower() for name in COLUMN_ORDER if COLUMN_KINDS[name] == pane)
@@ -249,41 +256,14 @@ _PANE_COLUMN_TYPES: dict[str, tuple[str, ...]] = {
 #: names no column, or one that pane does not render.
 DASHBOARD_COLUMN_REQUIRED_ERROR_KEY = "dashboard_pane.column_required"
 
+#: The machine key a column pane's envelope carries on stderr when the
+#: in-process gather cannot read the tree or fails while reading it.
+DASHBOARD_GATHER_UNAVAILABLE_ERROR_KEY = "dashboard_pane.gather_unavailable"
+
 
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
-
-
-def _scripts_dir(request: Request) -> pathlib.Path:
-    """Return the scripts/ directory path from the app's ApiConfig.
-
-    Scripts live at ``<kanban_root>/scripts/`` in both the live install
-    and any install produced by install.sh.  The kanban_root is read from
-    cfg stored on app.state.
-
-    Args:
-        request: The FastAPI request object (provides access to app.state).
-
-    Returns:
-        Absolute path to the scripts/ directory.
-    """
-    kanban_root: pathlib.Path = request.app.state.api_cfg.kanban_root
-    return kanban_root / "scripts"
-
-
-def _script_path(request: Request, relative: str) -> str:
-    """Resolve a script path relative to scripts/ and return it as a string.
-
-    Args:
-        request:  FastAPI request (for kanban_root).
-        relative: Relative path within scripts/; e.g. ``"verify-rc-state.sh"``
-                  or ``"dashboard/show-header.sh"``.
-
-    Returns:
-        Absolute script path string suitable for subprocess invocation.
-    """
-    return str(_scripts_dir(request) / relative)
 
 
 def _make_envelope(
@@ -349,66 +329,6 @@ def _read_output_result(output: "ops_read.ReadOutput") -> ShellResult:
     """The envelope fields of a script-shaped ``ops.read`` render result."""
     return ShellResult(exit_code=output.exit_code, stdout=output.stdout, stderr=output.stderr)
 
-
-# Example values the component refusal's remedy substitutes for a refused
-# query or path field -- each one a plain name the field accepts.
-_COMPONENT_EXAMPLES: dict[str, str] = {
-    "project": "my-app",
-    "key": "v1.2.3",
-    "rc": "v1.2.3",
-}
-
-
-def _component_refusal(
-    request: Request,
-    verb: str,
-    fields: dict[str, Optional[str]],
-    warnings: list[str],
-) -> Optional[JSONResponse]:
-    """Refuse a read whose project, key or selector parameter is not one plain name.
-
-    The one place every read route's confinement check lands (see
-    ``validation.require_component`` for what is refused and why). Each
-    entry of *fields* maps a query or path parameter name to the value the
-    request carried; an absent value (``None`` or ``""``) is skipped, since
-    whether a parameter is required is the route's own check. The first
-    refused parameter returns HTTP 422 with the dual-channel triple
-    ``<verb_snake>.<field>_invalid`` -- ``status.project_invalid``,
-    ``show.key_invalid`` -- a message naming the parameter and what is wrong
-    with it, a runnable curl remedy re-sending the request with an example
-    value in its place, and the ``warnings`` list. Runs before any path is
-    built, any file is read or any script is run.
-
-    Returns:
-        None when every supplied parameter is a plain name; otherwise the
-        422 refusal response.
-    """
-    for field, value in fields.items():
-        if value is None or value == "":
-            continue
-        try:
-            require_component(value, field)
-        except ComponentRefused as exc:
-            example = _COMPONENT_EXAMPLES.get(field, "my-app")
-            if field in request.path_params:
-                path = request.url.path.replace(
-                    f"/{request.path_params[field]}/", f"/{example}/", 1
-                )
-                corrected = request.url.replace(path=path)
-            else:
-                corrected = request.url.include_query_params(**{field: example})
-            triple = exc.contract(verb, f"curl -sS {shlex.quote(str(corrected))}")
-            # BLOCK-WORTHY (docs/blocking-site-census.md): an invariant by
-            # design -- the parameter becomes a path component, a glob
-            # prefix or an argv value, so a value that is not one plain name
-            # could read outside the kanban root or change what runs.
-            # Refused here, dual-channel, before anything is read.
-            # CENSUS-ANCHOR: reads-field-not-component-01
-            return JSONResponse(
-                content={**triple, "warnings": warnings},
-                status_code=HTTP_UNPROCESSABLE_ENTITY,
-            )
-    return None
 
 
 def _projects_cfg_list(kanban_root: pathlib.Path) -> list[str]:
@@ -491,7 +411,7 @@ def get_status(
             status_code=HTTP_UNPROCESSABLE_ENTITY, detail=exc.detail
         ) from exc
 
-    refused = _component_refusal(request, "status", {"project": project}, warnings)
+    refused = _component_refusal(request, "status", {"project": project}, None, warnings)
     if refused is not None:
         return refused
 
@@ -562,7 +482,7 @@ def get_show(
             status_code=HTTP_UNPROCESSABLE_ENTITY, detail=exc.detail
         ) from exc
 
-    refused = _component_refusal(request, "show", {"project": project, "key": key}, warnings)
+    refused = _component_refusal(request, "show", {"project": project, "key": key}, None, warnings)
     if refused is not None:
         return refused
 
@@ -636,7 +556,7 @@ def get_test_report(
             status_code=HTTP_UNPROCESSABLE_ENTITY, detail=exc.detail
         ) from exc
 
-    refused = _component_refusal(request, "test-report", {"project": project, "key": key}, warnings)
+    refused = _component_refusal(request, "test-report", {"project": project, "key": key}, None, warnings)
     if refused is not None:
         return refused
 
@@ -708,7 +628,7 @@ def get_metrics(
       Note: this array response does not carry a top-level ``warnings`` key;
       adding one requires a non-additive shape change tracked separately.
     """
-    refused = _component_refusal(request, "metrics", {"project": project}, warnings)
+    refused = _component_refusal(request, "metrics", {"project": project}, None, warnings)
     if refused is not None:
         return refused
 
@@ -799,7 +719,7 @@ def get_costs(
       Note: this array response does not carry a top-level ``warnings`` key;
       adding one requires a non-additive shape change tracked separately.
     """
-    refused = _component_refusal(request, "costs", {"project": project, "rc": rc}, warnings)
+    refused = _component_refusal(request, "costs", {"project": project, "rc": rc}, None, warnings)
     if refused is not None:
         return refused
 
@@ -1029,7 +949,7 @@ def get_agent_metrics(
             status_code=HTTP_UNPROCESSABLE_ENTITY, detail=exc.detail
         ) from exc
 
-    refused = _component_refusal(request, "agent-metrics", {"project": project}, warnings)
+    refused = _component_refusal(request, "agent-metrics", {"project": project}, None, warnings)
     if refused is not None:
         return refused
 
@@ -1103,7 +1023,7 @@ def get_rejected(
     Response envelope:
       ``{"exit_code": int, "stdout": str, "stderr": str, "warnings": list[str]}``
     """
-    refused = _component_refusal(request, "rejected", {"project": project}, warnings)
+    refused = _component_refusal(request, "rejected", {"project": project}, None, warnings)
     if refused is not None:
         return refused
 
@@ -1189,12 +1109,71 @@ def _dashboard_column_refusal(
     }
 
 
+def _render_column_pane(request: Request, pane: str, column: str) -> ShellResult:
+    """Render board column *column* of column pane *pane* in process.
+
+    Calls ``dashboard.column_render.board_pane.render_board_pane`` on the
+    server's kanban root under the server's environment, so the result is
+    the text the dashboard draws for that column -- the text
+    ``column-render.sh <pane> none --kanban-root <root> --all-projects
+    --column-type <column>`` prints. Starts no process, writes no file
+    (requirements only: a project whose dev tree is a git repository has
+    its last release read by a local ``git`` call, as the dashboard does).
+
+    Returns:
+        A ShellResult: exit 0 with the pane's lines on stdout; or, when the
+        gather cannot read the tree (``board_gather.BoardGatherUnavailable``)
+        or anything raises while gathering or rendering, the column_render
+        CLI's "gather unavailable" exit code with an empty stdout and the
+        dual-channel ``dashboard_pane.gather_unavailable`` block on stderr,
+        its message naming the cause.
+    """
+    kanban_root: pathlib.Path = request.app.state.api_cfg.kanban_root
+    try:
+        lines = board_pane.render_board_pane(kanban_root, subcommand=pane, column_type=column)
+    except Exception as exc:  # noqa: BLE001 -- every failure is reported, none is retried another way
+        if isinstance(exc, board_gather.BoardGatherUnavailable):
+            cause = (
+                f"{exc}. The pane reads an INI projects.cfg that registers at least one "
+                "project: register one with add-project.sh or create-project.sh, or convert a "
+                "colon-format registry with migrate/projects-cfg.sh"
+            )
+            remedy = f"cat {shlex.quote(str(kanban_root / 'projects.cfg'))}"
+        else:
+            cause = f"reading the board failed ({type(exc).__name__}: {exc})"
+            remedy = f"curl -sS {shlex.quote(str(request.url))}"
+        # BLOCK-WORTHY (docs/blocking-site-census.md): an invariant by design
+        # -- the column panes render in process and never fall back to a
+        # script, so a tree the in-process gather cannot read is reported,
+        # dual-channel, rather than answered 200 with an "(empty)" pane that
+        # reads as an empty board. Nothing was rendered or written.
+        # CENSUS-ANCHOR: reads-dashboard-gather-unavailable-01
+        return ShellResult(
+            exit_code=EXIT_GATHER_UNAVAILABLE,
+            stdout="",
+            stderr=format_error_contract(
+                DASHBOARD_GATHER_UNAVAILABLE_ERROR_KEY,
+                f"GET /dashboard/{pane} rendered nothing for column_type {column}: {cause}.",
+                remedy,
+            ) + "\n",
+        )
+    # The script prints its renderer's output through $(...) and printf
+    # '%s\n': trailing newlines collapse to one.
+    stdout = "".join(f"{line}\n" for line in lines).rstrip("\n") + "\n"
+    return ShellResult(exit_code=0, stdout=stdout, stderr="")
+
+
 
 @router.get(
     "/dashboard/{pane}",
     summary="Render a dashboard pane",
     response_description=(
-        "JSON envelope with exit_code, stdout, and stderr from the pane's render script."
+        "JSON envelope with exit_code, stdout, and stderr of the pane. The input and "
+        "queue panes render in process through "
+        "pgai_agent_kanban.dashboard.column_render and run no script; the input pane's "
+        "requirements column runs git against each project's dev tree (dev_tree_path) "
+        "to read its last release, and the other columns start no process. Only the "
+        "metrics, attention, header and status-window panes run their dashboard script."
     ),
 )
 def get_dashboard_pane(
@@ -1208,26 +1187,34 @@ def get_dashboard_pane(
 
     Accepted pane names (case-sensitive):
 
-    - ``input``         — Calls ``column-render.sh input`` (discovery-pipeline input column).
-    - ``queue``         — Calls ``column-render.sh queue`` (agent queue column).
+    - ``input``         — The discovery-pipeline input column, rendered in process.
+    - ``queue``         — The agent queue column, rendered in process.
+    - ``metrics``       — Runs ``dashboard/show-metrics.sh``.
+    - ``attention``     — Runs ``dashboard/show-attention.sh``.
+    - ``header``        — Runs ``dashboard/show-header.sh``.
+    - ``status-window`` — Runs ``dashboard/show-status-window.sh``.
 
     ``input`` and ``queue`` are the board's two column kinds
     (``pgai_agent_kanban.board.COLUMN_KINDS``); the board classifier there
-    defines the status each column item carries.
-    - ``metrics``       — Calls ``dashboard/show-metrics.sh``.
-    - ``attention``     — Calls ``dashboard/show-attention.sh``.
-    - ``header``        — Calls ``dashboard/show-header.sh``.
-    - ``status-window`` — Calls ``dashboard/show-status-window.sh``.
+    defines the status each column item carries. They render in process
+    through ``pgai_agent_kanban.dashboard.column_render.board_pane``: the
+    column is gathered from the server's kanban root and drawn as the
+    dashboard's mixed-project column, under the server's environment
+    (``NO_COLOR`` / ``TERM`` decide colour), running no script and
+    writing no file. The ``input`` pane's ``requirements`` column runs
+    ``git`` against each project's dev tree to read its last release
+    (``lib.released_version.last_released_version``, local refs only,
+    for a project whose ``dev_tree_path`` is a git repository); every
+    other column starts no process. Only ``metrics``, ``attention``,
+    ``header`` and ``status-window`` run a dashboard script.
 
     Query parameters:
 
-    - ``project`` (optional) — project name.  When supplied for
-      ``column-render``-backed panes (input, queue), the script is invoked with
-      ``--all-projects`` mode against the kanban root; for flag-style scripts the
-      ``--project`` flag is passed through.
+    - ``project`` (optional) — project name.  The column panes render every
+      registered project and do not read it; the flag-style panes pass it
+      through as the script's ``--project`` flag.
     - ``column_type`` (required for ``input`` and ``queue``) — the board
-      column to render, passed through as column-render.sh's
-      ``--column-type``.  ``input`` renders ``bugs``, ``priorities`` or
+      column to render.  ``input`` renders ``bugs``, ``priorities`` or
       ``requirements``; ``queue`` renders ``pm``, ``coder``, ``writer``,
       ``tester`` or ``cm``.  Matched case-insensitively, so a ``GET /board``
       column name (``CODER``) is accepted too.  The response is the text
@@ -1244,11 +1231,17 @@ def get_dashboard_pane(
       ``{"error": "dashboard_pane.column_required", "message": str,
       "remedy": str, "warnings": list[str]}`` -- the message names the
       columns the pane accepts and the remedy is a runnable ``curl`` line
-      re-sending the request with one of them.  No script is run.
+      re-sending the request with one of them.  Nothing is rendered.
+
+    When a column pane cannot gather the tree -- projects.cfg is absent,
+    in colon format or registers no project, or reading the board raises --
+    the envelope carries a non-zero ``exit_code``, an empty ``stdout`` and,
+    on ``stderr``, the dual-channel ``dashboard_pane.gather_unavailable``
+    block whose message names the cause. Nothing falls back to a script.
 
     HTTP status: 422 when an unknown pane is requested, or a column pane is
-    requested without a column it renders; otherwise 200/500 from the
-    underlying script.
+    requested without a column it renders; 500 when a column pane cannot
+    gather the tree; otherwise 200/500 from the pane.
     """
     if pane not in _VALID_PANES:
         valid = ", ".join(sorted(_VALID_PANES))
@@ -1257,42 +1250,26 @@ def get_dashboard_pane(
             detail=f"Unknown pane '{pane}'. Valid panes: {valid}.",
         )
 
-    refused = _component_refusal(request, "dashboard-pane", {"project": project}, warnings)
+    refused = _component_refusal(request, "dashboard-pane", {"project": project}, None, warnings)
     if refused is not None:
         return refused
-
-    scripts_dir = _scripts_dir(request)
-    kanban_root: pathlib.Path = request.app.state.api_cfg.kanban_root
 
     if pane in _COLUMN_PANES:
         accepted = _PANE_COLUMN_TYPES[pane]
         column = (column_type or "").strip().lower()
         if column not in accepted:
             # BLOCK-WORTHY (docs/blocking-site-census.md): an invariant by
-            # design -- a column pane renders exactly one board column, and in
-            # --all-projects mode column-render.sh gathers nothing for a
+            # design -- a column pane renders exactly one board column, and
+            # the dashboard's mixed-project pane gathers nothing for a
             # column type it does not know, so rendering anyway would answer
             # 200 with an "(empty)" pane indistinguishable from an empty
-            # board. Refused here, dual-channel, before any script runs.
+            # board. Refused here, dual-channel, before anything is rendered.
             # CENSUS-ANCHOR: reads-dashboard-column-required-01
             return JSONResponse(
                 content=_dashboard_column_refusal(request, pane, column_type, accepted, warnings),
                 status_code=HTTP_UNPROCESSABLE_ENTITY,
             )
-        # column-render.sh uses positional arguments, not --flag style.
-        # Call: column-render.sh <input|queue> none --kanban-root <root>
-        #       --all-projects --column-type <column>
-        script = str(scripts_dir / "dashboard" / "column-render.sh")
-        argv = [
-            script,
-            pane,         # positional subcommand
-            "none",       # placeholder for dir/backlog_file; --all-projects overrides it
-            "--kanban-root", str(kanban_root),
-            "--all-projects",
-            "--column-type", column,
-        ]
-        result = run_bounded(argv, timeout_seconds=request.app.state.api_cfg.shell_out_timeout_seconds)
-        return _make_envelope(result, warnings)
+        return _make_envelope(_render_column_pane(request, pane, column), warnings)
 
     # Flag-style dashboard scripts: metrics, attention, header, status-window
     if column_type is not None:
@@ -1378,7 +1355,7 @@ def get_approvals(
       200 — success (including empty array).
       422 — project parameter supplied but project does not exist.
     """
-    refused = _component_refusal(request, "approvals", {"project": project}, warnings)
+    refused = _component_refusal(request, "approvals", {"project": project}, None, warnings)
     if refused is not None:
         return refused
 
@@ -1467,7 +1444,7 @@ def get_auto_resolutions(
       200 — success (including empty array).
       422 — project parameter supplied but project does not exist.
     """
-    refused = _component_refusal(request, "auto-resolutions", {"project": project}, warnings)
+    refused = _component_refusal(request, "auto-resolutions", {"project": project}, None, warnings)
     if refused is not None:
         return refused
 
@@ -1621,7 +1598,7 @@ def get_verdicts(
     # kanban root (route_kanban_root), the one root every route reads --
     # load_api_config resolved it from PGAI_AGENT_KANBAN_ROOT_PATH at
     # startup, so it is the root the CLI twin reads.
-    refused = _component_refusal(request, "verdicts", {"project": project}, warnings)
+    refused = _component_refusal(request, "verdicts", {"project": project}, None, warnings)
     if refused is not None:
         return refused
 
@@ -1737,7 +1714,7 @@ def get_task_readme(
             status_code=HTTP_UNPROCESSABLE_ENTITY,
         )
 
-    refused = _component_refusal(request, "task-readme", {"project": project, "key": key}, warnings)
+    refused = _component_refusal(request, "task-readme", {"project": project, "key": key}, None, warnings)
     if refused is not None:
         return refused
 
@@ -1855,7 +1832,7 @@ def get_show_queues(
     404 when an explicit ``project`` does not resolve to a registered
     project. Either mode: 422 when ``project`` is not one plain name.
     """
-    refused = _component_refusal(request, "show-queues", {"project": project}, warnings)
+    refused = _component_refusal(request, "show-queues", {"project": project}, None, warnings)
     if refused is not None:
         return refused
 
@@ -1872,8 +1849,8 @@ def get_show_queues(
                         "error": "show_queues.project_not_found",
                         "message": f"Project not found: {project!r} (expected at {project_root})",
                         "remedy": (
-                            "Check the project name against projects.cfg, or create "
-                            f"it first with team/scripts/create-project.sh --project {project}."
+                            "Check the project name against projects.cfg, or create it first with "
+                            f"{installed_script_command(ctx.kanban_root, 'create-project.sh', '--project', project)}."
                         ),
                         "warnings": warnings,
                     },
@@ -1979,7 +1956,7 @@ def get_verify_rc_state(
             status_code=HTTP_UNPROCESSABLE_ENTITY, detail=exc.detail
         ) from exc
 
-    refused = _component_refusal(request, "verify-rc-state", {"project": project}, warnings)
+    refused = _component_refusal(request, "verify-rc-state", {"project": project}, None, warnings)
     if refused is not None:
         return refused
 
@@ -2039,6 +2016,7 @@ def get_release_locks(
       200 on exit_code 0 (listing printed, including an empty listing).
       422 when ``release`` or ``force`` is supplied.
     """
+    ctx = OpsContext(kanban_root=request.app.state.api_cfg.kanban_root)
     if release is not None or force is not None:
         raise HTTPException(
             status_code=HTTP_UNPROCESSABLE_ENTITY,
@@ -2047,11 +2025,10 @@ def get_release_locks(
                 "releases a lock. To release one, POST /operations/release-locks "
                 "with a JSON body {\"release\": NAME} (add \"force\": true to "
                 "override a live holder), or run the CLI verb directly: "
-                "team/scripts/release-locks.sh --release NAME [--force]."
+                f"{installed_script_command(ctx.kanban_root, 'release-locks.sh')} --release NAME [--force]."
             ),
         )
 
-    ctx = OpsContext(kanban_root=request.app.state.api_cfg.kanban_root)
     listing = ops_locks.list_locks(ctx)
     result = ShellResult(exit_code=0, stdout=ops_locks.render_lock_listing(listing), stderr="")
     return _make_envelope(result, warnings)
@@ -2139,7 +2116,7 @@ def get_release_state_route(
       404 when ``project`` does not resolve to a registered project.
       422 when release-state.md fails schema validation.
     """
-    refused = _component_refusal(request, "release-state", {"project": project}, warnings)
+    refused = _component_refusal(request, "release-state", {"project": project}, None, warnings)
     if refused is not None:
         return refused
 
@@ -2155,8 +2132,8 @@ def get_release_state_route(
                 "error": "release_state.project_not_found",
                 "message": str(exc),
                 "remedy": (
-                    "Check the project name against projects.cfg, or create "
-                    f"it first with team/scripts/create-project.sh --project {project}."
+                    "Check the project name against projects.cfg, or create it first with "
+                    f"{installed_script_command(ctx.kanban_root, 'create-project.sh', '--project', project)}."
                 ),
                 "warnings": warnings,
             },
@@ -2243,7 +2220,7 @@ def get_deep_verify_status_route(
       in force (project.cfg, else kanban.cfg) is outside its accepted
       vocabulary.
     """
-    refused = _component_refusal(request, "deep-verify-status", {"project": project}, warnings)
+    refused = _component_refusal(request, "deep-verify-status", {"project": project}, None, warnings)
     if refused is not None:
         return refused
 
@@ -2259,8 +2236,8 @@ def get_deep_verify_status_route(
                 "error": "deep_verify_status.project_not_found",
                 "message": str(exc),
                 "remedy": (
-                    "Check the project name against projects.cfg, or create "
-                    f"it first with team/scripts/create-project.sh --project {project}."
+                    "Check the project name against projects.cfg, or create it first with "
+                    f"{installed_script_command(ctx.kanban_root, 'create-project.sh', '--project', project)}."
                 ),
                 "warnings": warnings,
             },
@@ -2271,7 +2248,7 @@ def get_deep_verify_status_route(
             exc,
             "deep_verify_status.refused",
             (
-                f"Run team/scripts/deep-verify-status.sh --project {project} "
+                f"Run {installed_script_command(ctx.kanban_root, 'deep-verify-status.sh', '--project', project)} "
                 "to see the full diagnostic, then fix the named field."
             ),
         )

@@ -20,7 +20,8 @@ cap); the bullets below describe the workers and coverage keys:
     not validate them, so a malformed ``[testing]`` value never stops a
     wake; the resolvers default to the cfg file ``load_config`` recorded.
   - The shipped kanban.cfg_example carries both keys, documented inline,
-    and project.cfg_example carries no ``[testing]`` section.
+    and project.cfg_example's own ``[testing]`` section overrides none of
+    them.
 
 Tests invoke config_loader.sh via subprocess (bash -c "source ... && ..."),
 matching test_config_loader_key_validation.py, so the fixtures exercise the
@@ -299,10 +300,17 @@ def test_kanban_cfg_example_documents_testing_keys_inline() -> None:
     assert "Accepted: true|false" in coverage_doc and "Default: false" in coverage_doc
 
 
-def test_project_cfg_example_has_no_testing_section() -> None:
-    """[testing] is kanban-wide: no project.cfg key, no per-project override."""
-    text = _PROJECT_CFG_EXAMPLE.read_text(encoding="utf-8")
-    assert not re.search(r"^\s*#?\s*\[testing\]\s*$", text, re.M)
+def test_project_cfg_example_testing_section_overrides_no_kanban_wide_key() -> None:
+    """The kanban-wide [testing] keys have no per-project override: the
+    project.cfg template's own [testing] section holds only the project's
+    runner commands."""
+    keys = {
+        line.lstrip("# ").split("=", 1)[0].strip()
+        for line in _section_lines(_PROJECT_CFG_EXAMPLE, "testing")
+        if re.match(r"^#?\s?[a-z_]+\s*=", line)
+    }
+    assert keys == {"targeted_test_command", "pre_merge_command"}
+    assert not keys & {"workers", "coverage", "pre_merge_affected_cap"}
 
 
 # ---------------------------------------------------------------------------

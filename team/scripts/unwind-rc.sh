@@ -160,7 +160,10 @@ KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH}"
 # return non-zero from innocent operations.
 [[ -f "$KANBAN_ROOT/bashrc" ]]               && source "$KANBAN_ROOT/bashrc"
 [[ -f "$KANBAN_ROOT/env" ]]                  && source "$KANBAN_ROOT/env"
-[[ -f "$HOME/.config/pgai-kanban.cfg" ]]     && source "$HOME/.config/pgai-kanban.cfg"
+# Operator user config, then [chain] pm_mode (config_loader.sh).
+# shellcheck source=lib/config_loader.sh
+source "${SCRIPT_DIR}/lib/config_loader.sh"
+config_startup_prelude "$KANBAN_ROOT"
 
 # shellcheck source=lib/ini_parser.sh
 [[ -f "${SCRIPT_DIR}/lib/ini_parser.sh" ]] && source "${SCRIPT_DIR}/lib/ini_parser.sh"

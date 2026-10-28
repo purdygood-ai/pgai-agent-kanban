@@ -13,7 +13,9 @@ Coverage:
 
   1. **Flagged case**: a synthetic ``main..rc/v1.0.0`` range containing one
      empty non-merge commit (an identical tree to its parent) is caught,
-     the offending commit is named in the output, and the lint exits 1.
+     the offending commit is named in the output and written to
+     --findings-file as one quality finding, the stable error key the
+     completion gate reads is printed, and the lint exits 0.
 
   2. **Clean case, including a merge**: a range whose every commit either
      changes a file or is a merge (built by branching, committing on the
@@ -44,6 +46,7 @@ real one.
 from __future__ import annotations
 
 import importlib.util
+import json
 import subprocess
 from pathlib import Path
 import pytest
@@ -119,7 +122,9 @@ def _empty_commit(repo: Path, message: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-def test_flags_empty_non_merge_commit_in_rc_range(tmp_path: Path) -> None:
+def test_flags_empty_non_merge_commit_in_rc_range(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
     repo = tmp_path / "repo"
     _init_repo(repo, main_branch="main")
     _write_commit(repo, "README.md", "hello\n", "initial commit")
@@ -134,10 +139,21 @@ def test_flags_empty_non_merge_commit_in_rc_range(tmp_path: Path) -> None:
     assert [h.sha for h in hits] == [empty_sha]
     assert real_sha not in [h.sha for h in hits]
 
+    findings_file = tmp_path / "findings" / "rc_empty_commits.json"
     exit_code = lint_rc_empty_commits.main(
-        ["--repo", str(repo), "--range", "main..rc/v1.0.0"]
+        ["--repo", str(repo), "--range", "main..rc/v1.0.0", "--findings-file", str(findings_file)]
     )
-    assert exit_code == 1
+    assert exit_code == 0
+
+    captured = capsys.readouterr()
+    assert empty_sha[:7] in captured.out, captured.out
+    assert f"error:   {lint_rc_empty_commits.FOUND_ERROR_KEY}" in captured.err, captured.err
+    findings = json.loads(findings_file.read_text(encoding="utf-8"))
+    assert [f["sha"] for f in findings] == [empty_sha]
+    assert findings[0]["lint"] == "rc_empty_commits"
+    assert findings[0]["severity"] == "quality"
+    assert findings[0]["range"] == "main..rc/v1.0.0"
+    assert findings[0]["remedy"] == f"git -C {repo} show --stat {empty_sha}"
 
 
 # ---------------------------------------------------------------------------
@@ -160,10 +176,12 @@ def test_reports_nothing_for_a_clean_range_with_a_merge(tmp_path: Path) -> None:
     hits = lint_rc_empty_commits.find_empty_commits(repo, "main..rc/v1.0.0")
     assert hits == []
 
+    findings_file = tmp_path / "findings.json"
     exit_code = lint_rc_empty_commits.main(
-        ["--repo", str(repo), "--range", "main..rc/v1.0.0"]
+        ["--repo", str(repo), "--range", "main..rc/v1.0.0", "--findings-file", str(findings_file)]
     )
     assert exit_code == 0
+    assert json.loads(findings_file.read_text(encoding="utf-8")) == []
 
 
 # ---------------------------------------------------------------------------
@@ -230,4 +248,29 @@ def test_discovers_prefixed_main_and_rc_branches(tmp_path: Path) -> None:
     assert [h.sha for h in hits] == [empty_sha]
 
     exit_code = lint_rc_empty_commits.main(["--repo", str(repo)])
-    assert exit_code == 1
+    assert exit_code == 0
+
+
+# ---------------------------------------------------------------------------
+# Case 6: a range that does not resolve is the could-not-run status (2) and
+# never prints the found-commit error key -- the completion gate reads that
+# status as "could not run" and the key as "found".
+# ---------------------------------------------------------------------------
+
+
+def test_unresolvable_range_exits_2_without_the_found_key(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    repo = tmp_path / "repo"
+    _init_repo(repo, main_branch="main")
+    _write_commit(repo, "README.md", "hello\n", "initial commit")
+    findings_file = tmp_path / "findings.json"
+
+    exit_code = lint_rc_empty_commits.main(
+        ["--repo", str(repo), "--range", "main..no-such-branch", "--findings-file", str(findings_file)]
+    )
+
+    assert exit_code == 2
+    captured = capsys.readouterr()
+    assert lint_rc_empty_commits.FOUND_ERROR_KEY not in captured.out + captured.err
+    assert not findings_file.exists()

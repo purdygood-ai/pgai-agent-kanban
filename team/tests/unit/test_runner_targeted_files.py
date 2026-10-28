@@ -100,6 +100,7 @@ _QUALITY_PY_SCRIPTS = [
     "lint_gate_census_compliance.py",
     "lint_block_record_sites.py",
     "lint_inline_python.py",
+    "lint_section_parsers.py",
     "lint_docker_helper_path.py",
     "lint_python_duplicates.py",
     "lint_api_route_impl.py",
@@ -108,6 +109,7 @@ _QUALITY_PY_SCRIPTS = [
     "dashboard/generate_window_docs.py",
     "dashboard/lint_tmux_format_jobs.py",
     "generate_operator_verb_docs.py",
+    "generate_measured_pace_docs.py",
     "check_docs_citations.py",
 ]
 _QUALITY_SH_SCRIPTS = ["lint_skip_bug_gate.sh", "lint_governance_byte_budgets.sh"]

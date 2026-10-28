@@ -43,6 +43,13 @@ _TEAM_DIR = pathlib.Path(__file__).resolve().parents[2]
 _SCRIPTS_DIR = _TEAM_DIR / "scripts"
 _VOI_SCRIPT = _SCRIPTS_DIR / "verify-test-order-independence.sh"
 _GUARD_SHIM_DIR = _SCRIPTS_DIR / "wake" / "git-guard"
+# The package files the script's junit outcome diff imports, relative to
+# team/.
+_DIFF_MODULE_FILES = (
+    "pgai_agent_kanban/__init__.py",
+    "pgai_agent_kanban/testing/__init__.py",
+    "pgai_agent_kanban/testing/order_independence.py",
+)
 
 # A fixture test that does exactly what the real CM-release fixtures do:
 # build a local repository plus a bare "origin" under its own tmp_path and
@@ -99,12 +106,14 @@ def pytest_runtest_logreport(report):
 
 
 def _build_throwaway_team_tree(root: pathlib.Path) -> pathlib.Path:
-    """Copy the script and its sourced libraries into ``root/team`` beside
-    a one-test fixture suite, and return the copied script path.
+    """Copy the script, its sourced libraries and the outcome-diff module it
+    runs into ``root/team`` beside a one-test fixture suite, and return the
+    copied script path.
 
     The script resolves its test paths relative to its own location
     (``scripts/..``), so a copy placed here sweeps only the fixture suite,
-    never the real estate.
+    never the real estate. Only the diff module's own package files are
+    copied, so the unit target's package test directory stays empty.
     """
     team = root / "team"
     scripts = team / "scripts"
@@ -112,6 +121,10 @@ def _build_throwaway_team_tree(root: pathlib.Path) -> pathlib.Path:
     script_copy = scripts / _VOI_SCRIPT.name
     shutil.copy2(_VOI_SCRIPT, script_copy)
     shutil.copytree(_SCRIPTS_DIR / "lib", scripts / "lib")
+    for module_file in _DIFF_MODULE_FILES:
+        target = team / module_file
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(_TEAM_DIR / module_file, target)
 
     unit = team / "tests" / "unit"
     unit.mkdir(parents=True)

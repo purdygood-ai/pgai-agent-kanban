@@ -2,7 +2,7 @@
 """
 lint_lib_function_dedupe.py
 ===========================
-Pre-flight lint that asserts no function name is defined in more than one
+Pre-flight lint that reports every function name defined in more than one
 file matching ``team/scripts/lib/*.sh`` (non-recursive glob).
 
 SUPERSEDED AS A GATED-RUNNER CALL SITE
@@ -15,7 +15,7 @@ Running both scanners inside the gated-runner quality-lint pipeline would
 have been exactly the duplicated-lint surface this generalization exists to
 avoid.
 
-This file is UNCHANGED and still exists for its own narrower purpose: it
+This file still exists for its own narrower purpose: it
 keeps its own passing test suite (``test_lint_lib_function_dedupe.py``), its
 own census row (row 40, ``docs/blocking-site-census.md``), and its one
 remaining caller, ``audit_coding_standards.sh``'s D01 check -- a manually-run
@@ -34,9 +34,8 @@ semantics meant the load order was the only thing preventing silent
 argument misrouting.
 
 This lint converts an earlier grep-zero acceptance criterion into a
-permanent, gated-suite check.  When future edits reintroduce a duplicate
-function name across lib/*.sh files, this script exits 1 and the suite
-catches it before it reaches production.
+permanent check.  When future edits reintroduce a duplicate function name
+across lib/*.sh files, this script reports it as a finding.
 
 IDENTIFIER-BY-NECESSITY
 ------------------------
@@ -61,7 +60,7 @@ where ``name`` consists of lowercase letters, digits, and underscores
 non-whitespace character is ``#`` are skipped.
 
 If the same function name appears in TWO OR MORE files, the lint reports
-the name and the files, then exits 1.
+the name and the files as one finding.
 
 ALLOW-LIST
 ----------
@@ -93,16 +92,27 @@ Only the flat glob ``lib/*.sh`` is scanned — NOT subdirectories such as
 that live in non-lib scripts (or in subdirectory scripts) are not in scope
 and do not need special exemption.
 
+FINDINGS
+--------
+CONVERT (quality class, team/SOP-core.md "Gates and Refusals"): a
+duplicated name is a latent shadowing hazard, not a failure of the run that
+finds it.  Each duplicated name is printed (one ``  name() — defined in:
+a.sh, b.sh`` line under the count line, the shape
+``audit_coding_standards.sh``'s D01 check embeds) and recorded as one
+finding; with --findings-file the findings are written as a JSON array (the
+shape pgai_agent_kanban.lint.findings defines), ready for
+gated_runner_merge_findings_file.
+
 EXIT CODES
 ----------
-  0   No duplicates found; lint is green.
-  1   One or more duplicated function names found; see stdout for details.
+  0   Scan ran, whatever it found (duplicates are findings, not failures).
   2   Usage error or the lib directory was not found.
 
 USAGE
 -----
   python3 scripts/lint_lib_function_dedupe.py [--lib-dir PATH]
                                                [--allow-file FILENAME]
+                                               [--findings-file PATH]
                                                [--verbose]
 
   --lib-dir PATH         Directory to scan (default: team/scripts/lib/
@@ -113,6 +123,8 @@ USAGE
                          provider_codex.sh.  Passing ``--allow-file``
                          once REPLACES the defaults; pass all desired files
                          when using this flag.
+  --findings-file PATH   Write the findings as a JSON array to PATH (parent
+                         directories created; written even when empty).
   --verbose, -v          Print each scanned file and function extracted from it.
 
 EXAMPLES
@@ -128,6 +140,10 @@ EXAMPLES
       --allow-file provider_claude.sh \\
       --allow-file provider_codex.sh \\
       --allow-file my_new_provider.sh
+
+  # Record findings for a downstream merge:
+  python3 team/scripts/lint_lib_function_dedupe.py \\
+      --findings-file "${PGAI_AGENT_KANBAN_TEMP_DIR}/lint/lib_function_dedupe.json"
 """
 
 from __future__ import annotations
@@ -137,6 +153,21 @@ import re
 import sys
 from collections import defaultdict
 from pathlib import Path
+
+# The finding shape and the error-contract emitter live in the team package
+# beside scripts/; this script is run directly as well as imported, so the
+# package root is put on sys.path from this file's own location.
+_TEAM_DIR = Path(__file__).resolve().parent.parent  # team/
+if str(_TEAM_DIR) not in sys.path:
+    sys.path.insert(0, str(_TEAM_DIR))
+from pgai_agent_kanban.lib.error_contract import emit_error_contract  # noqa: E402
+from pgai_agent_kanban.lint.findings import (  # noqa: E402
+    display_path,
+    quality_finding,
+    write_findings_file,
+)
+
+_LINT_NAME = "lib_function_dedupe"
 
 # ---------------------------------------------------------------------------
 # Default allow-list
@@ -285,8 +316,9 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         prog="lint_lib_function_dedupe.py",
         description=(
             "Pre-flight lint: assert that no function name is defined in more "
-            "than one file matching team/scripts/lib/*.sh.  "
-            "Exits 1 when any duplicated name is found outside the allow-list."
+            "than one file matching team/scripts/lib/*.sh.  Quality class: each "
+            "duplicated name outside the allow-list is a finding, and the lint "
+            "exits 0 whatever it finds (2 on a usage error)."
         ),
     )
     parser.add_argument(
@@ -311,6 +343,14 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--findings-file",
+        metavar="PATH",
+        help=(
+            "Write the findings as a JSON array to PATH (parent directories "
+            "created; written even when empty).  Findings are printed either way."
+        ),
+    )
+    parser.add_argument(
         "--verbose",
         "-v",
         action="store_true",
@@ -319,10 +359,35 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
+def _findings(violations: dict[str, list[str]], *, lib_dir: Path) -> list[dict]:
+    """One quality finding per duplicated name. The remedy names the exact
+    files and re-checks: which definition survives is a design choice no
+    command can make."""
+    relint = f'python3 "{Path(__file__).resolve()}" --lib-dir "{lib_dir}"'
+    repo_root = _TEAM_DIR.parent
+    findings = []
+    for func_name, filenames in sorted(violations.items()):
+        paths = [display_path(lib_dir / name, repo_root) for name in filenames]
+        findings.append(
+            quality_finding(
+                _LINT_NAME,
+                f"{func_name}() is defined in {len(filenames)} lib/*.sh files: "
+                f"{', '.join(paths)}",
+                f"keep one {func_name}() definition and remove or rename it in "
+                f"{', '.join(paths[1:])}, then re-check: {relint}",
+                file=paths[0],
+                function=func_name,
+                files=paths,
+            )
+        )
+    return findings
+
+
 def main(argv: list[str] | None = None) -> int:
     """Entry point for the lib-function-dedupe lint.
 
-    Returns 0 (clean), 1 (violations found), or 2 (usage / path error).
+    Returns 0 whatever was found (each duplicated name is a quality finding,
+    printed and written to --findings-file), or 2 on a usage / path error.
     """
     args = _parse_args(argv)
 
@@ -369,10 +434,12 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     sh_count = len(list(lib_dir.glob("*.sh")))
+    findings = _findings(violations, lib_dir=lib_dir)
+    write_findings_file(args.findings_file, findings, lint="lint_lib_function_dedupe")
 
     if violations:
         print(
-            f"\nlint_lib_function_dedupe: FAIL — "
+            f"\nlint_lib_function_dedupe: "
             f"{len(violations)} function name(s) defined in more than one "
             f"team/scripts/lib/*.sh file:\n",
             flush=True,
@@ -390,7 +457,17 @@ def main(argv: list[str] | None = None) -> int:
             "intentional provider-interface implementation.",
             flush=True,
         )
-        return 1
+        # CENSUS-ANCHOR: lib-function-dedupe-01
+        # CONVERT: a duplicated lib function name is a latent shadowing
+        # hazard with zero runtime-failure risk to this run -- recorded as
+        # findings; returns 0.
+        emit_error_contract(
+            "lint.lib-function-dedupe",
+            f"{len(findings)} function name(s) are defined in more than one file "
+            f"under {lib_dir}; each is listed above.",
+            findings[0]["remedy"],
+        )
+        return 0
 
     print(
         f"lint_lib_function_dedupe: ok — "

@@ -147,9 +147,18 @@
 # DEPENDENCIES
 # -------------------------------------------------------------------------
 # Prefers jq for JSON merging (gated on `command -v jq`).
-# Falls back to a small inline python3 snippet if jq is absent.
-# python3 is assumed available (it is used throughout wake/claude.sh).
+# Falls back to pgai_agent_kanban.lib.token_capture write-tokens if jq is
+# absent. The claude response parse is that module's parse-claude-json.
+# Both are reached through pp_run_ops, self-sourced below when the caller
+# has not loaded it. python3 is assumed available.
 # -------------------------------------------------------------------------
+
+# pp_run_ops runs pgai_agent_kanban.lib.token_capture with the package root
+# this tree's own lib/ sits under, never the caller's working directory.
+if ! declare -F pp_run_ops >/dev/null 2>&1; then
+    # shellcheck source=scripts/lib/pp_run_ops.sh
+    source "$(dirname "${BASH_SOURCE[0]}")/pp_run_ops.sh"
+fi
 
 # ---------------------------------------------------------------------------
 # token_canonicalize_model <model_name>
@@ -278,147 +287,12 @@ token_capture_parse_result() {
         return 1
     fi
 
-    # Use python3 to parse — available everywhere claude is used.
+    # The parse lives in pgai_agent_kanban.lib.provider_usage.parse_claude_json;
+    # see that docstring for the record's fields and canonical_model_id rule.
     local parse_exit=0
     local usage_json
-    usage_json="$(python3 - "$json_file" "$result_text_file" "${selected_model}" <<'PY'
-import json, sys, pathlib
-
-json_path = pathlib.Path(sys.argv[1])
-result_path = pathlib.Path(sys.argv[2])
-requested_model = sys.argv[3] if len(sys.argv) > 3 else ""
-
-try:
-    raw = json_path.read_text(encoding='utf-8').strip()
-except OSError as e:
-    print(f"token_capture: cannot read json_file: {e}", file=sys.stderr)
-    result_path.write_text('', encoding='utf-8')
-    print(json.dumps({"captured": False, "reason": f"cannot read json_file: {e}"}))
-    sys.exit(1)
-
-# Claude --output-format json may emit a single JSON object or
-# (in edge cases) a JSON array. Handle both.
-try:
-    data = json.loads(raw)
-except json.JSONDecodeError:
-    # Try to grab the last non-empty line (stream-json fallback)
-    for line in reversed(raw.splitlines()):
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            data = json.loads(line)
-            break
-        except json.JSONDecodeError:
-            pass
-    else:
-        print("token_capture: cannot parse JSON from claude output", file=sys.stderr)
-        result_path.write_text(raw, encoding='utf-8')  # preserve raw as result
-        print(json.dumps({"captured": False, "reason": "cannot parse JSON from claude output"}))
-        sys.exit(1)
-
-# Extract agent text result (may be list of content blocks or plain string)
-result = data.get('result', '')
-if isinstance(result, list):
-    # content block array: extract text blocks
-    result = '\n'.join(
-        b.get('text', '') for b in result
-        if isinstance(b, dict) and b.get('type') == 'text'
-    )
-elif not isinstance(result, str):
-    result = str(result)
-
-# Write result text (always, even if empty)
-try:
-    result_path.write_text(result, encoding='utf-8')
-except OSError as e:
-    print(f"token_capture: cannot write result_text_file: {e}", file=sys.stderr)
-
-# ---------------------------------------------------------------------------
-# Extract top-level usage fields (legacy / aggregate totals from CLI)
-# ---------------------------------------------------------------------------
-usage = data.get('usage', {})
-if not isinstance(usage, dict):
-    usage = {}
-
-record = {
-    'input_tokens':                  int(usage.get('input_tokens',                  0)),
-    'output_tokens':                 int(usage.get('output_tokens',                 0)),
-    'cache_creation_input_tokens':   int(usage.get('cache_creation_input_tokens',   0)),
-    'cache_read_input_tokens':       int(usage.get('cache_read_input_tokens',       0)),
-    'canonical_model_id':            '',
-    'total_cost_usd':                None,
-    'model_usage':                   None,
-}
-
-# ---------------------------------------------------------------------------
-# Extract total_cost_usd — authoritative per-invocation cost from the CLI.
-# Captured verbatim as a float; set to None (JSON null) when absent.
-# ---------------------------------------------------------------------------
-raw_cost = data.get('total_cost_usd')
-if isinstance(raw_cost, (int, float)):
-    record['total_cost_usd'] = float(raw_cost)
-
-# ---------------------------------------------------------------------------
-# Extract modelUsage and transform to snake_case model_usage.
-# CLI shape:
-#   "modelUsage": {
-#     "claude-opus-4-8": {
-#       "inputTokens": N,
-#       "outputTokens": N,
-#       "cacheReadInputTokens": N,       -- optional
-#       "cacheCreationInputTokens": N,   -- optional
-#       "costUSD": N
-#     },
-#     ...
-#   }
-# We do NOT assume key order — iterate explicitly over all models.
-# ---------------------------------------------------------------------------
-raw_model_usage = data.get('modelUsage', None)
-if isinstance(raw_model_usage, dict) and raw_model_usage:
-    model_usage = {}
-    for model_name, mu in raw_model_usage.items():
-        if not isinstance(mu, dict):
-            continue
-        model_usage[model_name] = {
-            'input_tokens':                 int(mu.get('inputTokens',               0)),
-            'output_tokens':                int(mu.get('outputTokens',              0)),
-            'cache_creation_input_tokens':  int(mu.get('cacheCreationInputTokens',  0)),
-            'cache_read_input_tokens':      int(mu.get('cacheReadInputTokens',       0)),
-            'cost_usd':                     float(mu.get('costUSD', 0)),
-        }
-    record['model_usage'] = model_usage
-
-    # canonical_model_id: identify the primary model for this task.
-    # Priority:
-    #   1. requested_model (the --model value the wake script used), when it
-    #      appears as a key in modelUsage — that is by definition the primary.
-    #   2. The key with the greatest total token volume (input+output tokens),
-    #      i.e. the model that performed the most work.
-    #   3. Empty string — caller falls back to selected_model or a short alias.
-    # (Used for legacy pricing-table fallback in wake/claude.sh.)
-    canonical = ""
-    if requested_model and requested_model in model_usage:
-        canonical = requested_model
-    elif model_usage:
-        canonical = max(
-            model_usage,
-            key=lambda m: (
-                model_usage[m].get('input_tokens', 0)
-                + model_usage[m].get('output_tokens', 0)
-            ),
-        )
-    if canonical:
-        record['canonical_model_id'] = canonical
-else:
-    # modelUsage absent (old CLI) — fall back to canonical_model_id extraction
-    # from whatever modelUsage remnant may exist (e.g. empty dict or absent).
-    # If truly absent, canonical_model_id stays "" and caller uses selected_model.
-    pass
-
-print(json.dumps(record, separators=(',', ':')))
-PY
-    )" || parse_exit=$?
+    usage_json="$(pp_run_ops pgai_agent_kanban.lib.token_capture parse-claude-json -- \
+        "$json_file" "$result_text_file" "${selected_model}")" || parse_exit=$?
 
     if [[ $parse_exit -ne 0 ]]; then
         echo "token_capture.sh: WARNING: parse_result failed (exit ${parse_exit})" >&2
@@ -509,7 +383,7 @@ token_capture_merge_into_task_artifacts() {
 
     local tokens_json="${task_artifact_dir}/tokens.json"
 
-    # Attempt merge with jq if available; fall back to python3
+    # Attempt merge with jq if available; fall back to the python module
     if command -v jq >/dev/null 2>&1; then
         _token_capture_merge_jq \
             "$usage_record_json" "$tokens_json" \
@@ -763,166 +637,10 @@ _token_capture_merge_python() {
     local rc_version="${7:-}"
     local effort="${8:-}"
 
-    python3 - \
+    # pgai_agent_kanban.lib.token_capture.write_tokens_record documents the
+    # three record shapes and the merge rules.
+    pp_run_ops pgai_agent_kanban.lib.token_capture write-tokens -- \
         "$usage_json" "$tokens_json" \
-        "$model" "$provider" "$agent" "$elapsed_seconds" "${rc_version:-none}" "$effort" <<'PY'
-import json, sys, pathlib, datetime
-
-usage_json_str   = sys.argv[1]
-tokens_json_path = pathlib.Path(sys.argv[2])
-model            = sys.argv[3]
-provider         = sys.argv[4]
-agent            = sys.argv[5]
-elapsed_seconds  = int(sys.argv[6]) if sys.argv[6].isdigit() else 0
-rc_version       = sys.argv[7] if len(sys.argv) > 7 else 'none'
-# Treat empty string as "none" (caller may pass empty when no RC is active)
-if not rc_version:
-    rc_version = 'none'
-# effort: the reasoning-effort value in force, or '' when no caller has ever
-# supplied one. Unlike rc_version there is no "none" default — an empty
-# string here means "omit the effort key entirely" (see effective_effort below).
-effort = sys.argv[8] if len(sys.argv) > 8 else ''
-
-# Parse the per-invocation usage record
-try:
-    new = json.loads(usage_json_str) if usage_json_str.strip() not in ('', '{}') else {}
-except json.JSONDecodeError:
-    new = {}
-
-now = datetime.datetime.now(tz=datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
-
-# Detect captured:false sentinel (parse failure from token_capture_parse_result).
-# When captured is False, write an explicit failure record and exit.
-if new.get('captured') is False:
-    failure_reason = new.get('reason', 'no usage emitted')
-    merged_failure = {
-        'captured':        False,
-        'reason':          failure_reason,
-        'provider':        provider,
-        'agent':           agent,
-        'rc_version':      rc_version if rc_version else 'none',
-        'invocations':     1,
-        'elapsed_seconds': elapsed_seconds,
-        'timestamp':       now,
-        'total_cost_usd':  0,
-        'model_usage':     {},
-    }
-    if effort:
-        merged_failure['effort'] = effort
-    try:
-        tokens_json_path.write_text(json.dumps(merged_failure, indent=2) + '\n', encoding='utf-8')
-    except OSError as e:
-        print(f"token_capture: cannot write tokens.json: {e}", file=sys.stderr)
-        sys.exit(1)
-    sys.exit(0)
-
-# Load existing record (if any)
-existing = {}
-if tokens_json_path.is_file() and tokens_json_path.stat().st_size > 0:
-    try:
-        existing = json.loads(tokens_json_path.read_text(encoding='utf-8'))
-    except (json.JSONDecodeError, OSError):
-        existing = {}
-
-# Detect new schema: total_cost_usd is a float AND model_usage is a non-null dict.
-new_total_cost = new.get('total_cost_usd')
-new_model_usage = new.get('model_usage')
-has_new_schema = (
-    isinstance(new_total_cost, float) and
-    isinstance(new_model_usage, dict) and
-    new_model_usage is not None
-)
-
-if has_new_schema:
-    # ---- NEW SCHEMA ----
-    # Merge total_cost_usd (sum) and model_usage (per-model numeric sums).
-    # Drop top-level model/input_tokens/output_tokens/cache_* from output.
-
-    existing_cost = existing.get('total_cost_usd', 0)
-    if not isinstance(existing_cost, (int, float)):
-        existing_cost = 0
-    merged_cost = existing_cost + new_total_cost
-
-    # Merge model_usage: preserve existing models, sum fields for shared models.
-    existing_mu = existing.get('model_usage', {})
-    if not isinstance(existing_mu, dict):
-        existing_mu = {}
-    merged_mu = dict(existing_mu)  # copy so we don't mutate existing
-    for m, mu in new_model_usage.items():
-        if m in merged_mu:
-            prev = merged_mu[m]
-            merged_mu[m] = {
-                'input_tokens':                 prev.get('input_tokens',                0) + mu.get('input_tokens',                0),
-                'output_tokens':                prev.get('output_tokens',               0) + mu.get('output_tokens',               0),
-                'cache_creation_input_tokens':  prev.get('cache_creation_input_tokens', 0) + mu.get('cache_creation_input_tokens', 0),
-                'cache_read_input_tokens':      prev.get('cache_read_input_tokens',     0) + mu.get('cache_read_input_tokens',     0),
-                'cost_usd':                     prev.get('cost_usd',                    0) + mu.get('cost_usd',                    0),
-            }
-        else:
-            merged_mu[m] = {
-                'input_tokens':                 mu.get('input_tokens',                0),
-                'output_tokens':                mu.get('output_tokens',               0),
-                'cache_creation_input_tokens':  mu.get('cache_creation_input_tokens', 0),
-                'cache_read_input_tokens':      mu.get('cache_read_input_tokens',     0),
-                'cost_usd':                     mu.get('cost_usd',                    0),
-            }
-
-    # rc_version: use passed arg when non-empty/non-"none"; otherwise
-    # fall back to existing file's rc_version, defaulting to "none".
-    effective_rc_version = rc_version if rc_version and rc_version != 'none' else existing.get('rc_version', 'none') or 'none'
-
-    merged = {
-        'provider':        provider,
-        'agent':           agent,
-        'rc_version':      effective_rc_version,
-        'invocations':     existing.get('invocations', 0) + 1,
-        'elapsed_seconds': existing.get('elapsed_seconds', 0) + elapsed_seconds,
-        'timestamp':       now,
-        'total_cost_usd':  merged_cost,
-        'model_usage':     merged_mu,
-    }
-    # effort: use passed arg when non-empty; otherwise carry forward the
-    # existing file's effort field, if any. Omit the key entirely when
-    # neither this invocation nor any prior one supplied a value — this is
-    # what keeps tokens.json byte-identical to pre-effort output.
-    effective_effort = effort or existing.get('effort', '')
-    if effective_effort:
-        merged['effort'] = effective_effort
-else:
-    # ---- LEGACY SCHEMA ----
-    # total_cost_usd or model_usage absent — use old capture behavior.
-    new_input = int(new.get('input_tokens',                0))
-    new_output = int(new.get('output_tokens',               0))
-    new_cc     = int(new.get('cache_creation_input_tokens', 0))
-    new_cr     = int(new.get('cache_read_input_tokens',     0))
-
-    # rc_version: use passed arg when non-empty; otherwise fall back to
-    # existing file's rc_version, defaulting to "none".
-    effective_rc_version = rc_version if rc_version and rc_version != 'none' else existing.get('rc_version', 'none') or 'none'
-
-    merged = {
-        'model':                        model,
-        'provider':                     provider,
-        'agent':                        agent,
-        'rc_version':                   effective_rc_version,
-        'input_tokens':                 existing.get('input_tokens',                0) + new_input,
-        'output_tokens':                existing.get('output_tokens',               0) + new_output,
-        'cache_creation_input_tokens':  existing.get('cache_creation_input_tokens', 0) + new_cc,
-        'cache_read_input_tokens':      existing.get('cache_read_input_tokens',     0) + new_cr,
-        'invocations':                  existing.get('invocations',                 0) + 1,
-        'elapsed_seconds':              existing.get('elapsed_seconds',             0) + elapsed_seconds,
-        'timestamp':                    now,
-    }
-    # effort: same carry-forward-or-omit semantics as the new-schema branch above.
-    effective_effort = effort or existing.get('effort', '')
-    if effective_effort:
-        merged['effort'] = effective_effort
-
-try:
-    tokens_json_path.write_text(json.dumps(merged, indent=2) + '\n', encoding='utf-8')
-except OSError as e:
-    print(f"token_capture: cannot write tokens.json: {e}", file=sys.stderr)
-    sys.exit(1)
-PY
+        "$model" "$provider" "$agent" "$elapsed_seconds" "${rc_version:-none}" "$effort"
     return $?
 }

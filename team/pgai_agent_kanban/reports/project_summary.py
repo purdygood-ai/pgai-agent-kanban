@@ -64,7 +64,7 @@ if not __package__:
         sys.path.insert(0, _OWN_PACKAGE_ROOT)
 
 from pgai_agent_kanban.lib.html_comments import strip_html_comments  # noqa: E402
-from pgai_agent_kanban.task_status import section_value  # noqa: E402
+from pgai_agent_kanban.task_status import read_section, section_value  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -190,15 +190,20 @@ def _strip_html_comments(text: str) -> str:
 
 
 def _extract_field(text: str, field: str) -> str:
-    """Extract the value of a markdown header field.
+    """Extract the value of a markdown ``## <field>`` section.
 
     Looks for a pattern like:
         ## FieldName
         <!-- optional guidance comment, on one line or several -->
         <value on next non-blank line(s)>
 
-    HTML comments after the header are removed before the value is taken,
-    so template guidance such as the bug template's comment opening
+    The section is read by ``task_status.read_section``: the heading is
+    matched in any letter case, the body ends at the next ``## `` heading,
+    and a ``## `` line inside a fenced code block or an HTML comment block
+    is not a heading.
+
+    HTML comments in the body are removed before the value is taken, so
+    template guidance such as the bug template's comment opening
     ``## Symptom`` is skipped and the first line of real prose is returned.
     A line that held only a comment counts as blank. Comments are found the
     way markdown renders them (see ``_strip_html_comments``): a ``<!--``
@@ -206,19 +211,15 @@ def _extract_field(text: str, field: str) -> str:
     mid-line never reaches past its own paragraph into a later section.
     Text with no HTML comment reads exactly as it would without this step.
 
-    Returns the stripped first non-blank line after the header that is not
-    itself a heading, or ''. A section with no value (empty, or holding only
-    comments) yields the first such line of a later section, if any.
+    Returns the stripped first non-blank line of the section that is not
+    itself a heading (a ``###`` subheading is skipped), or ''. A section
+    with no value (empty, or holding only comments) returns '', never a
+    later section's text.
     """
-    pattern = re.compile(
-        r"^#{1,3}\s+" + re.escape(field) + r"\s*$",
-        re.IGNORECASE | re.MULTILINE,
-    )
-    m = pattern.search(text)
-    if m is None:
+    body = read_section(text, field, fences=True, comments=True)
+    if not body:
         return ""
-    rest = _strip_html_comments(text[m.end():])
-    for line in rest.splitlines():
+    for line in _strip_html_comments(body).splitlines():
         stripped = line.strip()
         if stripped and not stripped.startswith("#"):
             return stripped
@@ -651,7 +652,7 @@ def _offline_oneliner_bug(bug: BugItem) -> str:
     The Symptom value (``BugItem.symptom``) is preferred. It is read by
     ``_extract_field``, which skips HTML comments such as template guidance,
     so comment text never becomes the one-liner. A Symptom value is empty
-    only when nothing but headings and comments follows the Symptom heading.
+    when the Symptom section holds nothing but subheadings and comments.
     In that case the H1 title is used, then the filename slug.
     """
     # Prefer symptom field, then title, then filename slug

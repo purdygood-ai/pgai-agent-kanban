@@ -20,12 +20,20 @@ How it works:
      invocation that cm-release uses.
   5. Reads the checked-in artifact from CHANGELOG.md.
   6. Byte-compares the two.
-  7. Exits 0 when they are identical; exits 1 when they differ, printing an
-     actionable error message naming the stale artifact and the command to
-     refresh it.
+  7. When they differ, prints an actionable message naming the stale
+     artifact and the command to refresh it, and records each cause as a
+     finding.
 
-An empty or missing CHANGELOG.md is treated as stale (exit 1) — the
-artifact must be generated and committed before this check passes.
+An empty or missing CHANGELOG.md is reported as stale — the artifact must be
+generated and committed before this check passes.  A regeneration that
+fails is a finding too (freshness could not be checked).
+
+Findings (CONVERT, quality class, team/SOP-core.md "Gates and Refusals"):
+a stale CHANGELOG.md is documentation drift with zero runtime-failure risk,
+so the check exits 0 whatever it finds.  Every finding is printed and, with
+--findings-file, written as a JSON array (the shape
+pgai_agent_kanban.lint.findings defines) that gated_runner_merge_findings_file
+can merge per instance.
 
 RC mode (PGAI_LINT_CHANGELOG_MODE=rc):
   When the env var PGAI_LINT_CHANGELOG_MODE is set to "rc" AND the current
@@ -88,8 +96,8 @@ RC mode (PGAI_LINT_CHANGELOG_MODE=rc):
   lets the check pass on an RC branch without a per-RC CHANGELOG
   regeneration; the next release's CHANGELOG commit will eliminate the drift.
 
-  If all conditions hold, the gate exits 0.  Any other difference is a hard
-  failure.
+  If all conditions hold, the check passes.  Any other difference is
+  reported stale.
 
   The admission predicate does NOT rely on filesystem mtime (which is
   unreliable — a bug file's mtime moves with every edit, including the
@@ -112,6 +120,7 @@ invariant whenever an operator runs it.
 Usage:
     python3 team/scripts/lint_changelog_freshness.py [--changelog PATH]
                                                       [--bugs-dir PATH]
+                                                      [--findings-file PATH]
 
 Options:
     --changelog PATH    Path to the checked-in CHANGELOG.md artifact.
@@ -121,18 +130,22 @@ Options:
                         <kanban-root>/projects/pgai-agent-kanban/bugs/
                         Falls back to an empty directory when unresolvable
                         (no bugs disclosed — pre-ledger state).
+    --findings-file PATH
+                        Write the findings as a JSON array to PATH (parent
+                        directories created; written even when empty).
     --help, -h          Show this help and exit.
 
 Exit codes:
-    0   Artifact is fresh (byte-identical to regeneration, or all differences
-        are tolerable in RC mode: new KI additions and/or a new-release
-        section backed by a release-notes file on the branch).
-    1   Artifact is stale, missing, or regeneration failed.
+    0   The check ran, whatever it found.  A stale or missing artifact, or a
+        failed regeneration, is a finding (printed, and written to
+        --findings-file), not a failure.
     2   Usage error (unknown argument).
 
 Environment:
-    PGAI_AGENT_KANBAN_TEMP_DIR       Framework temp root (defaults to the
-                                      resolver fallback when unset).  Temp
+    PGAI_AGENT_KANBAN_TEMP_DIR       Framework temp root override.  When
+                                      unset the root comes from kanban.cfg
+                                      [paths], resolved by
+                                      pgai_agent_kanban.lib.temp_root.  Temp
                                       files are written under this root, never
                                       directly to /tmp.
     PGAI_AGENT_KANBAN_ROOT_PATH      Kanban root used to locate the bug ledger
@@ -180,9 +193,10 @@ _TEAM_DIR = _THIS_FILE.parent.parent  # team/
 _DEV_TREE_ROOT = _TEAM_DIR.parent  # project_root/
 _DEFAULT_CHANGELOG_PATH = _DEV_TREE_ROOT / "CHANGELOG.md"
 
-# The Public ID reader is shared with the changelog writer; this script is
-# run directly as well as imported, so the team package is put on sys.path
-# from this file's own location before the import.
+# The Public ID reader is shared with the changelog writer, and the temp root
+# resolver with every caller that writes scratch files; this script is run
+# directly as well as imported, so the team package is put on sys.path from
+# this file's own location before the imports.
 if str(_TEAM_DIR) not in sys.path:
     sys.path.insert(0, str(_TEAM_DIR))
 from pgai_agent_kanban.lib.public_id import (  # noqa: E402
@@ -191,6 +205,15 @@ from pgai_agent_kanban.lib.public_id import (  # noqa: E402
     leading_ki_id,
     same_ki_title,
 )
+from pgai_agent_kanban.lib.error_contract import emit_error_contract  # noqa: E402
+from pgai_agent_kanban.lib.temp_root import resolve_temp_root  # noqa: E402
+from pgai_agent_kanban.lint.findings import (  # noqa: E402
+    display_path,
+    quality_finding,
+    write_findings_file,
+)
+
+_LINT_NAME = "changelog_freshness"
 
 # Default project name — the kanban-self project that owns this script.
 _DEFAULT_PROJECT_NAME = "pgai-agent-kanban"
@@ -198,8 +221,8 @@ _DEFAULT_PROJECT_NAME = "pgai-agent-kanban"
 # Fallback branch prefix — project.cfg_example's own shipped default for
 # _DEFAULT_PROJECT_NAME. Used by _resolve_branch_prefix() only when the live
 # project.cfg cannot be read (unconfigured install, sandboxed test
-# environment); a project.cfg that IS readable always wins, including one
-# that deliberately configures an empty prefix.
+# environment) or configures a prefix pp_branch_prefix refuses; a valid
+# configured prefix always wins, including a deliberately empty one.
 _DEFAULT_BRANCH_PREFIX = "ai_"
 
 # Pattern that matches a KI line prefix in CHANGELOG output.
@@ -256,23 +279,16 @@ _EMPTY_SECTION_PLACEHOLDER_RE = re.compile(r"^None\s*$")
 
 
 def _get_temp_root() -> pathlib.Path:
-    """Return the framework temp root directory.
+    """Return this lint's scratch directory under the framework temp root.
 
-    Uses PGAI_AGENT_KANBAN_TEMP_DIR when set, otherwise falls back to the
-    documented resolver default.  Never writes directly to bare /tmp.
+    The root comes from :func:`pgai_agent_kanban.lib.temp_root.resolve_temp_root`
+    (``PGAI_AGENT_KANBAN_TEMP_DIR``, then kanban.cfg ``[paths]``, then the
+    resolver's own fallback).  Never writes directly to bare /tmp.
 
     Returns:
-        Path to the temp root directory (created if absent).
+        Path to ``<temp root>/changelog_freshness`` (created if absent).
     """
-    # anti-pattern-allowlist: 2 (justification: the literal is the resolver's
-    # documented last-resort fallback, mirroring the behaviour of temp.sh's
-    # pgai_temp_dir(); callers of this script should set PGAI_AGENT_KANBAN_TEMP_DIR)
-    root = (
-        pathlib.Path(
-            os.environ.get("PGAI_AGENT_KANBAN_TEMP_DIR", "") or "/tmp/pgai_kanban_tmp"
-        )
-        / "changelog_freshness"
-    )
+    root = pathlib.Path(resolve_temp_root()) / "changelog_freshness"
     root.mkdir(parents=True, exist_ok=True)
     return root
 
@@ -851,10 +867,12 @@ def _resolve_branch_prefix() -> str:
     via the canonical kanban-root resolver), so RC-branch detection tracks
     whatever prefix the project is actually configured with instead of a
     literal baked into the pattern. Falls back to _DEFAULT_BRANCH_PREFIX only
-    when the live project.cfg cannot be read at all — a project.cfg that IS
-    readable always wins, including one that deliberately configures an
-    empty prefix (mirrors project_paths.sh's pp_branch_prefix, which is
-    identity on an empty configured prefix).
+    when the live project.cfg cannot be read at all or configures a value
+    pp_branch_prefix refuses (single-quoted, a slash, ...), so a refused
+    prefix never reaches the RC-branch pattern and never raises. A valid
+    configured prefix always wins, including a deliberately empty one
+    (mirrors project_paths.sh's pp_branch_prefix, which is identity on an
+    empty configured prefix).
 
     Returns:
         Branch prefix string (e.g. "ai_"), or "" when configured empty.
@@ -1170,10 +1188,35 @@ def _format_remedy_block(
     return "\n".join(lines)
 
 
+def _record(
+    findings: list | None,
+    changelog_path: pathlib.Path,
+    bugs_dir: pathlib.Path,
+    cause: str,
+) -> None:
+    """Append one finding about *changelog_path* to *findings* (no-op when None).
+
+    The remedy is the fix block the remedy printer shows, joined into one
+    command line: regenerate the artifact, then re-run this check.
+    """
+    if findings is None:
+        return
+    regen_cmd, relint_cmd = _build_remedy_commands(changelog_path, bugs_dir)
+    findings.append(
+        quality_finding(
+            _LINT_NAME,
+            cause,
+            f"{regen_cmd} && {relint_cmd}",
+            file=display_path(changelog_path, _DEV_TREE_ROOT),
+        )
+    )
+
+
 def check_freshness(
     changelog_path: pathlib.Path = _DEFAULT_CHANGELOG_PATH,
     bugs_dir: pathlib.Path | None = None,
     extra_release_notes_dir: pathlib.Path | None = None,
+    findings: list | None = None,
 ) -> bool:
     """Assert that changelog_path is byte-identical to a fresh regeneration.
 
@@ -1214,6 +1257,10 @@ def check_freshness(
                         real repository tree.  Ignored when None (default);
                         production behavior is unchanged when this argument
                         is omitted.
+        findings:       When given, each problem found is appended to it as
+                        one quality finding (pgai_agent_kanban.lint.findings):
+                        one per stale cause, or one for a missing artifact or
+                        a failed regeneration.
 
     Returns:
         True when the artifact is fresh (or all staleness is tolerable in RC
@@ -1232,6 +1279,13 @@ def check_freshness(
         published_changelog=changelog_path,
     )
     if regen_path is None:
+        _record(
+            findings,
+            changelog_path,
+            bugs_dir,
+            f"{changelog_path} could not be checked: regenerating CHANGELOG.md "
+            "failed (the error is printed above)",
+        )
         return False
 
     try:
@@ -1250,6 +1304,7 @@ def check_freshness(
             ),
             file=sys.stderr,
         )
+        _record(findings, changelog_path, bugs_dir, f"{changelog_path} does not exist")
         return False
 
     if checked_in == regenerated:
@@ -1275,10 +1330,13 @@ def check_freshness(
             )
             return True
 
+        causes = _build_causes(changelog_path, checked_in_text, regenerated_text)
+        for cause in causes:
+            _record(findings, changelog_path, bugs_dir, cause)
         print(
             _format_remedy_block(
                 fail_summary=f"{changelog_path} is stale",
-                causes=_build_causes(changelog_path, checked_in_text, regenerated_text),
+                causes=causes,
                 changelog_path=changelog_path,
                 bugs_dir=bugs_dir,
                 extra_context=[
@@ -1294,10 +1352,13 @@ def check_freshness(
         return False
 
     # Normal mode: strict byte-compare already failed above.
+    causes = _build_causes(changelog_path, checked_in_text, regenerated_text)
+    for cause in causes:
+        _record(findings, changelog_path, bugs_dir, cause)
     print(
         _format_remedy_block(
             fail_summary=f"{changelog_path} is stale",
-            causes=_build_causes(changelog_path, checked_in_text, regenerated_text),
+            causes=causes,
             changelog_path=changelog_path,
             bugs_dir=bugs_dir,
         ),
@@ -1318,7 +1379,9 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "Operator check, run by hand: the gated test runners "
             "(run-unit-tests.sh, run-integration-tests.sh) do not run it.  "
             "Assert that CHANGELOG.md is byte-identical to a fresh regeneration "
-            "from the current codebase.  Exits 0 when fresh, 1 when stale or missing.\n"
+            "from the current codebase.  Quality class: a stale or missing artifact "
+            "is a finding, and the check exits 0 whatever it finds (2 on a usage "
+            "error).\n"
             "\n"
             "Set PGAI_LINT_CHANGELOG_MODE=rc to enable RC-mode tolerance: KI-line "
             "additions caused by bugs filed after the CHANGELOG.md git commit are "
@@ -1344,6 +1407,14 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "PGAI_AGENT_KANBAN_ROOT_PATH."
         ),
     )
+    parser.add_argument(
+        "--findings-file",
+        metavar="PATH",
+        help=(
+            "Write the findings as a JSON array to PATH (parent directories "
+            "created; written even when empty).  Findings are printed either way."
+        ),
+    )
     return parser.parse_args(argv)
 
 
@@ -1354,7 +1425,8 @@ def main(argv: list[str] | None = None) -> int:
         argv: Argument list (default: sys.argv[1:]).
 
     Returns:
-        Exit code (0 = fresh, 1 = stale/error, 2 = usage error).
+        Exit code: 0 whatever was found (each finding is printed and written
+        to --findings-file); 2 usage error (argparse).
     """
     args = _parse_args(argv)
     changelog_path = (
@@ -1362,8 +1434,20 @@ def main(argv: list[str] | None = None) -> int:
     )
     bugs_dir = pathlib.Path(args.bugs_dir) if args.bugs_dir else None
 
-    ok = check_freshness(changelog_path=changelog_path, bugs_dir=bugs_dir)
-    return 0 if ok else 1
+    findings: list = []
+    check_freshness(changelog_path=changelog_path, bugs_dir=bugs_dir, findings=findings)
+    write_findings_file(args.findings_file, findings, lint="lint_changelog_freshness")
+    if findings:
+        # CENSUS-ANCHOR: changelog-freshness-01
+        # CONVERT: a stale CHANGELOG.md is documentation drift with zero
+        # runtime-failure risk -- narrated and recorded; main returns 0 below.
+        emit_error_contract(
+            "lint.changelog-freshness",
+            f"{changelog_path} does not match a fresh render by the changelog "
+            f"writer; {len(findings)} cause(s) are printed above.",
+            findings[0]["remedy"],
+        )
+    return 0
 
 
 if __name__ == "__main__":

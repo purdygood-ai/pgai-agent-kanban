@@ -21,10 +21,10 @@ from pgai_agent_kanban.lib.md_fields import (
     main,
     read_body,
     read_field,
-    section_body,
     set_status_text,
     set_value_line,
 )
+from pgai_agent_kanban.task_status import read_section
 
 
 # --- the five writer variants -------------------------------------------------
@@ -66,7 +66,7 @@ def test_trailing_whitespace_on_the_heading_line() -> None:
 def test_missing_heading_reads_empty() -> None:
     text = "## Owner\nClaude\n"
     assert field_value(text, "PM Task") == ""
-    assert section_body(text, "PM Task") is None
+    assert read_section(text, "PM Task", end_at_subheading=True) is None
 
 
 # --- section boundaries -------------------------------------------------------
@@ -84,7 +84,7 @@ def test_missing_heading_reads_empty() -> None:
 )
 def test_empty_section_reads_empty_never_the_next_section(text: str) -> None:
     assert field_value(text, "PM Task") == ""
-    assert section_body(text, "PM Task") == ""
+    assert read_section(text, "PM Task", end_at_subheading=True) == ""
 
 
 def test_heading_is_not_matched_by_a_longer_heading() -> None:
@@ -99,16 +99,16 @@ def test_heading_matches_case_insensitively() -> None:
 def test_crlf_line_endings_read_like_lf() -> None:
     text = "## Owner\r\n\r\nClaude\r\n\r\n## Role\r\nCODER\r\n"
     assert field_value(text, "Owner") == "Claude"
-    assert section_body(text, "Role") == "CODER"
+    assert read_section(text, "Role", end_at_subheading=True) == "CODER"
 
 
 def test_section_body_returns_every_line_up_to_the_next_heading() -> None:
     text = "## Goal\nFirst line.\n\nSecond paragraph.\n### Detail\nkept\n## Inputs\n- a\n"
-    assert section_body(text, "Goal") == "First line.\n\nSecond paragraph."
+    assert read_section(text, "Goal", end_at_subheading=True) == "First line.\n\nSecond paragraph."
 
 
 def test_section_body_puts_an_inline_value_first() -> None:
-    assert section_body("## Notes: first\nsecond\n", "Notes") == "first\nsecond"
+    assert read_section("## Notes: first\nsecond\n", "Notes", end_at_subheading=True) == "first\nsecond"
 
 
 def test_first_matching_heading_wins() -> None:

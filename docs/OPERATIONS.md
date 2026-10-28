@@ -135,9 +135,20 @@ The operator is the only role that removes a `HALT` file, at either scope. CM ne
 
 ## When the chain halts
 
-A halted chain is the autonomous system's signal that operator judgment is required. The operator removes the `HALT` file when the underlying issue is resolved. This section is the operator-facing playbook for diagnosing and resolving an autonomous HALT.
+A halted chain is the autonomous system's signal that operator judgment is required. The operator removes the `HALT` file when the underlying issue is resolved. This section is the playbook for an autonomous halt — the HALT CM's release writes when an integrity check fails.
 
-The chain may halt for one of two reasons: the operator created a flag manually (covered above), or CM created one autonomously because one of its nine HALT triggers fired. The procedure below covers the autonomous case.
+**Most release problems do not halt.** A weak release ships with its status in its notes, verification that did not run is retried, and a mechanical failure that damaged nothing is resolved. Under the default ship posture, `always`, each leaves a record instead of a HALT:
+
+| Stop | What happens instead | What it leaves |
+|---|---|---|
+| Trigger 1 (TESTER `BLOCKED`), or a TESTER task `DONE` with no report | The TESTER task returns to `BACKLOG` once with its block cause and the release waits (`release.sh` exits 4). A second failure ships `NON-FUNCTIONAL` with "Verification did not run" under the notes' `## Known Issues` | One inbox entry, once the release has shipped |
+| An unrecognized TESTER state, or TESTER values no matrix row matches | Ships `KNOWN-BUGS` | A bug quoting the state or values |
+| Triggers 2, 3 and 8 | Ship, recording the stop they passed ("Ship posture" below) | An `## Auto-Ship Event` in `release-state.md` and one line under the notes' `## Known Issues` |
+| Trigger 5 (squash conflict) | The squash is backed out, the RC cancelled and its cargo rebundled (`release.sh` exits 5) | One inbox entry naming every conflicting path |
+| Trigger 6 (push refused after the tag) | The release ships locally (exit 0); the push-lag check, `scripts/cm/push-watchdog.sh`, pushes main and the tag once the remote accepts, then deletes the RC branch the event lists as still on the remote — only `<branch_prefix>rc/<Version>` for the event's own version, on the configured remote | A `## Push Lag Event` in `release-state.md` |
+| Trigger 7 (tag already on the remote) | The release stops before cutting the tag (`release.sh` exits 6) and changes nothing locally | One inbox entry naming the tag |
+
+Every row but the third holds under either posture. Triggers 2, 3 and 8 still halt on a lane whose posture resolves to `matrix`; "Ship posture" below says when that happens and how `--force` passes triggers 2 and 3 there. A squash conflict still halts when the cancel is not allowed (an approval gate, the retry ceiling) or fails, and its inbox entry says why. Every exit code is in `scripts/cm/release.sh --help`.
 
 **An autonomous CM halt is always project-scoped.** The file is `$PGAI_AGENT_KANBAN_ROOT_PATH/projects/<name>/HALT`, and only that project's lane is parked; every sibling project kept shipping while you were away. If the dashboard or a wake log reports a halt and the fleet-wide file is absent, this is what you are looking at. Find it:
 
@@ -147,35 +158,22 @@ ls $PGAI_AGENT_KANBAN_ROOT_PATH/projects/*/HALT 2>/dev/null
 
 ### CM HALT triggers
 
-CM writes `$PGAI_AGENT_KANBAN_ROOT_PATH/projects/<name>/HALT` for any of nine conditions. They are named here at operator granularity, for orientation only — `team/roles/CM.md`, "The nine triggers," is the authority for their wording, their numbering, and which of them a written override may pass.
+The stops that remain are integrity invariants: going on would publish a tree that is not the one verified, or label it wrongly. Each writes one operator inbox entry carrying its error key, reason and remedy, after its other writes. None is passed by `--force`. `team/roles/CM.md`, "The triggers," is the authority for trigger numbering.
 
-1. **TESTER state is `BLOCKED`** — verification could not complete, so there is no valid report to ship against.
-2. **TESTER systemic risk is high and the finding is not clear to ship** — a regression, integrity damage, or a large-effort finding.
-3. **A finding has fix effort `large` in a `SHIP-WITH-SERIOUS-CONCERNS` context** — too risky to ship through; the work needs scoping first.
-4. **A pre-squash hook failed** — the hook exited non-zero, or the phase is required and no hook resolved at any tier. See "Release Lifecycle Hooks" below.
-5. **The squash to main has conflicts** — git state is damaged; human judgment is required before any further branch mutation.
-6. **Push to origin failed after retries** — the release is locally complete but cannot be distributed.
-7. **The tag already exists on remote** — a race, or a repeat invocation against an already-shipped version.
-8. **The last three consecutive releases were all `NON-FUNCTIONAL`** — the chain is shipping degraded work without self-correcting.
-9. **The release-notes status stamp failed** — the release record cannot be guaranteed to state the actual ship decision.
+| Stop | Error key | HALT file |
+|---|---|---|
+| Pre-squash hook not executable, or exited non-zero (trigger 4) | `cm-release.trigger-4.pre-squash-hook-not-executable`, `cm-release.trigger-4.pre-squash-hook-failed` | yes |
+| Squash pollution guard found stray paths (trigger 10). Only with `CM_SQUASH_STRICT_POLLUTION_GUARD=true`; otherwise it warns | `cm-release.trigger-10.pollution-guard-strict` | yes |
+| Fidelity gate: the RC and main trees differ after the squash (trigger 11) | `cm-release.trigger-11.fidelity-gate-divergence` | yes |
+| Pre-tag hook not executable | `cm-release.pre-tag-hook-not-executable` | yes |
+| Pre-tag hook exited non-zero | `cm-release.hook-failure.cm-release-pre-tag` | no |
+| Pre-tag VERSION gate: the committed `VERSION` is not the tag being cut | `cm-release.pre-tag-version-mismatch` | no |
 
-Triggers 1 through 3 are judgement calls about the release in front of CM; the next subsection has the command for passing one. Triggers 4 through 9 are mechanical or systemic. When CM halts on trigger 8 it also files a bug naming the pattern, so the systemic issue is visible in the bug queue.
+A stop without a HALT file exits 1 before the tag and returns main to its pre-release commit. The lane keeps running, the CM release task records the stop, and the inbox entry says to fix the cause and run the release again.
 
-On a project whose ship posture is `always`, triggers 2, 3 and 8 do not halt at all: the release ships and records the stop it passed through. See "Ship posture — shipping through a ship-policy stop" below.
+A few stops still write a HALT with no inbox entry of their own: the release-notes status stamp failing (trigger 9), an existing tag pointing at the wrong commit (trigger 5b), a hook declared required that resolves nowhere ("Release Lifecycle Hooks" below), a stale worktree blocking the RC-branch delete, and a failed `release-state.md` write. The HALT file's header carries their reason and remedy.
 
-### Overriding a ship-policy stop
-
-Triggers 1, 2, and 3 are the ship-policy matrix's judgement calls about the release in front of it, and an operator carrying a written reason may pass them:
-
-```bash
-scripts/cm/release.sh --project <name> --force --reason "<why this must ship anyway>"
-```
-
-The remaining triggers are mechanical or systemic — they are repaired, not passed, and `--force` is a no-op against them. A forced ship is never quiet: the release notes are stamped `SHIPPED-BY-OPERATOR-OVERRIDE` and the project's `release-state.md` gains an `## Operator Override` block naming the timestamp, the version, the stop passed, and your reason. A halt cleared this way stays as visible afterwards as one cleared by a fix.
-
-The flags, the mandatory reason, and each of the command's four refusals with its remedy are in `docs/operator-commands.md`, "cm-release --force." Which triggers the flag reaches is marked per trigger in `team/roles/CM.md`, "The nine triggers."
-
-`--force` is a one-off answer to one stop. If a lane keeps stopping on triggers 2 and 3 and you keep forcing it through, the standing answer is the ship posture below. To see what the next release would decide before you run it, use `scripts/cm/release.sh --project <name> --decide-only` ("cm-release --decide-only" in `docs/operator-commands.md`).
+Inbox entries are read and closed with `inbox.sh` ("The operator inbox" below).
 
 ### Operator response procedure
 
@@ -187,7 +185,10 @@ When the operator returns to a halted chain:
 ls $PGAI_AGENT_KANBAN_ROOT_PATH/projects/*/HALT 2>/dev/null
 cat "$PGAI_AGENT_KANBAN_ROOT_PATH/projects/<name>/HALT"
 
-# 2. Find the BLOCKED CM task that wrote the HALT (most recent).
+# 2. Read the stop's inbox entry: the same error, reason and remedy, and how to resume.
+"$PGAI_AGENT_KANBAN_ROOT_PATH/scripts/inbox.sh" --project <name> list
+
+# 3. Find the BLOCKED CM task that wrote the HALT (most recent).
 #    Glob both formats: legacy CLAUDE-CM-* folders and the
 #    current CM-* format. Both layouts coexist on disk indefinitely.
 ls $PGAI_AGENT_KANBAN_ROOT_PATH/projects/*/tasks/CLAUDE-CM-*/status.md \
@@ -195,10 +196,10 @@ ls $PGAI_AGENT_KANBAN_ROOT_PATH/projects/*/tasks/CLAUDE-CM-*/status.md \
   | xargs grep -l "^BLOCKED$" \
   | tail -3
 
-# 3. Read that task's status.md for the full reason and any context CM recorded.
+# 4. Read that task's status.md for the full reason and any context CM recorded.
 cat <path-from-above>
 
-# 4. Read the project's release-state.md for the HALT Event log.
+# 5. Read the project's release-state.md for the HALT Event log.
 cat "$PGAI_AGENT_KANBAN_ROOT_PATH/projects/<name>/release-state.md"
 ```
 
@@ -207,8 +208,11 @@ The CM task's `## Blockers` field contains the plain-language reason. The `relea
 Once the issue is understood and resolved:
 
 ```bash
-# Resume this project's chain. Sibling projects were never stopped.
-rm "$PGAI_AGENT_KANBAN_ROOT_PATH/projects/<name>/HALT"
+# Resume this project's chain (removes its HALT file). Sibling projects were never stopped.
+"$PGAI_AGENT_KANBAN_ROOT_PATH/scripts/unhalt.sh" --project <name>
+
+# Close the stop's inbox entry, using the ID the list showed.
+"$PGAI_AGENT_KANBAN_ROOT_PATH/scripts/inbox.sh" --project <name> close --id INBOX-0001
 ```
 
 After the project's `HALT` is removed, the next wake firing enters that project's chain again. The BLOCKED CM task must be re-run (or the operator must manually advance the release by resolving the underlying issue and re-invoking the release script). Removing `HALT` does not automatically retry the CM task — the task state is unchanged by `HALT` creation or removal.
@@ -223,36 +227,39 @@ The HALT file has a deliberately simple lifecycle:
 |---|---|---|
 | 1. Create | Operator or CM | CM writes `$PGAI_AGENT_KANBAN_ROOT_PATH/projects/<name>/HALT` with a comment header documenting timestamp, what stopped, and what to do about it. The operator may `touch` that same project file to park one lane, or `$PGAI_AGENT_KANBAN_ROOT_PATH/HALT` for a fleet-wide manual pause. |
 | 2. Observe | Chain wake scripts | At each cron firing, before task selection, the wake script checks for the file. If present, exits cleanly with status 0 and logs the halt condition. |
-| 3. Investigate | Operator | Reads the HALT file header, the most recent BLOCKED CM task's `status.md`, and the project's `release-state.md` HALT Event log. |
-| 4. Resolve | Operator | Performs whatever action the trigger requires (fix the dev tree, resolve a conflict, push manually, adjust the priority queue, etc.). |
-| 5. Remove | Operator | `rm "$PGAI_AGENT_KANBAN_ROOT_PATH/projects/<name>/HALT"` for an autonomous halt; `rm "$PGAI_AGENT_KANBAN_ROOT_PATH/HALT"` for the operator's own fleet-wide manual pause. The chain resumes at the next wake firing. |
+| 3. Investigate | Operator | Reads the HALT file header, the stop's inbox entry, the most recent BLOCKED CM task's `status.md`, and the project's `release-state.md` HALT Event log. |
+| 4. Resolve | Operator | Runs the remedy the HALT header and inbox entry name (fix the hook, remove the stray paths from the RC branch, fold or revert the commit that landed on main mid-RC, and so on). |
+| 5. Remove | Operator | `scripts/unhalt.sh --project <name>` for an autonomous halt; `rm "$PGAI_AGENT_KANBAN_ROOT_PATH/HALT"` for the operator's own fleet-wide manual pause. The chain resumes at the next wake firing. |
 
-CM never removes a `HALT` file. The chain never auto-resumes. Removal is always the operator's deliberate signal.
+CM never removes a `HALT` file. A HALT you wrote is removed only by you. A chain HALT may also be cleared by OVERWATCH once its cause is resolved — see "When OVERWATCH resolves a halt for you" below.
 
 When CM creates the HALT file at `$PGAI_AGENT_KANBAN_ROOT_PATH/projects/<name>/HALT`, the format is:
 
 ```
 # HALT created by CM at <ISO-8601 timestamp>
+# halt-writer: cm-release
+# halt-reason: <the error key below>
+# halt-trigger: <trigger number, when the key names one>
 # error:   <stable key naming the trigger that fired>
 # message: <what stopped and why, in plain language>
 # remedy:  <what to do next, runnable where it can be>
 # Resolution: Operator review required. See CM task status.md for full reason.
 ```
 
-This makes the file self-documenting: `cat` on the project's HALT file is enough to know who created it, what stopped, and where to look next. Manual operator halts (from `touch`) have no header, at either scope; that absence itself indicates the halt was operator-initiated rather than CM-initiated.
+This makes the file self-documenting: `cat` on the project's HALT file is enough to know who created it, what stopped, and where to look next. The `# halt-writer:` line marks the HALT as the chain's. Manual operator halts (from `touch`) have no header, at either scope, and are read as yours; an empty HALT written by a HALT-AFTER promotion is told apart by `logs/sentinel-writes.log`.
 
 CM never overwrites an existing HALT file. If a project is already halted when a second trigger fires, the earlier reason stands and the newer one is reported in the release log only — so a HALT file that does not match the failure you just watched happen is the older halt, still uncleared.
 
 ## Ship posture — shipping through a ship-policy stop
 
-A project's ship posture decides what CM does when the ship-policy matrix says HALT. Under the default, `matrix`, every HALT row halts, exactly as described above. Under `always`, three stops ship the release instead and record what they would have stopped on:
+A project's ship posture decides what CM does when the ship-policy matrix would stop on a weak release. Under the default, `always`, three stops ship the release instead and record what they would have stopped on:
 
 - **Trigger 2** (systemic risk high, not clear to ship) and **trigger 3** (serious concerns plus a large fix) ship with release-notes Status `NON-FUNCTIONAL`.
 - **Trigger 8** (the last three releases all `NON-FUNCTIONAL`) files one bug naming the pattern and ships.
 
-Every other HALT is unchanged: trigger 1 (TESTER `BLOCKED`), the two matrix rows for an unrecognized TESTER state or no matching row, and every mechanical trigger from 4 onward — hooks, squash, push, tag, the notes stamp, and the release script's own pollution and fidelity guards. TESTER rates exactly as before; only CM's response to the rating changes.
+Under `matrix`, those three halt. Nothing else depends on the posture: a TESTER report problem halts under neither, and the integrity stops halt under both ("When the chain halts" above). TESTER rates exactly as before; only CM's response to the rating changes.
 
-`always` suits a local-only lane. There a tag is a checkpoint that nothing installs until you choose to, and the next bundle fixes what the last tag got wrong — so a trigger-2 or trigger-3 stop does nothing but idle the lane until someone runs `--force`. A lane that publishes to origin can use it too, but only by confirming it in a second key (the remote-lane guard, below).
+`always` is the default because a weak release that ships with its status in the notes tells a returning operator which version to install, while a halted lane only idles until someone runs `--force`. A lane that publishes to origin gets `always` only by confirming it in a second key (the remote-lane guard, below); without it, it runs under `matrix`. **To opt a lane back into stopping, set `ship_posture = matrix`** in its `project.cfg` ("Setting it" below).
 
 Do not confuse it with the deferral posture in "Deferral campaigns" below: `why.sh`'s `== posture ==` section reports only the deferral keys and never shows the ship posture.
 
@@ -262,10 +269,12 @@ Do not confuse it with the deferral posture in "Deferral campaigns" below: `why.
 
 | Key | Default | Accepted | Effect |
 |---|---|---|---|
-| `ship_posture` | `matrix` | `matrix` or `always` | `matrix` applies the ship-policy matrix as written. `always` ships through triggers 2, 3 and 8 and records each stop it passed. |
+| `ship_posture` | `always` | `matrix` or `always` | `always` ships through triggers 2, 3 and 8 and records each stop it passed. `matrix` halts on them. |
 | `ship_posture_confirm_remote` | `false` | `true` or `false` | The remote-lane guard. On a project that pushes to origin, `always` takes effect only when this is also `true`. Not consulted on a `push_to_remote = false` project. |
 
-Both keys live under `[release]`, in a project's own `project.cfg` or in `kanban.cfg`. `kanban.cfg_example` ships `ship_posture = matrix` active and the confirm key commented out; `project.cfg_example` ships both commented out. Values are matched exactly, so `Always` or `True` is not an accepted spelling.
+Both keys live under `[release]`, in a project's own `project.cfg` or in `kanban.cfg`. `kanban.cfg_example` ships `ship_posture = always` active and the confirm key commented out; `project.cfg_example` ships both commented out. Values are matched exactly, so `Always` or `True` is not an accepted spelling.
+
+**Upgrading.** The upgrade migration rewrites an existing `kanban.cfg` line `ship_posture = matrix` to `always` and prints the line that reverts it. It never writes a `project.cfg`, so a project that sets its own value keeps it. `docs/operator-commands.md` lists the migration.
 
 ### What resolves, and in what order
 
@@ -273,7 +282,7 @@ Each key resolves on its own, through the same chain `max_rc_retries` uses. The 
 
 1. The project's own `project.cfg` `[release]` section (or a legacy `PROJECT.cfg`).
 2. `kanban.cfg` `[release]`.
-3. The default: `matrix` for `ship_posture`, `false` for `ship_posture_confirm_remote`.
+3. The default: `always` for `ship_posture`, `false` for `ship_posture_confirm_remote`.
 
 A blank value counts as absent and falls through to the next tier. An unrecognized value does not fall through: it wins its tier, then resolves to `matrix`.
 
@@ -287,17 +296,18 @@ The Python resolver behind `kanban-status.sh` and `GET /status` prints the same 
 
 ### The remote-lane guard
 
-A lane that publishes to origin never slips into `always` by accident. When the project's `[project] push_to_remote` is anything but the literal `false` — and absent means `true` — `always` takes effect only if `ship_posture_confirm_remote` resolves to exactly `true`. Anything short of that resolves the posture to `matrix` and prints one warning line. Like the typo fallback, this is not a HALT: the release simply runs under `matrix`.
+A lane that publishes to origin never slips into `always` by accident. When the project's `[project] push_to_remote` is anything but the literal `false` — and absent means `true` — `always` takes effect only if `ship_posture_confirm_remote` resolves to exactly `true`, whether `always` came from a cfg file or from the default. Anything short of that resolves the posture to `matrix`: with one warning line when a cfg file set `always`, silently when `always` is only the default. Like the typo fallback, this is not a HALT: the release simply runs under `matrix`.
 
 The full resolution:
 
 | `ship_posture` resolves to | `push_to_remote` | `ship_posture_confirm_remote` | Resolved posture |
 |---|---|---|---|
-| absent, blank, or `matrix` | any | not consulted | `matrix` |
+| `matrix` | any | not consulted | `matrix` |
 | an unrecognized value | any | not consulted | `matrix`, with the unrecognized-value warning |
-| `always` | `false` | not consulted | `always` |
-| `always` | `true` or absent | `true` | `always` |
+| `always`, absent, or blank | `false` | not consulted | `always` |
+| `always`, absent, or blank | `true` or absent | `true` | `always` |
 | `always` | `true` or absent | absent, blank, `false`, or anything else | `matrix`, with the remote-lane warning |
+| absent or blank | `true` or absent | absent, blank, `false`, or anything else | `matrix`, silently |
 
 The remote-lane warning names the file to edit — the one already carrying a non-`true` confirm value, or else the one that set `always`:
 
@@ -309,18 +319,17 @@ Set the confirm key in the project's own `project.cfg`. A `true` in `kanban.cfg`
 
 ### Setting it
 
-Edit the project's `project.cfg`. Nothing needs restarting: every reader resolves the posture afresh, and a release reads it once, at the start of its ship-policy step. An example for a local-only lane:
+Edit the project's `project.cfg`. Nothing needs restarting: every reader resolves the posture afresh, and a release reads it once, at the start of its ship-policy step. A local-only lane needs no line at all to run under `always`. To make a lane stop on triggers 2, 3 and 8:
 
 ```
-# Example: projects/my-app/project.cfg on a local-only lane
-[project]
-push_to_remote = false
-
+# Example: projects/my-app/project.cfg on a lane that halts on every ship-policy stop
 [release]
-ship_posture = always
+ship_posture = matrix
 ```
 
-And for a lane that pushes to origin, where you have decided to accept it:
+Setting `ship_posture = matrix` in `kanban.cfg` does the same for every project that does not set its own value.
+
+For a lane that pushes to origin, where you have decided to accept `always`:
 
 ```
 # Example: projects/my-app/project.cfg on a lane that pushes to origin
@@ -329,7 +338,7 @@ ship_posture = always
 ship_posture_confirm_remote = true
 ```
 
-To go back, set `ship_posture = matrix` or delete the line. Nothing persists from the time a lane spent under `always` except the records each auto-ship left.
+To return a lane to `always`, delete its `ship_posture = matrix` line. Nothing persists from the time a lane spent under either posture except the records each auto-ship left.
 
 ### Seeing the resolved value
 
@@ -363,17 +372,57 @@ An auto-ship is never quiet. Each stop the posture shipped through leaves two re
 
 A trigger-2 or trigger-3 auto-ship also stamps `NON-FUNCTIONAL` and puts the standard non-functional warning, naming the bugs behind the stop, under the same `## Known Issues` heading. A trigger-8 auto-ship leaves the Status to the rest of the matrix, so it can ship `FUNCTIONAL` and still carry its auto-ship line.
 
-The Auto-Ship Event is appended only once the release has tagged. A release that passes the ship policy under `always` and then halts at a mechanical gate — a hook failure or a squash conflict, say — leaves no Auto-Ship Event behind, though notes the release had already stamped on the RC branch keep their auto-ship line. The block's exact shape and the Step 4c/4d mechanism are in `docs/cm-release-reference.md`, "The ship posture in full."
+The Auto-Ship Event is appended only once the release has tagged. A release that passes the ship policy under `always` and then stops at an integrity check leaves no Auto-Ship Event behind, though notes the release had already stamped on the RC branch keep their auto-ship line. The block's exact shape and the Step 4c/4d mechanism are in `docs/cm-release-reference.md`, "The ship posture in full."
 
-**`--force` under each posture.** Under `matrix`, `--force --reason` passes triggers 1, 2 and 3 as before. Under `always`, triggers 2 and 3 never reach a HALT, so there is nothing for `--force` to pass: a forced run on such a lane ships `NON-FUNCTIONAL` with an Auto-Ship Event, not with an operator-override stamp. `--force` still passes trigger 1 on either posture.
+**`--force` under each posture.** Under `matrix`, an operator carrying a written reason passes a trigger-2 or trigger-3 halt with `scripts/cm/release.sh --project <name> --force --reason "<why this must ship anyway>"`. A forced ship is never quiet: the notes are stamped `SHIPPED-BY-OPERATOR-OVERRIDE` and `release-state.md` gains an `## Operator Override` block naming the timestamp, the version, the stop passed and the reason. Under `always`, triggers 2 and 3 never reach a HALT, so a forced run ships `NON-FUNCTIONAL` with an Auto-Ship Event, not with an override stamp. `--force` passes nothing else: a trigger-8 halt is passed by acknowledging it with `unhalt.sh` (`docs/cm-release-reference.md`, "The ship posture in full"), and the integrity stops are repaired, not passed. The flags and the command's refusals are in `docs/operator-commands.md`, "cm-release --force"; to see what the next release would decide before you run it, use `--decide-only`.
 
 ## When OVERWATCH resolves a halt for you
 
-Some ship-policy halts are not judgement calls. Either a fix this RC itself shipped broke something and the recovery is a known playbook, or the state a verifier flagged is one you deliberately created and already decided about. OVERWATCH can take those two off your desk and escalates everything else exactly as before.
+OVERWATCH decides every stop in a project once and acts on the decision: a blocked task, a task asking for a human, a chain HALT. The hourly sweep decides every stop, and the on-BLOCK nudge runs the same decisions within seconds of a fresh block. Each decision has one of four outcomes:
 
-**The duty itself is stated once, in `team/roles/OVERWATCH.md`, "Autonomous Block Resolution."** That section is the authority for what each lane does, what authorises it, and what OVERWATCH may never do. This section is the operator's side of it: the key that turns it on, the ledger that authorises Lane B, the record it leaves, and where you watch it happen.
+| Outcome | What OVERWATCH does | What you do |
+|---|---|---|
+| **verb** | Runs one operator write you already have — requeue, reset to `BACKLOG`, clear a chain HALT, the resolution stage's cancel-and-rebundle, the allowlisted data fix — and the chain moves on | Nothing. The Decision event records it |
+| **inbox** | Parks the question in the project's operator inbox and clears `Needs Human`. A `BLOCKED` task stays `BLOCKED`; the chain carries on around it, unless it is its release's last open task, when the release waits on the answer | Answer it ("The operator inbox" below) |
+| **runaway** | Stops the project with a chain HALT and an inbox entry, because it is repeating itself. This is the only way OVERWATCH stops a project | Fix the cause, then resume ("Runaway stops" below) |
+| **none** | Nothing. An operator HALT always gets this outcome | — |
 
-**It ships off.** `[release] overwatch_resolve` is seeded commented-out into every `kanban.cfg` and every `project.cfg` — on a fresh install, on a new project, and by the upgrade migration, which never flips it. Absent, blank, or unreadable means `false`. A project with the key off gets no lane, no Decision event, and no surface change whatsoever — every halt takes the default path through the ship-policy matrix. (The matrix's own CANCEL-AND-REBUNDLE row for a fully-filed, nothing-shipped ship-policy halt sits outside the lanes, is unaffected by this key, and applies either way. Everything the matrix does not resolve raises Needs Human.)
+The decisions are code; no model is called. The rules that pick an outcome, the verb table and the limits on every verb are in `docs/overwatch.md` ("The decision wake", "Verbs"). This section is your side of it: what happens to each kind of HALT, the key that turns on the resolution stage's lanes, the `[overwatch]` keys, and the records to read.
+
+### What happens to a HALT
+
+OVERWATCH tells who wrote a HALT from the file itself. Every chain writer puts a `# halt-writer:` line under the HALT's first line; an empty file is looked up in `logs/sentinel-writes.log`. A HALT that cannot be proven to be the chain's is read as yours.
+
+| HALT written by | What OVERWATCH does |
+|---|---|
+| You: `halt.sh`, `halt-global.sh`, a file you made by hand, and always `$PGAI_AGENT_KANBAN_ROOT_PATH/HALT` | Nothing, ever. A chain HALT beside one of yours is left alone too |
+| CM's release (`# halt-writer: cm-release`) | Clears it once the trigger's cause check passes: the RC was cancelled and its cargo rebundled; for trigger 9, the release-notes status re-checks green. Until then triggers 2 and 3 go to the resolution stage below, and the rest wait for you. Triggers raised after the squash, and trigger 8, are never cleared. The release writes no trigger-1 HALT, because verification that did not run is requeued instead |
+| A HALT-AFTER promotion | Left for you, unless `halt_after_auto_resume = true` ("The `[overwatch]` keys" below) |
+| The runaway detector | Never cleared by OVERWATCH ("Runaway stops" below) |
+| An OVERWATCH repair | Removed by the repair that wrote it, or by the next sweep if that repair died |
+
+Every clear backs the HALT up under the project's `overwatch/backups/`, removes it through the same write `unhalt.sh` uses, and appends a Decision event. The per-trigger rows are in `docs/overwatch.md`, "Clearing a chain HALT". To see how a HALT reads:
+
+```bash
+cd "$PGAI_AGENT_KANBAN_ROOT_PATH" && python3 -m pgai_agent_kanban.overwatch.halt_provenance classify \
+    projects/<name>/HALT --kanban-root "$PGAI_AGENT_KANBAN_ROOT_PATH"
+```
+
+It prints the origin (`chain` or `operator`), the writer, the reason, the trigger and where the answer came from, tab-separated.
+
+### The resolution stage and its lanes
+
+A CM ship-policy HALT that no cause check has cleared goes to the resolution stage. Its matrix has one row that applies whatever the key below says: a ship-policy halt where every finding that must be filed is filed, nothing shipped, no approval gate is present, the lineage is clean and the retry ceiling (`[release] max_rc_retries`) is not reached is cancelled and rebundled. The RC is cancelled, its tasks closed `WONT-DO`, the bundle closed and its bugs reopened, and the drill is recorded in `projects/<name>/auto-resolutions.md`.
+
+What the matrix does not resolve gets a second look from three lanes, only on a project where `[release] overwatch_resolve = true`:
+
+- **Lane A — bad-fix regression.** A TESTER finding with `Regression: yes` names a bug this RC's own bundle fixed. Once that bug's `## Fix` rewrite is attached (`overwatch-attach-fix-rewrite.sh`), OVERWATCH unwinds and cancels the RC so the rewritten bug is decomposed again. One attempt per bug, never a loop.
+- **Lane B — declared intent.** An entry in `projects/<name>/INTENT.md` explains the block. OVERWATCH ships with `cm/release.sh --force`, the entry's text as `--reason`.
+- **Lane C — everything else.** One inbox entry holding a one-paragraph read of the cause and your options. Nothing is executed.
+
+A halt the stage leaves in place stays for you. The blocked CM task behind it is decided like any other block (`docs/overwatch.md`, "How it decides"). What authorises each lane, and what OVERWATCH may never do, is stated once in `team/roles/OVERWATCH.md`, "Autonomous Block Resolution".
+
+**It ships off.** `[release] overwatch_resolve` is seeded commented-out into every `kanban.cfg` and every `project.cfg` — on a fresh install, on a new project, and by the upgrade migration, which never flips it. Absent, blank, or unreadable means `false`. A project with the key off gets no lane classification and no lane's Decision event; its ship-policy halts take the matrix alone.
 
 ### Turning it on
 
@@ -397,7 +446,7 @@ bash "$PGAI_AGENT_KANBAN_ROOT_PATH/scripts/migrations/run-migrations.sh" \
 
 Add `--project <name>` to seed one project instead of all registered ones, or `--dry-run` to preview the writes. The migration is additive and idempotent: it only ever inserts the commented line into a `[release]` section that has none, and leaves any `overwatch_resolve` line already present — including a value you set yourself — byte-for-byte untouched. Re-running it is safe. `scripts/migrations/README.md` carries the runner's full operator procedure.
 
-What turning it on buys: a bad-fix regression halt is recycled within the hour instead of waiting for you, and a halt whose cause you have already declared ships instead of parking the lane. What it costs: on the projects you opt in, an RC can be cancelled and a release can go out while you are away — always reversibly, always one attempt, always on the record, but without you in the loop. Turn it on per project, not fleet-wide, until you have watched it behave on a lane you can afford to have moving.
+What turning it on buys: a bad-fix regression halt is recycled without waiting for you, and a halt whose cause you have already declared ships instead of parking the lane. What it costs: on the projects you opt in, an RC can be cancelled and a release can go out while you are away — always reversibly, always one attempt, always on the record, but without you in the loop. Turn it on per project, not fleet-wide, until you have watched it behave on a lane you can afford to have moving.
 
 ### Writing an INTENT.md entry Lane B will honour
 
@@ -430,37 +479,208 @@ The two tests never disagree on the automated path, because OVERWATCH ships with
 
 One last thing worth knowing: entries are live until you delete them — an entry describing a one-off experiment keeps authorising matching ships for as long as it sits in the file, so prune it when the experiment is over.
 
+### Runaway stops
+
+The runaway detector stops a project that is repeating itself, and it is the only path by which OVERWATCH stops one. It keeps four counters per project and trips when the events inside a counter's window exceed its threshold. With the shipped defaults that is 6 releases in an hour, 3 RCs opened and cancelled in a day, the 4th counted block of one task with the same reason code within seven days, or 21 inbox entries in a day (the detector's own not counted). A block that follows an OVERWATCH triage requeue is a retry on a requeue ladder and is not counted, so at the defaults a ladder that ends within its `requeue_budget` reaches its row's decision rather than a runaway stop; once the budget is spent, every further block counts. Only that project stops.
+
+A trip writes `projects/<name>/HALT`, never over an existing HALT, whose body names the counter, its threshold, window and count, and its last 10 events; then one inbox entry saying how to resume. OVERWATCH never clears this HALT. To resume:
+
+```bash
+# 1. Read what tripped: the HALT names the counter and its last events.
+cat "$PGAI_AGENT_KANBAN_ROOT_PATH/projects/<name>/HALT"
+cd "$PGAI_AGENT_KANBAN_ROOT_PATH" && python3 -m pgai_agent_kanban.overwatch.runaway status --project <name>
+
+# 2. Fix what was repeating, then resume this project only.
+"$PGAI_AGENT_KANBAN_ROOT_PATH/scripts/unhalt.sh" --project <name>
+
+# 3. Close the detector's inbox entry (its ID is in inbox.sh list).
+"$PGAI_AGENT_KANBAN_ROOT_PATH/scripts/inbox.sh" --project <name> close --id INBOX-0001
+```
+
+`status` prints each counter's count and threshold and writes nothing. After a trip only newer events count for that counter, so resuming never re-trips on the same evidence. The counters live in `projects/<name>/overwatch/runaway-counters.json`; the full HALT body is in `docs/overwatch.md`, "The runaway detector".
+
+**A stop OVERWATCH leaves unresolved reaches the inbox.** The decision wake writes one inbox entry when:
+
+- deciding a stop, or carrying out its decision, failed with an error;
+- a decided verb did not run because `block_triage = false` while its task is still stopped, or because the HALT that goes ahead of a repair could not be written;
+- the runaway detector is off for a project because one of its thresholds is not a whole number.
+
+Each entry names the stop, what was decided, why it did not run and the commands that resolve it. An open entry about the same stop is reused, so later sweeps add none. An operator HALT, `HALT_OVERWATCH` and a busy lock are not reported.
+
+### The `[overwatch]` keys
+
+Each key is read from the project's `project.cfg [overwatch]` first, then `kanban.cfg [overwatch]`, then the default. The exception is `leaked_listener_min_age_seconds`, read from `kanban.cfg` only. `kanban.cfg_example` carries each key's full comment.
+
+| Key | Accepted | Default | Effect |
+|---|---|---|---|
+| `runaway_releases_per_hour` | a non-negative whole number | `5` | Releases shipped on one project within one hour |
+| `runaway_rc_cycles_per_day` | a non-negative whole number | `2` | RCs opened and then cancelled on one project within one day |
+| `runaway_reason_repeats` | a non-negative whole number | `3` | Blocks of one task with the same reason code within seven days, not counting a block that follows a triage requeue; once `requeue_budget` is spent, every block counts |
+| `runaway_inbox_entries_per_day` | a non-negative whole number | `20` | Inbox entries written on one project within one day, the detector's own not counted |
+| `halt_after_auto_resume` | `true` \| `false` | `false` | `true` lets OVERWATCH clear a project HALT written by a HALT-AFTER promotion whose drain completed, leaving the inbox entry "stopped after rc:vX.Y.Z as armed; resume with unhalt". `false` leaves the HALT for you |
+| `block_triage` | `true` \| `false` | `true` | `false` keeps OVERWATCH to records, diagnoses and inbox entries: no verb changes a task's state, queue line or README |
+| `requeue_budget` | a non-negative whole number | `3` | How many times one task may be returned to its owner over its Block Record's life; once spent, the block goes to its classifier row's decision instead |
+| `leaked_listener_min_age_seconds` | a non-negative whole number of seconds | `3600` | How old a fixture listener under the temp root must be before the leaked-listener check stops it |
+
+`0` turns a runaway counter off, and blank keeps the default. A runaway threshold that is not a whole number is refused. In `kanban.cfg` it is refused at config validation: every agent wake fails its config load and exits 1 with `config_loader.overwatch.invalid_runaway_threshold`, naming the key, the value and the file, with a `sed` remedy that fixes it. In a `project.cfg` the detector checks nothing for that project until it is fixed, and the decision wake leaves an inbox entry naming the key and the fix. A `true`/`false` key refuses any other spelling (`yes`, `on`) rather than guessing. To see what a project resolves to:
+
+```bash
+cd "$PGAI_AGENT_KANBAN_ROOT_PATH" && python3 -m pgai_agent_kanban.overwatch.runaway config --project <name>
+```
+
+It prints the four runaway thresholds and `halt_after_auto_resume`.
+
 ### Reading an OVERWATCH Decision event
 
-Every classification — including Lane C, where nothing was executed — appends one block to the project's `release-state.md`. It is append-only; the last one is the most recent.
+Every decision OVERWATCH carried out, and every lane classification, appends one block to the project's `release-state.md`. It is append-only; the last one is the most recent. A decision-wake event (the values here are an example):
 
 ```
 ## OVERWATCH Decision
-Timestamp: 2026-03-02T16:40:00Z
+Timestamp: <time>
+Version: v1.4.0
+Lane: decision-wake
+Evidence:
+  - decision: kind=verb name=reset-to-backlog source=<TASK-ID> result=executed
+  - why: <the rule that chose the outcome>
+  - <each fact the decision read, then each backup it took>
+Verbs Run:
+  - task-status.sh --state BACKLOG --needs-human no: reset-to-backlog on <TASK-ID>: returned to BACKLOG with Needs Human no (...)
+Outcome: reset-to-backlog on <TASK-ID>: returned to BACKLOG with Needs Human no (...)
+```
+
+A lane event from the resolution stage has the same shape, with `Lane: A`, `B` or `C` and the files it read as its Evidence:
+
+```
+## OVERWATCH Decision
+Timestamp: <time>
 Version: v1.4.0
 Lane: C
 Evidence:
-- /home/op/pgai_agent_kanban/projects/<name>/HALT
-- /home/op/pgai_agent_kanban/projects/<name>/tasks/TESTER-.../artifacts/report.md
-- /home/op/pgai_agent_kanban/projects/<name>/INTENT.md
+  - /home/op/pgai_agent_kanban/projects/<name>/HALT
+  - /home/op/pgai_agent_kanban/projects/<name>/tasks/TESTER-.../artifacts/report.md
+  - /home/op/pgai_agent_kanban/projects/<name>/INTENT.md
 Verbs Run:
-- Needs Human raised (existing default — no new mechanism)
+  - inbox entry INBOX-0003 written
 Outcome: OVERWATCH read: v1.4.0 is HALTed and classifies as Lane C — ...
 ```
 
-Read it in this order. **Lane** tells you what OVERWATCH thought the block was: `A` a bad-fix regression, `B` a state you had declared, `C` everything else. **Verbs Run** is the complete list of what it actually did — for Lane C it is one line saying Needs Human was raised, and nothing was touched. **Evidence** names the files it read, so you can check its reasoning against the same sources. **Outcome** is the plain-language result; on Lane C it is the one-paragraph read naming the cause and your options, which is the fastest orientation you will get on a halt you did not watch happen.
+Read it in this order. **Lane** says which path decided: `decision-wake` for the decision wake, or the resolution stage's `A` (a bad-fix regression), `B` (a state you had declared) or `C` (everything else). On a decision-wake event the first Evidence line names the outcome (`kind`), the verb (`name`), the subject (`source`: a task ID, `halt:<name>` or `rc:vX.Y.Z`) and the result. **Verbs Run** is the complete list of what it actually did — for Lane C, one line naming the inbox entry, and nothing else was touched. **Evidence** names what it read, so you can check its reasoning against the same sources. **Outcome** is the plain-language result; on Lane C it is the one-paragraph read naming the cause and your options, the fastest orientation you will get on a halt you did not watch happen.
 
-A Lane A decision recorded against a bundle OVERWATCH already recycled once does not run the playbook again. It escalates, and its Outcome carries both attempts' evidence — one attempt, never a loop.
+A decision that carried nothing out — `none`, a deferral, an inbox question already open — writes no event, so an hourly sweep that keeps finding the same stop adds nothing. To list the events and the matching action-log rows:
+
+```bash
+grep -F '## OVERWATCH Decision' -A 12 "$PGAI_AGENT_KANBAN_ROOT_PATH/projects/<name>/release-state.md"
+grep -F 'decision-executor' "$PGAI_AGENT_KANBAN_ROOT_PATH/projects/<name>/overwatch/actions.log"
+```
 
 ### Watching a resolution happen
 
 Two live surfaces read the same two files, so they cannot disagree with each other.
 
-`why.sh` keeps the `HALTED` verdict and exit code `5` throughout — nothing can be dequeued either way — and only the cause and remedy change. While a lane is executing, the line reads `OVERWATCH resolving (lane A, attempt 1) for v1.4.0` and the remedy tells you to wait. Once the lane finishes, the line reports the recorded decision instead, but only while that decision's own version still matches the project's current `Active RC`, so a decision about a since-shipped RC is never presented as an explanation of a later halt.
+`why.sh` keeps the `HALTED` verdict and exit code `5` throughout — nothing can be dequeued either way — and only the cause and remedy change. While a lane is executing, the line reads `OVERWATCH resolving (lane A, attempt 1) for v1.4.0` and the remedy tells you to wait. Otherwise it reports the last Decision event, but only while that event's own version still matches the project's current `Active RC`, so a decision about a since-shipped RC is never presented as an explanation of a later halt.
 
-The dashboard's attention window shows the same two states, per project: a cyan `resolving` entry while a lane runs, or a `decision` entry summarising the last decision — the latter only while the project's HALT is still present and the versions still match. An in-progress resolution always wins over a recorded one, and neither is rendered in the red reserved for needs-human blocks, because neither is waiting on you yet.
+The dashboard's attention window shows the same two states, per project: a cyan `resolving` entry while a lane runs, or a `decision` entry summarising the last decision — the latter only while the project's HALT is still present and the versions still match. An in-progress resolution always wins over a recorded one, and neither is rendered in the red reserved for needs-human blocks, because neither is waiting on you yet. A question waiting on you shows in the same window's `OPERATOR INBOX` block.
 
 If a project's `overwatch/resolving.md` marker is present but nothing is running, a firing was killed mid-drill. That marker is deliberate evidence of exactly that, not a bug. The marker names the lane, the attempt, and the version; for a Lane A or CANCEL-AND-REBUNDLE drill, the project's `auto-resolutions.md` ledger already lists every action that drill had committed to taking, because the entry is written before the drill runs. Read both, then let the next OVERWATCH sweep reconcile the rest.
+
+## The operator inbox
+
+Each project has one inbox, `projects/<name>/operator-inbox.md`: the questions only a human can answer, parked while the chain carries on. OVERWATCH writes them, `wake-batch.sh` writes one for a registry fault it refuses, any agent may write one through the inbox module, and a bug or priority set to `needs-operator` gets one (see "The bug lifecycle" below). Each entry says when it was asked, its source (a task ID, `rc:vX.Y.Z`, the project, `wake-batch`, or a bug or priority key), the question, what was done meanwhile, and how to answer.
+
+You see open entries in three places: the attention window's `OPERATOR INBOX` block, `metrics-report.sh --inbox` (one `<project>: <N> open` line per project; add `--project <name>` for one), and `inbox_open` in `metrics-report.sh --day` JSON.
+
+**Recording an answer does not act on it**, with one exception: when the entry's source is a bug or priority at `needs-operator`, answering sets that item back to `open`. Otherwise nothing reads the `Answer` field. Do what the entry's `How to answer` says, then record the answer and close the entry so the open count stays true:
+
+```bash
+# 1. Read the open questions (closed ones follow under Done).
+"$PGAI_AGENT_KANBAN_ROOT_PATH/scripts/inbox.sh" --project <name> list
+
+# 2. Act on the entry's "How to answer": return the task, unhalt the project, fix the README.
+
+# 3. Record what you decided. The entry stays open; a second answer replaces the first.
+"$PGAI_AGENT_KANBAN_ROOT_PATH/scripts/inbox.sh" --project <name> answer --id INBOX-0001 --answer "split the task"
+
+# 4. Close it: the entry moves to ## Done with its answer.
+"$PGAI_AGENT_KANBAN_ROOT_PATH/scripts/inbox.sh" --project <name> close --id INBOX-0001
+```
+
+`--project` is required; `$PGAI_PROJECT_NAME` is never read in its place. `INBOX-0007`, `inbox_7` and `7` name the same entry. `inbox.sh --help` lists the exit codes; every refusal prints error, message and remedy and writes nothing.
+
+The REST twins call the same functions:
+
+```bash
+# list
+curl -sS "http://127.0.0.1:8300/projects/<name>/inbox"
+
+# answer
+curl -sS -X POST http://127.0.0.1:8300/operations/inbox-answer \
+    -H 'Content-Type: application/json' \
+    -d '{"project": "<name>", "id": "INBOX-0001", "answer": "keep"}'
+```
+
+`close` has no REST twin. Request and response shapes are in `docs/operator-api.md`; the file format is in `docs/overwatch.md`, "The operator inbox".
+
+## The bug lifecycle
+
+Every bug (and priority) file carries one `## Status`. Each status means one of four things: the bug is waiting to be worked, it is being fixed, it is waiting on a named human answer, or it is closed.
+
+| Status | Set by | Leaves by |
+|---|---|---|
+| `open` | The filer (the template's default). Also: answering the item's inbox entry (from `needs-operator`), an RC unwind (from `running`), and `reset.sh` | Discovery bundles it (`running`), the re-file detector closes it (`duplicate`), or you close it |
+| `running` | Discovery, when it bundles the item. Also the PM, for a ride-along (below) | The release step sets `done` when a DONE task of the shipped version claims it. Unclaimed, it is carried (below) |
+| `needs-operator` | The PM, for an item it leaves out of every ticket because a human must answer first. Also discovery, for a carried item. Either one writes an inbox entry with the question | Answering the inbox entry returns it to `open`. Or you close it as `wont-do` or `duplicate`, or the re-file detector closes it (`duplicate`) |
+| `done` | The release step, or `close.sh` (the default `--state`) | Closed |
+| `wont-do` | You, with `close.sh --state wont-do` | Closed |
+| `duplicate` | The re-file detector, or you with `close.sh --state duplicate` | Closed |
+
+Bundling and the release step's promotion leave a `needs-operator` item alone, and intake refuses a new filing of its defect. To revive a closed item, `reset.sh --project my-app --key BUG-NNNN` sets it back to `open`.
+
+### Answering or closing a needs-operator item
+
+The item's inbox entry carries its key as the source and the question to answer. Answer it, and the item is `open` again; the next discovery pass bundles it. Or drop it with `close.sh`, which also closes the item's open inbox entries:
+
+```bash
+# Answer: the bug returns to open, and the next bundle takes it.
+"$PGAI_AGENT_KANBAN_ROOT_PATH/scripts/inbox.sh" --project my-app answer --id INBOX-0001 --answer "mirror fixed; retry the install"
+"$PGAI_AGENT_KANBAN_ROOT_PATH/scripts/inbox.sh" --project my-app close --id INBOX-0001
+
+# Drop it: not a defect the chain can fix.
+"$PGAI_AGENT_KANBAN_ROOT_PATH/scripts/close.sh" --project my-app --key BUG-NNNN --state wont-do --note "operator-side install; nothing to change"
+
+# Drop it: the same defect as a live bug. --note must name that bug.
+"$PGAI_AGENT_KANBAN_ROOT_PATH/scripts/close.sh" --project my-app --key BUG-NNNN --state duplicate --note "duplicate of BUG-NNNN"
+```
+
+`--state duplicate` without a `--note` naming another existing item is refused (`close.duplicate_pointer_missing`, exit 1) and nothing is written. `close.sh --help` lists every exit code.
+
+### Carried items become needs-operator
+
+When a release ships without a DONE task claiming one of its bundle's items, that item stays `running` while its bundle closes. The item is now **carried**: the board marks it so. The next discovery pass converts each carried item to `needs-operator` and writes an inbox entry naming the bundle and any reason the bundle's PM task recorded. One line is printed per item:
+
+```
+converted BUG-NNNN-<slug>.md to needs-operator: carried from <bundle>; operator question INBOX-NNNN
+```
+
+A `running` item that no bundle lists at all is orphaned, not carried, and discovery offers it for bundling again as before.
+
+### One record per defect
+
+A defect gets one live record. Two checks keep it that way.
+
+**Intake refuses the same defect.** `intake.sh` refuses a `BUG-*` draft that reports the same defect as a bug at `open`, `running` or `needs-operator`. It exits 5 (`intake.same_defect`), names the live bug's ID and writes nothing. "Same defect" means one of two things:
+
+- The draft's body cites that bug as the defect it reports, for example "same defect as BUG-NNNN", "duplicate of BUG-NNNN", "recurrence of BUG-NNNN" or "BUG-NNNN still reproduces". An ID mentioned in passing, or a remark on another bug's status such as "BUG-NNNN is still open", does not count.
+- The draft's slug differs from that bug's only by re-file markers at its start or end. The markers are the re-file words (`again`, `redux`, `recurring`, `repeat`, `repeats`, `repeated`, `repeating`, `refile`, `refiles`, `refiled`, `refiling`), the ordinals from `second` to `tenth` and `2nd`, `3rd` and up, and one trailing counter (the `-3` in `lock-leak-3`).
+
+Every other word or number names the defect. `pane-shows-3-columns` and `pane-shows-4-columns` are distinct, and so are slugs that differ by `first`, `once`, `another` or `still`.
+
+The filer cites the named bug instead. The rule is in `intake.sh --help`.
+
+**Discovery closes re-filed duplicates.** Before it scans for bugs to bundle, discovery groups the live bugs by the same rule and closes all but one of each group as `duplicate`. The close note points at the record it keeps. The kept record is the lowest-numbered bug, or the lowest-numbered `running` one when the group has any. A `running` bug is never closed. One line is printed per closure:
+
+```
+closed BUG-NNNN-<slug>.md as duplicate of BUG-NNNN (<kept name>): <why>
+```
 
 ## Per-Project HALT Workflow
 
@@ -569,7 +789,7 @@ rm "$PGAI_AGENT_KANBAN_ROOT_PATH/projects/<name>/HALT"
 rm "$PGAI_AGENT_KANBAN_ROOT_PATH/HALT"
 ```
 
-The operator does not interact with `HALT-AFTER` at resume time — it was removed by the auto-promotion step. Only `HALT` remains, and removing `HALT` lets the next wake firing enter the chain again. The chain itself never removes either flag; promotion creates `HALT`, and the operator clears it. See "When the chain halts" for the full operator response procedure.
+The operator does not interact with `HALT-AFTER` at resume time — it was removed by the auto-promotion step. Only `HALT` remains, and removing `HALT` lets the next wake firing enter the chain again. The chain itself never removes `HALT-AFTER`; promotion creates `HALT`, and the operator clears it. With `[overwatch] halt_after_auto_resume = true`, OVERWATCH clears a project-scoped promotion `HALT` itself and leaves an inbox entry saying how to resume; a promotion at the kanban root is always yours. See "When the chain halts" for the full operator response procedure.
 
 ## Why is this lane not moving?
 
@@ -745,10 +965,74 @@ decision into the wake log:
 | `piggybacking N deferred bugs (trigger: BUG-XXXX high)` | A bug above the level opened an RC, so the held-back ones rode along on it. |
 | `N bug(s) remain deferred at level=low; requirements queue not empty, hygiene sweep withheld` | Everything unhandled is deferred, but the chain still has requirements work to do. |
 | `hygiene sweep -- bug queue and requirements queue both empty; bundling N deferred bug(s)` | Nothing else was left to do, so the litter was bundled. |
+| `deferral bound deferred_max_count=M exceeded -- N bug(s) deferred` | More than `deferred_max_count` bugs are deferred. |
+| `deferral bound deferred_max_age_days=D exceeded -- oldest deferred bug BUG-XXXX-<slug> dated YYYY-MM-DD is N day(s) old` | The oldest deferred bug has waited longer than `deferred_max_age_days`. |
+| `deferral bound exceeded; bundling N deferred bug(s) held at level=low` | A bound fired, so the deferred bugs were bundled with requirements still queued. |
 | `WARNING severity field in <file> is missing or unparseable` | The bug's `**Severity:**` field is absent or not one of low/medium/high. It is treated as above the level and stays a candidate — an unreadable severity is never quietly swallowed into "deferred." |
+| `WARNING Date field in <file> is missing or unparseable ('<value>'); it never fires deferred_max_age_days` | The bug's `**Date:**` cannot be read, so it does not count toward the age bound. |
 
-A ride-along is marked on its own line in the bundle's `## Bundled Items`, and
-PM consolidates those into hygiene tickets under the cap in `team/roles/PM.md`.
+A piggybacked bug is marked on its own line in the bundle's `## Bundled Items`,
+and PM consolidates those into hygiene tickets under the cap in
+`team/roles/PM.md`. This is not the plan `ride_along` field described under
+"Bundle mixing" below.
+
+### Deferral bounds
+
+The hygiene sweep bundles deferred bugs only when the chain has nothing else to
+do. Two `[release]` keys cap the wait even while requirements are still queued:
+
+| Key | Accepted | Default | Fires when |
+|---|---|---|---|
+| `deferred_max_count` | a non-negative whole number | unset (no bound) | more than this many bugs are deferred |
+| `deferred_max_age_days` | a non-negative whole number | unset (no bound) | the oldest deferred bug's `**Date:**` is more than this many days ago (UTC) |
+
+Both are checked only while deferral is on and every unhandled bug is
+deferred; a bug above the level opens an RC on its own. When a bound fires,
+discovery bundles every deferred bug that tick and prints the lines in the
+table above, naming the bound. With neither key set, only the hygiene sweep
+bundles deferred bugs.
+
+```ini
+# projects/my-app/project.cfg
+[release]
+deferred_bugs = true
+deferred_bug_level = medium
+deferred_max_count = 5
+deferred_max_age_days = 30
+```
+
+They resolve `project.cfg`, then `kanban.cfg`, then the default, and a
+campaign file never changes them. A value that is not a whole number is
+refused (`defer_posture.invalid_<key>`), naming the file, and discovery
+bundles nothing until it is fixed.
+
+### Bundle mixing — bugs in a requirement RC
+
+By default no bug rides in a requirement RC. Two `[release]` keys let the PM
+add a few deferred bugs to one:
+
+| Key | Accepted | Default | Effect |
+|---|---|---|---|
+| `bundle_mixing` | `separate`\|`ride-along` | `separate` | `separate` keeps bugs out of requirement RCs; `ride-along` lets the PM add them. |
+| `ride_along_max` | a non-negative whole number | `3` | The most bugs one requirement RC may carry. Ignored under `separate`. |
+
+Under `ride-along` a bug may ride only when both rules hold:
+
+- **Severity.** No ride-along bug is `high` or `critical`. A missing or unrecognised severity is refused too.
+- **File overlap.** No ride-along bug names a file that the requirement's `## Deliverables` names.
+
+The PM lists its choice in the plan's `ride_along` field
+(`team/pm-agent/README.md`, "Plan fields"). Before writing anything, the
+materializer runs the plan lint, `team/pm-agent/lib/ride_along_lint.py`, which
+checks `bundle_mixing`, the cap and both rules. A violating plan is refused
+whole: it exits 1, names every finding (`ride_along_lint.<rule>`), and writes
+no task folder, queue line or status. An accepted bug is listed in the
+requirement's `## Bundled Items` with a `— ride-along` suffix and set to
+`running`. The release then promotes or carries it exactly as a bundle item.
+
+The keys resolve like the deferral bounds, and a campaign file never changes
+them. This is not `defer_piggyback`, which carries deferred bugs on a
+*bugfix* RC that a bug above the level opened.
 
 ### Spending
 
@@ -1011,6 +1295,10 @@ The previous repo-level `team/release-state.md` has been removed entirely. The o
 
 Nothing renders it on an RC. A committed `CHANGELOG.md` that is stale on an RC branch — after a ticket edits a shipped `release-notes/vX.Y.Z.md`, for example — is expected and harmless: the release render brings it current. The gated test runners do not check it.
 
+The `README.md` and `HOW_TO.md` measured-pace blocks are rendered at the other end of the cycle, when the next RC opens: right after `team/scripts/cm/open-rc.sh` cuts the RC branch and before it pushes it, its Step 8a (`team/scripts/lib/cm/measured_pace_refresh.sh`) runs `team/scripts/generate_measured_pace_docs.py` over the dev tree's two files and commits them on the new RC branch when the render changed them. The shipped release writes its rollup after it tags, so RC open is the first point where the blocks can name it.
+
+The step never stops the open. A project whose docs carry no measured-pace block, docs that are untracked or have uncommitted changes, and a failed render or commit each narrate one `[measured-pace]` line and leave both files at `HEAD`; a failure line names the command that re-renders by hand.
+
 `team/scripts/lint_changelog_freshness.py` is an operator check, run by hand: it exits 0 when the committed file matches a fresh render and 1 when it is stale or missing. It renders through the same writer, so it too writes any Public ID it assigns back to the bug files.
 
 ### Releases produced outside `cm/release.sh`
@@ -1208,8 +1496,9 @@ Example with 5 projects and defaults (`min_proj=3, max_proj=8, max_col=34`):
 | Key | Default | Effect |
 |-----|---------|--------|
 | `max_tasks_per_wake` | `5` | Tasks processed per agent wake; lower it to `1` when you want one task per wake for traceability |
-| `lock_wait_seconds` | `120` | Seconds a wake retries, with backoff, for a project repo lock another wake chain holds before it defers; `0` = a single attempt. See "Repo lock and contention" |
+| `lock_wait_seconds` | `120` | Seconds a wake retries, with backoff, for a project repo lock another wake chain holds before it defers — only when no other project remains in the batch, and in the end-of-iteration retry pass; while others remain it defers at once. `0` = a single attempt. See "Repo lock and contention" |
 | `lock_starvation_firings` | `3` | Consecutive firings a role may end deferred on repo-lock contention with a BACKLOG task before the wake logs a starvation warning and PM wakes skip discovery; `0` turns the guard off. See "Repo lock and contention" |
+| `stop_on_blocked` | `false` | What a task that ends `BLOCKED` stops. `false`: the batch continues and only its dependants wait — a task whose `## Prerequisites` names it stays `WAITING` while the batch dispatches the next independent task; other projects are never affected. `true` restores the stop-the-batch behaviour: nothing more is dispatched for that project this firing. The upgrade migration rewrites an existing `kanban.cfg` line `stop_on_blocked = true` to `false` and prints the line that reverts it |
 
 **`[paths]` — directory layout:**
 
@@ -1293,9 +1582,30 @@ The prohibition is not cosmetic. An explicit model in a subagent definition outr
 
 Without the flag, the installer writes nothing under that provider's agents directory — no files, no directory creation, no prompts. Pass both flags to refresh both lanes. So after changing a wrapper, or after taking an upgrade whose release changed one, run the install with the flag for every lane you actually use; until you do, the copy already on disk keeps serving every wake. Existing copies are backed up before being overwritten — see "Role-file handling (multi-provider)" under "Defensive install.sh Behavior" below.
 
+### Project test runners
+
+A project's CODER and WRITER tickets get their test-runner acceptance criteria from two optional keys in that project's own `project.cfg`. The PM materializer reads them as it writes each ticket and appends the criteria. **A project that sets neither key gets no runner criterion at all**, and nothing falls back to `kanban.cfg`, whose `[testing]` keys are a different, kanban-wide set.
+
+**`[testing]` in `project.cfg` — the project's runner commands:**
+
+| Key | Default | Effect |
+|-----|---------|--------|
+| `targeted_test_command` | `""` | The command that runs only named test files. `{files}` marks where the files go (at the end when the command has none). Join several runners with `&&`, each with its own `{files}`. When set, each ticket gets the criterion that this command, run on the test files the ticket adds or changes, exits 0, plus a constraint to run only those tests; a plan criterion naming a full run of the runner is rewritten to the targeted run |
+| `pre_merge_command` | `""` | The whole-tree check a ticket runs once before it merges. When set, each ticket's acceptance criteria end with "`<command>` exits 0 before merging." |
+
+An unset or empty key adds nothing: no criterion, no constraint, no rewrite. The kanban's own project sets both:
+
+```ini
+[testing]
+targeted_test_command = bash team/scripts/run-unit-tests.sh --files {files} && bash team/scripts/run-integration-tests.sh --files {files}
+pre_merge_command = bash team/scripts/run-unit-tests.sh --pre-merge
+```
+
+An upgrade adds whichever of those two lines is missing, and only to the project whose dev tree is the kanban's own source tree (the migration helpers table in `docs/operator-commands.md`); set the keys by hand for any other project. `project.cfg_example` carries both keys with their inline comments, and "Targeted-test policy" in `team/pm-agent/README.md` states the full rewrite rules.
+
 ## Cleanup Script
 
-The cleanup script at `scripts/cleanup/cleanup.sh` performs automated housekeeping: it deletes old logs, rotates debug logs, moves old briefs aside, and purges the framework temp directory. It is designed for cron invocation and requires no LLM involvement.
+The cleanup script at `scripts/cleanup/cleanup.sh` performs automated housekeeping: it deletes old logs, deletes leftover task-liveness records under `locks/task-liveness/`, rotates debug logs, moves old briefs aside, and purges the framework temp directory. It is designed for cron invocation and requires no LLM involvement.
 
 **It never deletes a task folder.** Finished tasks, bugs, priorities and shipped requirements leave the live project only through the archive, which moves them and can restore them — see "Archive — finished work out of the live project" below.
 
@@ -1303,11 +1613,14 @@ Command examples in this section run from the kanban root (`cd "$PGAI_AGENT_KANB
 
 ### What it does
 
-A full run performs these steps in order for one project. The numbers are the script's own step labels, as they appear in its log; there is no Step 3.
+A full run performs these steps in order for one project, except where a step says it is kanban-wide. The numbers are the script's own step labels, as they appear in its log; there is no Step 3.
 
 0. **Purge trivial logs** — deletes small, old per-firing wake batch logs under `logs/agents/` (see "Log retention" below).
 1. **Prune old log files** — deletes files directly in `PGAI_LOGS_DIR` (default `logs/agents/`) older than the log retention period.
 2. **Report terminal task folders** — counts the `DONE` and `WONT-DO` task folders whose `status.md` is older than `PGAI_CLEANUP_TASK_RETENTION_DAYS` (default 7), logs that count, and names the command that previews the archive. Nothing is deleted, at any age, in a dry run or a real one.
+
+2b. **Delete leftover task-liveness records** — deletes each `locks/task-liveness/<task>.record` whose task folder exists in no registered project's tasks directory, because the task was archived or deleted. A record whose task folder still exists anywhere is kept, and so is one whose agent is still alive or whose record cannot be read. When the project list or any project's tasks directory cannot be resolved, the step logs a warning and deletes nothing. A dry run logs each record it would delete and deletes none. Step 2b is kanban-wide, not per project: in a run over every project the first pass does the work.
+
 4. **Rotate debug logs** — moves each `logs/debug/<agent>.log`, kanban-wide and per project, last written on an earlier UTC day to `logs/debug/archive/<YYYYMMDD>-<agent>.log` beside it, and starts a fresh file.
 5. **Archive old briefs** — moves brief files in `PGAI_BRIEFS_DIR` older than the log retention period into `PGAI_ARCHIVE_DIR/briefs/` (default `projects/<project>/tasks/archive/briefs/`).
 6. **Purge the framework temp dir** — removes the kanban-owned contents of `PGAI_AGENT_KANBAN_TEMP_DIR`, keeping the root itself and the worktree of every task still `WORKING`. The purge is skipped while any wake lock is held.
@@ -1352,7 +1665,7 @@ The defaults are tuned for the observed log-size distribution. Raise `PGAI_CLEAN
 # Trivial-tier sweep only — fast, safe to run on a tight schedule.
 scripts/cleanup/cleanup.sh --trivial-only
 
-# Full sweep — Steps 0, 1, 2, 4, 5 and 6 (requires each project's release-state.md).
+# Full sweep — Steps 0, 1, 2, 2b, 4, 5 and 6 (requires each project's release-state.md).
 scripts/cleanup/cleanup.sh
 ```
 
@@ -1369,7 +1682,7 @@ scripts/cleanup/cleanup.sh --temp-only
 
 #### What is never auto-deleted
 
-The trivial purge is scoped narrowly on purpose, and nothing in the script deletes kanban state:
+The trivial purge is scoped narrowly on purpose, and nothing in the script deletes kanban state beyond the leftover task-liveness records Step 2b removes:
 
 - **`actions.log`** — the framework's audit trail. Excluded both by path scope (it lives outside `logs/agents/`) and by an explicit `-not -name actions.log` safety guard in case a future layout change places one inside the swept tree.
 - **Per-task logs in `projects/*/tasks/<TASK-ID>/logs/`** — these are the audit trail of what each task did. No cleanup step reaches them.
@@ -1415,7 +1728,7 @@ scripts/cleanup/cleanup.sh
 scripts/cleanup/cleanup.sh --project pgai-agent-kanban
 ```
 
-The script writes a summary log to `PGAI_LOGS_DIR/cleanup-YYYYMMDD-HHMMSS.log` on every per-project run, including dry runs. The summary's `task_folders_kept` line is Step 2's count.
+The script writes a summary log to `PGAI_LOGS_DIR/cleanup-YYYYMMDD-HHMMSS.log` on every per-project run, including dry runs. The summary's `task_folders_kept` line is Step 2's count, and its `liveness_records_deleted` line is Step 2b's.
 
 ### Configuration
 
@@ -1854,18 +2167,29 @@ The text color of each entry reflects its current lifecycle status, read from ea
 | `running` | amber                         | `#BA7517` |
 | `done`    | green                         | `#639922` |
 | `blocked` | red                           | `#E24B4A` |
+| `needs-operator` | magenta, its own colour      | palette key `status_needs_operator` |
+| `duplicate`, `wont-do` | green, the `done` colour | same as `done` |
 
-The mapping is implemented once in `team/pgai_agent_kanban/dashboard/column_render/cells.py` (`status_color()`), and the legend maps the status keywords through the same arms (running; done and wont-do; blocked; open) so legend and rows never disagree.
+A `carried` item keeps the `open` colour and shows ` ↻` after its ID. With colour off, a carried item shows ` [carried]` and a `needs-operator` item ` [needs-op]`.
+
+The mapping is implemented once in `team/pgai_agent_kanban/dashboard/column_render/cells.py` (`status_color()`), and the legend maps the status keywords through the same arms (running; done, wont-do and duplicate; blocked; needs-operator; open) so legend and rows never disagree.
 
 #### Legend
 
-A persistent legend below the visibility grid lists each active project with its color tag and renders the four status keywords in their mapped colors, so the convention can be relearned without leaving the dashboard:
+A persistent legend below the visibility grid lists each active project with its color tag and renders the status keywords in their mapped colors, so the convention can be relearned without leaving the dashboard. The dashboard's keywords are the `DASHBOARD_LEGEND_STATUS_KEYWORDS` list, `open running done wont-do blocked needs-operator carried`, and `carried` is drawn as its row marker:
 
 ```
-PROJECT: ■ pgai-agent-kanban  ■ pgai-chomp-man   |   STATUS: open  running  done  blocked
+PROJECT: ■ pgai-agent-kanban  ■ pgai-chomp-man   |   STATUS: open  running  done  wont-do  blocked  needs-operator  ↻ carried
 ```
 
-The legend template lives in `team/scripts/lib/dashboard_legend.sh` as the `DASHBOARD_LEGEND_TEMPLATE` constant; the renderer substitutes the per-project block and the colored status block into the template on every refresh.
+The renderer is `pgai_agent_kanban.dashboard.legend`. Run without `--status-keywords` it prints its default set, `open running done blocked needs-operator carried`. With colour off a project tag is the first four characters of its name in brackets and `carried` reads `[carried]`. From a source checkout:
+
+```
+$ cd team && python3 -m pgai_agent_kanban.dashboard.legend --use-color false
+PROJECT: (no projects)   |   STATUS: open  running  done  blocked  needs-operator  [carried]
+```
+
+The legend template and keyword list live in `team/scripts/lib/dashboard_legend.sh` as the `DASHBOARD_LEGEND_TEMPLATE` and `DASHBOARD_LEGEND_STATUS_KEYWORDS` constants; the renderer substitutes the per-project block and the colored status block into the template on every refresh.
 
 #### Operator override
 
@@ -1934,9 +2258,12 @@ projects/<name>/metrics/
   rc/<version>.json        # per-RC rollup, one file per closed RC
   day/<YYYY-MM-DD>.json    # per-day rollup, one file per day with activity
   history.csv              # cumulative append-only history, one row per RC
+  blocked-intervals.jsonl  # block ledger: every block, append-only, one record per line
+  reliability.json         # Hands-off and Clean streaks, rewritten from the ledger
+  blocked-intervals.backfill.jsonl  # backfill sidecar; present only after reliability-backfill.sh runs
 ```
 
-The per-task `tokens.json` files under `projects/<name>/tasks/<task-id>/artifacts/tokens.json` are the source data every rollup is computed from. The metrics surface is strictly derived: deleting any rollup file and re-running the aggregator must reproduce the same content from the per-task data. Operators may safely delete and regenerate any file in `metrics/rc/` or `metrics/day/`. `history.csv` is append-only — see "Cumulative history.csv" below.
+The per-task `tokens.json` files under `projects/<name>/tasks/<task-id>/artifacts/tokens.json` are the source data every rollup is computed from. The metrics surface is strictly derived: deleting any rollup file and re-running the aggregator must reproduce the same content from the per-task data. Operators may safely delete and regenerate any file in `metrics/rc/` or `metrics/day/`. `history.csv` is append-only — see "Cumulative history.csv" below. The block ledger is not derived: it is the only record of the project's blocks, so never edit or delete it. `reliability.json` is derived from the ledger and the RC rollups.
 
 ### Per-task `tokens.json` schema (the source of truth)
 
@@ -1968,7 +2295,7 @@ The remaining fields (`provider`, `agent`, the four token counts, `invocations`,
 
 ### Per-RC JSON rollup
 
-Written by `team/scripts/lib/metrics_aggregator.py` on RC close (invoked from `team/scripts/cm/release.sh` Step 19a) and on demand by `metrics-report.sh` when a requested file is missing. Path: `projects/<name>/metrics/rc/<version>.json`. The wake driver's finalize stage recomputes the rollup once more (`team/scripts/lib/metrics_rollup_refresh.sh`) whenever a task attributed to that RC writes its `tokens.json` after the rollup already exists — the CM release task that shipped the RC is the standing case, since its own usage is captured only after its session ends — so a shipped RC's rollup counts every task that worked it, that task's tokens and wall time included. The refresh is the same deterministic recompute as the original write; it never rewrites `history.csv`, whose row keeps the figures from RC close, and it never revisits rollups written before a task's `tokens.json` landed under the pre-refresh wake driver.
+Written by `team/scripts/lib/metrics_aggregator.py` on RC close (invoked from `team/scripts/cm/release.sh` Step 15a) and on demand by `metrics-report.sh` when a requested file is missing. Path: `projects/<name>/metrics/rc/<version>.json`. The wake driver's finalize stage recomputes the rollup once more (`team/scripts/lib/metrics_rollup_refresh.sh`) whenever a task attributed to that RC writes its `tokens.json` after the rollup already exists — the CM release task that shipped the RC is the standing case, since its own usage is captured only after its session ends — so a shipped RC's rollup counts every task that worked it, that task's tokens and wall time included. The refresh is the same deterministic recompute as the original write; it never rewrites `history.csv`, whose row keeps the figures from RC close, and it never revisits rollups written before a task's `tokens.json` landed under the pre-refresh wake driver.
 
 The rollup carries identity (`rc`, `project`, `workflow_type`), lifecycle (`opened_at`, `closed_at`, `wall_time_minutes`, `outcome`), task counts (`tasks.total`, `tasks.by_agent`), and the full token breakdown:
 
@@ -2026,7 +2353,7 @@ Day rollups are derived from the same per-task data as RC rollups; they are not 
 
 ### Cumulative `history.csv`
 
-Written by `team/scripts/lib/metrics_csv_writer.py` on RC close (invoked from `team/scripts/cm/release.sh` Step 19b). Path: `projects/<name>/metrics/history.csv`.
+Written by `team/scripts/lib/metrics_csv_writer.py` on RC close (invoked from `team/scripts/cm/release.sh` Step 15b). Path: `projects/<name>/metrics/history.csv`.
 
 One row per RC, appended on close, never modified. The header is written on first call and never re-emitted. Columns, in order:
 
@@ -2053,6 +2380,48 @@ Legacy `tokens.json` files may carry the shortname `model` field (`opus`, `sonne
 
 The source files are not modified by the aggregator. Historical fidelity is preserved; canonicalization happens in memory at aggregation time. Current writes are expected to be canonical at the source, so the read-time map is a compatibility shim.
 
+### Block ledger: `blocked-intervals.jsonl`
+
+Path: `projects/<name>/metrics/blocked-intervals.jsonl`. This file is the one record of every block the project has had. That covers task blocks and HALTs, whether the chain or an operator raised them. It feeds both the per-RC `blocked_minutes` and the reliability streaks. The file holds one JSON object per line, is appended to and never rewritten, and is created by the first block. No file means no block has been recorded. "Reliability (left pane)" in [dashboard.md](dashboard.md) says which events are blocks.
+
+| Field | Values | Meaning |
+|---|---|---|
+| `version` | `vX.Y.Z` or `no-rc` | The project's Active RC when the block was raised. `no-rc` is used between releases and is never counted toward an RC's blocked minutes. |
+| `kind` | `block-start`, `block-end`, `block-escalate` | Opens a block or closes it. `block-escalate` marks an open block as one a human must clear, without closing it. |
+| `source` | `task:<TASK-ID>`, `halt:project`, `halt:global` | What blocked. A start and its end pair on `version` and `source`. |
+| `timestamp` | ISO-8601 | When the event happened. |
+| `class` | `human`, `any` | On a start or an escalate, the block's class. On an end, who resolved it: `human` when a human had to. |
+| `cause` | `chain`, `operator` | Who raised the block. `operator` blocks count toward blocked minutes and are left out of the streaks. |
+| `reason_code` | a code | Why the block was raised, on a start: for example `per_task_timeout`, `needs_human`, or a CM HALT's error key. How it was resolved, on an end: for example `requeue`, `reset`, `unhalt`, `done`. |
+
+The first four fields are required. The last three are optional. A record without them, which includes every record written before they existed, reads as `cause` `chain`, `class` `any` and no reason code. A value outside the listed vocabulary also reads as the default. A block is class `human` when its start says so, when it carries a `block-escalate` line, or when its end's class is `human`. Every other block is `any`.
+
+Example, one task block an operator released with `reset.sh`:
+
+```json
+{"class": "any", "cause": "chain", "kind": "block-start", "reason_code": "agent_unclassified", "source": "task:example-task", "timestamp": "2026-09-18T10:00:00+00:00", "version": "v2.24.0"}
+{"class": "human", "kind": "block-end", "reason_code": "reset", "source": "task:example-task", "timestamp": "2026-09-18T11:00:00+00:00", "version": "v2.24.0"}
+```
+
+Every ledger write is best-effort. A write that fails prints one warning and never changes the status write, triage step, operator command or wake cycle it accompanies. For history written before the ledger recorded class and cause, see "`reliability-backfill.sh`" below.
+
+### Reliability streaks: `reliability.json`
+
+Path: `projects/<name>/metrics/reliability.json`. It holds the two streaks the rc-metrics pane's Reliability block shows. "Reliability (left pane)" in [dashboard.md](dashboard.md) defines them. The file is rewritten whole after every ledger write and once at RC close. Both rewrites are best-effort: a failure leaves the previous file in place. `python3 -m pgai_agent_kanban.metrics.reliability refresh --project <name>` rewrites it on demand. The pane, `metrics-report.sh --reliability` and the `GET /projects/{name}/reliability` route in [operator-api.md](operator-api.md) read this file and never compute it.
+
+Top level: `schema_version` (`1`), `project`, `computed_at`, `first_record_at` (the earliest ledger record, `null` for an empty ledger), and two streak objects, `hands_off` (class `human`) and `clean` (class `any`). Every timestamp is UTC. Each streak has:
+
+| Field | Meaning |
+|---|---|
+| `class` | `human` for `hands_off`, `any` for `clean`. |
+| `status` | `resolved`, `open` (the last qualifying block is still open), or `no block on record`. |
+| `rcs` | Shipped RCs whose `closed_at` is after `since`, not counting the block's own RC. `0` while open. |
+| `hours` | Hours from `since` to `computed_at`, to two decimals. `0` while open. The pane and `metrics-report.sh --reliability` do not show this figure: they count from `since` to the time they render. |
+| `since` | The last block's resolution time. `first_record_at` when there is no block on record. `null` while open. |
+| `last_block` | That block: `time`, `rc`, `task`, `source`, `reason_code`, `class`, `cause`, `escalated`, and `resolution` (`time`, `class`, `reason_code`; `null` while open). `null` when there is no block on record. |
+
+Operator-caused blocks are left out of both streaks. An RC counts as shipped when its `metrics/rc/<version>.json` has `"outcome": "shipped"` (in any letter case) and a `closed_at`. Clean's `rcs` and `hours` are each capped at Hands-off's.
+
 ### `metrics-report.sh` CLI
 
 `team/scripts/metrics-report.sh` is the operator-facing entry point for everything under `metrics/`. The scope flags select what to emit; output goes to stdout in the requested format.
@@ -2062,49 +2431,99 @@ The source files are not modified by the aggregator. Historical fidelity is pres
 | `--rc` | `vX.Y.Z` | Emit the per-RC rollup JSON. Triggers on-demand aggregation if the file is missing. |
 | `--day` | `YYYY-MM-DD` | Emit the per-day rollup JSON. Triggers on-demand aggregation if the file is missing. |
 | `--csv` | (none) | Emit the full contents of `history.csv`. Combine with `--project` to filter. |
-| `--format` | `jsonl` | Emit one JSON object per line (JSON Lines). Without `--rc` or `--day`, streams every per-RC rollup found, sorted by version. |
+| `--format` | `jsonl` \| `json` | `jsonl`: emit one JSON object per line (JSON Lines). Without `--rc` or `--day`, streams every per-RC rollup found, sorted by version. `json`, with `--reliability` only: print the project's `reliability.json` as stored. It needs `--project` (or `PGAI_PROJECT_NAME`) and exits 2 when the file is missing or unreadable. |
 | `--tail` | (none) | Live-tail `history.csv` via `tail -f`. Streams each new row as `team/scripts/cm/release.sh` appends it. Stop with Ctrl-C. |
-| `--project` | `<name>` | Override `PGAI_PROJECT_NAME` (default: `pgai-agent-kanban`). |
+| `--reliability` | (none) | Print each project's Hands-off and Clean streak lines from `reliability.json`, the same lines the rc-metrics pane shows. Without `--project`, covers every project in `projects.cfg`. A missing or unreadable file prints a placeholder line and still exits 0. Cannot be combined with `--rc`, `--day`, `--csv` or `--tail`. |
+| `--now` | ISO-8601 time | With `--reliability`: count each streak's hours to this time instead of the current time. |
+| `--project` | `<name>` | Project to operate on. Required (or set `PGAI_PROJECT_NAME`) in every mode except `--reliability`. |
 | `--kanban-root` | `<path>` | Override `PGAI_AGENT_KANBAN_ROOT_PATH`. |
 
 Example invocations:
 
 ```bash
 # Per-RC rollup for v0.24.12
-team/scripts/metrics-report.sh --rc v0.24.12
+"$PGAI_AGENT_KANBAN_ROOT_PATH/scripts/metrics-report.sh" --rc v0.24.12
 
 # Per-day rollup for today (UTC)
-team/scripts/metrics-report.sh --day 2026-05-18
+"$PGAI_AGENT_KANBAN_ROOT_PATH/scripts/metrics-report.sh" --day 2026-05-18
 
 # Full history CSV
-team/scripts/metrics-report.sh --csv
+"$PGAI_AGENT_KANBAN_ROOT_PATH/scripts/metrics-report.sh" --csv
 
 # Filtered CSV for a different project
-team/scripts/metrics-report.sh --csv --project pgai-chomp-man
+"$PGAI_AGENT_KANBAN_ROOT_PATH/scripts/metrics-report.sh" --csv --project pgai-chomp-man
 
 # Streaming JSON Lines for every RC ever closed
-team/scripts/metrics-report.sh --format jsonl
+"$PGAI_AGENT_KANBAN_ROOT_PATH/scripts/metrics-report.sh" --format jsonl
 
 # Live tail of new RC closes
-team/scripts/metrics-report.sh --tail
+"$PGAI_AGENT_KANBAN_ROOT_PATH/scripts/metrics-report.sh" --tail
+
+# Hands-off and Clean streaks, every registered project, then one project
+"$PGAI_AGENT_KANBAN_ROOT_PATH/scripts/metrics-report.sh" --reliability
+"$PGAI_AGENT_KANBAN_ROOT_PATH/scripts/metrics-report.sh" --reliability --project pgai-agent-kanban
+
+# One project's reliability.json, as stored
+"$PGAI_AGENT_KANBAN_ROOT_PATH/scripts/metrics-report.sh" --reliability --format json --project pgai-agent-kanban
 ```
 
 Exit codes: 0 on success (warnings on stderr are fine), 1 on usage or configuration errors, 2 when the requested data does not exist (no rollup file, empty CSV, etc.). Downstream consumers should treat exit 2 as "nothing to report for this scope" rather than a hard failure.
+
+### `reliability-backfill.sh`
+
+`team/scripts/reliability-backfill.sh` rebuilds a project's block-ledger records, with `class`, `cause` and `reason_code`, from evidence already on disk. Use it for history written before the ledger recorded those fields. It runs in two steps, review and then merge:
+
+```bash
+# 1. Write the sidecar for review. The ledger is left byte-identical.
+"$PGAI_AGENT_KANBAN_ROOT_PATH/scripts/reliability-backfill.sh" --project pgai-agent-kanban
+
+# 2. After review, append the sidecar records the ledger lacks.
+"$PGAI_AGENT_KANBAN_ROOT_PATH/scripts/reliability-backfill.sh" --project pgai-agent-kanban --apply
+```
+
+`--project` defaults to `PGAI_PROJECT_NAME`.
+
+**Step 1** writes `projects/<name>/metrics/blocked-intervals.backfill.jsonl`. Each line is a ledger record plus a `backfill` object with four fields:
+
+- `block`: the block the line belongs to;
+- `block_class`: the class that block reads as;
+- `in_ledger`: whether the ledger already has this line;
+- `basis`: the evidence the line rests on.
+
+The evidence it reads:
+
+- the ledger;
+- each task folder's `artifacts/block-evidence/triage-*.json` and its `status.md` (`## State`, `## Block Record`), live and archived;
+- `logs/sentinel-writes.log`;
+- `metrics/rc/*.json`;
+- `release-state.md`.
+
+A block the ledger leaves open is closed as follows:
+
+- A triage `act` inside the block closes it, class `any`.
+- Otherwise, unless the task is BLOCKED now, it closes at its RC's close with reason code `rc_closed`. A task block closed that way is class `human`. A block whose RC has not closed stays open.
+
+Two more rules set a block's class. A triage `escalate` inside a block marks it `human`. A HALT block takes the class of the task blocks of its RC that it overlaps: `human` if any of them is `human`.
+
+**Step 2** (`--apply`) reads the sidecar, not the evidence. It appends every sidecar record the ledger lacks, never rewrites or deletes a line, then refreshes `reliability.json`. A field the sidecar rebuilt for a line the ledger already has stays in the sidecar. A second run, with or without `--apply`, adds no records.
+
+Exit codes: 0 when the sidecar is written or applied. 2 when the run is refused and nothing is written. The refusals are no project or an unknown one, a malformed ledger, `--apply` with no sidecar, and a malformed sidecar.
 
 ### The `rc-metrics` dashboard window
 
 The left pane of the kanban dashboard's window 7 (`rc-metrics`) renders a live operator view of the same data, refreshed on the standard dashboard interval while its window is active (visibility-aware — see "Refresh cadence" in `docs/dashboard.md`). It runs `team/scripts/dashboard/metrics.sh` under `cadence-loop.sh` so truecolor is preserved.
 
-The pane shows two stacked blocks:
+The pane shows three stacked blocks:
 
 - **Today** — per-project summary for the current UTC day: RCs shipped, wall time, total tokens with cache-hit percentage, task count. Sourced from `metrics/day/<today>.json` per project.
 - **Current RC** — per-project open-RC progress: tasks done / total, elapsed wall time, tokens so far. Sourced from `metrics/rc/<active>.json` per project plus the project's `release-state.md` for active-RC discovery.
+- **Reliability** — two lines per project. **Hands-off** gives the releases shipped and the hours elapsed, to the time the pane renders, since the last block a human had to clear. **Clean** gives the same since the last block of any kind, including the ones the system cleared itself, so it is never longer than Hands-off. A block is a task going `BLOCKED` or `Needs Human`, a per-task timeout kill, or a HALT the chain raised. An operator-raised HALT is not a block. Sourced from `metrics/reliability.json` per project. "Reliability (left pane)" in [dashboard.md](dashboard.md) has the line format and the full rules, and `metrics-report.sh --reliability` prints the same lines.
 
 The pane is intentionally facts-only: no pace projections, no comparison to historical averages, no charts. Operators who want richer views should consume `history.csv` or the per-RC JSON files directly through their tool of choice.
 
 ### `team/scripts/cm/release.sh` integration
 
-`team/scripts/cm/release.sh` Step 19 invokes both writers as a non-blocking pair. Step 19a runs `metrics_aggregator.py` to write the per-RC JSON; Step 19b runs `metrics_csv_writer.py` to append the history.csv row from that JSON. Both steps are wrapped in non-blocking error handling: if either fails, the release still ships and a `[metrics]` WARNING is printed to stderr. The release contract (branch merged, tag pushed, state file updated) does not depend on metrics succeeding. Operators who notice missing rollups can rebuild them after the fact by deleting the file and re-running `metrics-report.sh --rc <version>`.
+`team/scripts/cm/release.sh` Step 15 invokes both writers as a non-blocking pair. Step 15a runs `metrics_aggregator.py` to write the per-RC JSON; Step 15b runs `metrics_csv_writer.py` to append the history.csv row from that JSON. Both steps are wrapped in non-blocking error handling: if either fails, the release still ships and a `[metrics]` WARNING is printed to stderr. The release contract (branch merged, tag pushed, state file updated) does not depend on metrics succeeding. Operators who notice missing rollups can rebuild them after the fact by deleting the file and re-running `metrics-report.sh --rc <version>`.
 
 ### `cost-report.sh` (backward-compatibility wrapper)
 
@@ -2152,7 +2571,7 @@ Anthropic bills four distinct token categories on every Claude API call. Cost da
 | Cache reads | `cache_read_input_tokens` | 0.10x | Tokens served from a previously written cache entry. |
 | Output | `output_tokens` | 5.00x (varies by model) | Tokens the model generated. |
 
-The exact dollar amounts live in `team/scripts/lib/token_pricing.json` under `providers.<provider>.models.<model>.{input,output,cache_creation,cache_read}_per_1m`. Do not memorize numbers from this document — they will drift. The ratios above are stable (they are how Anthropic structures the pricing) but the absolute rates are not.
+The exact dollar amounts live in the kanban's `token_pricing.json` (`scripts/lib/` under the kanban root on an installed kanban, `team/scripts/lib/` in a source checkout) under `providers.<provider>.models.<model>.{input,output,cache_creation,cache_read}_per_1m`. Do not memorize numbers from this document — they will drift. The ratios above are stable (they are how Anthropic structures the pricing) but the absolute rates are not.
 
 **Why cache reads dominate this framework's input volume.** The kanban runs each agent task as a fresh `claude -p` invocation. There is no persistent agent process holding context between tasks; every task pays to load the governance stack (DIRECTIVES, OVERVIEW, SOP, role file, project README, task README, task status) from scratch.
 
@@ -2210,19 +2629,19 @@ Example invocations, one per flag:
 
 ```bash
 # Specific month
-team/scripts/cost-report.sh --month 2026-05
+"$PGAI_AGENT_KANBAN_ROOT_PATH/scripts/cost-report.sh" --month 2026-05
 
 # Single day
-team/scripts/cost-report.sh --day 2026-05-16
+"$PGAI_AGENT_KANBAN_ROOT_PATH/scripts/cost-report.sh" --day 2026-05-16
 
 # Single RC
-team/scripts/cost-report.sh --rc v0.23.22
+"$PGAI_AGENT_KANBAN_ROOT_PATH/scripts/cost-report.sh" --rc v0.23.22
 
 # Override project
-team/scripts/cost-report.sh --project pgai-chomp-man
+"$PGAI_AGENT_KANBAN_ROOT_PATH/scripts/cost-report.sh" --project pgai-chomp-man
 
 # CSV output for spreadsheet analysis
-team/scripts/cost-report.sh --month 2026-05 --csv
+"$PGAI_AGENT_KANBAN_ROOT_PATH/scripts/cost-report.sh" --month 2026-05 --csv
 ```
 
 The script exits 0 on success (warnings on stderr are fine) and 1 on usage or configuration errors. If there is no data for the requested scope it prints `no data for <scope>` and exits 0.
@@ -2320,7 +2739,7 @@ When you need to verify the report is computing costs correctly — for example,
 **Step 3 — read the four rates from token_pricing.json.** Look up `providers.claude.models.<model_id>` and copy out the four `*_per_1m` values. Do not hardcode these from memory — open the live file. Example for one model (rates as of this writing; verify before using):
 
 ```bash
-python3 -m json.tool team/scripts/lib/token_pricing.json | grep -A 1 'claude-opus-4-7'
+python3 -m json.tool "$PGAI_AGENT_KANBAN_ROOT_PATH/scripts/lib/token_pricing.json" | grep -A 1 'claude-opus-4-7'
 ```
 
 **Step 4 — apply the per-category formula.** Each category cost is `tokens * rate_per_1m / 1_000_000`:
@@ -2349,7 +2768,9 @@ For a coarser check, sum the `cost_usd` of every entry in a single RC's `tasks` 
 
 ### Keeping token_pricing.json fresh
 
-Pricing lives in `team/scripts/lib/token_pricing.json`. The `cost-report.sh` script reads it from the project's `dev_tree_path` (per `project.cfg [project]`), falling back to the kanban root copy. Dollar amounts are never hardcoded in the script — the JSON is the source of truth.
+Pricing lives in the kanban's own table: `scripts/lib/token_pricing.json` under the kanban root on an installed kanban, `team/scripts/lib/token_pricing.json` in a source checkout. The aggregator prices every project's tasks from that one file and never reads it from a project's repository; when the file is missing it prints one warning ending `Expected at: <path>`, and every cost it would compute from the table is 0. Dollar amounts are never hardcoded in the scripts — the JSON is the source of truth.
+
+The subscription comparison block in `cost-report.sh` reads the same table through the same kanban-side lookup: `scripts/lib/token_pricing.json` under the kanban root, else the copy in the tree the running code ships in (`team/scripts/lib/` in a source checkout). A project's `dev_tree_path` is never read, so every project gets the comparison. When no copy exists the report prints `WARNING: token_pricing.json not found; subscription comparison unavailable. Expected at: <kanban root>/scripts/lib/token_pricing.json`, and the rest of the report is unaffected.
 
 The file has three top-level keys: `providers` (per-provider, per-model rates expressed as `*_per_1m`), `subscriptions` (subscription credit values used by the comparison block), and `updated` (an ISO date string). Bump the `updated` field whenever you change any rate or subscription value — it is the audit trail for "when did this pricing snapshot last reflect public list prices."
 
@@ -2359,7 +2780,7 @@ Update the file whenever:
 - A new model is added that the kanban will use (otherwise the model shows `cost_usd=0` in reports and emits a stderr warning on first encounter).
 - A subscription tier price or programmatic-credit value changes.
 
-The file is plain JSON. Edit it, validate it parses (`python3 -m json.tool team/scripts/lib/token_pricing.json`), commit the change with the `updated` field bumped, and the next report will use the new rates.
+The file is plain JSON. Edit the installed copy, validate it parses (`python3 -m json.tool "$PGAI_AGENT_KANBAN_ROOT_PATH/scripts/lib/token_pricing.json"`), and the next report uses the new rates. An install or upgrade replaces that copy with the repository's `team/scripts/lib/token_pricing.json`, so make the same change there and commit it with the `updated` field bumped.
 
 ### Linking cost data to provider decisions
 
@@ -2368,29 +2789,29 @@ The metrics layer exists because real numbers beat guesses for provider decision
 `cost-report.sh` does not prescribe an answer. It produces the data each option needs to be evaluated against — projected monthly burn, per-agent cost share (relevant if different agents are routed to different providers), and the explicit subscription-versus-API comparison block. Reading those numbers and choosing an arrangement is the operator's call.
 
 
-## RC Abandonment: `team/scripts/cm/cancel-rc.sh`
+## RC Abandonment: `scripts/cm/cancel-rc.sh`
 
-When a Release Candidate needs to be abandoned before it ships — for example, when TESTER finds catastrophic gaps that warrant starting fresh, when the operator decides scope has changed significantly, or when an RC was opened for the wrong version — use `team/scripts/cm/cancel-rc.sh` to cleanly abandon it.
+When a Release Candidate needs to be abandoned before it ships — for example, when TESTER finds catastrophic gaps that warrant starting fresh, when the operator decides scope has changed significantly, or when an RC was opened for the wrong version — use `scripts/cm/cancel-rc.sh` to cleanly abandon it.
 
 ### When to use cancel-rc.sh
 
-Use `team/scripts/cm/cancel-rc.sh` in these situations:
+Use `scripts/cm/cancel-rc.sh` in these situations:
 
 - **TESTER finds catastrophic gaps** that cannot be patched without a full re-decomposition — the RC quality is too low to iterate on.
 - **Operator decides scope change is needed** — the work decomposed under this RC is no longer the right work to do; fresh requirements are needed.
-- **Wrong RC version opened** — `team/scripts/cm/open-rc.sh` was run with the wrong version number and the error must be undone before starting over.
+- **Wrong RC version opened** — `scripts/cm/open-rc.sh` was run with the wrong version number and the error must be undone before starting over.
 - **RC branch became inconsistent** — partial failures or manual edits left the project's `release-state.md` or the branch in a state that cannot be recovered automatically.
 
-Do NOT use `team/scripts/cm/cancel-rc.sh` for minor gaps. TESTER files bugs for gaps small enough to fix without abandoning the current RC; discovery bundles them into the next patch release.
+Do NOT use `scripts/cm/cancel-rc.sh` for minor gaps. TESTER files bugs for gaps small enough to fix without abandoning the current RC; discovery bundles them into the next patch release.
 
 ### Usage
 
 ```bash
 # Interactive (prompts for confirmation):
-team/scripts/cm/cancel-rc.sh v0.15.4
+"$PGAI_AGENT_KANBAN_ROOT_PATH/scripts/cm/cancel-rc.sh" v0.15.4
 
 # Non-interactive (--yes skips confirmation prompt):
-team/scripts/cm/cancel-rc.sh v0.15.4 --yes
+"$PGAI_AGENT_KANBAN_ROOT_PATH/scripts/cm/cancel-rc.sh" v0.15.4 --yes
 ```
 
 ### What cancel-rc.sh does
@@ -2410,11 +2831,11 @@ team/scripts/cm/cancel-rc.sh v0.15.4 --yes
 - Does NOT touch `main`.
 - Does NOT delete any git tags.
 - Does NOT automatically mark kanban tasks as `WONT-DO` — you must do that manually after running the script.
-- Does NOT create a new RC — run `team/scripts/cm/open-rc.sh <new_version>` separately.
+- Does NOT create a new RC — run `"$PGAI_AGENT_KANBAN_ROOT_PATH/scripts/cm/open-rc.sh" <new_version>` separately.
 
 ### Idempotency
 
-`team/scripts/cm/cancel-rc.sh` is safe to re-run if it fails midway. Each step checks current state before acting:
+`scripts/cm/cancel-rc.sh` is safe to re-run if it fails midway. Each step checks current state before acting:
 
 - If `rc/<version>` is already gone from origin, the remote-delete step is skipped.
 - If `rc/<version>` is already gone locally, the local-delete step is skipped.
@@ -2425,27 +2846,27 @@ team/scripts/cm/cancel-rc.sh v0.15.4 --yes
 
 1. Manually set any pending kanban tasks for the cancelled RC to `WONT-DO` in their `status.md`.
 2. If needed, archive or remove the requirements document for the cancelled version.
-3. Open a new RC when ready: `team/scripts/cm/open-rc.sh <next_version>`.
+3. Open a new RC when ready: `"$PGAI_AGENT_KANBAN_ROOT_PATH/scripts/cm/open-rc.sh" <next_version>`.
 
 ### Example: abandoning v0.15.4 and starting v0.15.5
 
 ```bash
 # Abandon the current RC
-team/scripts/cm/cancel-rc.sh v0.15.4 --yes
+"$PGAI_AGENT_KANBAN_ROOT_PATH/scripts/cm/cancel-rc.sh" v0.15.4 --yes
 
 # Verify the cleanup
 git ls-remote origin rc/v0.15.4   # should return nothing
 grep -A1 "Active RC" "$KANBAN_ROOT/projects/<project-name>/release-state.md"  # should show "none"
 
 # Open the next RC
-team/scripts/cm/open-rc.sh v0.15.5
+"$PGAI_AGENT_KANBAN_ROOT_PATH/scripts/cm/open-rc.sh" v0.15.5
 ```
 
 ## Cancelling an in-flight RC
 
-This section is the operator playbook for unwinding an in-flight release candidate end-to-end with `team/scripts/unwind-rc.sh` and verifying the result with `team/scripts/verify-rc-state.sh`. Use it when a TESTER-blocked RC needs to be re-rolled rather than waived, when an RC was opened against the wrong version, or when the chain's state stores have drifted far enough that the next iteration cannot pick up cleanly.
+This section is the operator playbook for unwinding an in-flight release candidate end-to-end with `unwind-rc.sh` and verifying the result with `verify-rc-state.sh`. Both are installed under the kanban root's `scripts/` directory, and every script path in this playbook is relative to the kanban root (`$PGAI_AGENT_KANBAN_ROOT_PATH`). Use it when a TESTER-blocked RC needs to be re-rolled rather than waived, when an RC was opened against the wrong version, or when the chain's state stores have drifted far enough that the next iteration cannot pick up cleanly.
 
-The broader script suite is the successor to `team/scripts/cm/cancel-rc.sh`. The older script (covered in the section above) deletes branches and resets `release-state.md` only; it leaves task folders, queue caches, requirements files, PM plan markers, and bundled PRIORITY/BUG markers untouched. `unwind-rc.sh` walks all of those state stores in one pass and creates a recoverable backup before it does anything destructive. Reach for the new script when an RC has accumulated real material — task folders, queue activity, materialized plan markers. Reach for the older `team/scripts/cm/cancel-rc.sh` only when nothing has happened beyond `team/scripts/cm/open-rc.sh` and you want a minimal undo.
+The broader script suite is the successor to `scripts/cm/cancel-rc.sh`. The older script (covered in the section above) deletes branches and resets `release-state.md` only; it leaves task folders, queue caches, requirements files, PM plan markers, and bundled PRIORITY/BUG markers untouched. `unwind-rc.sh` walks all of those state stores in one pass and creates a recoverable backup before it does anything destructive. Reach for the new script when an RC has accumulated real material — task folders, queue activity, materialized plan markers. Reach for the older `scripts/cm/cancel-rc.sh` only when nothing has happened beyond `scripts/cm/open-rc.sh` and you want a minimal undo.
 
 ### When to cancel versus when to waive
 
@@ -2455,7 +2876,7 @@ Cancellation and waiver are the two ways out of a stuck RC. They are not interch
 
 - TESTER reports catastrophic gaps that span multiple decomposed tickets. The decomposition itself is wrong, not a single ticket.
 - The operator has decided the scope is wrong and wants to re-author the requirements document before the chain produces anything more on this branch.
-- `team/scripts/cm/open-rc.sh` was run with the wrong version number and the rest of the chain has not progressed past trivial work.
+- `scripts/cm/open-rc.sh` was run with the wrong version number and the rest of the chain has not progressed past trivial work.
 - The RC's state stores are inconsistent enough that `verify-rc-state.sh` reports multiple errors and the cheapest path forward is a clean re-roll.
 
 **Waive** (per CM's `SHIP-WITH-CONCERNS` / `SHIP-WITH-SERIOUS-CONCERNS` ship policy) when the RC is materially complete and the residual gaps are small enough to fix in the next patch release:
@@ -2492,7 +2913,7 @@ touch "$PGAI_AGENT_KANBAN_ROOT_PATH/projects/<name>/HALT"
 
 ### Running unwind-rc.sh
 
-The script lives at `team/scripts/unwind-rc.sh`. Its full signature is:
+The script lives at `scripts/unwind-rc.sh` under the kanban root. Its full signature is:
 
 ```
 unwind-rc.sh --project <name> --key <vX.Y.Z> [--dry-run] [--confirm] [--force]
@@ -2501,7 +2922,7 @@ unwind-rc.sh --project <name> --key <vX.Y.Z> [--dry-run] [--confirm] [--force]
 Start with `--dry-run`. It runs every pre-flight check, builds the full inventory of what would be modified, prints the plan, and exits 0 without changing anything. Reading the plan is the cheapest way to confirm the script will touch exactly what you expect.
 
 ```bash
-team/scripts/unwind-rc.sh --project pgai-agent-kanban --key v0.26.3 --dry-run
+"$PGAI_AGENT_KANBAN_ROOT_PATH/scripts/unwind-rc.sh" --project pgai-agent-kanban --key v0.26.3 --dry-run
 ```
 
 The plan lists, in the order the script will execute them: backup destination, RC branch state (local and remote), task folders that will flip to `WONT-DO`, queue entries that will flip to `[x]`, the requirements file that will be renamed, PM plan markers that will be removed, PRIORITY and BUG backlog entries that will flip back to `[ ]`, the `release-state.md` reset, and any discovery-state cache files that will be removed.
@@ -2509,7 +2930,7 @@ The plan lists, in the order the script will execute them: backup destination, R
 When the plan matches your intent, run the script for real:
 
 ```bash
-team/scripts/unwind-rc.sh --project pgai-agent-kanban --key v0.26.3
+"$PGAI_AGENT_KANBAN_ROOT_PATH/scripts/unwind-rc.sh" --project pgai-agent-kanban --key v0.26.3
 ```
 
 The interactive run prints the same plan, then prompts with `Proceed with cancellation of rc/<version>? Type 'yes' to continue:`. Type `yes` exactly — any other input aborts without modifying state. For scripted invocation, `--confirm` answers the prompt and leaves every pre-flight check in place. `--force` also skips the prompt, but it skips the Active-RC-mismatch check too, so reserve it for the recovery case above.
@@ -2535,10 +2956,10 @@ Exit codes are deliberate:
 
 ### Verifying clean state with verify-rc-state.sh
 
-After `unwind-rc.sh` exits 0, run `team/scripts/verify-rc-state.sh` to confirm the project's state stores are consistent with each other.
+After `unwind-rc.sh` exits 0, run `scripts/verify-rc-state.sh` to confirm the project's state stores are consistent with each other.
 
 ```bash
-team/scripts/verify-rc-state.sh pgai-agent-kanban
+"$PGAI_AGENT_KANBAN_ROOT_PATH/scripts/verify-rc-state.sh" pgai-agent-kanban
 ```
 
 The checker is read-only. It walks every state store and reports `OK`, `WARN`, or `ERROR` findings, then prints a summary line like `verify-rc-state: 0 errors, 1 warning, 24 ok`. By default only warnings and errors are printed; add `--verbose` to print every check.
@@ -2606,11 +3027,11 @@ The next wake firing picks up the new requirements document and the chain procee
 cp -a $(pgai_temp_dir)/unwind-rc-<version>-backup-<TIMESTAMP>/. "$PGAI_AGENT_KANBAN_ROOT_PATH/projects/<name>/"
 ```
 
-The git unwind step (deleting the local and remote RC branch) is not covered by the backup — restoring branches requires either re-creating them from a reflog entry or re-running `team/scripts/cm/open-rc.sh` to cut a fresh branch. If branch state matters and a restore is likely, capture the branch SHAs before running `unwind-rc.sh` for real.
+The git unwind step (deleting the local and remote RC branch) is not covered by the backup — restoring branches requires either re-creating them from a reflog entry or re-running `scripts/cm/open-rc.sh` to cut a fresh branch. If branch state matters and a restore is likely, capture the branch SHAs before running `unwind-rc.sh` for real.
 
 **Re-running after a partial run.** Every action step in `unwind-rc.sh` is written to be idempotent. Task folders that already carry a `## Cancellation Note` block are skipped. Queue entries already at `[x]` are left alone. The requirements file is only renamed if a non-superseded original exists. `release-state.md` fields already at `none` are not rewritten. The orphan-branch detection only flags branches whose task IDs are in the cancelled RC's task set. Re-running on a partially-cancelled RC converges to the same end state as a clean run.
 
-**Cancelled the wrong RC.** If you discover after the fact that the wrong RC was cancelled, restore from backup, re-cut the RC branch with `team/scripts/cm/open-rc.sh`, and re-bundle the requirements file by renaming it back from `*.SUPERSEDED-on-cancel-*.md` to `<version>-<slug>.md`. Renaming alone is not enough: the unwind set the file's `## Status` to `wont-do`, which discovery reads as closed and skips. Set it back to `open`, the value discovery reads as a bundle not yet queued for PM, so the next iteration picks it up. The bundled PRIORITY/BUG items need the same care: the unwind reset each one's `## Status` to `open`, and discovery reads that header, never the `[ ]`/`[x]` backlog marker, so set each item's `## Status` back to `running` by hand. Otherwise discovery offers them again as unbundled work. This is recoverable but tedious; the `--dry-run` pass exists to prevent it.
+**Cancelled the wrong RC.** If you discover after the fact that the wrong RC was cancelled, restore from backup, re-cut the RC branch with `scripts/cm/open-rc.sh`, and re-bundle the requirements file by renaming it back from `*.SUPERSEDED-on-cancel-*.md` to `<version>-<slug>.md`. Renaming alone is not enough: the unwind set the file's `## Status` to `wont-do`, which discovery reads as closed and skips. Set it back to `open`, the value discovery reads as a bundle not yet queued for PM, so the next iteration picks it up. The bundled PRIORITY/BUG items need the same care: the unwind reset each one's `## Status` to `open`, and discovery reads that header, never the `[ ]`/`[x]` backlog marker, so set each item's `## Status` back to `running` by hand. Otherwise discovery offers them again as unbundled work. This is recoverable but tedious; the `--dry-run` pass exists to prevent it.
 
 **Forgot to verify before unhalting.** Without `verify-rc-state.sh` between cancellation and unhalt, an inconsistency missed by `unwind-rc.sh` propagates into the next iteration as wrong work. The chain may produce tasks against stale state, fail in unexpected places, or — worse — produce work that materially conflicts with the next RC's intent. The verify step takes seconds. Run it every time.
 
@@ -2644,7 +3065,13 @@ For each phase, the release script searches three locations and uses the first o
 
 The design mirrors the ports-are-topology philosophy: deployment overrides app default. Tier (c) is the project's own default — versioned, reviewed, and immune to project recreation. Tier (b) exists so an operator can wire a temporary override without editing the repo. Tier (a) exists so a hook can live at any explicit path (e.g., a shared script directory).
 
-An in-repo hook (tier c) that exists but is not executable is an **error**, not a silent skip. The release halts with a message naming the path and the `chmod +x` fix. Kanban-side and cfg hooks that exist but are not executable emit a warning and skip (backward-compatible behavior).
+An in-repo hook (tier c) and a cfg hook with a relative path (tier a) are read from the RC branch's git tree, not the dev tree's checkout. A hook there that cannot run is an **error**, not a silent skip: the release halts with a message naming the path and a runnable fix, which depends on what is committed at the hook path:
+
+- **A regular file with git mode 100644.** The fix is `git update-index --chmod=+x <hook path>` and a commit on the RC branch.
+- **A symlink** (git mode 120000). The release follows it on the RC branch, up to 8 links, to a committed regular file, and runs that target's content. When the target is 100644, the fix is `git update-index --chmod=+x <target>` — the target, not the link.
+- **A symlink that cannot be followed** to a committed regular file (the target is missing on the branch, outside the repository, a directory or a submodule, or the chain is too long), **or a directory or submodule** at the hook path. The fix is `git rm -r --quiet -- <hook path>` and a commit. After the removal that tier resolves nothing, so the next tier is searched, or the line reads `none configured`. To keep a hook for the phase, commit an executable regular file at the path instead.
+
+Kanban-side hooks and cfg hooks with an absolute path are read from disk. One that exists but is not executable emits a warning and is skipped.
 
 ### The always-printed hook line
 
@@ -2697,14 +3124,14 @@ Hook stdout and stderr are captured and prefixed with `[hook <name>]` in the rel
 `project.cfg_example` carries commented `[hooks]` entries for all three phase-hook keys and all three `*_required` keys. See the file for inline documentation; the common patterns:
 
 - **No hook needed.** Leave all six keys commented out (the default). The release prints `none configured` three times and proceeds.
-- **Portable hook that survives project recreation.** Drop an executable script at `<dev_tree_path>/.pgai/hooks/cm-release-<phase>.sh` and commit it to the managed repo. The `.pgai/` prefix is the portable in-repo hook location — no `project.cfg` edit is required for the hook to resolve.
+- **Portable hook that survives project recreation.** Drop an executable script at `<dev_tree_path>/.pgai/hooks/cm-release-<phase>.sh` and commit it to the managed repo with git mode 100755, or commit a symlink there to a committed executable file. The `.pgai/` prefix is the portable in-repo hook location — no `project.cfg` edit is required for the hook to resolve.
 - **Required portable hook (fail-loud on missing wiring).** Same as above, plus set `cm_release_<phase>_hook_required = true` in `project.cfg [hooks]`.
 - **Kanban-side override.** Drop the hook at `$KANBAN_ROOT/projects/<name>/hooks/cm-release-<phase>.sh` when the hook should NOT ship with the managed repo (temporary, deployment-specific, or a testing override).
 - **Explicit path.** Set `cm_release_<phase>_hook` in `project.cfg [hooks]` to point at a script anywhere. Absolute paths are used as-is; relative paths resolve against `dev_tree_path`.
 
 ### The pre-squash HALT trigger, in context
 
-The pre-squash hook failure is trigger #4 of the nine CM HALT triggers (see "CM HALT triggers" above). Two failure paths reach that trigger under this design:
+The pre-squash hook failure is trigger 4, one of the integrity stops in "CM HALT triggers" above. Two failure paths reach that trigger under this design:
 
 - The pre-squash hook resolved and ran, but exited non-zero. The release blocks; the operator inspects the `[hook cm-release-pre-squash]` log lines.
 - No hook resolved at any tier and `cm_release_pre_squash_hook_required = true`. The release HALTs before the phase; the operator adds the missing hook or clears the required flag.
@@ -2727,7 +3154,7 @@ Use this procedure when ALL of the following are true:
 
 This is **not** a "TESTER waiver" procedure. The old waiver pattern — operator flipping a TESTER task from `BLOCKED` to `DONE` after deciding a found bug was acceptable — is no longer used. TESTER no longer reaches `BLOCKED` for found bugs, stale assertions, pre-existing failures, or gaps. TESTER files those via Path C and continues to `DONE` with a `SHIP-WITH-CONCERNS` or `SHIP-WITH-SERIOUS-CONCERNS` recommendation. CM applies ship policy.
 
-If you see a TESTER task in `BLOCKED` state, it means verification literally could not complete (pre-flight failure, runner crash, missing requirements doc, unreachable dev tree). The fix is to repair the infrastructure problem and re-run TESTER — not to flip the state by hand. Manually marking a `BLOCKED` TESTER task as `DONE` would discard the signal that verification did not happen and silently bypass the chain's halt mechanism.
+If you see a TESTER task in `BLOCKED` state, it means verification literally could not complete (pre-flight failure, runner crash, missing requirements doc, unreachable dev tree). The release does not halt on it: it returns the TESTER task to `BACKLOG` once with its block cause and waits (`release.sh` exits 4), and if verification still does not run it ships `NON-FUNCTIONAL` with "Verification did not run" and an operator inbox entry. The fix is to repair the infrastructure problem so the requeued run completes — not to flip the state by hand. Manually marking a `BLOCKED` TESTER task as `DONE` discards the signal that verification did not happen, and a `DONE` task with no report is still read as verification that did not run.
 
 For CM tasks in `BLOCKED` state, see the "When the chain halts" section above. CM blocks itself when it creates an autonomous HALT; the operator's job is to investigate the trigger, resolve the underlying issue, remove that project's HALT file, and re-run (or supersede) the CM task. The procedure below applies only when the operator has independently completed the underlying release work outside the pipeline.
 
@@ -2793,9 +3220,29 @@ If the work was genuinely completed, use `DONE`. `WONT-DO` means the work was in
 
 Cron drives the chain at a fixed cadence — every 2 minutes per agent by default, with a sub-minute stagger so agents in the same 2-minute window do not collide. In `team/templates/install/crontab.example`, PM fires at :00, CM at :00+21s and TESTER at :00+42s on even minutes; CODER fires at :01 and WRITER at :01+21s on odd minutes. The size-tier templates beside it (`crontab-small.example`, `crontab-medium.example`, `crontab-large.example`) fire each agent every 5 minutes, every 2 minutes and every minute respectively.
 
+**Batches of one agent never overlap within a project.** Each `wake-batch.sh` firing starts one batch per registered, enabled project, and each batch works that project alone. A batch first claims the single-instance guard for its project and agent: a record at `locks/wake-batch-<agent>-<project>.record` naming the batch's pid. A firing starts a batch for each project that has no running batch of that agent, and skips each project that has one with one log line, changing nothing there:
+
+```text
+wake-batch(<agent>): previous firing still running for project <project> (pid <pid>, age <N>s); skipping
+```
+
+A record whose pid is dead, or has been reused by another process, is taken over at once. Batches for different projects never wait on each other's guard, and neither do different agents. If a project's guard cannot be read or written, its batch logs that to stderr and runs unguarded rather than not at all. The firing waits for every batch it started and exits with the first non-zero status among them, else 0. A provider wake script run directly (`scripts/wake/<provider>.sh`) takes no guard and works every registered project in turn.
+
+The agent is read from the arguments the way the provider wake scripts read them: `--agent=X`, `--agent X` or `-a X` anywhere, the last one winning, else the legacy positional word; `--sleep`/`-s` and `--max-tasks` take their value with them. Three faults are refused rather than run blind:
+
+- **No agent can be read.** The firing prints the dual-channel refusal `wake_batch.agent_undetermined`, starts no provider wake script and exits 1.
+- **`projects.cfg` exists but cannot be read.** The firing prints `wake_batch.registry_unreadable` naming the file, starts nothing, exits 1 and leaves one open operator-inbox entry. A missing `projects.cfg`, or one that registers no enabled project, is not a fault: one `nothing to wake` line, exit 0.
+- **A registered name is not a plain project name** (one the project-name rule accepts: a lowercase letter or digit, then lowercase letters, digits and `-`). The firing logs the name, prints `wake_batch.project_name_not_plain`, starts no batch for it and leaves one open operator-inbox entry. Every other project is still woken, and the exit status is theirs.
+
+Each inbox entry has source `wake-batch` and goes to the first registered project that has a directory, else the first project directory under `projects/`. A firing that meets the same fault again adds no second entry. Fix the cause as the entry's `How to answer` says, then close it.
+
+Within one project only one agent runs at a time: every chain holds the project's repo lock for its whole run, and the guard does not change that. Across projects the host runs up to one session per project per agent at once, bounded by the per-task timeout (`max_task_seconds`) and the `[wake]` runtime caps.
+
 The stagger spreads start times only. Every role's wake for a project takes the same repo lock, so a wake that runs past the next role's slot still holds it when that role fires; "Repo lock and contention" below covers what the later wake does.
 
-Each firing runs one main-loop pass per registered project: pick the next BACKLOG task, run the agent, repeat until the project's backlog is empty or a stop condition trips. When the loop has no more BACKLOG tasks and PM is operating in `automatic` mode, the autonomous scan (`discovery_run_pipeline`) fires before the firing exits — it inspects bugs, priority requirements, and regular requirements for fresh work and may queue a new PM task. The scan runs without the repo lock, and on a busy chain it exits in seconds without scanning anything.
+**Each tier assumes, per project, that an idle pass releases the repo lock well inside its stagger** — the gap between two agents' start times: 60 s on small, 21 s on medium and 12 s on large. The large tier fires every agent every minute for every project: each firing gives every project its own batch, and one project's lock is contended only by that project's own agents, whatever other projects are doing. An idle pass is a wake with nothing to dispatch for a project. It holds the lock only for its housekeeping on the dev tree and worktrees, then releases it before the WAITING/BLOCKED re-checks and the intake census. Their scans run unlocked. Each queue or status write they make — a WAITING or BLOCKED promotion, an intake-item closure — retakes the repo lock for that one write and releases it at once, logging `project <project>: idle pass: <write> made under the retaken repo lock (held <N.NN>s, exit <N>)`. A write that cannot take the lock is not made, nor is any later write in that pass; the pass ends and the next firing retries, logging `project <project>: idle pass: <write> not written -- repo lock held by <provenance>; ...`. A measured idle pass holds the lock for 1.0 to 1.5 s, and a unit test keeps that hold under 2 s and under half the large tier's 12 s stagger, and each write's hold under the same 2 s. Each release logs its hold as `project <project>: repo lock released (held <N.NN>s)`, so the assumption can be checked on a live host. The large tier is meant for hosts where that assumption holds. Two kinds of pass keep the lock for the whole pass: a PM pass in `automatic` mode, which keeps it through discovery (below), and a pass whose dispatch is held by the blocked-task guard.
+
+Each batch runs one main-loop pass over its project: pick the next BACKLOG task, run the agent, repeat until the project's backlog is empty or a stop condition trips. `max_tasks_per_wake` and the `[wake]` runtime caps count per batch, that is per project and agent, so a long queue in one project does not hold back another project's batch. When the loop has no more BACKLOG tasks and PM is operating in `automatic` mode, the autonomous scan (`discovery_run_pipeline`) fires before the batch exits — it inspects bugs, priority requirements, and regular requirements for fresh work and may queue a new PM task. The PM wake keeps the chain's repo lock through the scan and writes what it finds in the same firing; on a busy chain discovery exits in seconds without scanning anything.
 
 Without further machinery, a PM task queued by the autonomous scan would sit in the just-emptied backlog until the next cron tick before being processed. For the common operator workflow ("drop a bug, see what happens, drop another") that wait time compounds across iterations.
 
@@ -2815,7 +3262,7 @@ Before the post-discovery iteration fires, three explicit gates must all clear. 
 2. **Active RC re-check.** If the project's `release-state.md` shows `## Active RC` other than `none`, skip. An RC is in flight and PM must not decompose new work mid-flight. Discovery's chain-busy guard already exits before any scan while an RC is active, but the post-discovery iteration re-checks as defense in depth — the state could have changed between that guard and this point.
 3. **`process_one_task` natural empty-queue guard.** Even after the first two gates pass, `process_one_task` only runs when a real BACKLOG task is selectable from the project's queue. If none is found, the call is a no-op and the loop exits cleanly without firing an agent.
 
-The dispatch also runs only under the repo lock. PM let go of the lock for the discovery scan, and discovery took it back only if it wrote something. If PM does not hold the lock again at this point, or it no longer owns it when ownership is re-verified, the iteration is skipped and the next PM wake dispatches the task.
+The dispatch also runs only under the repo lock. PM keeps the chain's lock through discovery, so the dispatch uses the same hold. If PM no longer owns it when ownership is re-verified at this point, the iteration is skipped and the next PM wake dispatches the task.
 
 The three-gate design preserves a key invariant: the post-discovery iteration cannot process a task during an Active RC, cannot run while HALT is set, and cannot fire on a phantom queue entry. Any failure mode falls back to "wait for the next cron tick" — the worst outcome of a gate trip is one cron interval of latency, never incorrect execution.
 
@@ -2830,11 +3277,11 @@ The three-gate design preserves a key invariant: the post-discovery iteration ca
 
 ### Repo lock and contention
 
-Each project has one repo lock. A role's wake takes it at the start of its chain for that project, recording op `wake-chain:<project>` in the lock's provenance, and holds it until the chain ends — through task selection, the agent run and the merge. Two roles never hold it at once. Three behaviours decide what happens when two wakes want it.
+Each project has one repo lock. A role's wake takes it at the start of its chain for that project, recording op `wake-chain:<project>` in the lock's provenance, and holds it until the chain ends — through task selection, the agent run and the merge. An idle pass is the exception: it releases the lock before its re-checks and census ("Cron and Wake Cadence" above), retakes it for each queue or status write they make, and takes it back for the rest of the chain only if a re-check makes a task dispatchable. Two roles never hold it at once. Three behaviours decide what happens when two wakes want it.
 
-#### An idle PM wake holds no lock while it scans
+#### An idle PM wake keeps the lock through discovery
 
-When PM's queue is empty (or dispatch is held by the blocked-task guard) and PM is in `automatic` mode, PM releases the repo lock before it runs discovery and logs `repo lock released for read-only discovery; discovery re-takes it only to write`. After the HALT and pending-PM-ticket guards, discovery's first check is whether the chain is busy: an Active RC, or any task named in any role queue whose own `status.md` is not DONE or WONT-DO. A busy chain exits before any scan, so the whole PM wake takes seconds. The wake log names the cause, then the exit:
+When PM's queue is empty (or dispatch is held by the blocked-task guard) and PM is in `automatic` mode, PM keeps the chain's repo lock and runs discovery under it, logging `repo lock kept through discovery; the discovery write uses the chain's hold`. After the HALT and pending-PM-ticket guards, discovery's first check is whether the chain is busy: an Active RC, or any task named in any role queue whose own `status.md` is not DONE or WONT-DO. A busy chain exits before any scan, so the whole PM wake takes seconds. The wake log names the cause, then the exit:
 
 ```text
 discovery_run_pipeline [<project>]: chain busy — <agent>_backlog task <TASK-ID> is <STATE>
@@ -2843,16 +3290,24 @@ discovery_run_pipeline [<project>]: chain busy, idle exit before any scan
 
 The cause line reads `discovery_run_pipeline [<project>]: chain busy — Active RC=<version>` when an RC is open, and `discovery_run_pipeline [<project>]: chain busy — <agent>_backlog names <TASK-ID> with unparseable status.md` when a queued task's state cannot be read.
 
-On an idle chain, discovery scans without the lock and takes it only once it has something to write: a bundle into `requirements/`, an intake item's status flip, or a PM ticket. That acquisition is a single attempt and never waits. Two outcomes stop the write, and the iteration ends idle:
+On an idle chain, discovery scans under the chain's hold and writes in the same firing once it has something to write: a bundle into `requirements/`, an intake item's status flip, or a PM ticket. Before the first write it confirms the chain still owns the lock and re-runs the busy test; it never acquires the lock a second time, so the write never waits on another role. Two outcomes stop the write, and the iteration ends idle:
 
-- Another role holds the lock: `<step>: repo lock not available for the discovery write; deferring to the next wake`.
-- The busy test, re-run under the lock, finds the chain turned busy during the scan: `<step>: chain became busy during the unlocked scan; not writing`.
+- The chain lost ownership of the lock: `project <project>: discovery write: repo lock ownership lost; not writing`, then `<step>: repo lock not available for the discovery write; deferring to the next wake`.
+- The busy test finds the chain turned busy during the scan: `<step>: chain became busy during the unlocked scan; not writing`.
 
-A PM wake that wrote keeps the lock for its post-discovery dispatch and releases it when its chain ends. `pm-agent.sh --auto` runs the same pipeline outside any wake chain. It takes the lock for the write itself, with op `discovery-write:<project>`, and releases it before returning.
+The PM wake keeps the lock for its post-discovery dispatch and releases it once, when its chain ends.
+
+`pm-agent.sh --auto` runs the same pipeline outside any wake chain, holding no lock, so its scans run unlocked. At its first write it takes the repo lock itself, with op `discovery-write:<project>`, waiting with backoff for up to `[wake] lock_wait_seconds` (default `120`; `0` makes it a single attempt) for any holder to let go, and releases it before returning. A wait logs `discovery write: waiting up to <S>s (lock_wait_seconds) for the repo lock held by <provenance>`. When the wait runs out it logs `discovery write: repo lock still held after waiting up to <S>s (lock_wait_seconds)` and the deferral line above, and the write waits for the next run.
 
 #### A contended wake waits for another wake chain
 
-A wake that finds the lock held by another wake chain — the lock record's op is `wake-chain:<project>` — does not give up at the first probe. It retries with backoff, starting at 1 s and doubling to 8 s between attempts, for up to `[wake] lock_wait_seconds` (default `120`; `0` makes every acquisition a single attempt). That outlasts an idle chain's hold, so a role with ready work takes the lock and dispatches in the same firing once the holder lets go.
+A lock held by another wake chain — the lock record's op is `wake-chain:<project>` — defers that project at once while other projects remain in the batch, so they run first; the bounded wait applies only when none remain (a single-project batch included) and in the end-of-iteration retry pass. The immediate deferral logs:
+
+```text
+project <project>: not waiting for the repo lock held by wake chain holder=<h> pid=<p> op=wake-chain:<project> task=<t>: <n> other project(s) remain in this batch and go first; the end-of-iteration retry pass waits for it (lock_wait_seconds=<N>)
+```
+
+The wait retries with backoff, starting at 1 s and doubling to 8 s between attempts, for up to `[wake] lock_wait_seconds` (default `120`; `0` makes every acquisition a single attempt). That outlasts an idle chain's hold, so a role with ready work takes the lock and dispatches in the same firing once the holder lets go.
 
 ```text
 project <project>: waiting up to <S>s for the repo lock held by wake chain holder=<h> pid=<p> op=wake-chain:<project> task=<t> (lock_wait_seconds=<N>, batch budget left=<B>s)
@@ -2868,7 +3323,7 @@ project <project>: repo lock still held after waiting <S>s (lock_wait_seconds=<N
 
 Any other holder is not waited on: an OVERWATCH repair, `pm-agent.sh --auto`'s `discovery-write:<project>` lock, an operator tool, or a lock with no record. The wake defers at once and logs `project <project>: not waiting for the repo lock: its holder is not a wake chain (<provenance>)`. A refused acquisition — incomplete provenance or an unusable lock directory — also returns at once.
 
-Whenever the first attempt ends without the lock — the wait ran out, or the holder was not one to wait on — the wake logs `project <project>: repo lock held by <provenance> -- probe <n>, deferring for an end-of-iteration retry` and moves on to its other projects. It tries once more at the end of the iteration, waiting only for any budget left. If the lock is still held, it logs `project <project>: retry pass: still contended after retry (<n> probe(s) this firing), deferring to the next wake firing`.
+Whenever the first attempt ends without the lock — other projects remained, the wait ran out, or the holder was not one to wait on — the wake logs `project <project>: repo lock held by <provenance> -- probe <n>, deferring for an end-of-iteration retry` and moves on to its other projects. It tries once more at the end of the iteration, waiting only for any budget left. If the lock is still held, it logs `project <project>: retry pass: still contended after retry (<n> probe(s) this firing), deferring to the next wake firing`.
 
 #### The starvation guard gives a losing role priority
 
@@ -2880,7 +3335,7 @@ At `[wake]` `lock_starvation_firings` consecutive firings (default `3`; `0` turn
 project <project>: WARNING: lock starvation: <role> has deferred on repo-lock contention for <N> consecutive firing(s) while its task <TASK-ID> is BACKLOG -- PM wakes skip discovery while that task is ready
 ```
 
-From then on, every PM wake for the project skips discovery while that role's task is still BACKLOG, so PM stops taking the lock for discovery. PM re-checks the task's state at each wake and logs:
+From then on, every PM wake for the project skips discovery while that role's task is still BACKLOG, so PM no longer holds the lock through a discovery scan. PM re-checks the task's state at each wake and logs:
 
 ```text
 project <project>: autonomous scan: skipping discovery -- <role> task <TASK-ID> is ready and <role> has deferred on repo-lock contention for <N> consecutive firing(s)
@@ -2987,11 +3442,13 @@ Both provider dispatchers (`scripts/wake/claude.sh` and `scripts/wake/codex.sh`)
 `[providers] active` immediately after argument parsing, before sourcing any provider-specific
 code, acquiring any flock, or reading any queue. The inactive script exits in under one second from cron-firing to process-exit.
 
-This is a hard contract. The crontab installs entries for every provider on every tick;
-the cheapness of the inactive-exit path is what keeps the unused entries from consuming
+This is a hard contract. Shipped schedules call `scripts/wake-batch.sh`, which execs only the
+active provider's wake script, so the inactive-exit path is reached when an inactive
+provider's wake script is invoked directly: by an operator, or from an older crontab that
+still carries one row per provider. Its cheapness is what keeps those firings from consuming
 real machine resources. If a future provider adds a long initialization step before the
-active-provider check, that contract has been broken and the change needs to be moved
-later in the wake script.
+active-provider check, that contract has been broken and the change needs to be moved later
+in the wake script.
 
 Verifying the contract is straightforward when needed:
 
@@ -3107,64 +3564,50 @@ Set `PGAI_KANBAN_PM_MODE` through any of the standard configuration channels:
 
 ### Crontab convention
 
-The recommended crontab installs entries for every provider listed in `kanban.cfg`
-`[providers] available`. Claude and Codex are first-class providers; both fire on every
-tick, and the one whose name does not match `[providers] active` exits in under one second.
+The recommended crontab has one entry per agent, each running `scripts/wake-batch.sh`.
+That script reads `kanban.cfg` `[providers] active` on every firing and dispatches to the
+active provider's wake script itself, so switching providers needs no crontab edit (see
+"Provider Switch" above). Each firing starts one guarded batch per project; "Cron and Wake
+Cadence" above covers the fan-out and the guard.
 
-The default pattern fires each agent every 2 minutes per provider with a sub-minute stagger
-so agents in the same 2-minute window do not collide.  PM, CM, and TESTER fire on even
-minutes; CODER and WRITER fire on odd minutes.  Operators can swap the even/odd assignment
-if preferred.
+The default pattern, `team/templates/install/crontab.example`, fires each agent every 2
+minutes with a sub-minute stagger so agents in the same 2-minute window do not collide.
+PM, CM, and TESTER fire on even minutes; CODER and WRITER fire on odd minutes.  Operators
+can swap the even/odd assignment if preferred.
 
 ```cron
 PGAI_AGENT_KANBAN_ROOT_PATH=/home/<user>/pgai_agent_kanban
 PATH=/path/to/claude:/path/to/codex:/usr/local/bin:/usr/bin:/bin
 
-# --- Claude entries — even-minute agents (pm, cm, tester) ---
-*/2 * * * * $PGAI_AGENT_KANBAN_ROOT_PATH/scripts/wake/claude.sh --agent=pm     --sleep=0  >> $PGAI_AGENT_KANBAN_ROOT_PATH/logs/cron-pm.log 2>&1
-*/2 * * * * $PGAI_AGENT_KANBAN_ROOT_PATH/scripts/wake/claude.sh --agent=cm     --sleep=21 >> $PGAI_AGENT_KANBAN_ROOT_PATH/logs/cron-cm.log 2>&1
-*/2 * * * * $PGAI_AGENT_KANBAN_ROOT_PATH/scripts/wake/claude.sh --agent=tester --sleep=42 >> $PGAI_AGENT_KANBAN_ROOT_PATH/logs/cron-tester.log 2>&1
+# --- Even-minute agents (pm, cm, tester) ---
+*/2 * * * * $PGAI_AGENT_KANBAN_ROOT_PATH/scripts/wake-batch.sh --agent=pm     --sleep=0  >> $PGAI_AGENT_KANBAN_ROOT_PATH/logs/cron-pm.log 2>&1
+*/2 * * * * $PGAI_AGENT_KANBAN_ROOT_PATH/scripts/wake-batch.sh --agent=cm     --sleep=21 >> $PGAI_AGENT_KANBAN_ROOT_PATH/logs/cron-cm.log 2>&1
+*/2 * * * * $PGAI_AGENT_KANBAN_ROOT_PATH/scripts/wake-batch.sh --agent=tester --sleep=42 >> $PGAI_AGENT_KANBAN_ROOT_PATH/logs/cron-tester.log 2>&1
 
-# --- Claude entries — odd-minute agents (coder, writer) ---
-1-59/2 * * * * $PGAI_AGENT_KANBAN_ROOT_PATH/scripts/wake/claude.sh --agent=coder  --sleep=0  >> $PGAI_AGENT_KANBAN_ROOT_PATH/logs/cron-coder.log 2>&1
-1-59/2 * * * * $PGAI_AGENT_KANBAN_ROOT_PATH/scripts/wake/claude.sh --agent=writer --sleep=21 >> $PGAI_AGENT_KANBAN_ROOT_PATH/logs/cron-writer.log 2>&1
-
-# --- Codex entries — same schedule, parallel script ---
-*/2 * * * * $PGAI_AGENT_KANBAN_ROOT_PATH/scripts/wake/codex.sh --agent=pm     --sleep=0  >> $PGAI_AGENT_KANBAN_ROOT_PATH/logs/cron-pm.log 2>&1
-*/2 * * * * $PGAI_AGENT_KANBAN_ROOT_PATH/scripts/wake/codex.sh --agent=cm     --sleep=21 >> $PGAI_AGENT_KANBAN_ROOT_PATH/logs/cron-cm.log 2>&1
-*/2 * * * * $PGAI_AGENT_KANBAN_ROOT_PATH/scripts/wake/codex.sh --agent=tester --sleep=42 >> $PGAI_AGENT_KANBAN_ROOT_PATH/logs/cron-tester.log 2>&1
-1-59/2 * * * * $PGAI_AGENT_KANBAN_ROOT_PATH/scripts/wake/codex.sh --agent=coder  --sleep=0  >> $PGAI_AGENT_KANBAN_ROOT_PATH/logs/cron-coder.log 2>&1
-1-59/2 * * * * $PGAI_AGENT_KANBAN_ROOT_PATH/scripts/wake/codex.sh --agent=writer --sleep=21 >> $PGAI_AGENT_KANBAN_ROOT_PATH/logs/cron-writer.log 2>&1
+# --- Odd-minute agents (coder, writer) ---
+1-59/2 * * * * $PGAI_AGENT_KANBAN_ROOT_PATH/scripts/wake-batch.sh --agent=coder  --sleep=0  >> $PGAI_AGENT_KANBAN_ROOT_PATH/logs/cron-coder.log 2>&1
+1-59/2 * * * * $PGAI_AGENT_KANBAN_ROOT_PATH/scripts/wake-batch.sh --agent=writer --sleep=21 >> $PGAI_AGENT_KANBAN_ROOT_PATH/logs/cron-writer.log 2>&1
 
 # --- OVERWATCH Tier-1 sweep (hourly at :30) ---
 # Deterministic bash sweep across every registered project. Zero LLM cost.
 # The :30 minute slot puts the sweep off-beat from every 2-minute agent tick,
 # so it never collides with an agent wake.
 30 * * * * $PGAI_AGENT_KANBAN_ROOT_PATH/scripts/overwatch-sweep.sh >> $PGAI_AGENT_KANBAN_ROOT_PATH/logs/cron-overwatch-sweep.log 2>&1
-
-# --- OVERWATCH Tier-2 deep-clean (daily at 03:30) ---
-# LLM-driven review of the action log and any sweep-flagged anomalies.
-# The daily cadence keeps model cost bounded; the 03:30 slot avoids the
-# hourly sweep at :30 by an hour and sits during a low-traffic window.
-30 3 * * * $PGAI_AGENT_KANBAN_ROOT_PATH/scripts/wake-batch.sh --agent=overwatch --sleep=0 --max-tasks=1 >> $PGAI_AGENT_KANBAN_ROOT_PATH/logs/cron-overwatch.log 2>&1
 ```
 
-The overwatch lines are the two-tier cadence in cron form. Both are staggered off the every-2-minutes agent slots — the hourly sweep fires at the :30 mark (equidistant from :00 and :00+21s and :01+21s slots), the daily deep-clean fires at 03:30. Neither line touches the provider-dispatch pattern above: `overwatch-sweep.sh` is provider-independent bash, and the Tier-2 agent wake honors the standard `[providers] active` resolution just like the vertical agents. See `roles/OVERWATCH.md` for the tier semantics.
+The overwatch line is OVERWATCH's whole schedule: one hourly sweep at the :30 mark, off the agent slots. `overwatch-sweep.sh` is provider-independent and calls no model, so it does not follow the provider-dispatch pattern above. There is no daily OVERWATCH wake. An older crontab that still carries a `wake-batch.sh` line for the overwatch agent loses it the next time `install-crontab.sh` rewrites the managed lines; until then that line runs plain block triage and the resolution stage, and dispatches nothing.
 
-The on-BLOCK trigger (in the wake scripts' generic set-BLOCKED path) is the event-driven complement to these cron lines: fresh BLOCKED tasks nudge OVERWATCH within seconds rather than waiting for the next :30 tick. The trigger fires-and-forgets — the block path's exit status is unchanged whether or not the nudge lands, so a broken `wake-now.sh` cannot add a failure mode to the chain. Storms dedupe via the per-agent wake flock: many blocks in one minute produce one OVERWATCH run.
-
-Both providers' entries fire on every tick. The script whose provider name does not match
-`[providers] active` exits in under a second; the matching script proceeds to acquire the
-flock and do real work. Only one provider does work at a time. See "Provider Switch" above.
+The on-BLOCK nudge is the event-driven complement to the hourly line. When a wake chain blocks a task, it releases the project's repo lock and then starts `overwatch-sweep.sh --only block-triage --lock-wait 60` in the background, so a fresh block is decided within seconds rather than at the next :30 tick. The nudge is fire-and-forget: its exit status is ignored, so it adds no failure mode to the block path. A chain nudges at most once, OVERWATCH never nudges itself, and each project's firing lock keeps two firings from acting on one project at once. Its output goes to `logs/overwatch-trigger.log`.
 
 The `--sleep=N` parameter delays the script N seconds after cron fires but before acquiring
 the work-queue lock, creating sub-minute stagger without cron fractions.  The legacy
-positional form (`wake/claude.sh pm`) still works but emits a deprecation warning; switch
+positional form (`wake-batch.sh pm`) still works but emits a deprecation warning; switch
 to `--agent=` at your next crontab edit.
 
 To install or update the crontab automatically, run `team/scripts/install-crontab.sh`.
-That script reads `team/templates/install/crontab.example`, substitutes the live kanban root path,
-and emits both the Claude and the Codex blocks.
+That script renders the tier template you choose (`team/templates/install/crontab-small.example`,
+`crontab-medium.example` or `crontab-large.example`; the medium tier carries the schedule
+above), substituting the live kanban root and the directory holding the claude CLI.
 
 While you are stabilizing a new install, you may also wish to include `PGAI_KANBAN_PM_MODE=manual` at
 the top of the crontab to disable the autonomous scan.  Switch
@@ -3483,14 +3926,14 @@ Each role's wake reads layers 1 and 2 as listed in `read-order/<role>.txt`. The 
 
 The multi-project directory layout, `$PGAI_PROJECT_ROOT` resolution, per-project path table, and single-project shim are documented in `team/SOP-core.md` under "Projects Layout." This section covers the operator create-project flow and workflow-template dispatch.
 
-New projects are added with `team/scripts/create-project.sh`. It bootstraps the full project skeleton, registers the project in `projects.cfg`, and writes a `project.cfg` rendered from the `project.cfg_example` template — every per-project key, each with its accepted values and default — with **permissive ceilings**: `max_patch=21`, `max_minor=13`, `max_major=0`. A freshly-created project is therefore **live** — the discovery pipeline can queue PM for any requirements doc within those ceilings on the next wake. `max_major=0` keeps major releases gated until the operator raises it.
+New projects are added with `scripts/create-project.sh`. It bootstraps the full project skeleton, registers the project in `projects.cfg`, and writes a `project.cfg` rendered from the `project.cfg_example` template — every per-project key, each with its accepted values and default — with **permissive ceilings**: `max_patch=21`, `max_minor=13`, `max_major=0`. A freshly-created project is therefore **live** — the discovery pipeline can queue PM for any requirements doc within those ceilings on the next wake. `max_major=0` keeps major releases gated until the operator raises it.
 
 ### Canonical four-step flow
 
 ```bash
 # 1. Bootstrap the project (skeleton, queues, templates, registration),
 #    supplying the path-bearing fields at creation time.
-team/scripts/create-project.sh --project <name> [--workflow-type <type>] \
+"$PGAI_AGENT_KANBAN_ROOT_PATH/scripts/create-project.sh" --project <name> [--workflow-type <type>] \
   --dev-tree /absolute/path/to/local/clone \
   --git-repo git@github.com:<org>/<repo>.git
 
@@ -3498,7 +3941,7 @@ team/scripts/create-project.sh --project <name> [--workflow-type <type>] \
 $EDITOR $PGAI_AGENT_KANBAN_ROOT_PATH/projects/<name>/README.md
 
 # 3. Release workflow only: create the chain's base branch (<prefix>main) once.
-team/scripts/init-project-git-repo.sh --project <name>   # push_to_remote = true
+"$PGAI_AGENT_KANBAN_ROOT_PATH/scripts/init-project-git-repo.sh" --project <name>   # push_to_remote = true
 
 # 4. Drop one or more requirements docs.
 $EDITOR $PGAI_AGENT_KANBAN_ROOT_PATH/projects/<name>/requirements/v0.1.0.md
@@ -3512,7 +3955,7 @@ Nothing holds the chain back after step 1: the discovery pipeline scans the proj
 
 | Field | Default | Notes |
 |---|---|---|
-| `project_name` | `--project <name>` | Validated `^[a-zA-Z][a-zA-Z0-9_-]*$`. |
+| `project_name` | `--project <name>` | Validated `^[a-z0-9][a-z0-9-]*$`. |
 | `workflow_type` | `release` | Any registered, ready workflow type (`HOW_TO.md` section 3). |
 | `git_remote_name` | `origin` | The dev tree's remote that CM's release verbs, `init-project-git-repo.sh` and the push-lag checks fetch from and push to. Blank or absent means `origin`. |
 | `dev_tree_path` | *(empty)* | Set with `--dev-tree`, or edit `project.cfg` later. |
@@ -3560,15 +4003,15 @@ Ceilings are operator checkpoints, not an activation switch. To hold a new proje
 
 ```bash
 # Show current ceilings.
-team/scripts/set-version-ceiling.sh --project <name> --show
+"$PGAI_AGENT_KANBAN_ROOT_PATH/scripts/set-version-ceiling.sh" --project <name> --show
 
 # Raise minor or major ceiling.
-team/scripts/set-version-ceiling.sh --project <name> --minor <N>
-team/scripts/set-version-ceiling.sh --project <name> --major <N>
+"$PGAI_AGENT_KANBAN_ROOT_PATH/scripts/set-version-ceiling.sh" --project <name> --minor <N>
+"$PGAI_AGENT_KANBAN_ROOT_PATH/scripts/set-version-ceiling.sh" --project <name> --major <N>
 
 # Lift a ceiling (no cap): writes max_minor = none / max_major = none.
-team/scripts/set-version-ceiling.sh --project <name> --no-minor
-team/scripts/set-version-ceiling.sh --project <name> --no-major
+"$PGAI_AGENT_KANBAN_ROOT_PATH/scripts/set-version-ceiling.sh" --project <name> --no-minor
+"$PGAI_AGENT_KANBAN_ROOT_PATH/scripts/set-version-ceiling.sh" --project <name> --no-major
 ```
 
 `set-version-ceiling.sh` edits `project.cfg` in place; all other fields are preserved verbatim. `--no-minor` and `--no-major` write the explicit spelling `none` rather than deleting the line, because a deleted line does not mean "no cap": an absent ceiling is the default (21 / 13 / 0), so deleting `max_major` restores the major-release gate instead of removing it. `--show` prints each value in effect: a number, the default marked `(default)` when the key is absent (`max_minor=13 (default)`), `none`, or a malformed value marked invalid.
@@ -3585,7 +4028,7 @@ Release lifecycle hooks (pre-squash, pre-tag, post-tag) can live in three locati
 <dev_tree_path>/.pgai/hooks/cm-release-<phase>.sh
 ```
 
-Drop an executable script at that path, commit it to the managed repo, and the release will resolve it automatically. No `project.cfg` edit is required for the in-repo tier to work. This is the recommended location for hooks that should always be present regardless of the kanban installation state (for example, a version-bump wrapper whose absence causes shipping drift).
+Drop an executable script at that path, commit it to the managed repo with git mode 100755 (or commit a symlink there to a committed executable file), and the release resolves it from the RC branch automatically. No `project.cfg` edit is required for the in-repo tier to work. This is the recommended location for hooks that should always be present regardless of the kanban installation state (for example, a version-bump wrapper whose absence causes shipping drift).
 
 The kanban's `create-project.sh` does not seed a `.pgai/hooks/` directory in the managed repo — the directory is opt-in per project and created only when the project actually needs a portable hook. Full behavior — the three-tier precedence order, the always-printed resolution line, the `cm_release_<phase>_hook_required` flag, and the hook environment contract — is documented in "Release Lifecycle Hooks" above.
 
@@ -3626,7 +4069,7 @@ Both workflows produce the same directory skeleton (`tasks/`, `bugs/`, `priority
 
 | Aspect | `release` project | `document` project |
 |---|---|---|
-| Queue files seeded | `coder_backlog.md`, `pm_backlog.md`, `writer_backlog.md`, `tester_backlog.md`, `cm_backlog.md`, `bug_backlog.md`, `priority_backlog.md`, `overwatch_backlog.md` | Same minus `coder_backlog.md` (no CODER pulls in a document chain); `overwatch_backlog.md` is seeded the same either way — OVERWATCH is horizontal, not tied to a workflow's agent roster |
+| Queue files seeded | `coder_backlog.md`, `pm_backlog.md`, `writer_backlog.md`, `tester_backlog.md`, `cm_backlog.md`, `bug_backlog.md`, `priority_backlog.md` | Same minus `coder_backlog.md` (no CODER pulls in a document chain). OVERWATCH keeps no queue |
 | `REQUIREMENTS-TEMPLATE.md` `## Workflow Type` | `release` | `document` |
 | `REQUIREMENTS-TEMPLATE.md` content focus | Source branch, test required, code-shipping fields | Audience, brief, outline, deliverables, voice-and-tone notes |
 | `brief-example.md` at project root | not seeded | seeded — short, concrete example of the brief format WRITER expects |
@@ -3668,7 +4111,7 @@ No edits to `create-project.sh` are needed. After installation, `create-project.
 
 **A differing copy is never skipped.** The refresh cannot tell an operator's edit from a copy seeded by an older release, and skipping would leave the stale copies the refresh exists to replace. A local customization therefore does not survive an upgrade in the live file; it survives in the backup. To keep it, re-apply it from the `.bak` after each upgrade, or propose it as a change to the shipped template so every project gets it. The `.bak` suffix keeps backups out of every `*.md` scan, so they are never read as bug, priority or requirements files. The refresh does not remove old backups; delete them when you no longer want them.
 
-**Nothing else under `projects/` is written.** The README copies are seeded once at creation and never refreshed, and the rest of each project's state stays protected through an upgrade. Templates are read only from the installed tree, never from a dev-tree checkout, so a template change reaches projects only once it ships and is installed.
+**Nothing else under `projects/` is written except the project README template snapshot,** `projects/<name>/.readme-template.md`: stored when missing, and when it differs from the installed `templates/project/README-TEMPLATE.md`, moved aside as `.readme-template.<UTC timestamp>.md`, replaced by that template, and reported in a one-line notice. What the notice means, and that the project `README.md` itself is never edited, is in `HOW_TO.md` section 10, "Project README template notice". The README copies are seeded once at creation and never refreshed, and the rest of each project's state stays protected through an upgrade. Templates are read only from the installed tree, never from a dev-tree checkout, so a template change reaches projects only once it ships and is installed.
 
 **Reading the output.** Every line the step prints starts with `Seeded templates:`. An example, for a project with an edited bug template and no requirements template (the project name and timestamp are illustrative):
 
@@ -3678,7 +4121,14 @@ Seeded templates: project 'demo': seeded missing requirements/templates/REQUIREM
 Seeded templates: refreshed 1 file(s) (each backed up first) and seeded 1 across 1 registered project(s).
 ```
 
-A run over copies that already match prints a single line saying nothing changed.
+The closing line also counts any project README template snapshot the run stored or moved aside. A run whose intake copies already match but which wrote a snapshot prints a notice for each project whose snapshot was moved aside (a missing snapshot is stored with no notice of its own), then a closing line counting the snapshots instead of saying nothing changed. An example, where one project's snapshot was moved aside and another's was stored (paths shortened; project name and timestamp illustrative):
+
+```
+Seeded templates: project 'alpha': the project README template changed since README.md was seeded or last checked; README.md is not changed; see the change: diff -u '.../projects/alpha/.readme-template.20261016T193148Z.md' '.../templates/project/README-TEMPLATE.md'
+Seeded templates: all intake copies in 2 registered project(s) already match the installed templates; moved aside 1 changed and stored 1 missing project README template snapshot(s) (.readme-template.md).
+```
+
+Only a run that writes no intake copy and no snapshot prints a single line saying nothing changed.
 
 **A failure never stops the install or upgrade.** A project whose directory is missing, or a copy that cannot be written, is reported on stderr and skipped while the other projects still refresh. The installer then warns and prints the command to re-run once the cause is fixed:
 
@@ -3756,13 +4206,13 @@ max_patch = 5    # only vX.Y.Z where Z <= 5 are queued
 
 ```bash
 # Edit project.cfg [versioning] directly, or use set-version-ceiling.sh:
-team/scripts/set-version-ceiling.sh --project <name> --minor 22
+"$PGAI_AGENT_KANBAN_ROOT_PATH/scripts/set-version-ceiling.sh" --project <name> --minor 22
 ```
 
 **To remove a ceiling entirely** (no cap):
 
 ```bash
-team/scripts/set-version-ceiling.sh --project <name> --no-minor
+"$PGAI_AGENT_KANBAN_ROOT_PATH/scripts/set-version-ceiling.sh" --project <name> --no-minor
 # Or manually: set max_minor = none in project.cfg [versioning].
 # Removing or commenting out the line restores the default (13), not "no cap".
 ```
@@ -3770,7 +4220,7 @@ team/scripts/set-version-ceiling.sh --project <name> --no-minor
 **To inspect current ceilings:**
 
 ```bash
-team/scripts/set-version-ceiling.sh --project <name> --show
+"$PGAI_AGENT_KANBAN_ROOT_PATH/scripts/set-version-ceiling.sh" --project <name> --show
 ```
 
 The discovery pipeline also logs the ceilings in effect, defaults included and any `none` left out of the line, making it easy to confirm the operator's intent in the cron log. The line comes after the HALT, pending-PM-ticket and chain-busy guards, so it appears only on a wake that goes on to scan an idle chain.
@@ -3778,8 +4228,8 @@ The discovery pipeline also logs the ceilings in effect, defaults included and a
 **Before you raise a ceiling, find out what spent it.** A patch ceiling reached far sooner than the project's real output explains is usually a run of discovery-generated bundles that carry no resolvable work: consecutive patch versions, one dateline across the whole run, and a `## Bundled Items` section holding pipeline narration instead of bug or priority files. Each one claimed a version slot when discovery wrote it, and each reaching PM decomposes into an empty release. `retire-empty-bundles.sh` reports that class of file without writing anything —
 
 ```bash
-team/scripts/retire-empty-bundles.sh --project <name>            # report only
-team/scripts/retire-empty-bundles.sh --project <name> --apply    # set ## Status: done
+"$PGAI_AGENT_KANBAN_ROOT_PATH/scripts/retire-empty-bundles.sh" --project <name>            # report only
+"$PGAI_AGENT_KANBAN_ROOT_PATH/scripts/retire-empty-bundles.sh" --project <name> --apply    # set ## Status: done
 ```
 
 — and retiring one sets its `## Status` to `done` rather than deleting it, which takes it out of PM's eligible set and frees the version line to move again. Raising the ceiling over an uncleared run only gives the empty bundles more room to consume. The three tells above — consecutive versions, one dateline, narration where item files should be — are what separate this run from ordinary backlog, and the script's `--help` carries the authoritative eligibility rule: a bundle is retirable only when its `## Status` is neither `done` nor `running` and no line under `## Bundled Items` resolves to a file on disk. Report first, read the list, then `--apply`.
@@ -3839,8 +4289,8 @@ $EDITOR "$PGAI_AGENT_KANBAN_ROOT_PATH/pseudocron.env"
 #   <minute> is a literal integer 0–59 (no *, */N, ranges, or lists).
 #   <command> is run via bash -c; shell metacharacters work.
 
-5   /home/<user>/pgai_agent_kanban/scripts/wake/claude.sh --agent=pm
-6   /home/<user>/pgai_agent_kanban/scripts/wake/claude.sh --agent=coder
+5   /home/<user>/pgai_agent_kanban/scripts/wake-batch.sh --agent=pm
+6   /home/<user>/pgai_agent_kanban/scripts/wake-batch.sh --agent=coder
 30  curl -fsS https://example.com/health >> /tmp/health.log 2>&1
 ```
 

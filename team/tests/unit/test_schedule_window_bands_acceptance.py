@@ -24,7 +24,9 @@ FIXTURE STRATEGY
 -----------------
 - **Crontab**: installed through the crontab-sandbox stub every test in
   this tree gets from the autouse `_sandbox_crontab` fixture in
-  team/tests/conftest.py (`crontab -` writes to $HOME/.fake_crontab;
+  team/tests/conftest.py (`crontab -` writes to the test's own
+  tmp_path/.fake_crontab, since HOME stays the test process's own --
+  $HOME/.fake_crontab is used only by a subprocess given its own HOME;
   never the operator's real crontab).
 - **Kanban root**: a fresh `tmp_path`-scoped directory per test, never the
   operator's real kanban root and never a bare `/tmp` path -- pytest's
@@ -129,8 +131,8 @@ def _diagnostic(result: subprocess.CompletedProcess) -> str:
 
 def _install_crontab(text: str) -> None:
     """Install a synthetic crontab through the autouse crontab-sandbox stub
-    (team/tests/conftest.py's `_sandbox_crontab`) -- writes to
-    $HOME/.fake_crontab, never the real operator crontab."""
+    (team/tests/conftest.py's `_sandbox_crontab`) -- writes to the test's
+    own tmp_path/.fake_crontab, never the real operator crontab."""
     result = subprocess.run(
         ["crontab", "-"],
         input=text,

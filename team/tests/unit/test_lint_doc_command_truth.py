@@ -1171,14 +1171,151 @@ def test_tree_without_operator_docs_skips_the_check_with_a_note(tmp_path: Path, 
 
 
 def test_real_tree_ships_no_undocumented_script() -> None:
-    undocumented, checked, where = _lint.run_undocumented_script_check(
-        _TEAM_DIR / "scripts",
-        [(_REPO_ROOT / rel, rel) for rel in _lint._OPERATOR_DOCS],
-        [(_REPO_ROOT / rel, rel) for rel in _lint._INTERNAL_CHECKS_DOCS],
+    # The lint's own check with its own defaults: no document list, scripts
+    # path or remedy text of this test's own, so the test and the lint agree.
+    report = _lint.check_undocumented_scripts(_REPO_ROOT)
+    assert report is not None, "none of the operator docs exists in the real tree"
+    assert report.scripts_checked > 100, f"implausibly few installed scripts found: {report.scripts_checked}"
+    assert report.where_to_list is not None, "no scanned document has an Internal checks section"
+    assert report.findings == [], "\n\n".join(report.findings)
+
+
+def _undocumented_names(text: str) -> set[str]:
+    """The script paths named by UNDOCUMENTED SCRIPT lines in *text*."""
+    prefix = "UNDOCUMENTED SCRIPT: scripts/"
+    return {line.strip()[len(prefix):] for line in text.splitlines() if line.strip().startswith(prefix)}
+
+
+def test_lint_command_line_and_test_route_report_the_same_undocumented_script(tmp_path: Path) -> None:
+    root = _build_fixture_tree(tmp_path)
+    _write_operator_commands(root)
+    _write_script(root, "foo.sh")
+    doc = _write_doc(root, "no-citations.md", "# Nothing cited here\n")
+
+    proc = subprocess.run(
+        [sys.executable, str(_LINT_SCRIPT), "--repo-root", str(root), "--doc", str(doc)],
+        capture_output=True,
+        text=True,
+        timeout=60,
     )
-    assert checked > 100, f"implausibly few installed scripts found: {checked}"
-    assert where is not None and where[0] == "docs/operator-commands.md", where
-    assert [u.rel for u in undocumented] == [], (
-        "scripts the install ships that no operator doc names and no Internal checks section lists: "
-        f"{[u.rel for u in undocumented]}; add a line for each to docs/operator-commands.md's Internal checks section"
+    report = _lint.check_undocumented_scripts(root)
+
+    assert proc.returncode == 1, f"stdout: {proc.stdout!r}\nstderr: {proc.stderr!r}"
+    assert report is not None
+    assert _undocumented_names(proc.stdout) == {"foo.sh"}, f"stdout: {proc.stdout!r}"
+    assert {u.rel for u in report.undocumented} == {"foo.sh"}
+    assert _undocumented_names("\n".join(report.findings)) == {"foo.sh"}
+    for finding in report.findings:
+        assert finding in proc.stdout, f"finding not printed verbatim by the lint: {finding!r}"
+
+
+# ---------------------------------------------------------------------------
+# Config-key parity: a fenced ini block is an example, not a default claim;
+# a prose "`key` defaults to `value`" sentence is a default claim.
+# ---------------------------------------------------------------------------
+
+_RELEASE_REGISTRY = """\
+#!/usr/bin/env bash
+# fixture config_loader.sh: a two-key [release] Key Registry
+#
+# Key Registry
+# ------------
+# [release]
+#   deferred_bugs           OPTIONAL  false
+#   deferred_bug_level      OPTIONAL  low
+
+true
+"""
+
+
+def _key_parity_findings(tmp_path: Path, doc_body: str) -> list[str]:
+    """Run the key-parity pass over one markdown document against the
+    two-key [release] fixture registry and return its findings."""
+    loader = tmp_path / "fixture_config_loader.sh"
+    loader.write_text(_RELEASE_REGISTRY, encoding="utf-8")
+    registry = _lint._parse_config_loader_registry(loader, "fixture_config_loader.sh")
+    doc = tmp_path / "settings.md"
+    doc.write_text(doc_body, encoding="utf-8")
+    findings, _count, _matched = _lint.run_key_parity_check(
+        [(doc, "settings.md")], registry, "python3 team/scripts/lint_doc_command_truth.py"
     )
+    return findings
+
+
+def test_fenced_ini_example_with_non_default_values_is_not_a_default_claim(tmp_path: Path) -> None:
+    findings = _key_parity_findings(
+        tmp_path,
+        "# Settings\n\n"
+        "An operator who wants medium bugs to wait sets:\n\n"
+        "```ini\n"
+        "# projects/my-app/project.cfg\n"
+        "[release]\n"
+        "deferred_bugs = true\n"
+        "deferred_bug_level = medium\n"
+        "```\n",
+    )
+
+    assert findings == [], "\n\n".join(findings)
+
+
+def test_fenced_ini_example_still_flags_an_unknown_key(tmp_path: Path) -> None:
+    findings = _key_parity_findings(
+        tmp_path,
+        "# Settings\n\n"
+        "```ini\n"
+        "[release]\n"
+        "deferred_bugs = true\n"
+        "deferred_bug_level = medium\n"
+        "deferred_bug_levle = high\n"
+        "```\n",
+    )
+
+    assert len(findings) == 1, "\n\n".join(findings)
+    assert findings[0].startswith("UNKNOWN CONFIG KEY: [release] deferred_bug_levle")
+
+
+def test_prose_defaults_to_sentence_is_checked_against_the_registry(tmp_path: Path) -> None:
+    findings = _key_parity_findings(
+        tmp_path,
+        "# Settings\n\n"
+        "`deferred_bugs` defaults to `true`, and `deferred_bug_level` defaults to `low`.\n",
+    )
+
+    assert len(findings) == 1, "\n\n".join(findings)
+    assert findings[0].startswith("CONFIG DEFAULT MISMATCH: [release] deferred_bugs")
+    assert "settings.md:3" in findings[0]
+    assert "documented default: 'true'" in findings[0]
+    assert "loader default:     'false'" in findings[0]
+
+
+def test_prose_default_naming_its_section_inline_is_checked(tmp_path: Path) -> None:
+    findings = _key_parity_findings(
+        tmp_path,
+        "# Settings\n\n"
+        "`[release] deferred_bug_level` defaults to `medium`;"
+        " `[release]` `deferred_bugs` defaults to `false`.\n",
+    )
+
+    assert len(findings) == 1, "\n\n".join(findings)
+    assert findings[0].startswith("CONFIG DEFAULT MISMATCH: [release] deferred_bug_level")
+
+
+def test_prose_default_for_a_name_no_registry_declares_is_not_reported(tmp_path: Path) -> None:
+    findings = _key_parity_findings(
+        tmp_path,
+        "# Settings\n\n"
+        "`deferred_bugs` defaults to `false`; `deferred_bug_level` defaults to `low`.\n"
+        "`timeout_seconds` defaults to `30`.\n",
+    )
+
+    assert findings == [], "\n\n".join(findings)
+
+
+def test_real_tree_operations_deferral_example_block_is_not_a_default_claim(capsys) -> None:
+    """docs/OPERATIONS.md shows a bounded-deferral project.cfg example whose
+    values differ from the loader defaults; the real tree's key-parity pass
+    reports no default mismatch for it."""
+    _lint.main(["--repo-root", str(_REPO_ROOT), "--key-doc", str(_REPO_ROOT / "docs" / "OPERATIONS.md")])
+    out = capsys.readouterr().out
+
+    assert "CONFIG DEFAULT MISMATCH" not in out, out

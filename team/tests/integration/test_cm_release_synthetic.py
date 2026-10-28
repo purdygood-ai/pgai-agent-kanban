@@ -71,6 +71,7 @@ from tests.fixtures.scrubbed_subprocess_env import (
     build_scrubbed_env,
     scrub_agent_scoped_env,
 )
+from tests.fixtures.section_reader_modules import copy_section_reader_modules
 
 
 @pytest.fixture(autouse=True)
@@ -248,6 +249,7 @@ def _build_kanban_root(
         (cm_py_dir / py_file.name).write_text(
             py_file.read_text(encoding="utf-8"), encoding="utf-8"
         )
+    copy_section_reader_modules(cm_py_dir.parent)
 
     return root
 
@@ -447,7 +449,7 @@ class TestCleanRelease:
         engine's core path is broken.
         """
         version = "v0.1.0"
-        project_name = "clean_release_test"
+        project_name = "clean-release-test"
 
         bare_remote = tmp_path / "bare_remote.git"
         repo_path = tmp_path / "dev_repo"
@@ -564,7 +566,7 @@ class TestFixedInWriteback:
           - The closing summary reports the stamp count, not a bare claim.
         """
         version = "v0.1.0"
-        project_name = "fixed_in_release_test"
+        project_name = "fixed-in-release-test"
 
         bare_remote = tmp_path / "bare_remote.git"
         repo_path = tmp_path / "dev_repo"
@@ -671,7 +673,7 @@ class TestConflictingMidRcMainCommit:
           - Main still contains the pre-release commit (operator's work is intact).
         """
         version = "v0.2.0"
-        project_name = "conflict_mid_rc_test"
+        project_name = "conflict-mid-rc-test"
 
         bare_remote = tmp_path / "bare_remote.git"
         repo_path = tmp_path / "dev_repo"
@@ -807,7 +809,7 @@ class TestNonConflictingMidRcMainCommit:
         main_diverges_mid_rc in test_rc_lifecycle.py.
         """
         version = "v0.3.0"
-        project_name = "nonconflict_mid_rc_test"
+        project_name = "nonconflict-mid-rc-test"
 
         bare_remote = tmp_path / "bare_remote.git"
         repo_path = tmp_path / "dev_repo"
@@ -1037,7 +1039,7 @@ class TestChangelogFreshnessAfterRelease:
             no orphaned commits between the tag and the branch tip).
         """
         version = "v0.4.0"
-        project_name = "polish_freshness_test"
+        project_name = "polish-freshness-test"
 
         bare_remote = tmp_path / "bare_remote.git"
         repo_path = tmp_path / "dev_repo"
@@ -1325,15 +1327,15 @@ class TestResumeFromPartialRun:
         "version, project_name, stop_after",
         [
             pytest.param(
-                "v0.5.0", "resume_post_squash_test", "squash",
+                "v0.5.0", "resume-post-squash-test", "squash",
                 id="post_squash_no_notes_no_changelog_no_tag",
             ),
             pytest.param(
-                "v0.6.0", "resume_post_notes_test", "notes",
+                "v0.6.0", "resume-post-notes-test", "notes",
                 id="post_notes_no_changelog_no_tag",
             ),
             pytest.param(
-                "v0.7.0", "resume_post_changelog_test", "changelog",
+                "v0.7.0", "resume-post-changelog-test", "changelog",
                 id="post_changelog_no_tag",
             ),
         ],
@@ -1524,7 +1526,7 @@ class TestVerifyBeforeDestroy:
              (local + origin), release-state Active RC cleared.
         """
         version = "v0.20.0"
-        project_name = "verify_before_destroy_test"
+        project_name = "verify-before-destroy-test"
 
         bare_remote = tmp_path / "bare_remote.git"
         repo_path = tmp_path / "dev_repo"
@@ -1721,7 +1723,7 @@ class TestHookResolutionIsRcBranchAware:
             hook ran.
         """
         version = "v0.21.0"
-        project_name = "hook_resolution_rc_aware_test"
+        project_name = "hook-resolution-rc-aware-test"
 
         bare_remote = tmp_path / "bare_remote.git"
         repo_path = tmp_path / "dev_repo"
@@ -1845,7 +1847,7 @@ class TestHookOrderRecurrence:
             commit did not land there instead.
         """
         version = "v0.22.0"
-        project_name = "hook_order_recurrence_test"
+        project_name = "hook-order-recurrence-test"
 
         bare_remote = tmp_path / "bare_remote.git"
         repo_path = tmp_path / "dev_repo"
@@ -2085,8 +2087,8 @@ class TestHaltScopeRecurrence:
         those three points.
         """
         version = "v0.30.0"
-        project_a = "halt_scope_project_a"
-        project_b = "halt_scope_project_b"
+        project_a = "halt-scope-project-a"
+        project_b = "halt-scope-project-b"
 
         bare_remote_a = tmp_path / "bare_remote_a.git"
         repo_a = tmp_path / "dev_repo_a"
@@ -2339,7 +2341,7 @@ class TestHandsFreeDemoEndToEnd:
           - The version tag exists (the release actually shipped).
         """
         version = "v0.9.0"
-        project_name = "hands_free_demo_test"
+        project_name = "hands-free-demo-test"
 
         # --- Step 1: the fixture tree's deliberate quality-class finding ---
         # A release-notes-shaped prose file citing a bare internal task ID
@@ -2545,7 +2547,7 @@ class TestHandsFreeDemoCodeSurfaceLitterEndToEnd:
           - The version tag exists (the release actually shipped).
         """
         version = "v0.9.1"
-        project_name = "hands_free_demo_code_surface_test"
+        project_name = "hands-free-demo-code-surface-test"
 
         # --- Step 1: the fixture tree's deliberate quality-class finding ---
         # A code file (the shape team/scripts/, team/scripts/lib/, and
@@ -2764,7 +2766,7 @@ class TestDualChannelForcedHookFailure:
             step (read the hook's own diagnostic output, fix it, re-run).
         """
         version = "v0.10.0"
-        project_name = "dual_channel_hook_failure_test"
+        project_name = "dual-channel-hook-failure-test"
 
         bare_remote = tmp_path / "bare_remote.git"
         repo_path = tmp_path / "dev_repo"
@@ -2841,7 +2843,7 @@ class TestDualChannelForcedGateRefusal:
             concrete next step (inspect the task, resolve, re-run TESTER).
         """
         version = "v0.11.0"
-        project_name = "dual_channel_gate_refusal_test"
+        project_name = "dual-channel-gate-refusal-test"
 
         bare_remote = tmp_path / "bare_remote.git"
         repo_path = tmp_path / "dev_repo"
@@ -2941,7 +2943,7 @@ class _PushGateCase:
 
     def __init__(self, tmp_path: pathlib.Path, shape: str) -> None:
         self.tmp_path = tmp_path
-        self.project = "push_gate_project"
+        self.project = "push-gate-project"
         self.repo = tmp_path / "dev_repo"
         self.origin = tmp_path / "origin.git"
         _init_git_repo_offline(self.repo, self.origin)
@@ -2954,7 +2956,7 @@ class _PushGateCase:
         elif shape == "no-project-cfg":
             cfg.unlink()
         elif shape == "not-registered":
-            (self.root / "projects.cfg").write_text("[project:another_project]\npriority=1\n", encoding="utf-8")
+            (self.root / "projects.cfg").write_text("[project:another-project]\npriority=1\n", encoding="utf-8")
         elif shape == "no-dev-tree-path":
             cfg.write_text(
                 "".join(l for l in kept if not l.startswith(("push_to_remote", "dev_tree_path"))),

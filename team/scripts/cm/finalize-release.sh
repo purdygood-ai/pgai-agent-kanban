@@ -44,9 +44,15 @@
 #       logged and the step is skipped.
 #   3. git push $REMOTE $MAIN_BRANCH  (includes the polish commit if Step 2b ran)
 #   4. git push $REMOTE <VERSION>
+#      A push the remote refuses is push lag, not a failure: it is narrated
+#      dual-channel and the script still exits 0. The commits and the tag stay
+#      ahead of the remote in git, where the push-lag check
+#      (scripts/cm/push-watchdog.sh --project <name>) finds and pushes them
+#      once the remote accepts.
 #   5. Optionally create a GitHub release via gh CLI if available and authenticated.
 #      Gated by push_to_remote like Steps 3-4: a GitHub release is a publication,
 #      so with push_to_remote=false gh is never invoked and the step is skipped.
+#      Skipped as well when Step 4 did not put the tag on the remote.
 #   6. Print a summary
 #
 # Prerequisites:
@@ -62,13 +68,37 @@
 # shellcheck source=../lib/env_bootstrap.sh
 source "$(dirname "${BASH_SOURCE[0]}")/../lib/env_bootstrap.sh"
 
+# --- Source the temp-root wrapper (Step 2b's polish set-aside patch path) ---
+# Resolved from this script's own location, so it is the copy shipped beside
+# it in the repo and the installed layout alike. A missing copy refuses before
+# anything is read or pushed rather than guessing a root of its own.
+_FINALIZE_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../lib" && pwd)"
+_FINALIZE_TEMP_SH="${_FINALIZE_LIB_DIR}/temp.sh"
+if [[ ! -f "$_FINALIZE_TEMP_SH" ]]; then
+  # shellcheck source=../lib/error_contract.sh
+  source "${_FINALIZE_LIB_DIR}/error_contract.sh"
+  # BLOCK-WORTHY: release finalization cannot name a temp root without the
+  # wrapper, and nothing has been read, committed or pushed yet.
+  pgai_emit_error_contract "cm-finalize-release.temp-sh-missing" \
+    "finalize-release.sh needs the temp-root wrapper at ${_FINALIZE_TEMP_SH} and it does not exist; nothing was committed or pushed." \
+    "ls -l '${_FINALIZE_TEMP_SH}'"
+  # CENSUS-ANCHOR: cm-finalize-release-temp-sh-missing-01
+  exit 1
+fi
+# shellcheck source=../lib/temp.sh
+source "$_FINALIZE_TEMP_SH"
+unset _FINALIZE_TEMP_SH _FINALIZE_LIB_DIR
+
 # --- Source optional config files (BEFORE strict mode) ---
 # The kanban bashrc/env may have unset vars, non-zero returns, or interactive
 # aliases that would trip strict mode. Source them first.
 KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH}"
 [[ -f "$KANBAN_ROOT/bashrc" ]] && source "$KANBAN_ROOT/bashrc"
 [[ -f "$KANBAN_ROOT/env" ]] && source "$KANBAN_ROOT/env"
-[[ -f "$HOME/.config/pgai-kanban.cfg" ]] && source "$HOME/.config/pgai-kanban.cfg"
+# Operator user config, then [chain] pm_mode (config_loader.sh).
+# shellcheck source=../lib/config_loader.sh
+source "$(dirname "${BASH_SOURCE[0]}")/../lib/config_loader.sh"
+config_startup_prelude "$KANBAN_ROOT"
 
 # --- Source project path helpers ---
 # shellcheck source=lib/project_paths.sh
@@ -133,9 +163,15 @@ Project context resolution (highest to lowest precedence):
   2. PGAI_PROJECT_NAME environment variable
   3. FAIL — prints error naming both knobs, exits non-zero
 
+A push the remote refuses is push lag, not a failure: it is reported and
+the script still exits 0, leaving the commits and the tag for the push-lag
+check (scripts/cm/push-watchdog.sh --project <name>) to push once the
+remote accepts; the GitHub release is then skipped.
+
 Exit codes:
-  0  Push complete (or --help requested, or operator aborted at the prompt)
-  1  Missing VERSION, tag not found locally, or git push failure
+  0  Push complete, push lag left for the push-lag check, --help requested,
+     or operator aborted at the prompt
+  1  Missing VERSION, tag not found locally, or a refused polish commit
 
 Example:
   scripts/cm/finalize-release.sh --project my-project v1.5.0
@@ -378,7 +414,7 @@ else
   if [[ -n "$POLISH_PORCELAIN" ]]; then
     echo ""
     echo "[Step 2b] Detected uncommitted WRITER polish for ${VERSION} after scripts/cm/release.sh."
-    _polish_patch="${PGAI_AGENT_KANBAN_TEMP_DIR:-/tmp/pgai_kanban_tmp}/${PROJECT_NAME}-${_BARE_VERSION}-notes-polish.patch"
+    _polish_patch="$(pgai_temp_dir)/${PROJECT_NAME}-${_BARE_VERSION}-notes-polish.patch"
     _polish_set_aside="git -C '${REPO_ROOT}' diff -- 'release-notes/${_BARE_VERSION}.md' > '${_polish_patch}' && git -C '${REPO_ROOT}' checkout -- 'release-notes/${_BARE_VERSION}.md' && scripts/cm/finalize-release.sh --project ${PROJECT_NAME} ${VERSION}"
 
     _polish_branch="$(git -C "$REPO_ROOT" rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
@@ -457,11 +493,15 @@ fi
 # Gated by push_to_remote flag: pushes all commits on $MAIN_BRANCH to $REMOTE
 # (including any polish commit from Step 2b and any stranded augmentation
 # commits) when push_to_remote=true; skipped otherwise.
+# A refused push is push lag (PUSH_*_STATUS FAILED), reported after Step 4.
 echo ""
+PUSH_MAIN_STATUS="skipped (push_to_remote=false)"
+PUSH_TAG_STATUS="skipped (push_to_remote=false)"
 if [[ "$_CM_PUSH_TO_REMOTE" == "true" ]]; then
   echo "[Step 3] Pushing ${MAIN_BRANCH} to ${REMOTE}..."
-  git -C "$REPO_ROOT" push "${REMOTE}" "$MAIN_BRANCH"
-  echo "  Done."
+  PUSH_MAIN_STATUS="yes"
+  git -C "$REPO_ROOT" push "${REMOTE}" "$MAIN_BRANCH" || PUSH_MAIN_STATUS="FAILED"
+  echo "  ${PUSH_MAIN_STATUS/yes/Done.}"
 else
   echo "[push_to_remote=false] skipping ${REMOTE} push for ${PROJECT_NAME}: git push ${REMOTE} $MAIN_BRANCH (Step 3)"
 fi
@@ -470,10 +510,21 @@ fi
 # Gated by push_to_remote flag: skipped when push_to_remote=false.
 if [[ "$_CM_PUSH_TO_REMOTE" == "true" ]]; then
   echo "[Step 4] Pushing tag $VERSION to ${REMOTE}..."
-  git -C "$REPO_ROOT" push "${REMOTE}" "$VERSION"
-  echo "  Done."
+  PUSH_TAG_STATUS="yes"
+  git -C "$REPO_ROOT" push "${REMOTE}" "$VERSION" || PUSH_TAG_STATUS="FAILED"
+  echo "  ${PUSH_TAG_STATUS/yes/Done.}"
 else
   echo "[push_to_remote=false] skipping ${REMOTE} push for ${PROJECT_NAME}: git push ${REMOTE} $VERSION (Step 4)"
+fi
+
+if [[ "$PUSH_MAIN_STATUS" == "FAILED" || "$PUSH_TAG_STATUS" == "FAILED" ]]; then
+  # CONVERT: a push the remote refused leaves push lag for the push-lag
+  # check to retry; the release is already complete locally.
+  # CENSUS-ANCHOR: cm-finalize-release-push-lag-01
+  pgai_emit_error_contract "cm-finalize-release.push-lag" \
+    "${REMOTE} refused the push (${MAIN_BRANCH}: ${PUSH_MAIN_STATUS}, tag ${VERSION}: ${PUSH_TAG_STATUS}); ${VERSION} is complete locally and the push-lag check pushes the rest once ${REMOTE} accepts. The GitHub release is skipped." \
+    "$(printf '%q' "${KANBAN_ROOT}/scripts/cm/push-watchdog.sh") --project $(printf '%q' "$PROJECT_NAME")" \
+    "$PROJECT_NAME"
 fi
 
 # --- Step 5: Optionally create GitHub release ---
@@ -487,6 +538,9 @@ RELEASE_NOTES_FILE="$REPO_ROOT/release-notes/${_BARE_VERSION}.md"
 if [[ "$_CM_PUSH_TO_REMOTE" != "true" ]]; then
   GH_RELEASE_STATUS="skipped (push_to_remote=false)"
   echo "[push_to_remote=false] skipping GitHub release for ${PROJECT_NAME}: gh release create $VERSION (Step 5)"
+elif [[ "$PUSH_TAG_STATUS" != "yes" ]]; then
+  GH_RELEASE_STATUS="skipped (tag $VERSION is not on ${REMOTE} yet)"
+  echo "[Step 5] tag $VERSION is not on ${REMOTE} yet; skipping GitHub release creation."
 elif command -v gh >/dev/null 2>&1; then
   if gh auth status >/dev/null 2>&1; then
     echo "[Step 5] Creating GitHub release for $VERSION..."
@@ -528,16 +582,13 @@ echo ""
 echo "Finalize complete."
 echo "  Version:        $VERSION"
 echo "  Polish commit:  $POLISH_COMMIT_STATUS"
-if [[ "$_CM_PUSH_TO_REMOTE" == "true" ]]; then
-  echo "  ${MAIN_BRANCH} pushed: yes"
-  echo "  tag pushed:     yes"
-else
-  echo "  ${MAIN_BRANCH} pushed: skipped (push_to_remote=false)"
-  echo "  tag pushed:     skipped (push_to_remote=false)"
-fi
+echo "  ${MAIN_BRANCH} pushed: ${PUSH_MAIN_STATUS}"
+echo "  tag pushed:     ${PUSH_TAG_STATUS}"
 echo "  GitHub release: $GH_RELEASE_STATUS"
 echo ""
-if [[ "$_CM_PUSH_TO_REMOTE" == "true" ]]; then
+if [[ "$PUSH_MAIN_STATUS" == "FAILED" || "$PUSH_TAG_STATUS" == "FAILED" ]]; then
+  echo "The release is complete locally; ${REMOTE} refused the push. The push-lag check pushes it once ${REMOTE} accepts: $(printf '%q' "${KANBAN_ROOT}/scripts/cm/push-watchdog.sh") --project $(printf '%q' "$PROJECT_NAME")"
+elif [[ "$_CM_PUSH_TO_REMOTE" == "true" ]]; then
   echo "The release is live on ${REMOTE}. Downstream consumers can now pull."
 else
   echo "The release is complete locally. Operator must push to ${REMOTE} manually when ready."

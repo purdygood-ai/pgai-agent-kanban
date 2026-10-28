@@ -83,6 +83,8 @@ source "${_SCRIPT_DIR}/lib/pp_run_ops.sh"
 source "${_SCRIPT_DIR}/lib/ini_parser.sh"
 # shellcheck source=lib/temp.sh
 source "${_SCRIPT_DIR}/lib/temp.sh"
+# shellcheck source=lib/container_common.sh
+source "${_SCRIPT_DIR}/lib/container_common.sh"
 
 _MODULE="pgai_agent_kanban.container.lifecycle"
 _DEFAULT_NAME="pgai-kanban"
@@ -163,28 +165,6 @@ _refuse_engine() {
     pgai_emit_error_contract "container_down.engine_failed" "${message}" "${3}"
     # CENSUS-ANCHOR: container-down-engine-failed-01
     exit 1
-}
-
-# _first_line FILE -- the first non-blank line of FILE (empty when none).
-_first_line() {
-    [[ -r "$1" ]] || return 0
-    local line
-    while IFS= read -r line || [[ -n "${line}" ]]; do
-        [[ -n "${line//[[:space:]]/}" ]] && { printf '%s\n' "${line}"; return 0; }
-    done < "$1"
-    return 0
-}
-
-# _kv_get KEY TEXT -- the value of the first "KEY=value" line in TEXT.
-_kv_get() {
-    local key="$1" line
-    while IFS= read -r line; do
-        if [[ "${line}" == "${key}="* ]]; then
-            printf '%s\n' "${line#"${key}="}"
-            return 0
-        fi
-    done <<< "$2"
-    return 0
 }
 
 # ---------------------------------------------------------------------------
@@ -300,20 +280,6 @@ docker_use_session_begin "${_SCRIPT_NAME}" "-"
 # Engine queries
 # ---------------------------------------------------------------------------
 
-# _query_state: sets _STATE (running|stopped|absent) and _STATE_IMAGE.
-_query_state() {
-    local out="${_WORK}/inspect.out" err="${_WORK}/inspect.err" rc=0 prc=0 parsed
-    pgai_docker "${ENGINE}" container inspect "${NAME}" >"${out}" 2>"${err}" || rc=$?
-    parsed="$(pp_run_ops "${_MODULE}" container-state --name "${NAME}" --input "${out}" \
-        --exit-code "${rc}" --stderr-file "${err}" 2>"${_WORK}/state.err")" || prc=$?
-    if [[ "${prc}" -ne 0 && "${prc}" -ne 3 ]]; then
-        _refuse_engine "the state query for container '${NAME}'" \
-            "$(_first_line "${_WORK}/state.err")" "$(printf '%q info' "${ENGINE}")"
-    fi
-    _STATE="$(_kv_get state "${parsed}")"
-    _STATE_IMAGE="$(_kv_get image "${parsed}")"
-}
-
 # _list_processes: writes the container's process table to ${_WORK}/ps.out.
 # Returns the engine's exit status (stderr in ${_WORK}/ps.err).
 _list_processes() {
@@ -329,9 +295,9 @@ _parse_scheduler() {
     parsed="$(pp_run_ops "${_MODULE}" scheduler --input "${_WORK}/ps.out" 2>"${_WORK}/sched.err")" || prc=$?
     if [[ "${prc}" -ne 0 && "${prc}" -ne 3 ]]; then
         _refuse_engine "reading the process table of container '${NAME}' (to find its scheduler)" \
-            "$(_first_line "${_WORK}/sched.err")" "$(printf '%q exec %q ps -eo pid=,args=' "${ENGINE}" "${NAME}")"
+            "$(container_first_line "${_WORK}/sched.err")" "$(printf '%q exec %q ps -eo pid=,args=' "${ENGINE}" "${NAME}")"
     fi
-    _SCHEDULER_PIDS="$(_kv_get pids "${parsed}")"
+    _SCHEDULER_PIDS="$(container_kv_get pids "${parsed}")"
     _SCHEDULER_PIDS="${_SCHEDULER_PIDS//,/ }"
 }
 
@@ -348,7 +314,7 @@ _parse_sessions() {
         --input "${_WORK}/ps.out" 2>"${_WORK}/sessions.err")" || prc=$?
     if [[ "${prc}" -ne 0 && "${prc}" -ne 3 ]]; then
         _refuse_engine "listing the agent sessions in container '${NAME}'" \
-            "$(_first_line "${_WORK}/sessions.err")" \
+            "$(container_first_line "${_WORK}/sessions.err")" \
             "$(printf 'PYTHONPATH=%q python3 -m %s sessions --help' "$(pp_pythonpath)" "${_MODULE}")"
     fi
     _SESSION_COUNT=0
@@ -399,10 +365,10 @@ _parse_sessions() {
 # sessions it would end cannot be seen.
 _refresh_sessions() {
     if ! _list_processes; then
-        _query_state
+        container_query_state
         [[ "${_STATE}" != "running" ]] && return 1
         _refuse_engine "listing the processes in container '${NAME}' (to find its agent sessions)" \
-            "$(_first_line "${_WORK}/ps.err")" "$(printf '%q exec %q ps -eo pid=,args=' "${ENGINE}" "${NAME}")"
+            "$(container_first_line "${_WORK}/ps.err")" "$(printf '%q exec %q ps -eo pid=,args=' "${ENGINE}" "${NAME}")"
     fi
     _parse_sessions
     return 0
@@ -423,7 +389,7 @@ _stop_scheduler() {
     for (( check = 0; check <= _SCHEDULER_EXIT_CHECKS; check++ )); do
         if ! _list_processes; then
             _refuse_engine "listing the processes in container '${NAME}' (to find its scheduler)" \
-                "$(_first_line "${_WORK}/ps.err")" "$(printf '%q exec %q ps -eo pid=,args=' "${ENGINE}" "${NAME}")"
+                "$(container_first_line "${_WORK}/ps.err")" "$(printf '%q exec %q ps -eo pid=,args=' "${ENGINE}" "${NAME}")"
         fi
         _parse_scheduler
         [[ -z "${_SCHEDULER_PIDS}" ]] && break
@@ -438,7 +404,7 @@ _stop_scheduler() {
     if [[ -n "${_SCHEDULER_PIDS}" ]]; then
         # shellcheck disable=SC2086 # one argument per pid
         _refuse_engine "stopping the scheduler in container '${NAME}' (pid ${_SCHEDULER_PIDS} still running ${_SCHEDULER_EXIT_CHECKS}s after SIGTERM)" \
-            "$(_first_line "${_WORK}/kill.err")" \
+            "$(container_first_line "${_WORK}/kill.err")" \
             "$(printf '%q exec %q kill -KILL %s' "${ENGINE}" "${NAME}" "${_SCHEDULER_PIDS}")"
     fi
 
@@ -450,7 +416,7 @@ _stop_scheduler() {
     if [[ "${rc}" -ne 0 ]] \
         && pgai_docker "${ENGINE}" exec "${NAME}" tmux has-session -t "${_SCHEDULER_SESSION}" >/dev/null 2>&1; then
         _refuse_engine "closing the scheduler's tmux session '${_SCHEDULER_SESSION}' in container '${NAME}'" \
-            "$(_first_line "${_WORK}/tmux.err")" \
+            "$(container_first_line "${_WORK}/tmux.err")" \
             "$(printf '%q exec %q tmux kill-session -t %q' "${ENGINE}" "${NAME}" "${_SCHEDULER_SESSION}")"
     fi
     echo "${_SCRIPT_NAME}: scheduler stopped (tmux session '${_SCHEDULER_SESSION}' closed after the scheduler exited); no new wake starts"
@@ -497,7 +463,7 @@ _stop_and_remove() {
         pgai_docker "${ENGINE}" stop "${NAME}" >/dev/null 2>"${_WORK}/stop.err" || rc=$?
         if [[ "${rc}" -ne 0 ]]; then
             _refuse_engine "stopping container '${NAME}'" \
-                "$(_first_line "${_WORK}/stop.err")" "$(printf '%q rm -f %q' "${ENGINE}" "${NAME}")"
+                "$(container_first_line "${_WORK}/stop.err")" "$(printf '%q rm -f %q' "${ENGINE}" "${NAME}")"
         fi
         echo "${_SCRIPT_NAME}: container '${NAME}' stopped"
     fi
@@ -505,7 +471,7 @@ _stop_and_remove() {
     pgai_docker "${ENGINE}" rm "${NAME}" >/dev/null 2>"${_WORK}/rm.err" || rc=$?
     if [[ "${rc}" -ne 0 ]]; then
         _refuse_engine "removing container '${NAME}'" \
-            "$(_first_line "${_WORK}/rm.err")" "$(printf '%q rm -f %q' "${ENGINE}" "${NAME}")"
+            "$(container_first_line "${_WORK}/rm.err")" "$(printf '%q rm -f %q' "${ENGINE}" "${NAME}")"
     fi
     echo "${_SCRIPT_NAME}: container '${NAME}' removed"
 }
@@ -520,7 +486,7 @@ else
 fi
 echo "${_SCRIPT_NAME}: engine=${ENGINE} container=${NAME} kanban_root=${_KANBAN_ROOT} mode=${_mode}"
 
-_query_state
+container_query_state
 case "${_STATE}" in
     absent)
         echo "${_SCRIPT_NAME}: container '${NAME}' does not exist; nothing to stop"

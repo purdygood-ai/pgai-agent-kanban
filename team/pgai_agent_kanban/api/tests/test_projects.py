@@ -10,11 +10,23 @@ Acceptance criteria verified:
      counts matching the fixture.
   4. GET /projects/does-not-exist returns 404 with the name echoed in the body.
   5. active_rc is null (JSON null) when release-state.md has "Active RC = none".
+  6. branch_prefix reads the same for ``ai_``, a quoted ``"ai_"`` and an empty
+     prefix (``test_branch_prefix_spellings``).
+  7. halt / halt_text equal ``dashboard.halt_state.halt_flag_and_text``: a
+     kanban-wide HALT halts, a project HALT-AFTER drains without halting.
+     A kanban-wide HALT-AFTER drains a project with no sentinel of its own
+     and no kanban-wide HALT (``effective_halt_flag_and_text``), and on the
+     golden board halt / halt_text are what GET /dashboard/header draws.
+  8. A colourless project's colour is the same on GET /board, GET
+     /projects/{name} and the dashboard's registry reader, and both routers
+     bind one colour function; queue_counts is
+     ``dashboard.task_counts.agent_queue_counts``.
 
 Test structure:
   - ``TestProjectMetadataEndpoint`` — acceptance-criteria tests.
   - Fixtures are materialised under pytest's tmp_path (no live kanban state).
-  - No shell-outs; all state is file-based.
+  - No shell-outs, except the dashboard-header comparison, which runs
+    show-header.sh on a throwaway golden board; all state is file-based.
 """
 
 from __future__ import annotations
@@ -26,6 +38,14 @@ import pytest
 from fastapi.testclient import TestClient
 
 from pgai_agent_kanban.board import get_last_released_for_project
+from tests.fixtures.golden_board import PROJECT_NAME as GOLDEN_PROJECT
+from tests.fixtures.halt_header import (
+    HEADER_HALT_CASES,
+    build_halt_board,
+    header_halt_pair,
+    write_sentinels,
+)
+from tests.fixtures.route_cli_parity import build_api_client
 
 # ---------------------------------------------------------------------------
 # Fixture constants
@@ -674,3 +694,204 @@ class TestProjectMetadataEndpoint:
         assert body["color"] == "#378ADD", (
             f"Expected first palette color '#378ADD', got {body['color']!r}"
         )
+
+
+@pytest.mark.parametrize(
+    ("written", "expected"),
+    [("ai_", "ai_"), ('"ai_"', "ai_"), ("", "")],
+    ids=["bare", "double-quoted", "empty"],
+)
+def test_branch_prefix_spellings(
+    meta_client: TestClient,
+    project_fixture_root: pathlib.Path,
+    written: str,
+    expected: str,
+) -> None:
+    """branch_prefix in the card is the configured prefix, surrounding double quotes stripped."""
+    cfg = project_fixture_root / "projects" / _PROJECT_NAME / "project.cfg"
+    cfg.write_text(
+        cfg.read_text(encoding="utf-8").replace("branch_prefix = ai_\n", f"branch_prefix = {written}\n"),
+        encoding="utf-8",
+    )
+    assert f"branch_prefix = {written}\n" in cfg.read_text(encoding="utf-8")
+
+    resp = meta_client.get(f"/projects/{_PROJECT_NAME}")
+
+    assert resp.status_code == 200
+    assert resp.json()["branch_prefix"] == expected
+
+
+# ---------------------------------------------------------------------------
+# HALT state: halt / halt_text are the dashboard's pair
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("sentinels", "halt", "halt_text"),
+    [
+        pytest.param({"HALT": "halted\n"}, True, "HALT", id="kanban-wide-halt"),
+        pytest.param(
+            {f"projects/{_PROJECT_NAME}/HALT-AFTER": "rc\n"}, False, "HALT-AFTER rc",
+            id="project-halt-after-drains-without-halting",
+        ),
+        pytest.param({}, False, "", id="no-sentinel"),
+    ],
+)
+def test_halt_matches_the_dashboard_halt_pair(
+    meta_client: TestClient,
+    project_fixture_root: pathlib.Path,
+    sentinels: dict[str, str],
+    halt: bool,
+    halt_text: str,
+) -> None:
+    """halt / halt_text equal halt_state.halt_flag_and_text for the same roots."""
+    from pgai_agent_kanban.dashboard.halt_state import halt_flag_and_text
+
+    for rel_path, text in sentinels.items():
+        _write(project_fixture_root / rel_path, text)
+
+    resp = meta_client.get(f"/projects/{_PROJECT_NAME}")
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert (body["halt"], body["halt_text"]) == (halt, halt_text)
+    flag, text = halt_flag_and_text(project_fixture_root / "projects" / _PROJECT_NAME, project_fixture_root)
+    assert (body["halt"], body["halt_text"]) == (flag == "yes", text)
+
+
+@pytest.mark.parametrize(
+    ("sentinels", "halt", "halt_text"),
+    [
+        pytest.param({"HALT-AFTER": "rc\n"}, False, "HALT-AFTER rc", id="kanban-wide-halt-after"),
+        pytest.param(
+            {"HALT-AFTER": "rc\n", f"projects/{_PROJECT_NAME}/HALT-AFTER": "pm\n"}, False, "HALT-AFTER pm",
+            id="project-halt-after-beats-kanban-wide-halt-after",
+        ),
+        pytest.param(
+            {"HALT-AFTER": "rc\n", f"projects/{_PROJECT_NAME}/HALT": "halted\n"}, True, "HALT",
+            id="project-halt-beats-kanban-wide-halt-after",
+        ),
+        pytest.param(
+            {"HALT": "halted\n", "HALT-AFTER": "rc\n"}, True, "HALT",
+            id="kanban-wide-halt-beats-kanban-wide-halt-after",
+        ),
+        pytest.param({"HALT-AFTER": "not a token\n"}, False, "", id="invalid-kanban-wide-halt-after"),
+    ],
+)
+def test_halt_follows_the_halt_precedence(
+    meta_client: TestClient,
+    project_fixture_root: pathlib.Path,
+    sentinels: dict[str, str],
+    halt: bool,
+    halt_text: str,
+) -> None:
+    """A kanban-wide HALT-AFTER reaches halt_text below every other sentinel."""
+    from pgai_agent_kanban.dashboard.halt_state import effective_halt_flag_and_text
+
+    write_sentinels(project_fixture_root, sentinels)
+
+    resp = meta_client.get(f"/projects/{_PROJECT_NAME}")
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert (body["halt"], body["halt_text"]) == (halt, halt_text)
+    flag, text = effective_halt_flag_and_text(project_fixture_root / "projects" / _PROJECT_NAME, project_fixture_root)
+    assert (body["halt"], body["halt_text"]) == (flag == "yes", text)
+
+
+@pytest.mark.parametrize("sentinels, expected", HEADER_HALT_CASES)
+def test_halt_matches_the_dashboard_header(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+    sentinels: dict[str, str],
+    expected: tuple[bool, str],
+) -> None:
+    """On the golden board, GET /projects/{name} reports the HALT the dashboard header draws."""
+    root = build_halt_board(tmp_path, monkeypatch)
+    write_sentinels(root, sentinels)
+
+    with build_api_client(root) as client:
+        resp = client.get(f"/projects/{GOLDEN_PROJECT}")
+        header = header_halt_pair(client, GOLDEN_PROJECT)
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert (body["halt"], body["halt_text"]) == expected
+    assert (body["halt"], body["halt_text"]) == header
+
+
+# ---------------------------------------------------------------------------
+# Colour: one rule for GET /board, GET /projects/{name} and the dashboard
+# ---------------------------------------------------------------------------
+
+# Registered first but second in priority order, and the reverse; neither
+# sets dashboard_color.
+_COLOURLESS_CFG = (
+    "[project:first-registered]\npriority=5\n\n"
+    "[project:second-registered]\npriority=1\n"
+)
+# Palette slot each project holds: its ordinal in priority order.
+_PRIORITY_ORDINAL = {"second-registered": 0, "first-registered": 1}
+
+
+def test_colourless_projects_share_one_colour_rule(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A colourless project's colour is the same on GET /board, GET /projects/{name}
+    and the dashboard's own registry reader: the default-palette entry at the
+    project's ordinal in priority order, as projects_cfg_color assigns it."""
+    from pgai_agent_kanban.api.app import create_app
+    from pgai_agent_kanban.api.config import ApiConfig
+    from pgai_agent_kanban.lib.palette import load_default_palette
+    from pgai_agent_kanban.ops.projects import dashboard_registry_rows
+
+    root = tmp_path / "colour_root"
+    _write(root / "projects.cfg", _COLOURLESS_CFG)
+    for name in _PRIORITY_ORDINAL:
+        (root / "projects" / name / "tasks" / "queues").mkdir(parents=True)
+
+    monkeypatch.setenv("PGAI_AGENT_KANBAN_ROOT_PATH", str(root))
+    monkeypatch.setenv("KANBAN_ROOT", str(root))
+    app = create_app(cfg=ApiConfig(host="127.0.0.1", port=0, kanban_root=root))
+    with TestClient(app, raise_server_exceptions=True) as client:
+        board = client.get("/board")
+        cards = {name: client.get(f"/projects/{name}") for name in _PRIORITY_ORDINAL}
+
+    assert board.status_code == 200
+    board_colours = {p["name"]: p["color"] for p in board.json()["projects"]}
+    dashboard_colours = {name: colour for name, colour, _rows in dashboard_registry_rows(root, "20")}
+    palette = load_default_palette()
+    for name, ordinal in _PRIORITY_ORDINAL.items():
+        assert cards[name].status_code == 200
+        expected = palette[ordinal]
+        assert board_colours[name] == cards[name].json()["color"] == dashboard_colours[name] == expected, name
+    assert board_colours["first-registered"] != board_colours["second-registered"]
+
+
+def test_routers_share_the_colour_and_count_functions() -> None:
+    """The project card binds the one colour function and the board takes its
+    rows (colour included) from the dashboard's registry reader, both in
+    ops.projects; projects.py binds the one backlog counter."""
+    from pgai_agent_kanban.api.routers import board as board_router
+    from pgai_agent_kanban.api.routers import projects as projects_router
+    from pgai_agent_kanban.dashboard import task_counts
+    from pgai_agent_kanban.ops import projects as ops_projects
+
+    assert projects_router.project_color is ops_projects.project_color
+    assert board_router.dashboard_registry_rows is ops_projects.dashboard_registry_rows
+    assert projects_router.agent_queue_counts is task_counts.agent_queue_counts
+
+
+def test_queue_counts_are_the_task_counts_backlog_counts(
+    meta_client: TestClient, project_fixture_root: pathlib.Path,
+) -> None:
+    """queue_counts is task_counts.agent_queue_counts for every agent's backlog."""
+    from pgai_agent_kanban.dashboard.task_counts import agent_queue_counts
+
+    resp = meta_client.get(f"/projects/{_PROJECT_NAME}")
+
+    assert resp.status_code == 200
+    tasks_dir = project_fixture_root / "projects" / _PROJECT_NAME / "tasks"
+    expected = {agent.upper(): agent_queue_counts(tasks_dir, agent) for agent in ("pm", "coder", "writer", "tester", "cm")}
+    assert resp.json()["queue_counts"] == expected
+    assert expected["CODER"] != {"open": 0, "working": 0, "done": 0}

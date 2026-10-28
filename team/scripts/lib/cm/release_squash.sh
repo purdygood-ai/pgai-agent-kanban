@@ -23,8 +23,12 @@
 #             (idempotency-guarded: skipped when local main is already at or
 #             ahead of <remote>/main)
 #         6.  git merge --squash $RC_BRANCH into $MAIN_BRANCH (UD/DU conflicts
-#             are auto-resolved via _cm_autoresolve_ud_conflicts before
-#             HALTing; any other conflict shape HALTs — Trigger 5)
+#             are auto-resolved via _cm_autoresolve_ud_conflicts; any other
+#             conflict shape is Trigger 5: the squash is backed out and the
+#             RC cancelled and rebundled with an operator inbox entry naming
+#             every conflicting path, exit 5, or -- when the resolution
+#             matrix does not allow the cancel -- a HALT;
+#             cm_release_resolve_squash_conflict, release_resolve.sh)
 #         7.  git commit -m "Release $ACTIVE_RC" (idempotency-guarded: skipped
 #             when the index is empty after the squash)
 #         7a. Fidelity gate: git diff --quiet $RC_BRANCH $MAIN_BRANCH, HALTing
@@ -34,8 +38,8 @@
 #       PROJECT_NAME (all set by cm_release_preflight / release.sh) and the
 #       ambient environment. Must be
 #       called directly (never via command substitution) — its conflict and
-#       fidelity-gate paths call `cm_halt`, which calls `exit` directly, and
-#       its squash-commit failure path calls `exit 1` directly.
+#       fidelity-gate paths call `cm_halt` or exit 5, which call `exit`
+#       directly, and its squash-commit failure path calls `exit 1` directly.
 #
 #       On return, MAIN_SHA and RC_SHA are set as globals — MAIN_SHA in
 #       particular is read by cm_release_cleanup_on_exit (the script's EXIT
@@ -46,6 +50,8 @@
 # Dependencies (must already be sourced/defined by the caller before this
 # file's entry point is called)
 # -----------------------------------------------------------------------
+#   team/scripts/lib/cm/release_resolve.sh — cm_release_resolve_squash_conflict
+#     (sourced below, beside this file).
 #   team/scripts/lib/cm/release_preflight.sh — cm_halt,
 #     _cm_autoresolve_ud_conflicts (both called below), and
 #     cm_release_preflight must already have run so REPO_ROOT, MAIN_BRANCH,
@@ -63,6 +69,11 @@
 if declare -F cm_release_squash_to_main >/dev/null 2>&1; then
     return 0
 fi
+
+# The squash-conflict resolution (trigger 5) lives in its own stage, sourced
+# here so a caller that sources only this file still resolves it.
+# shellcheck source=release_resolve.sh
+source "$(dirname "${BASH_SOURCE[0]}")/release_resolve.sh"
 
 # -----------------------------------------------------------------------
 # cm_release_squash_to_main — entry point (see header doc above).
@@ -118,14 +129,13 @@ cm_release_squash_to_main() {
     _squash_main_rc=0
     git -C "$REPO_ROOT" merge --squash "$RC_BRANCH" || _squash_main_rc=$?
     if [[ $_squash_main_rc -ne 0 ]]; then
-      # Attempt UD/DU auto-resolve before halting.
+      # Attempt UD/DU auto-resolve first; a conflict it cannot clear is
+      # never merged by hand -- the RC is cancelled and rebundled (or, when
+      # the resolution matrix does not allow that, the project HALTs).
       _autoresolve_main_rc=0
       _cm_autoresolve_ud_conflicts "$REPO_ROOT" "${RC_BRANCH} into ${MAIN_BRANCH}" "main" || _autoresolve_main_rc=$?
       if [[ $_autoresolve_main_rc -ne 0 ]]; then
-        cm_halt \
-          "cm-release.trigger-5.squash-conflict" \
-          "Trigger 5: git merge --squash ${RC_BRANCH} into ${MAIN_BRANCH} produced conflicts (rc=${_squash_main_rc}) that the UD/DU auto-resolver could not clear — git state may be damaged." \
-          "Inspect the conflicted paths with 'git status' in ${REPO_ROOT}, resolve them by hand (or run 'git merge --abort' to back out), then re-run scripts/cm/release.sh."
+        cm_release_resolve_squash_conflict "$_squash_main_rc"
       fi
     fi
 
@@ -186,10 +196,14 @@ cm_release_squash_to_main() {
       echo "" >&2
       echo "[Step 7a] Fidelity gate: DIVERGENCE DETECTED — rc/$ACTIVE_RC and $MAIN_BRANCH differ:" >&2
       git -C "$REPO_ROOT" diff --stat "$RC_BRANCH" "$MAIN_BRANCH" >&2 || true
+      # BLOCK-WORTHY (trigger 11): tagging a main that diverges from the RC
+      # would ship a tree nobody verified; the HALT also writes the operator
+      # inbox (--inbox).
       cm_halt \
         "cm-release.trigger-11.fidelity-gate-divergence" \
         "Trigger 11: the post-squash fidelity gate found ${MAIN_BRANCH} diverging from rc/${ACTIVE_RC} after the squash — a commit landed on ${MAIN_BRANCH} mid-RC." \
-        "Inspect the divergent paths in the 'git diff --stat' output printed above, decide whether to fold the foreign commit into the next RC or revert it, then re-run scripts/cm/release.sh."
+        "Inspect the divergent paths in the 'git diff --stat' output printed above, decide whether to fold the foreign commit into the next RC or revert it, then re-run scripts/cm/release.sh." \
+        --inbox
     fi
   fi
 }

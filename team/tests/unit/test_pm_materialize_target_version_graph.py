@@ -34,7 +34,7 @@ import sys
 import pytest
 
 from pgai_agent_kanban.lib.error_contract import parse_error_contract
-from pgai_agent_kanban.lib.md_fields import section_body
+from pgai_agent_kanban.task_status import read_section
 from tests.fixtures.scrubbed_subprocess_env import build_scrubbed_env
 
 try:
@@ -121,7 +121,9 @@ def _task_dirs(team_root: pathlib.Path) -> list:
 
 def _prereqs(task_dir: pathlib.Path) -> list:
     """The task IDs a materialized README lists under ## Prerequisites."""
-    body = section_body((task_dir / "README.md").read_text(encoding="utf-8"), "Prerequisites") or ""
+    body = read_section(
+        (task_dir / "README.md").read_text(encoding="utf-8"), "Prerequisites", end_at_subheading=True
+    ) or ""
     return [line.strip()[2:].strip() for line in body.splitlines() if line.strip().startswith("- ")]
 
 

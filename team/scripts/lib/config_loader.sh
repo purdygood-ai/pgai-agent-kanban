@@ -6,6 +6,10 @@
 # Usage
 # -----
 #   source "$(dirname "${BASH_SOURCE[0]}")/config_loader.sh"
+#   config_startup_prelude "$KANBAN_ROOT"    # entry-point startup: source
+#                                            # ~/.config/pgai-kanban.cfg, then
+#                                            # export PGAI_KANBAN_PM_MODE
+#                                            # (see the function's comment)
 #   load_config /path/to/kanban.cfg          # validate and export
 #   config_get paths dev_tree_path           # optional explicit accessor
 #   unset "${CONFIG_LOADER_WAKE_ENV_NAMES[@]}"  # drop inherited [wake] exports
@@ -177,18 +181,18 @@
 #                                             the shipped value above is the
 #                                             current re-baselined ceiling,
 #                                             not a load-time fallback.)
-#   budget_bytes_tester     OPTIONAL  118784
+#   budget_bytes_tester     OPTIONAL  126976
 #   budget_bytes_po         OPTIONAL  73728
-#   budget_bytes_pm         OPTIONAL  90112
-#   budget_bytes_writer     OPTIONAL  77824
-#   budget_bytes_cm         OPTIONAL  102400
-#   budget_bytes_overwatch  OPTIONAL  90112
+#   budget_bytes_pm         OPTIONAL  98304
+#   budget_bytes_writer     OPTIONAL  86016
+#   budget_bytes_cm         OPTIONAL  114688
+#   budget_bytes_overwatch  OPTIONAL  98304
 #
 # [wake]
 #   max_tasks_per_wake      OPTIONAL  5
 #   max_runtime_seconds     OPTIONAL  14400
 #   pause_between_tasks     OPTIONAL  5
-#   stop_on_blocked         OPTIONAL  true
+#   stop_on_blocked         OPTIONAL  false  (true = a BLOCKED task ends the project's batch)
 #   stop_file               OPTIONAL  ${PGAI_AGENT_KANBAN_TEMP_DIR}/wakeup/stop
 #   pm_max_tasks            OPTIONAL  15
 #   max_task_seconds        OPTIONAL  5400
@@ -313,6 +317,42 @@
 #                                              deferred bug rides along with
 #                                              it. false = the triggering
 #                                              bug ships alone.)
+#   deferred_max_age_days   OPTIONAL  ""     (whole number of days, or unset
+#                                              for no bound. When every
+#                                              open bug is deferred and the
+#                                              oldest one's **Date:** is
+#                                              more than this many days
+#                                              ago, discovery opens a
+#                                              bugfix bundle of the
+#                                              deferred bugs. NOT read by
+#                                              load_config() below —
+#                                              resolved and validated by
+#                                              resolve_defer_posture in
+#                                              defer_posture.sh and its
+#                                              Python twin
+#                                              lib/defer_posture.py,
+#                                              project.cfg > kanban.cfg >
+#                                              unset.)
+#   deferred_max_count      OPTIONAL  ""     (whole number, or unset for no
+#                                              bound. When every open bug
+#                                              is deferred and MORE than
+#                                              this many are, discovery
+#                                              opens a bugfix bundle of the
+#                                              deferred bugs. Resolved like
+#                                              deferred_max_age_days.)
+#   bundle_mixing           OPTIONAL  separate (separate|ride-along —
+#                                              separate keeps deferred bugs
+#                                              out of requirement RCs;
+#                                              ride-along lets the PM add up
+#                                              to ride_along_max of them to
+#                                              one. Resolved like
+#                                              deferred_max_age_days.)
+#   ride_along_max          OPTIONAL  3      (whole number — the most
+#                                              deferred bugs one requirement
+#                                              RC may carry under
+#                                              bundle_mixing=ride-along.
+#                                              Resolved like
+#                                              deferred_max_age_days.)
 #   deep_verify             OPTIONAL  weekly (weekly|off — the DEEP-VERIFY
 #                                              scheduled-dispatch cadence.
 #                                              Validated by load_config()
@@ -366,7 +406,7 @@
 #                                         section genuinely shared by both cfg
 #                                         files — see the section header
 #                                         above.)
-#   ship_posture            OPTIONAL  matrix (NOT read/validated by
+#   ship_posture            OPTIONAL  always (NOT read/validated by
 #                                         load_config() below — read by
 #                                         pp_ship_posture() in
 #                                         team/scripts/lib/project_paths.sh
@@ -382,20 +422,25 @@
 #                                         the posture covers and records
 #                                         what they would have stopped on.
 #                                         Absent or blank in BOTH resolves
-#                                         to 'matrix'. An unrecognized value
-#                                         also resolves to 'matrix' with one
-#                                         warning line — never a refusal.)
+#                                         to 'always' (subject to the
+#                                         remote-lane guard below). An
+#                                         unrecognized value resolves to
+#                                         'matrix' with one warning line —
+#                                         never a refusal.)
 #   ship_posture_confirm_remote  OPTIONAL  false (NOT read/validated by
 #                                         load_config() below — read by the
 #                                         same two resolvers through the same
 #                                         project.cfg-then-kanban.cfg chain.
 #                                         On a push_to_remote = true lane,
 #                                         ship_posture = always takes effect
-#                                         only when this is exactly 'true';
+#                                         only when this is exactly 'true',
+#                                         the built-in default included;
 #                                         anything else resolves the posture
-#                                         to 'matrix' with one warning line.
-#                                         Not consulted on a push_to_remote
-#                                         = false lane.)
+#                                         to 'matrix' (one warning line when
+#                                         a cfg file set 'always', none for
+#                                         the built-in default). Not
+#                                         consulted on a push_to_remote =
+#                                         false lane.)
 #   container_images        OPTIONAL  ""  (NOT read/validated by
 #                                         load_config() below — read from
 #                                         kanban.cfg only by
@@ -466,8 +511,9 @@
 #                                         then to 3. How many times block
 #                                         triage may requeue one task over
 #                                         the life of its Block Record,
-#                                         across block reasons and epochs,
-#                                         before it escalates instead. A
+#                                         across block reasons and epochs;
+#                                         once spent, the block goes to its
+#                                         classifier row's decision. A
 #                                         non-negative whole number; any
 #                                         other value refuses, dual-channel.)
 #   leaked_listener_min_age_seconds OPTIONAL 3600 (NOT read/validated by
@@ -480,6 +526,35 @@
 #                                         before it counts as leaked. A
 #                                         non-negative whole number; any other
 #                                         value is reported and 3600 used.)
+#   runaway_releases_per_hour     OPTIONAL  5
+#   runaway_rc_cycles_per_day     OPTIONAL  2
+#   runaway_reason_repeats        OPTIONAL  3
+#   runaway_inbox_entries_per_day OPTIONAL  20
+#                                         (validated, never exported, by
+#                                         load_config() below — read by
+#                                         resolve_thresholds() in
+#                                         team/pgai_agent_kanban/
+#                                         overwatch/runaway.py, which checks
+#                                         project.cfg first, then falls back
+#                                         to this kanban.cfg value, then to
+#                                         the default. The runaway detector's
+#                                         thresholds: exceeding one halts the
+#                                         project. A non-negative whole
+#                                         number, 0 turns the counter off;
+#                                         blank keeps the default. Any other
+#                                         value refuses dual-channel at load,
+#                                         naming the key, in whichever cfg
+#                                         file load_config() is handed.)
+#   halt_after_auto_resume  OPTIONAL  false (NOT read/validated by
+#                                         load_config() below — resolved by
+#                                         resolve_halt_after_auto_resume() in
+#                                         team/pgai_agent_kanban/overwatch/
+#                                         runaway.py, project.cfg first, then
+#                                         this kanban.cfg value. true|false
+#                                         only: whether a completed HALT-AFTER
+#                                         HALT may be cleared to an inbox
+#                                         entry. An unrecognized value
+#                                         refuses, dual-channel.)
 #
 # [archive]  — the fourth section shared by kanban.cfg (framework-wide
 #              default) and a project's own project.cfg (per-project
@@ -501,8 +576,11 @@
 #                                         run archives nothing — a wake or
 #                                         release never stops over it.)
 #
-# [testing]  — gated test-suite settings. Kanban-wide only: project.cfg
-#              carries no [testing] key and no per-project override. NOT
+# [testing]  — gated test-suite settings. Kanban-wide only: no
+#              project.cfg overrides these keys. (project.cfg has a
+#              [testing] section of its own with different keys — the
+#              project's runner commands, registered in project_paths.sh's
+#              Key Registry.) NOT
 #              read/validated by load_config() below — a malformed value
 #              here must not stop a wake that never runs a suite. The test
 #              runners read each key through its resolver at the bottom of
@@ -574,6 +652,16 @@ if ! command -v pgai_emit_error_contract >/dev/null 2>&1; then
 fi
 
 # ---------------------------------------------------------------------------
+# Bootstrap: ensure the temp root wrapper is available. load_config resolves
+# PGAI_AGENT_KANBAN_TEMP_DIR through pgai_temp_dir rather than reading
+# [paths] itself, so the framework has one bash copy of that rule.
+# ---------------------------------------------------------------------------
+if ! command -v pgai_temp_dir >/dev/null 2>&1; then
+    # shellcheck source=temp.sh
+    source "$(dirname "${BASH_SOURCE[0]}")/temp.sh"
+fi
+
+# ---------------------------------------------------------------------------
 # _CONFIG_LOADER_CFG_PATH — set by load_config; used by config_get.
 # ---------------------------------------------------------------------------
 _CONFIG_LOADER_CFG_PATH=""
@@ -623,6 +711,8 @@ _CONFIG_LOADER_KNOWN_KEYS=(
     models.codex:writer models.codex:tester models.codex:cm models.codex:po
     cleanup:retention_days cleanup:trivial_log_bytes cleanup:trivial_log_hours
     release:deferred_bugs release:deferred_bug_level release:defer_piggyback
+    release:deferred_max_age_days release:deferred_max_count
+    release:bundle_mixing release:ride_along_max
     release:deep_verify release:max_rc_retries
     release:deep_verify_offhours_window release:overwatch_resolve
     release:ship_posture release:ship_posture_confirm_remote
@@ -630,6 +720,9 @@ _CONFIG_LOADER_KNOWN_KEYS=(
     locks:stale_lock_reap_after_wake_periods
     overwatch:block_triage overwatch:requeue_budget
     overwatch:leaked_listener_min_age_seconds
+    overwatch:runaway_releases_per_hour overwatch:runaway_rc_cycles_per_day
+    overwatch:runaway_reason_repeats overwatch:runaway_inbox_entries_per_day
+    overwatch:halt_after_auto_resume
     archive:archive_count
     testing:workers testing:coverage testing:pre_merge_affected_cap
     install:crontab_backups_keep
@@ -893,6 +986,43 @@ _config_loader_export_wake_integer() {
 
     export "${env_name}=${value}"
     return 0
+}
+
+# ---------------------------------------------------------------------------
+# _config_loader_check_runaway_threshold <cfg> <key> <default>
+#
+# Refuses an [overwatch] runaway_* threshold in <cfg> that is present and
+# not a whole number. Accepted: 0 (the counter is off) or a positive whole
+# number in decimal digits; blank or absent keeps <default>, the same form
+# resolve_thresholds() in team/pgai_agent_kanban/overwatch/runaway.py
+# accepts. Validates only; nothing is exported, because runaway.py reads
+# the key itself (project.cfg first, then kanban.cfg).
+#
+# BLOCK-WORTHY (docs/blocking-site-census.md): an invariant by design. A
+# threshold runaway.py cannot read turns the runaway detector -- the one
+# path by which OVERWATCH stops a project that repeats itself -- off for
+# every project that reads the value, with nothing louder than a warning.
+# Refusing at config load names the key before that can happen. The
+# remedy rewrites the key inside [overwatch] alone to the digits the value
+# started with, else the key's default.
+# ---------------------------------------------------------------------------
+_config_loader_check_runaway_threshold() {
+    local cfg="$1" key="$2" default="$3"
+    local value suggested
+
+    value="$(read_ini "$cfg" overwatch "$key" "")"
+    if [[ -z "$value" || "$value" =~ ^[0-9]+$ ]]; then
+        return 0
+    fi
+
+    suggested="${value%%[^0-9]*}"
+    [[ -n "$suggested" ]] || suggested="$default"
+    pgai_emit_error_contract \
+        "config_loader.overwatch.invalid_runaway_threshold" \
+        "config_loader: load_config: [overwatch] ${key}='${value}' in ${cfg} is not a whole number (accepted: 0 to turn the counter off, or a positive whole number; blank or absent keeps the default ${default}); left as it is, the runaway detector checks nothing for a project that reads it." \
+        "sed -i '/^[[:space:]]*\\[overwatch\\][[:space:]]*\$/,/^[[:space:]]*\\[/ s/^[[:space:]]*${key}[[:space:]]*=.*/${key} = ${suggested}/' \"${cfg}\""
+    # CENSUS-ANCHOR: config-loader-runaway-threshold-01
+    return 1
 }
 
 # ---------------------------------------------------------------------------
@@ -1164,30 +1294,28 @@ load_config() {
     _dev_tree_path="$(read_ini "$cfg" paths dev_tree_path "")"
     export PGAI_DEV_TREE_PATH="${PGAI_DEV_TREE_PATH:-${_dev_tree_path}}"
 
-    # [paths] tmp_root + tmp_subdir → PGAI_AGENT_KANBAN_TEMP_DIR
-    # If PGAI_AGENT_KANBAN_TEMP_DIR is already set in the environment, skip.
-    if [[ -z "${PGAI_AGENT_KANBAN_TEMP_DIR:-}" ]]; then
-        local _tmp_root _tmp_subdir
-        _tmp_root="$(read_ini "$cfg" paths tmp_root "/tmp")"
-        _tmp_subdir="$(read_ini "$cfg" paths tmp_subdir "pgai_kanban_tmp")"
-        _tmp_root="${_tmp_root:-/tmp}"
-        _tmp_subdir="${_tmp_subdir:-pgai_kanban_tmp}"
-        export PGAI_AGENT_KANBAN_TEMP_DIR="${_tmp_root}/${_tmp_subdir}"
-    fi
+    # PGAI_AGENT_KANBAN_TEMP_DIR comes from temp.sh's pgai_temp_dir in its
+    # explicit-config form: an override already set in the environment wins
+    # (whitespace-trimmed, blank = unset); otherwise the [paths] pair of the
+    # cfg this function was handed, a key absent or blank taking its registry
+    # default (tmp_root /tmp, tmp_subdir pgai_kanban_tmp); otherwise the
+    # wrapper's last resort. pgai_temp_dir creates the directory and never
+    # returns empty or '/'.
+    local _temp_dir
+    _temp_dir="$(pgai_temp_dir "$cfg")"
+    export PGAI_AGENT_KANBAN_TEMP_DIR="$_temp_dir"
 
     # Export TMPDIR so that mktemp and other tools that respect TMPDIR
     # land under the configured framework temp root rather than /tmp.
     # TMPDIR is derived only from the already-resolved PGAI_AGENT_KANBAN_TEMP_DIR
-    # value above — it MUST NOT re-read tmp_root/tmp_subdir or re-implement
-    # the concat.  Mirror pgai_temp_dir's mkdir -p to ensure the directory exists.
-    mkdir -p "${PGAI_AGENT_KANBAN_TEMP_DIR}"
+    # value above, never from a second read of the config.
     export TMPDIR="${PGAI_AGENT_KANBAN_TEMP_DIR}"
 
     # [providers] ai_auth_mode → AI_AUTH_MODE
     export AI_AUTH_MODE="${AI_AUTH_MODE:-$(read_ini "$cfg" providers ai_auth_mode oauth)}"
 
     # [chain] pm_mode → PGAI_KANBAN_PM_MODE
-    export PGAI_KANBAN_PM_MODE="${PGAI_KANBAN_PM_MODE:-$(read_ini "$cfg" chain pm_mode automatic)}"
+    config_export_pm_mode "$cfg"
 
     # [dashboard] rows_per_column → DASHBOARD_ROWS_PER_COLUMN
     DASHBOARD_ROWS_PER_COLUMN="${DASHBOARD_ROWS_PER_COLUMN:-$(read_ini "$cfg" dashboard rows_per_column 21)}"
@@ -1228,11 +1356,14 @@ load_config() {
     _config_loader_export_wake_integer "$cfg" pause_between_tasks PAUSE_BETWEEN_TASKS 5 || return 1
 
     # [wake] stop_on_blocked → STOP_ON_BLOCKED
-    export STOP_ON_BLOCKED="${STOP_ON_BLOCKED:-$(read_ini "$cfg" wake stop_on_blocked true)}"
+    # false (default): a task that ends BLOCKED parks only itself -- its
+    # dependants stay WAITING and the batch dispatches the next independent
+    # task. true: the project's batch stops after the BLOCKED task.
+    export STOP_ON_BLOCKED="${STOP_ON_BLOCKED:-$(read_ini "$cfg" wake stop_on_blocked false)}"
 
     # [wake] stop_file → STOP_FILE
     # Default derives from the already-resolved temp dir (single-resolver discipline:
-    # consumes PGAI_AGENT_KANBAN_TEMP_DIR set above; does not re-read tmp_root/tmp_subdir).
+    # consumes PGAI_AGENT_KANBAN_TEMP_DIR set above; does not re-read [paths]).
     export STOP_FILE="${STOP_FILE:-$(read_ini "$cfg" wake stop_file "${PGAI_AGENT_KANBAN_TEMP_DIR}/wakeup/stop")}"
 
     # [wake] pm_max_tasks → PM_MAX_TASKS
@@ -1255,12 +1386,27 @@ load_config() {
     _config_loader_export_wake_integer "$cfg" max_task_seconds MAX_TASK_SECONDS 5400 || return 1
 
     # [wake] max_project_seconds → MAX_PROJECT_SECONDS
-    # Per-project runtime cap.  Each project in the multi-project iteration gets
-    # its own elapsed clock that resets at the start of run_project_chain.  When
-    # elapsed time for that project exceeds MAX_PROJECT_SECONDS the project task
-    # loop exits and the next project gets its own fresh clock.  This prevents a
-    # stalled project 1 from consuming the entire batch budget and starving
-    # projects 2..N.  Default: same as MAX_RUNTIME_SECONDS when unset.
+    # Per-project runtime cap.  Each project gets its own elapsed clock:
+    # run_project_chain starts it once the project's repo lock is held and
+    # the agent's backlog file has been found, before the per-project setup;
+    # when it exceeds MAX_PROJECT_SECONDS the task loop exits.  The
+    # per-project setup (config load, dev-tree check, reconciliation, model
+    # preflight and the dispatch gate) and the idle pass, including any wait
+    # to retake the repo lock there, count against MAX_PROJECT_SECONDS as
+    # well as MAX_RUNTIME_SECONDS.  Only the work before the clock starts --
+    # wake bootstrap, path resolution, OVERWATCH block triage, the initial
+    # repo-lock wait (up to [wake] lock_wait_seconds, default 120) and the
+    # backlog check -- counts against MAX_RUNTIME_SECONDS alone, whose clock
+    # (WAKE_START_EPOCH) starts when the wake starts.  Under wake-batch.sh
+    # each (project, agent) batch is one project, so this cap and
+    # MAX_RUNTIME_SECONDS bound the same batch.
+    # This cap trips first only when it is lower than MAX_RUNTIME_SECONDS by
+    # more than that pre-clock time; with a smaller gap, or equal caps,
+    # MAX_RUNTIME_SECONDS trips first.
+    # Only a provider wake script run directly (wake/claude.sh, wake/codex.sh)
+    # works every project in turn as one batch; there each project gets a
+    # fresh clock while MAX_RUNTIME_SECONDS caps the whole run.
+    # Default: same as MAX_RUNTIME_SECONDS when unset.
     # Set to 0 to disable the per-project cap (unlimited per project).
     # Nesting invariant: task < project <= batch — the project cap may equal
     # the batch cap (single-project installs), but the per-task limit must
@@ -1469,6 +1615,15 @@ load_config() {
             ;;
     esac
 
+    # [overwatch] runaway_* thresholds — validated here, exported nowhere.
+    # runaway.py reads each one itself (project.cfg first, then kanban.cfg);
+    # this check makes a value that is not a whole number refuse at load,
+    # naming the key, rather than turn the runaway detector off.
+    _config_loader_check_runaway_threshold "$cfg" runaway_releases_per_hour 5 || return 1
+    _config_loader_check_runaway_threshold "$cfg" runaway_rc_cycles_per_day 2 || return 1
+    _config_loader_check_runaway_threshold "$cfg" runaway_reason_repeats 3 || return 1
+    _config_loader_check_runaway_threshold "$cfg" runaway_inbox_entries_per_day 20 || return 1
+
     # [models.<provider>] per-role model overrides → PGAI_<ROLE>_MODEL
     # The active provider is resolved lazily: if read_active_provider is available
     # (sourced by the provider lib), use it; otherwise fall back to the [providers]
@@ -1533,6 +1688,58 @@ load_config() {
         unset _resolved_e_source
     done
 
+    return 0
+}
+
+# ---------------------------------------------------------------------------
+# config_startup_prelude [kanban_root]
+#
+# The shared startup step of the kanban entry-point scripts. Call it once,
+# before strict mode, at the point the script used to source the operator's
+# user config — after <root>/bashrc and <root>/env, so the order of those
+# three files is unchanged. It:
+#
+#   1. sources $HOME/.config/pgai-kanban.cfg when that file exists
+#      (operator-local bash config, sourced as-is);
+#   2. when <kanban_root>/kanban.cfg exists, exports PGAI_KANBAN_PM_MODE from
+#      its [chain] pm_mode (default automatic). The file is read only when
+#      the variable is unset or empty, so a value already in the environment,
+#      or one the user config set, wins over kanban.cfg.
+#
+# kanban_root defaults to $PGAI_AGENT_KANBAN_ROOT_PATH. A second call in the
+# same shell is a no-op (the user config is not sourced twice); the guard is
+# not exported, so each child script runs its own startup. Always returns 0.
+#
+# The user config is sourced inside this function: plain and exported
+# assignments in it behave exactly as at top level, but a bare `declare` in
+# it would make a function-local variable.
+# ---------------------------------------------------------------------------
+config_startup_prelude() {
+    [[ -n "${_CONFIG_STARTUP_PRELUDE_DONE:-}" ]] && return 0
+    _CONFIG_STARTUP_PRELUDE_DONE=1
+
+    if [[ -f "$HOME/.config/pgai-kanban.cfg" ]]; then
+        # shellcheck source=/dev/null
+        source "$HOME/.config/pgai-kanban.cfg"
+    fi
+
+    local _csp_cfg="${1:-${PGAI_AGENT_KANBAN_ROOT_PATH:-}}/kanban.cfg"
+    if [[ -f "$_csp_cfg" ]]; then
+        config_export_pm_mode "$_csp_cfg"
+    fi
+    return 0
+}
+
+# ---------------------------------------------------------------------------
+# config_export_pm_mode <kanban.cfg>
+#
+# The one read of [chain] pm_mode: exports PGAI_KANBAN_PM_MODE from
+# <kanban.cfg> (default automatic) when the variable is unset or empty, so
+# a value already in the environment wins. load_config and
+# config_startup_prelude both call it. Always returns 0.
+# ---------------------------------------------------------------------------
+config_export_pm_mode() {
+    export PGAI_KANBAN_PM_MODE="${PGAI_KANBAN_PM_MODE:-$(read_ini "$1" chain pm_mode automatic)}"
     return 0
 }
 

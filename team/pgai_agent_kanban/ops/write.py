@@ -24,11 +24,25 @@ Sentinel provenance:
     command line, e.g. the halt-after.sh that called the CLI shim), user,
     test (the pytest node id when written under pytest, else "-").  The
     format is defined once in pgai_agent_kanban.lib.sentinel_provenance; the
-    sentinel's own bytes are unchanged.  team/scripts/lib/
-    sentinel_leak_check.sh reads the log to tell an operator or agent write
-    made during a gated suite from a sentinel the suite left behind.  A
+    sentinel's own bytes are unchanged.  scripts/lib/sentinel_leak_check.sh
+    reads the log to tell an operator or agent write made during a gated
+    suite from a sentinel the suite left behind.  A
     record that cannot be appended is narrated as one stderr warning and
     never fails the write or changes its exit code.
+
+Blocked ledger:
+
+    unhalt, reset_item, close_item and wontdo_item close the matching block
+    on the project's blocked-interval ledger (pgai_agent_kanban.metrics.
+    blocked_ledger) through the shared stamps in pgai_agent_kanban.
+    task_status.  unhalt closes ``halt:project``: class human, cause chain
+    when the HALT it removed was raised by the chain (no operator record for
+    it in the sentinel-writes log), cause operator otherwise.  reset_item
+    closes ``task:<TASK-ID>`` with class human; close_item and wontdo_item
+    close it with class any.  Each closes only an open block, under the
+    version it was opened with, and is best-effort (CENSUS CLASS CONVERT):
+    a ledger failure prints at most one stderr warning and never changes
+    the operation, its exit code, or its REST twin's response.
 
 Functions:
 
@@ -37,7 +51,8 @@ Functions:
         creates the file.
 
     unhalt(ctx, project)
-        Remove PROJECT_ROOT/HALT.  Idempotent.
+        Remove PROJECT_ROOT/HALT.  Idempotent.  A removal closes the
+        ``halt:project`` block on the blocked ledger (see above).
 
     halt_after(ctx, project, token="rc")
         Write TOKEN to PROJECT_ROOT/HALT-AFTER.  Overwrites any existing sentinel.
@@ -81,21 +96,51 @@ Functions:
         its number atomically (claim_next_bug_id): deposited as named when
         the number is free, renumbered to the next free number -- title and
         **Bug ID:** lines rewritten -- when it is taken; a BUG-* name that
-        fails the ledger filename contract is refused before anything is
-        written.  PRIORITY-* and requirements deposits are no-clobber (fail
+        fails the ledger filename contract, or a draft that reports the
+        same defect as a live bug (lib.bug_filing.find_same_defect), is
+        refused before anything is written.  PRIORITY-* and requirements deposits are no-clobber (fail
         if the target exists).  Returns the deposited Path on success.
 
     close_item(ctx, project, key, state="done", note="", dry_run=False)
         Set the terminal state on a task or intake item identified by key.
         For agent tasks: always writes DONE to ## State, clears ## Blockers and
-        ## Needs Human, flips the agent queue marker to [x].
+        ## Needs Human, flips the agent queue marker to [x], and closes the
+        task's open blocked-ledger block with class any.
         For intake items: sets ## Status to state (one of
-        lib.terminal_states.CLOSED_STATES: done|wont-do), optionally records
-        note in ## Close Note, flips the backlog marker to [x].
+        lib.terminal_states.CLOSED_STATES: done|wont-do|duplicate), optionally
+        records note in ## Close Note, flips the backlog marker to [x].
+        duplicate requires a note naming the surviving item (the pointer).
+        Closing a needs-operator item also closes its open operator-inbox
+        entries.
+
+    set_needs_operator(ctx, project, key, question, now=None)
+        Set a bug or priority item's ## Status to needs-operator and write
+        one operator-inbox entry (Source: the item, Question: QUESTION)
+        through overwatch.inbox.write_entry.  Returns the InboxEntry.
+
+    reopen_needs_operator_item(ctx, project, source)
+        Set the needs-operator bug or priority item an inbox entry's Source
+        names back to open; overwatch.inbox.answer_entry calls it.  Returns
+        the reopened item's path, or None when the source names no such item.
+
+    check_needs_operator(ctx, project, key, question)
+        Run every set_needs_operator check and write nothing: a caller that
+        must know all its needs-operator writes will be accepted before its
+        first write (the PM materializer) calls this first.  Returns the
+        item's path.
+
+    ride_along_item(ctx, project, key, requirement)
+        List an open bug in a requirement's ## Bundled Items as a ride-along
+        (``- NAME (`PATH`) — ride-along``; the section is created at the end
+        of the file when absent), then set the bug's ## Status to running
+        and its bug_backlog line, when present, to [x].  The release step
+        then promotes or carries it exactly as a bundled item.  Returns the
+        bug's path.
 
     wontdo_item(ctx, project, key)
         Mark an agent task as WONT-DO.  Clears ## Blockers and ## Needs Human.
-        Flips the agent queue marker to [x].
+        Flips the agent queue marker to [x].  Closes the task's open
+        blocked-ledger block with class any.
 
     delete_item(ctx, project, key, force=False)
         Delete a task (directory) or intake item (file) identified by key.
@@ -111,6 +156,7 @@ Functions:
           --force, performs cleanup (worktree remove, prune, rm -rf, branch delete)
           narrating each step; raises MountPinned (exit 4) if mount-pinned.
           Regenerates status.md from the BACKLOG template (amnesia guarantee),
+          closes the task's open blocked-ledger block with class human,
           clears artifacts/ and task logs/, flips queue marker to [ ], deletes
           the feature branch from the project dev tree, runs git worktree prune,
           and appends one line to the operator reset log.
@@ -157,6 +203,7 @@ CLI usage (bash delegation shim):
     python3 -m pgai_agent_kanban.ops switch_provider KANBAN_ROOT PROVIDER
     python3 -m pgai_agent_kanban.ops deposit_intake PROJECT_ROOT FILE_PATH
     python3 -m pgai_agent_kanban.ops close_item  PROJECT_ROOT KEY [STATE] [NOTE] [DRY_RUN]
+    python3 -m pgai_agent_kanban.ops set_needs_operator PROJECT_ROOT KEY QUESTION
     python3 -m pgai_agent_kanban.ops wontdo_item PROJECT_ROOT KEY
     python3 -m pgai_agent_kanban.ops delete_item PROJECT_ROOT KEY [FORCE]
     python3 -m pgai_agent_kanban.ops reset_item  PROJECT_ROOT KEY [KEEP_ARTIFACTS] [FORCE]
@@ -184,9 +231,14 @@ For switch_provider: 1 for every refusal (an unrecognized provider -- the
     [providers] active key, a write failure); the confirmation goes to stdout.
 For deposit_intake: 2 routing refused (including a BUG-* name that fails the ledger
     filename contract), 3 target exists (PRIORITY-* and requirements only),
-    4 filesystem error.
+    4 filesystem error, 5 a BUG-* draft reporting the same defect as a live bug
+    (the dual-channel block on stderr names the live bug's ID).
 For close_item/wontdo_item/delete_item: 2 ambiguous key, 3 not found, 4 state mutation failed,
-    2 (delete) guard refused.
+    2 (delete) guard refused.  close_item: 1 a --state that is not a closed state, or
+    duplicate with no note naming the surviving item (close.duplicate_pointer_missing).
+For set_needs_operator: the inbox entry is printed to stdout; every refusal prints the
+    dual-channel block on stderr: 2 an empty QUESTION, a closed item, an item that is not a
+    bug or priority, or an ambiguous KEY; 3 KEY not found; 4 a write failed.
 For reset_item: 2 WORKING state refusal, ambiguous key, or stale-worktree refusal (no --force);
     3 not found; 4 mount-pinned path blocks --force cleanup.
 For set_marker/remove_marker: 1 MARKER is not a queue marker, 3 no line for KEY (or no
@@ -210,9 +262,11 @@ import shutil
 import sys
 import tempfile
 from pathlib import Path
+from typing import NoReturn
 
 from pgai_agent_kanban import task_status as _task_status
 from pgai_agent_kanban.lib.atomic_write import atomic_write
+from pgai_agent_kanban.lib import branch_prefix as _branch_prefix
 from pgai_agent_kanban.lib import defer_posture as _defer_posture
 from pgai_agent_kanban.lib import ini
 from pgai_agent_kanban.lib.active_provider import VALID_PROVIDERS
@@ -223,6 +277,7 @@ from pgai_agent_kanban.lib.error_contract import (
 )
 from pgai_agent_kanban.lib.filename_contract import (
     INTAKE_FILENAME_NOT_BARE,
+    INTAKE_ROUTES,
     IntakeFilenameRefused,
     intake_destination,
 )
@@ -232,7 +287,12 @@ from pgai_agent_kanban.lib.ledger_filename_contract import (
     next_free_number as _ledger_next_free_number,
 )
 from pgai_agent_kanban.lib.md_fields import read_field as _read_md_field
-from pgai_agent_kanban.lib.sentinel_provenance import record_sentinel_write
+from pgai_agent_kanban.lib.sentinel_provenance import (
+    CAUSE_OPERATOR,
+    record_sentinel_write,
+    sentinel_cause,
+)
+from pgai_agent_kanban.lib import temp_root as _temp_root
 from pgai_agent_kanban.lib.version_ceiling import (
     CEILING_SECTION,
     NO_CEILING,
@@ -240,21 +300,37 @@ from pgai_agent_kanban.lib.version_ceiling import (
     read_ceiling,
 )
 from pgai_agent_kanban.lib.terminal_states import (
+    ACTIVE_INTAKE_STATES,
     CLOSED_STATES,
+    DUPLICATE_STATE,
     LEGACY_STATE_ALIASES,
+    NEEDS_OPERATOR_STATE,
+    OPEN_STATE,
+    RUNNING_STATE,
+    canonical_state as _canonical_state,
     is_terminal as _is_terminal_state,
 )
-from pgai_agent_kanban.ops.context import OpsContext
+from pgai_agent_kanban.ops.context import OpsContext, context_for_project
 from pgai_agent_kanban.ops.errors import (
     Ambiguous,
+    ContractError,
     IoError,
     MountPinned,
     NotFound,
     OpsError,
     Refused,
+    SameDefectRefused,
     cli_exit_code,
 )
 from pgai_agent_kanban.ops.resolve import ResolveResult, resolve_item, resolve_project_name
+from pgai_agent_kanban.overwatch.halt_provenance import installed_script_command
+
+# Blocked-ledger vocabulary (pgai_agent_kanban.metrics.blocked_ledger) the
+# unhalt / reset / close / wontdo stamps write; see "Blocked ledger" above.
+_HALT_PROJECT_SOURCE = "halt:project"
+_BLOCK_CLASS_HUMAN = "human"
+_BLOCK_CLASS_ANY = "any"
+_BLOCK_CAUSE_CHAIN = "chain"
 
 
 # ---------------------------------------------------------------------------
@@ -301,6 +377,15 @@ def unhalt(ctx: OpsContext, project: str) -> None:
 
     Idempotent: if PROJECT_ROOT/HALT is already absent, returns without error.
 
+    A HALT this call removes closes the project's open ``halt:project``
+    block on the blocked ledger, reason_code ``unhalt``: class human, cause
+    chain, when the sentinel-writes log has no operator record that still
+    describes the HALT (the chain raised it and a human cleared it); cause
+    operator when it has one.  Best-effort -- see "Blocked ledger" in the
+    module docstring.  The removal is recorded in the sentinel-writes log
+    (op ``unhalt``), so a later chain HALT on the project is never read as
+    this operator's.
+
     Args:
         ctx:     OpsContext carrying the kanban root path.
         project: Project name as registered in projects.cfg.
@@ -317,11 +402,28 @@ def unhalt(ctx: OpsContext, project: str) -> None:
         return
 
     try:
+        cause = sentinel_cause(halt_path, kanban_root=ctx.kanban_root)
+    except Exception:  # noqa: BLE001 - provenance is advisory; no record reads as chain
+        cause = _BLOCK_CAUSE_CHAIN
+
+    try:
         halt_path.unlink()
     except OSError as exc:
         raise OpsError(
             f"unhalt: failed to remove HALT sentinel at {halt_path}: {exc}"
         ) from exc
+    record_sentinel_write(ctx.kanban_root, halt_path, "unhalt")
+
+    if cause == CAUSE_OPERATOR:
+        _task_status.stamp_ledger_block_end(
+            ctx.kanban_root, project, _HALT_PROJECT_SOURCE,
+            block_class=_BLOCK_CLASS_ANY, cause=CAUSE_OPERATOR, reason_code="unhalt",
+        )
+    else:
+        _task_status.stamp_ledger_block_end(
+            ctx.kanban_root, project, _HALT_PROJECT_SOURCE,
+            block_class=_BLOCK_CLASS_HUMAN, cause=_BLOCK_CAUSE_CHAIN, reason_code="unhalt",
+        )
 
 
 def halt_after(ctx: OpsContext, project: str, token: str = "rc") -> None:
@@ -450,11 +552,13 @@ def unhalt_global(ctx: OpsContext) -> None:
 # ---------------------------------------------------------------------------
 
 # Body of an armed campaign file; the target line is appended. The comment
-# names the three operator-facing places the file is armed, cleared and read.
+# names the three operator-facing places the file is armed, cleared and read,
+# as paths under the installed kanban root. They stay relative so every
+# board's campaign file carries the same bytes.
 _CAMPAIGN_FILE_HEADER = (
-    "# DEFER-LOW-BUGS campaign file -- armed by team/scripts/defer.sh,\n"
-    "# cleared by team/scripts/undefer.sh, read by\n"
-    "# team/scripts/lib/defer_posture.sh.\n"
+    "# DEFER-LOW-BUGS campaign file -- armed by scripts/defer.sh,\n"
+    "# cleared by scripts/undefer.sh, read by\n"
+    "# scripts/lib/defer_posture.sh (paths under the kanban root).\n"
 )
 
 
@@ -503,12 +607,13 @@ class CampaignChange:
         )
 
 
-def _normalise_defer_until(project: str, until: str) -> str:
+def _normalise_defer_until(kanban_root: Path, project: str, until: str) -> str:
     """Return *until* as ``vX.Y.Z``, or refuse it before anything is resolved.
 
     One leading ``v`` and then one leading ``V`` are dropped and a single
-    ``v`` is put back, so ``2.14.0``, ``v2.14.0`` and ``V2.14.0`` all arm
-    ``v2.14.0``. *project* is the name as typed; it fills the remedy.
+    ``v`` is put back, so ``1.2.3``, ``v1.2.3`` and ``V1.2.3`` all arm
+    ``v1.2.3``. *project* is the name as typed; it fills the remedy, which
+    names the installed ``defer.sh`` under *kanban_root*.
 
     Raises:
         Refused: *until* is empty (``defer.until_required``) or not
@@ -523,7 +628,7 @@ def _normalise_defer_until(project: str, until: str) -> str:
             "defer.until_required",
             "defer.sh: --until is required -- a deferral campaign always names the release it runs until.",
             "Re-run with --until set to a well-formed version, e.g. "
-            f"team/scripts/defer.sh --project {project} --until v2.20.0.",
+            f"{installed_script_command(kanban_root, 'defer.sh', '--project', project, '--until', 'v1.2.3')}.",
         ))
     bare = until[1:] if until.startswith("v") else until
     bare = bare[1:] if bare.startswith("V") else bare
@@ -536,7 +641,7 @@ def _normalise_defer_until(project: str, until: str) -> str:
         raise Refused(format_error_contract(
             "defer.until_malformed",
             f"defer.sh: --until value '{until}' is not well-formed semver (expected vX.Y.Z).",
-            "Re-run with a well-formed version, e.g. --until v2.14.0.",
+            "Re-run with a well-formed version, e.g. --until v1.2.3.",
         ))
     return normalised
 
@@ -599,7 +704,7 @@ def defer(ctx: OpsContext, project: str, until: str) -> CampaignChange:
         Ambiguous: The prefix matches several projects.
         IoError:   The campaign file could not be written.
     """
-    until_normalised = _normalise_defer_until(project, until)
+    until_normalised = _normalise_defer_until(ctx.kanban_root, project, until)
     project = resolve_project_name(ctx, project)
     project_root = _require_project_dir(
         ctx, project, "defer",
@@ -800,8 +905,8 @@ def set_version_ceiling(
             raise Refused(format_error_contract(
                 "set_version_ceiling.invalid_ceiling",
                 f"set-version-ceiling.sh: {flag} requires a non-negative integer; got: '{change}'.",
-                "Re-run with a non-negative integer, e.g. team/scripts/set-version-ceiling.sh "
-                f"--project {shlex.quote(project)} {flag} 5",
+                "Re-run with a non-negative integer, e.g. "
+                + installed_script_command(ctx.kanban_root, "set-version-ceiling.sh", "--project", project, flag, "5"),
             ))
 
     cfg_file = ctx.project_root(project) / "project.cfg"
@@ -935,7 +1040,8 @@ def switch_provider(ctx: OpsContext, provider: str) -> ProviderSwitch:
             "switch_provider.unknown_provider",
             f"switch-provider.sh: unrecognized provider '{provider}'; "
             f"valid providers: {', '.join(PROVIDER_CLIS)}.",
-            "Re-run with a valid provider, e.g. team/scripts/switch-provider.sh --provider claude",
+            "Re-run with a valid provider, e.g. "
+            + installed_script_command(ctx.kanban_root, "switch-provider.sh", "--provider", "claude"),
         ))
 
     if shutil.which(cli) is None:
@@ -982,7 +1088,43 @@ def switch_provider(ctx: OpsContext, provider: str) -> ProviderSwitch:
 # the operator API's intake route and discovery share one contract.
 
 
-def route_intake_name(project: str, file_path: "Path | str") -> str:
+# The bare name a not-bare intake refusal suggests, by the directory the
+# staged name's routing prefix sends it to: the staged name's own leading
+# identifier followed by "-example.md" when it carries one whole, else the
+# fixed example name.  Every suggestion routes back to the same directory.
+_BARE_EXAMPLE_NAMES: dict[str, tuple[re.Pattern[str], str]] = {
+    "bugs": (re.compile(r"BUG-[0-9]{4}(?![0-9])"), "BUG-0001-example.md"),
+    "priority": (re.compile(r"PRIORITY-[0-9]{4}(?![0-9])"), "PRIORITY-0001-example.md"),
+    "requirements": (re.compile(r"v[0-9]+(?:\.[0-9]+)*"), "v1.0.0-example.md"),
+}
+
+# The suggestion for a not-bare name that carries no routing prefix at all.
+_BARE_EXAMPLE_DEFAULT = "BUG-0001-example.md"
+
+
+def _bare_intake_example(name: str) -> str:
+    """Return a bare intake name that routes where *name*'s prefix routes.
+
+    *name* is a staged basename ``intake_destination`` refused as not bare.
+    Its routing prefix is read with the same ``INTAKE_ROUTES`` table intake
+    routes on, so the suggestion keeps it.  For example, staged
+    ``PRIORITY-0042-a%2Fb.md`` gives ``PRIORITY-0042-example.md``,
+    ``v1.2.3..x.md`` gives ``v1.2.3-example.md``, and ``BUG-0001\\x.md``
+    gives ``BUG-0001-example.md``.  A name with no routing prefix gets
+    ``BUG-0001-example.md``.  Used only to make the refusal's remedy
+    runnable; it never touches the filesystem.
+    """
+    for pattern, subdir in INTAKE_ROUTES:
+        if pattern.match(name):
+            id_re, fallback = _BARE_EXAMPLE_NAMES[subdir]
+            m = id_re.match(name)
+            return f"{m.group(0)}-example.md" if m else fallback
+    return _BARE_EXAMPLE_DEFAULT
+
+
+def route_intake_name(
+    project: str, file_path: "Path | str", kanban_root: "Path | str"
+) -> str:
     """Return the project sub-directory the basename of *file_path* routes to.
 
     The intake name check deposit_intake runs before it copies anything, and
@@ -994,12 +1136,17 @@ def route_intake_name(project: str, file_path: "Path | str") -> str:
     one intake filename check, shared with the API route's own pre-write
     guard.  A basename that is not a bare file name (it can still carry
     ``..``, a backslash, a URL-encoded separator or a NUL) is refused
-    dual-channel; one that matches no routing prefix is refused with the
-    plain ``deposit_intake: cannot route ...`` line.
+    dual-channel, its remedy renaming the file to a bare name that keeps its
+    routing prefix (``_bare_intake_example``) and re-running the intake.sh
+    installed under *kanban_root*, so it runs as printed from any directory;
+    one that matches no routing prefix is refused with the plain
+    ``deposit_intake: cannot route ...`` line.
 
     Args:
-        project:   Project name, used only to make the remedy runnable.
-        file_path: The staged file whose basename is routed.
+        project:     Project name, used only to make the remedy runnable.
+        file_path:   The staged file whose basename is routed.
+        kanban_root: The resolved kanban root, used only to name the
+                     installed intake.sh in the remedy.
 
     Returns:
         ``"bugs"``, ``"priority"`` or ``"requirements"``.
@@ -1013,12 +1160,12 @@ def route_intake_name(project: str, file_path: "Path | str") -> str:
         return intake_destination(src.name)
     except IntakeFilenameRefused as exc:
         if exc.error == INTAKE_FILENAME_NOT_BARE:
-            renamed = src.with_name("BUG-0001-example.md")
+            renamed = src.with_name(_bare_intake_example(src.name))
             remedy = (
                 "Rename the staged file to a bare intake name, then re-run intake: "
                 + shlex.join(["mv", str(src), str(renamed)])
                 + " && "
-                + shlex.join(["intake.sh", "--project", project, str(renamed)])
+                + installed_script_command(kanban_root, "intake.sh", "--project", project, str(renamed))
             )
             # BLOCK-WORTHY (docs/blocking-site-census.md): an invariant by
             # design -- the deposited name is joined under the project
@@ -1035,6 +1182,9 @@ def route_intake_name(project: str, file_path: "Path | str") -> str:
 
 # Machine key: a BUG-* intake name that fails the ledger filename contract.
 INTAKE_BUG_NAME_MALFORMED = "intake.bug_filename_malformed"
+
+# Machine key: a BUG-* draft reporting the same defect as a live bug.
+INTAKE_BUG_SAME_DEFECT = "intake.same_defect"
 
 # Identity deposit_intake records in bugs/.bug-claims.log for each number it
 # claims (claim_next_bug_id's claimed_by).
@@ -1079,7 +1229,9 @@ def _suggest_bug_name(name: str, bugs_dir: Path) -> str:
     return f"BUG-{number:04d}-{slug}.md"
 
 
-def _refuse_malformed_bug_name(project: str, src: Path, bugs_dir: Path) -> None:
+def _refuse_malformed_bug_name(
+    project: str, src: Path, bugs_dir: Path, kanban_root: "Path | str"
+) -> None:
     """Refuse a BUG-* staged name that fails the ledger filename contract.
 
     The contract is ``ledger_filename_re("BUG")`` read case-sensitively, so
@@ -1087,8 +1239,9 @@ def _refuse_malformed_bug_name(project: str, src: Path, bugs_dir: Path) -> None:
     case-insensitive read of files already filed accepts one.  The message
     carries the shared contract's own text (``build_remedy``, what discovery
     prints when it rejects a name); the remedy renames the staged draft to a
-    valid name and re-runs intake.sh on it.  Nothing has been claimed or
-    written when this raises.
+    valid name and re-runs the intake.sh installed under *kanban_root* on
+    it, so it runs as printed from any directory.  Nothing has been claimed
+    or written when this raises.
 
     Raises:
         Refused: dual-channel, ``intake.bug_filename_malformed``.
@@ -1102,7 +1255,7 @@ def _refuse_malformed_bug_name(project: str, src: Path, bugs_dir: Path) -> None:
         "Rename the staged draft to the ledger filename contract, then re-run intake: "
         + shlex.join(["mv", str(src), str(renamed)])
         + " && "
-        + shlex.join(["intake.sh", "--project", project, str(renamed)])
+        + installed_script_command(kanban_root, "intake.sh", "--project", project, str(renamed))
     )
     # BLOCK-WORTHY (docs/blocking-site-census.md): an invariant by design --
     # a BUG-* name off the contract carries no number the claim can take and
@@ -1110,6 +1263,53 @@ def _refuse_malformed_bug_name(project: str, src: Path, bugs_dir: Path) -> None:
     # CENSUS-ANCHOR: write-intake-bug-name-malformed-01
     raise Refused(format_error_contract(
         INTAKE_BUG_NAME_MALFORMED, f"intake.sh: refusing {name}: {reason}", remedy))
+
+
+def _refuse_same_defect(src: Path, bugs_dir: Path) -> None:
+    """Refuse a BUG-* draft that reports the same defect as a live bug.
+
+    The rule is ``lib.bug_filing.find_same_defect``, the one same-defect
+    predicate: the draft's body cites a bug at open, running or
+    needs-operator as the defect it reports, or its slug differs from such a
+    bug's slug only by re-file markers (a re-file word, an ordinal or a
+    trailing counter at its start or end).  The message names the live
+    bug's ID, file and status and why the draft matched; the remedy prints
+    that bug, whose record is where new evidence belongs.  Nothing has been
+    claimed or written when this raises.
+
+    Raises:
+        SameDefectRefused: dual-channel, ``intake.same_defect``.
+        IoError:           The draft cannot be read.
+    """
+    # Imported here, not at module level: lib.bug_filing imports
+    # task_status, which imports this package while it initialises.
+    from pgai_agent_kanban.lib.bug_filing import find_same_defect
+
+    try:
+        text = src.read_text(encoding="utf-8", errors="replace")
+    except OSError as exc:
+        raise IoError(f"deposit_intake: cannot read {src}: {exc}") from exc
+    match = find_same_defect(str(bugs_dir), src.name, text)
+    if match is None:
+        return
+    bug = match.bug
+    message = (
+        f"intake.sh: refusing {src.name}: it reports the same defect as {bug.bug_id} "
+        f"({bug.name}, status {bug.status}): {match.why}. Nothing was written. "
+        f"Cite {bug.bug_id} instead of filing the defect again; if the draft reports a "
+        f"different defect, reword it so it does not cite {bug.bug_id} as its defect, "
+        "or rename it so its slug names that defect, and re-run intake."
+    )
+    remedy = (
+        f"Read {bug.bug_id}, the live record of this defect, and add new evidence there: "
+        + shlex.join(["cat", bug.path])
+    )
+    # AGENT-RESOLVABLE (docs/blocking-site-census.md): the defect already has
+    # a live record, so the filer cites it -- or rewords a draft that reports
+    # a different defect -- in the same session; nothing is claimed or
+    # written and nothing needs a human.
+    # CENSUS-ANCHOR: write-intake-bug-same-defect-01
+    raise SameDefectRefused(INTAKE_BUG_SAME_DEFECT, message, remedy, bug.bug_id)
 
 
 def _renumber_bug_text(data: bytes, stem: str) -> bytes:
@@ -1142,9 +1342,10 @@ def _deposit_bug(src: Path, bugs_dir: Path) -> Path:
     Claims the draft's own number with ``claim_next_bug_id`` (the one
     O_EXCL claim, loaded from this tree's pm-agent/lib/bug_scanner.py by
     ``lib.bug_filing``): when it is free the draft is placed byte-identical
-    under its own name; when it is taken the claim hands out the next free
-    number, the file is named for it and its title and **Bug ID:** lines are
-    rewritten to match.  The claim lock is held until the file is in place
+    under its own name; when it is taken -- by a live bug, by a bug in the
+    project's archive, or by another claim -- the claim hands out the next
+    free number, the file is named for it and its title and **Bug ID:**
+    lines are rewritten to match.  The claim lock is held until the file is in place
     and released on every path, so a concurrent depositor never takes the
     same number.  Placement is a hard link, so a name that a writer
     bypassing the claim created meanwhile is never replaced: the deposit
@@ -1230,7 +1431,8 @@ def deposit_intake(ctx: OpsContext, project: str, file_path: "Path | str") -> Pa
 
     Routes purely by the basename of ``file_path`` (case-sensitive prefix
     match).  It does not validate file contents or check headings; content
-    validation is the discovery pipeline's responsibility.  A BUG-* draft
+    validation is the discovery pipeline's responsibility.  A BUG-* draft's
+    body is read only for the same-defect check below.  A BUG-* draft
     is the one deposit that may be renamed: its number is claimed so no two
     bugs ever share one.
 
@@ -1251,9 +1453,19 @@ def deposit_intake(ctx: OpsContext, project: str, file_path: "Path | str") -> Pa
           otherwise it is refused dual-channel
           (``intake.bug_filename_malformed``) with the contract's own
           malformed-name text, before any claim or write.
+        - A draft that reports the same defect as a live bug (status open,
+          running or needs-operator) is refused dual-channel
+          (``intake.same_defect``, ``SameDefectRefused``, exit 5), naming
+          that bug's ID, before any claim or write.  The rule is
+          ``lib.bug_filing.find_same_defect``: the body cites the bug as
+          the defect it reports, or the slug differs from its slug only by
+          re-file markers (a re-file word, an ordinal or a trailing
+          counter at its start or end).  An ID mentioned in passing is not
+          a citation.
         - The number is claimed atomically (``claim_next_bug_id`` with the
           draft's own number preferred).  Free: the draft is deposited
-          byte-identical under its own name.  Taken: it is deposited as the
+          byte-identical under its own name.  Taken (a live bug or one in
+          the project's archive holds it): it is deposited as the
           next free number, ``BUG-MMMM-<slug>.md``, with its ``# BUG-...``
           title line and ``**Bug ID:**`` line rewritten to name it; every
           other byte is unchanged.  The returned path names the file.
@@ -1294,6 +1506,9 @@ def deposit_intake(ctx: OpsContext, project: str, file_path: "Path | str") -> Pa
         Refused:   If the basename is not a bare file name, does not
                    match any known intake prefix, or is a BUG-* name that
                    fails the ledger filename contract.  Nothing is copied.
+        SameDefectRefused:
+                   If a BUG-* draft reports the same defect as a live bug
+                   (a Refused; exit code 5).  Nothing is copied.
         OpsError:  If a PRIORITY-* or requirements target already exists
                    (no clobber), whether it was present at the pre-check or
                    appeared before placement.
@@ -1320,7 +1535,7 @@ def deposit_intake(ctx: OpsContext, project: str, file_path: "Path | str") -> Pa
 
     # --- Route by filename prefix ---
     basename = src.name
-    dest_subdir = route_intake_name(project, src)
+    dest_subdir = route_intake_name(project, src, ctx.kanban_root)
 
     dest_dir = project_root / dest_subdir
 
@@ -1332,7 +1547,8 @@ def deposit_intake(ctx: OpsContext, project: str, file_path: "Path | str") -> Pa
 
     # --- BUG-*: contract-checked name, atomically claimed number ---
     if dest_subdir == "bugs":
-        _refuse_malformed_bug_name(project, src, dest_dir)
+        _refuse_malformed_bug_name(project, src, dest_dir, ctx.kanban_root)
+        _refuse_same_defect(src, dest_dir)
         return _deposit_bug(src, dest_dir)
 
     target = dest_dir / basename
@@ -1437,12 +1653,21 @@ def close_item(
     For AGENT TASKS (task folder under tasks/):
         Always writes DONE to ## State, clears ## Blockers to "none" and
         ## Needs Human to "no", and flips the agent queue marker to [x].
+        The task's open block on the blocked ledger is closed, class any
+        (best-effort; see "Blocked ledger" in the module docstring).
         The ``state`` argument is intake vocabulary and is ignored for tasks.
 
     For INTAKE ITEMS (bug/priority/requirement):
-        Sets ## Status to ``state`` (one of ``CLOSED_STATES``: done|wont-do),
-        optionally records ``note`` in a ## Close Note section, and flips the
-        intake backlog marker to [x].
+        Sets ## Status to ``state`` (one of ``CLOSED_STATES``:
+        done|wont-do|duplicate), optionally records ``note`` in a
+        ## Close Note section, and flips the intake backlog marker to [x].
+        ``duplicate`` needs a pointer: ``note`` must name the surviving
+        item -- a bug, priority or requirement key other than this item's
+        own, e.g. "duplicate of BUG-NNNN" -- and is recorded as given.  An
+        item closed from ``needs-operator`` also has its open operator-inbox
+        entries (those whose Source names it) closed, since nobody needs
+        their answer any more; that close is best-effort and a failure is
+        one stderr warning.
 
     The write is atomic: a temp file in the same directory is written, then
     renamed over the target (os.replace is atomic on POSIX).
@@ -1452,18 +1677,22 @@ def close_item(
         project: Project name as registered in projects.cfg.
         key:     Task folder name or intake file base name.
         state:   Terminal state for intake items.  One of ``CLOSED_STATES``
-                 ("done", "wont-do"); a legacy alias such as "superseded" is
-                 refused with a remedy naming "wont-do".  Validated for
-                 agent tasks too, though tasks always close as DONE.
-                 Defaults to "done".
+                 ("done", "wont-do", "duplicate"); a legacy alias such as
+                 "superseded" is refused with a remedy naming "wont-do".
+                 Validated for agent tasks too, though tasks always close
+                 as DONE.  Defaults to "done".
         note:    Optional free-form note recorded in ## Close Note section
-                 of intake items.  Ignored for agent tasks.
+                 of intake items; required, and naming the surviving item,
+                 for "duplicate".  Ignored for agent tasks.
         dry_run: When True, report the intended change to stdout without
                  writing anything.  Exits 0.
 
     Raises:
         OpsError:  If ``state`` is not a closed state (a dual-channel
-                   ``close.invalid_state`` refusal, exit 1), the project root
+                   ``close.invalid_state`` refusal, exit 1), ``duplicate``
+                   comes without a note naming the surviving item (a
+                   dual-channel ``close.duplicate_pointer_missing`` refusal,
+                   exit 1, nothing written), the project root
                    is missing, key resolves to a bad path, or the
                    status.md/intake file cannot be read.
         NotFound:  If no item matches the key.
@@ -1491,6 +1720,7 @@ def close_item(
             return
 
         _write_task_terminal_state(status_file, "DONE", "close_item")
+        _close_task_block(ctx, project, result.path.name, _BLOCK_CLASS_ANY, "done")
 
         marker_file = _get_marker_file(
             ctx.project_root(project), result.item_type, result.path
@@ -1501,6 +1731,9 @@ def close_item(
 
     # --- Intake item branch ---
     item_path = result.path
+
+    if state == DUPLICATE_STATE:
+        _check_duplicate_pointer(ctx, project, key, item_path, note)
 
     if dry_run:
         print(
@@ -1518,6 +1751,9 @@ def close_item(
     )
     marker_key = _get_item_key_in_marker(result.item_type, result.path)
     set_marker(marker_file, marker_key, "x", ignore_case=True)
+
+    if _canonical_state(result.state) == NEEDS_OPERATOR_STATE:
+        _close_inbox_entries_for(ctx, project, item_path)
 
 
 def _check_close_state(state: str, project: str, key: str) -> None:
@@ -1552,6 +1788,498 @@ def _check_close_state(state: str, project: str, key: str) -> None:
     raise OpsError(format_error_contract("close.invalid_state", message, remedy))
 
 
+# A token in a duplicate close note that may name the surviving item: a plain
+# name carrying at least one digit (a bug or priority ID, a requirement name), so
+# ordinary words are never looked up.
+_POINTER_TOKEN_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
+
+
+def _duplicate_pointer(
+    ctx: OpsContext, project: str, item_path: Path, note: str
+) -> "Path | None":
+    """Return the surviving item *note* points at, or ``None`` when it names none.
+
+    The pointer is the first token of *note* that resolves (``resolve_item``,
+    exact then prefix) to one bug, priority or requirement file other than
+    *item_path* itself.  A token that matches nothing, a task, or more than
+    one item is skipped.
+    """
+    for token in _POINTER_TOKEN_RE.findall(note):
+        token = token.rstrip(".-_")
+        if not any(ch.isdigit() for ch in token):
+            continue
+        try:
+            found = resolve_item(ctx, project, token)
+        except OpsError:
+            continue
+        if found.item_type != "task" and found.path.resolve() != item_path.resolve():
+            return found.path
+    return None
+
+
+def _check_duplicate_pointer(
+    ctx: OpsContext, project: str, key: str, item_path: Path, note: str
+) -> None:
+    """Refuse a ``duplicate`` close whose *note* does not name the surviving item."""
+    if _duplicate_pointer(ctx, project, item_path, note) is not None:
+        return
+    message = (
+        f"close.sh: closing {key!r} as '{DUPLICATE_STATE}' needs a pointer to the "
+        f"surviving item: pass --note naming an existing bug, priority or requirement "
+        f"other than this one (for example --note 'duplicate of BUG-NNNN'); "
+        f"{'no --note was given' if not note.strip() else 'the --note names none'}, "
+        f"so nothing was written."
+    )
+    remedy = f"ls {shlex.quote(str(item_path.parent))}"
+    # BLOCK-WORTHY (docs/blocking-site-census.md): a duplicate always points
+    # at the item that survives it -- one without a pointer is a closed
+    # record nobody can follow. Refused before anything is written.
+    # CENSUS-ANCHOR: write-close-duplicate-pointer-01
+    raise OpsError(format_error_contract("close.duplicate_pointer_missing", message, remedy))
+
+
+def _close_inbox_entries_for(ctx: OpsContext, project: str, item_path: Path) -> None:
+    """Close every open operator-inbox entry whose Source names *item_path*.
+
+    Called when a needs-operator item is closed: its question no longer
+    needs an answer.  The inbox is written only through overwatch.inbox.
+    """
+    # Imported here: overwatch.inbox imports this package.
+    from pgai_agent_kanban.overwatch import inbox as _inbox
+
+    try:
+        for entry in _inbox.list_open(ctx, project):
+            found = _intake_item_for_source(ctx, project, entry.source)
+            if found is not None and found.path.resolve() == item_path.resolve():
+                _inbox.close_entry(ctx, project, entry.entry_id)
+    except OpsError as exc:
+        # CONVERT: the item is closed either way; a question left open in
+        # the inbox is clutter the operator can close by hand, not damage.
+        print(
+            f"close_item: WARNING: {item_path.stem} is closed but its open operator-inbox "
+            f"entries were not all closed: {exc}",
+            file=sys.stderr,
+        )
+
+
+# ---------------------------------------------------------------------------
+# needs-operator: set_needs_operator / reopen_needs_operator_item
+# ---------------------------------------------------------------------------
+
+#: Intake item types a needs-operator question can be parked on.
+_NEEDS_OPERATOR_ITEM_TYPES = ("bug", "priority")
+
+
+class NeedsOperatorRefused(ContractError, Refused):
+    """set_needs_operator refused its input before writing (ops exit code 2)."""
+
+
+class NeedsOperatorNotFound(ContractError, NotFound):
+    """set_needs_operator found no item for the key (ops exit code 3)."""
+
+
+def _refuse_needs_operator(kind: type, error: str, message: str, remedy: str) -> NoReturn:
+    """Raise *kind* -- the one refusal site every set_needs_operator check shares.
+
+    Nothing has been written when this runs: every check happens before the
+    item or the inbox is touched.
+    """
+    # AGENT-RESOLVABLE: a refused needs-operator call leaves the item and the
+    # inbox exactly as they were; the caller corrects its own next call (a
+    # real key, a non-empty question, an item still open) in the same
+    # session and nothing needs a human.
+    # CENSUS-ANCHOR: write-needs-operator-refusal-01
+    raise kind(error, message, remedy)
+
+
+def _ops_cli_command(kanban_root: Path, *args: str) -> str:
+    """Return a runnable ``python3 -m pgai_agent_kanban.ops ...`` command from the install root."""
+    quoted = " ".join(shlex.quote(str(arg)) for arg in args)
+    return f"cd {shlex.quote(str(kanban_root))} && python3 -m pgai_agent_kanban.ops {quoted}"
+
+
+def _intake_item_for_source(
+    ctx: OpsContext, project: str, source: str
+) -> "ResolveResult | None":
+    """Return the bug or priority item an inbox entry's *source* names, or ``None``.
+
+    The source's first line, stripped, is resolved like any key (exact, then
+    an unambiguous prefix).  A source that is not one plain name (an RC such
+    as ``rc:v1.2.3``), names nothing, names a task or requirement, or is
+    ambiguous names no item.
+    """
+    first = source.strip().split("\n", 1)[0].strip()
+    if not first or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", first):
+        return None
+    try:
+        found = resolve_item(ctx, project, first)
+    except OpsError:
+        return None
+    if found.item_type not in _NEEDS_OPERATOR_ITEM_TYPES:
+        return None
+    return found
+
+
+def _checked_needs_operator_item(
+    ctx: OpsContext, project: str, key: str, question: str
+) -> "tuple[ResolveResult, str]":
+    """Run every set_needs_operator check and return ``(item, stem)``.
+
+    Reads only: a refusal (``_refuse_needs_operator``) leaves the item and
+    the inbox untouched. Shared by :func:`check_needs_operator` and
+    :func:`set_needs_operator`, so both refuse exactly the same inputs.
+    """
+    project_root = ctx.project_root(project)
+    listing = f"ls {shlex.quote(str(project_root / 'bugs'))} {shlex.quote(str(project_root / 'priority'))}"
+
+    try:
+        result = resolve_item(ctx, project, key)
+    except Ambiguous:
+        _refuse_needs_operator(
+            NeedsOperatorRefused,
+            "needs_operator.ambiguous_key",
+            f"key {key!r} matches more than one item in project {project!r}; give the "
+            f"whole file name. Nothing was written.",
+            listing,
+        )
+    except NotFound:
+        _refuse_needs_operator(
+            NeedsOperatorNotFound,
+            "needs_operator.unknown_key",
+            f"no bug or priority item matches key {key!r} in project {project!r}; "
+            f"nothing was written.",
+            listing,
+        )
+
+    stem = result.path.stem if result.item_type != "task" else result.path.name
+    if result.item_type not in _NEEDS_OPERATOR_ITEM_TYPES:
+        _refuse_needs_operator(
+            NeedsOperatorRefused,
+            "needs_operator.not_intake_item",
+            f"{stem} is a {result.item_type}, not a bug or priority item; only bugs and "
+            f"priorities are parked on an operator question. Nothing was written.",
+            listing,
+        )
+
+    current = _canonical_state(result.state)
+    if current not in ACTIVE_INTAKE_STATES:
+        closed = _is_terminal_state(current)
+        _refuse_needs_operator(
+            NeedsOperatorRefused,
+            "needs_operator.item_closed" if closed else "needs_operator.bad_status",
+            f"{stem} has ## Status {result.state.strip() or '(none)'!r}; only an item at "
+            f"{', '.join(ACTIVE_INTAKE_STATES)} can be set to {NEEDS_OPERATOR_STATE}. "
+            f"Nothing was written.",
+            installed_script_command(ctx.kanban_root, "reset.sh", "--project", project, "--key", stem)
+            if closed
+            else f"cat {shlex.quote(str(result.path))}",
+        )
+
+    if not question.strip():
+        _refuse_needs_operator(
+            NeedsOperatorRefused,
+            "needs_operator.empty_question",
+            f"the question for {stem} is empty; the item is parked only together with the "
+            f"question the operator must answer. Nothing was written.",
+            _ops_cli_command(
+                ctx.kanban_root, "set_needs_operator", str(project_root), stem,
+                "Which value should this use?",
+            ),
+        )
+    return result, stem
+
+
+def check_needs_operator(ctx: OpsContext, project: str, key: str, question: str) -> Path:
+    """Refuse, writing nothing, every input :func:`set_needs_operator` would refuse.
+
+    For a caller that must know all of its needs-operator writes will be
+    accepted before it writes anything (the PM materializer checks every
+    plan entry before the first task folder). The checks are the ones
+    ``set_needs_operator`` runs; an accepted input can still fail later on
+    a filesystem error or a status changed in between.
+
+    Returns:
+        The item's path.
+
+    Raises:
+        NeedsOperatorRefused / NeedsOperatorNotFound: as set_needs_operator.
+    """
+    result, _stem = _checked_needs_operator_item(ctx, project, key, question)
+    return result.path
+
+
+def set_needs_operator(
+    ctx: OpsContext,
+    project: str,
+    key: str,
+    question: str,
+    *,
+    now: "object | None" = None,
+):
+    """Park a bug or priority item on an operator question.
+
+    Sets the item's ``## Status`` to ``needs-operator`` and writes one open
+    operator-inbox entry through ``overwatch.inbox.write_entry``: Source is
+    the item's key (its file name without ``.md``), Question is *question*.
+    Answering that entry (``overwatch.inbox.answer_entry``, from any
+    surface) sets the item back to ``open``.
+
+    An item already at ``needs-operator`` asked the same question again is
+    left as it is and its existing open entry returned (``write_entry``
+    with ``once``); a different question adds a second entry.
+
+    The status is written first and restored if the inbox write fails, so a
+    failed call leaves no item parked without its question.
+
+    Args:
+        ctx:      OpsContext carrying the kanban root path.
+        project:  Project name as registered in projects.cfg.
+        key:      Bug or priority key (file base name or unambiguous prefix).
+        question: The question for the operator; must not be blank.
+        now:      The inbox entry's date (a datetime); ``None`` for now.
+
+    Returns:
+        The ``overwatch.inbox.InboxEntry`` written (or the matching one
+        already open).
+
+    Raises:
+        NeedsOperatorRefused:  a blank question, an ambiguous key, an item
+            that is not a bug or priority, or one whose status is not
+            open, running or needs-operator (exit 2).
+        NeedsOperatorNotFound: no item matches the key (exit 3).
+        OpsError / IoError:    the item or inbox could not be read or written.
+    """
+    # Imported here: overwatch.inbox imports this package.
+    from pgai_agent_kanban.overwatch import inbox as _inbox
+
+    result, stem = _checked_needs_operator_item(ctx, project, key, question)
+    current = _canonical_state(result.state)
+    previous = result.state.strip()
+    if current != NEEDS_OPERATOR_STATE:
+        _set_sections_or_raise(result.path, {"Status": NEEDS_OPERATOR_STATE}, "set_needs_operator")
+
+    try:
+        return _inbox.write_entry(
+            ctx,
+            project,
+            source=stem,
+            question=question,
+            meanwhile=(
+                f"Set {stem} to {NEEDS_OPERATOR_STATE}; bundling leaves it out until "
+                f"the answer."
+            ),
+            how_to_answer=(
+                f"Answer this entry with the inbox answer command; answering sets {stem} "
+                f"back to {OPEN_STATE}."
+            ),
+            now=now,
+            once=True,
+        )
+    except OpsError:
+        if current != NEEDS_OPERATOR_STATE:
+            _set_sections_or_raise(result.path, {"Status": previous}, "set_needs_operator")
+        raise
+
+
+def reopen_needs_operator_item(
+    ctx: OpsContext, project: str, source: str
+) -> "Path | None":
+    """Set the needs-operator item an inbox entry's *source* names back to ``open``.
+
+    ``overwatch.inbox.answer_entry`` calls this after recording an answer,
+    so every answer surface reopens the item.  The backlog marker is set to
+    ``[ ]`` as ``reset_item`` sets it.  A source that names no bug or
+    priority item (an RC, a task), or one whose status is not
+    ``needs-operator``, changes nothing.
+
+    Returns:
+        The reopened item's path, or ``None`` when nothing was changed.
+
+    Raises:
+        OpsError / IoError: the item could not be rewritten.
+    """
+    found = _intake_item_for_source(ctx, project, source)
+    if found is None or _canonical_state(found.state) != NEEDS_OPERATOR_STATE:
+        return None
+    _set_sections_or_raise(found.path, {"Status": OPEN_STATE}, "reopen_needs_operator_item")
+    set_marker(
+        _get_marker_file(ctx.project_root(project), found.item_type, found.path),
+        _get_item_key_in_marker(found.item_type, found.path),
+        " ",
+        ignore_case=True,
+    )
+    return found.path
+
+
+# ---------------------------------------------------------------------------
+# ride_along_item: a deferred bug ticketed inside a requirement RC
+# ---------------------------------------------------------------------------
+
+#: The heading a ride-along is listed under in its requirement -- the same
+#: section a bundle lists its items in, so the release promotes, carries and
+#: unwinds a ride-along exactly as it does a bundled item.
+_RIDE_ALONG_HEADING = "Bundled Items"
+#: The trailing text on a ride-along's ``## Bundled Items`` line.
+RIDE_ALONG_SUFFIX = "ride-along"
+
+
+class RideAlongRefused(ContractError, Refused):
+    """ride_along_item refused its input before writing (ops exit code 2)."""
+
+
+class RideAlongNotFound(ContractError, NotFound):
+    """ride_along_item found no bug for the key (ops exit code 3)."""
+
+
+def _refuse_ride_along(kind: type, error: str, message: str, remedy: str) -> NoReturn:
+    """Raise *kind* -- the one refusal site every ride_along_item check shares.
+
+    Nothing has been written when this runs: every check happens before the
+    requirement or the bug is touched.
+    """
+    # AGENT-RESOLVABLE: a refused ride-along leaves the bug, the requirement
+    # and the backlog exactly as they were; the caller corrects its own next
+    # call (a real bug key, a bug still open, the project's own requirement)
+    # in the same session and nothing needs a human.
+    # CENSUS-ANCHOR: write-ride-along-refusal-01
+    raise kind(error, message, remedy)
+
+
+def ride_along_listing_line(bug_path: Path) -> str:
+    """The ``## Bundled Items`` line that lists *bug_path* as a ride-along."""
+    return f"- {bug_path.name} (`{bug_path}`) — {RIDE_ALONG_SUFFIX}"
+
+
+def _listed_names(requirement_text: str) -> "set[str]":
+    """File names the requirement's ``## Bundled Items`` already lists."""
+    # Imported here, as overwatch.inbox is above: a lib reader kept off this
+    # module's import path.
+    from pgai_agent_kanban.lib.bundle_items import parse_bundled_item_paths
+
+    return {Path(path).name for path in parse_bundled_item_paths(requirement_text)}
+
+
+def ride_along_item(
+    ctx: OpsContext, project: str, key: str, requirement: "Path | str"
+) -> Path:
+    """List an open bug in a requirement as a ride-along and set it ``running``.
+
+    A ride-along is a bug ticketed inside a requirement RC. The bug is added
+    to the requirement's ``## Bundled Items`` section (created at the end of
+    the file when absent) as ``- NAME (`PATH`) — ride-along``, then its
+    ``## Status`` is set to ``running`` and its ``bug_backlog.md`` line, when
+    it has one, to ``[x]`` -- what discovery writes for a bundled bug. Listed
+    there, the bug is in flight while the requirement is, and the release
+    step promotes it, or carries it, exactly as a bundled item; an RC unwind
+    sets it back to ``open``.
+
+    The listing is written before the status, so the bug is never
+    ``running`` without a requirement that lists it. A bug already listed
+    in *requirement* and already ``running`` is left as it is (a repeated
+    call writes nothing).
+
+    Args:
+        ctx:         OpsContext carrying the kanban root path.
+        project:     Project name as registered in projects.cfg.
+        key:         Bug key (file base name or unambiguous prefix).
+        requirement: The requirement file; must sit in the project's
+                     ``requirements/`` directory, where the release and
+                     discovery read listings.
+
+    Returns:
+        The bug's path.
+
+    Raises:
+        RideAlongRefused:  an ambiguous key, an item that is not a bug, a
+            bug whose status is not ``open`` (or ``running`` already listed
+            here), or a requirement outside the project's requirements/
+            directory (exit 2).
+        RideAlongNotFound: no bug matches the key (exit 3).
+        OpsError / IoError: a file could not be read or written.
+    """
+    project_root = ctx.project_root(project)
+    requirements_dir = ctx.requirements_dir(project)
+    requirement_path = Path(requirement)
+    listing = f"ls {shlex.quote(str(project_root / 'bugs'))}"
+
+    if (
+        not requirement_path.is_file()
+        or requirement_path.resolve().parent != requirements_dir.resolve()
+    ):
+        _refuse_ride_along(
+            RideAlongRefused,
+            "ride_along.requirement_outside",
+            f"{requirement_path} is not a requirement file in {requirements_dir}; a "
+            f"ride-along is listed only in its own project's requirement, where the "
+            f"release step and discovery read it. Nothing was written.",
+            f"ls {shlex.quote(str(requirements_dir))}",
+        )
+
+    try:
+        result = resolve_item(ctx, project, key)
+    except Ambiguous:
+        _refuse_ride_along(
+            RideAlongRefused,
+            "ride_along.ambiguous_key",
+            f"key {key!r} matches more than one item in project {project!r}; give the "
+            f"whole bug file name. Nothing was written.",
+            listing,
+        )
+    except NotFound:
+        _refuse_ride_along(
+            RideAlongNotFound,
+            "ride_along.unknown_key",
+            f"no bug matches key {key!r} in project {project!r}; nothing was written.",
+            listing,
+        )
+
+    if result.item_type != "bug":
+        _refuse_ride_along(
+            RideAlongRefused,
+            "ride_along.not_bug",
+            f"{result.path.name} is a {result.item_type}, not a bug; only a bug rides "
+            f"along in a requirement RC. Nothing was written.",
+            listing,
+        )
+
+    try:
+        text = requirement_path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise IoError(f"ride_along_item: cannot read {requirement_path}: {exc}") from exc
+    listed = result.path.name in _listed_names(text)
+    current = _canonical_state(result.state) or OPEN_STATE
+    if current != OPEN_STATE and not (current == RUNNING_STATE and listed):
+        _refuse_ride_along(
+            RideAlongRefused,
+            "ride_along.bad_status",
+            f"{result.path.stem} has ## Status {result.state.strip() or '(none)'!r}; only an "
+            f"{OPEN_STATE} bug can ride along (one already {RUNNING_STATE} belongs to "
+            f"another bundle or requirement). Nothing was written.",
+            f"cat {shlex.quote(str(result.path))}",
+        )
+
+    if not listed:
+        line = ride_along_listing_line(result.path)
+        body = _task_status.read_section(text, _RIDE_ALONG_HEADING, end_at_subheading=True)
+        if body is None:
+            new_text = f"{text.rstrip()}\n\n## {_RIDE_ALONG_HEADING}\n\n{line}\n"
+        else:
+            new_text = _task_status.replace_section(
+                text, _RIDE_ALONG_HEADING, f"{body.strip()}\n{line}" if body.strip() else line
+            )
+        _write_or_raise_io(requirement_path, new_text)
+
+    if current != RUNNING_STATE:
+        _set_sections_or_raise(result.path, {"Status": RUNNING_STATE}, "ride_along_item")
+    set_marker(
+        _get_marker_file(project_root, result.item_type, result.path),
+        _get_item_key_in_marker(result.item_type, result.path),
+        "x",
+        ignore_case=True,
+    )
+    return result.path
+
+
 # ---------------------------------------------------------------------------
 # wontdo_item
 # ---------------------------------------------------------------------------
@@ -1561,7 +2289,8 @@ def wontdo_item(ctx: OpsContext, project: str, key: str) -> None:
     """Mark an agent task as WONT-DO.
 
     Writes WONT-DO to ## State, clears ## Blockers to "none" and ## Needs Human
-    to "no", and flips the agent queue marker to [x].  Produces WONT-DO only;
+    to "no", and flips the agent queue marker to [x].  The task's open block
+    on the blocked ledger is closed, class any (best-effort).  Produces WONT-DO only;
     cannot set DONE through any argument combination.
 
     The write is atomic: temp file in the same directory, then os.replace.
@@ -1595,6 +2324,7 @@ def wontdo_item(ctx: OpsContext, project: str, key: str) -> None:
         )
 
     _write_task_terminal_state(status_file, "WONT-DO", "wontdo_item")
+    _close_task_block(ctx, project, task_dir.name, _BLOCK_CLASS_ANY, "wont-do")
 
     marker_file = _get_marker_file(
         ctx.project_root(project), result.item_type, result.path
@@ -1706,6 +2436,8 @@ def reset_item(
         - Raises Refused (exit 2) if state is WORKING (filesystem race guard).
         - Regenerates status.md from the BACKLOG template (template regeneration,
           not surgical edit — this is the amnesia guarantee).
+        - Closes the task's open block on the blocked ledger with class
+          human, reason_code ``reset`` (a human released it); best-effort.
         - Clears artifacts/ and the task's logs/ directory (unless
           keep_artifacts=True; logs are always cleared regardless).
         - Flips the agent queue marker to [ ] in <agent>_backlog.md.
@@ -1825,8 +2557,9 @@ def _reset_agent_task(
     - When no stale state: force and bare behave identically; no worktree
       cleanup narration; normal reset proceeds.
 
-    After any stale-worktree handling: regenerates status.md, clears
-    artifacts/ and logs/, flips the queue marker, deletes the feature branch,
+    After any stale-worktree handling: regenerates status.md, closes the
+    task's open blocked-ledger block (class human), clears artifacts/ and
+    logs/, flips the queue marker, deletes the feature branch,
     runs git worktree prune, and appends to the reset log.
 
     Args:
@@ -1858,7 +2591,11 @@ def _reset_agent_task(
     # Read dev_tree and branch_prefix early so detection can use them; they are
     # also consumed by Step 4 below.
     dev_tree = _read_dev_tree_path(project_root)
-    branch_prefix = _read_branch_prefix(project_root)
+    try:
+        branch_prefix = _branch_prefix.ini_branch_prefix_for_project_root(project_root)
+    except _branch_prefix.InvalidBranchPrefixError:
+        # A prefix pp_branch_prefix refuses reads as none, as an unreadable project.cfg does.
+        branch_prefix = ""
     if dev_tree is not None and dev_tree.is_dir():
         stale_wt = _detect_stale_worktree(dev_tree, task_id, branch_prefix)
         if stale_wt.registration_exists or stale_wt.path_exists:
@@ -1890,6 +2627,10 @@ def _reset_agent_task(
     status_file = task_dir / "status.md"
     fresh_status = _generate_status_md(task_id, participant, role)
     _write_or_raise_io(status_file, fresh_status)
+
+    # --- Step 1b: the operator released the task: close its open block on
+    # the blocked ledger as one a human had to clear (best-effort). ---
+    _close_task_block(ctx, project, task_id, _BLOCK_CLASS_HUMAN, "reset")
 
     # --- Step 2: Clear artifacts/ and task logs/ ---
     artifacts_dir = task_dir / "artifacts"
@@ -2179,18 +2920,6 @@ def _read_dev_tree_path(project_root: Path) -> "Path | None":
     return None
 
 
-def _read_branch_prefix(project_root: Path) -> str:
-    """Return the branch_prefix from project.cfg, or '' when unset.
-
-    Args:
-        project_root: Absolute path to the project root.
-
-    Returns:
-        Branch prefix string (e.g. 'ai_'), or '' for the default (no prefix).
-    """
-    return _read_project_cfg_value(project_root, "project", "branch_prefix")
-
-
 def _git_delete_feature_branch(
     dev_tree: Path, feature_branch: str, branch_prefix: str = ""
 ) -> None:
@@ -2370,16 +3099,21 @@ def _detect_stale_worktree(
     Worktree path convention: mirrors worktree.sh pgai_worktree_path.  The
     resolved path is:
         <PGAI_WORKTREE_BASE>/<task_id>          when PGAI_WORKTREE_BASE is set
-        /tmp/pgai_kanban_tmp/projects/<PP_project_name>/worktrees/<task_id>
+        <temp root>/projects/<PP_project_name>/worktrees/<task_id>
                                                   per-project default (env unset)
-        /tmp/pgai_kanban_tmp/worktrees/<task_id>  fallback when no project context
+        <temp root>/worktrees/<task_id>           fallback when no project context
+
+    <temp root> is what :func:`pgai_agent_kanban.lib.temp_root.resolve_temp_root`
+    returns with no kanban root given -- the answer worktree.sh's
+    pgai_temp_dir gives (PGAI_AGENT_KANBAN_TEMP_DIR, else kanban.cfg [paths]
+    tmp_root/tmp_subdir, else the documented last-resort root).
 
     Because Python cannot source worktree.sh, this function uses the
     PGAI_WORKTREE_BASE environment variable as the canonical override and
-    applies the same default resolution logic without reading kanban.cfg.
-    The kanban.cfg tier is only relevant when an operator has set
-    worktree_base in [paths]; in that scenario the operator may also set
-    PGAI_WORKTREE_BASE explicitly — a supported escape hatch.
+    does not read kanban.cfg's [paths] worktree_base. That tier is only
+    relevant when an operator has set worktree_base; in that scenario the
+    operator may also set PGAI_WORKTREE_BASE explicitly — a supported
+    escape hatch.
 
     Registration detection: checks for the presence of the directory
     <dev_tree>/.git/worktrees/<task_id>.  Git creates this directory when a
@@ -2407,7 +3141,7 @@ def _detect_stale_worktree(
         wt_base = pgai_worktree_base
     else:
         # Default: per-project subtree when PP_project_name is set (mirrors Tier 3).
-        temp_root = os.environ.get("PGAI_AGENT_KANBAN_TEMP_DIR", "/tmp/pgai_kanban_tmp")
+        temp_root = _temp_root.resolve_temp_root()
         pp_project_name = os.environ.get("PP_project_name", "").strip()
         if pp_project_name:
             wt_base = os.path.join(temp_root, "projects", pp_project_name, "worktrees")
@@ -2731,6 +3465,25 @@ def _cleanup_stale_worktree(
     print(
         f"reset: [worktree cleanup] stale worktree cleanup complete for task {task_id!r}",
         file=_sys.stderr,
+    )
+
+
+def _close_task_block(
+    ctx: OpsContext, project: str, task_id: str, block_class: str, reason_code: str
+) -> None:
+    """Close task *task_id*'s open block on the project's blocked ledger.
+
+    *block_class* is the class of the resolution (``human`` for a reset,
+    ``any`` for a close or wontdo).  No open block is a silent no-op.
+    Best-effort and never raises -- CENSUS CLASS CONVERT
+    (docs/blocking-site-census.md): the status.md write has already landed.
+    """
+    _task_status.stamp_ledger_block_end(
+        ctx.kanban_root,
+        project,
+        _task_status.task_ledger_source(task_id),
+        block_class=block_class,
+        reason_code=reason_code,
     )
 
 
@@ -3083,9 +3836,12 @@ def ensure_marker(text: "str | None", item_key: str, marker: str) -> str:
       :func:`replace_marker` (only the bracket changes).
     - *text* is ``None`` (no file yet): a new cache,
       ``# Backlog Cache`` / ``## Queue`` / ``- [<marker>] <item_key>``.
-    - No line, a ``## Queue`` heading present: ``- [<marker>] <item_key>``
+    - No line, a ``## Queue`` section present: ``- [<marker>] <item_key>``
       is added after the last line of that section, its trailing blank
-      lines cut so the entry follows directly.
+      lines cut so the entry follows directly; one blank line separates it
+      from a heading after the section.  The section is found by
+      :func:`task_status.read_section` and bounded where that reader
+      bounds it (see :func:`_append_queue_entry`).
     - No line and no ``## Queue``: a ``## Queue`` section holding the entry
       is appended at the end.
 
@@ -3107,16 +3863,27 @@ def ensure_marker(text: "str | None", item_key: str, marker: str) -> str:
     new_text, count = replace_marker(text, item_key, target)
     if count:
         return new_text
-    if re.search(r"^## Queue\s*$", text, re.M):
-        return re.sub(
-            r"(^## Queue\s*\n(?:.*\n)*?)(?=\n##|\Z)",
-            lambda m: m.group(1).rstrip() + f"\n{entry}\n",
-            text,
-            count=1,
-            flags=re.M,
-        )
+    if _task_status.read_section(text, "Queue") is not None:
+        return _append_queue_entry(text, entry)
     suffix = "" if text.endswith("\n") else "\n"
     return text + suffix + f"\n## Queue\n\n{entry}\n"
+
+
+def _append_queue_entry(text: str, entry: str) -> str:
+    """Return *text* with *entry* on its own line at the end of ``## Queue``.
+
+    The section's bounds are :func:`task_status.section_span`'s -- the ones
+    :func:`task_status.read_section` and :func:`task_status.replace_section`
+    share -- so this writer carries no section regex of its own.  Everything up to the end of the section's body is kept with its
+    trailing whitespace cut, the entry follows on the next line, and a
+    heading after the section follows the entry after one blank line.  At
+    the end of the file the entry's line is the last line.  The caller has
+    already confirmed the section is present.
+    """
+    span = _task_status.section_span(text, "Queue")
+    head = text[: span.body_end].rstrip()
+    later = "\n" + text[span.next_heading:] if span.next_heading is not None else ""
+    return f"{head}\n{entry}\n{later}"
 
 
 def queue_markers(
@@ -3467,6 +4234,7 @@ def _cli_main(argv: list[str] | None = None) -> int:
                                                              NO_MINOR NO_MAJOR DRY_RUN
         python3 -m pgai_agent_kanban.ops switch_provider KANBAN_ROOT PROVIDER
         python3 -m pgai_agent_kanban.ops close_item  PROJECT_ROOT KEY [STATE] [NOTE] [DRY_RUN]
+        python3 -m pgai_agent_kanban.ops set_needs_operator PROJECT_ROOT KEY QUESTION
         python3 -m pgai_agent_kanban.ops wontdo_item PROJECT_ROOT KEY
         python3 -m pgai_agent_kanban.ops delete_item PROJECT_ROOT KEY [FORCE]
         python3 -m pgai_agent_kanban.ops reset_item  PROJECT_ROOT KEY [KEEP_ARTIFACTS] [FORCE]
@@ -3486,6 +4254,7 @@ def _cli_main(argv: list[str] | None = None) -> int:
            also used by reset_item for WORKING state refusal or stale-worktree-without-force
         3  Not found; also set_marker/remove_marker with no line for KEY
         4  State mutation failed / I/O error; also reset_item mount-pinned path
+        5  deposit_intake: a BUG-* draft reporting the same defect as a live bug
     """
     args = argv if argv is not None else sys.argv[1:]
 
@@ -3494,7 +4263,8 @@ def _cli_main(argv: list[str] | None = None) -> int:
             "write: VERB argument is required\n"
             "  verbs: halt, unhalt, halt_after, halt_global, unhalt_global,"
             " defer, undefer, set_version_ceiling, switch_provider, deposit_intake,"
-            " close_item, wontdo_item, delete_item, reset_item, set_marker, remove_marker",
+            " close_item, set_needs_operator, wontdo_item, delete_item, reset_item,"
+            " set_marker, remove_marker",
             file=sys.stderr,
         )
         return 1
@@ -3508,7 +4278,7 @@ def _cli_main(argv: list[str] | None = None) -> int:
                 print("write halt: PROJECT_ROOT argument is required", file=sys.stderr)
                 return 1
             project_root = Path(rest[0])
-            ctx, project = _ctx_for_project_root(project_root)
+            ctx, project = context_for_project(project_root)
             halt(ctx, project)
 
         elif verb == "unhalt":
@@ -3516,7 +4286,7 @@ def _cli_main(argv: list[str] | None = None) -> int:
                 print("write unhalt: PROJECT_ROOT argument is required", file=sys.stderr)
                 return 1
             project_root = Path(rest[0])
-            ctx, project = _ctx_for_project_root(project_root)
+            ctx, project = context_for_project(project_root)
             unhalt(ctx, project)
 
         elif verb == "halt_after":
@@ -3525,7 +4295,7 @@ def _cli_main(argv: list[str] | None = None) -> int:
                 return 1
             project_root = Path(rest[0])
             token = rest[1] if len(rest) > 1 else "rc"
-            ctx, project = _ctx_for_project_root(project_root)
+            ctx, project = context_for_project(project_root)
             halt_after(ctx, project, token)
 
         elif verb == "halt_global":
@@ -3562,8 +4332,14 @@ def _cli_main(argv: list[str] | None = None) -> int:
                 return 1
             project_root = Path(rest[0])
             file_path = Path(rest[1])
-            ctx, project = _ctx_for_project_root(project_root)
-            deposited = deposit_intake(ctx, project, file_path)
+            ctx, project = context_for_project(project_root)
+            try:
+                deposited = deposit_intake(ctx, project, file_path)
+            except SameDefectRefused as exc:
+                # Through the shared emitter, so the refusal is recorded
+                # like every other dual-channel CLI refusal; exit 5.
+                _print_refusal(exc)
+                return cli_exit_code(exc)
             # Print the deposited path to stdout (Seam 1: bash wrapper captures this).
             print(deposited)
             if deposited.name != file_path.name:
@@ -3588,8 +4364,11 @@ def _cli_main(argv: list[str] | None = None) -> int:
             state = rest[2] if len(rest) > 2 else "done"
             note = rest[3] if len(rest) > 3 else ""
             dry_run = len(rest) > 4 and rest[4] == "1"
-            ctx, project = _ctx_for_project_root(project_root)
+            ctx, project = context_for_project(project_root)
             close_item(ctx, project, key, state=state, note=note, dry_run=dry_run)
+
+        elif verb == "set_needs_operator":
+            return _cli_set_needs_operator(rest)
 
         elif verb == "wontdo_item":
             if len(rest) < 2:
@@ -3600,7 +4379,7 @@ def _cli_main(argv: list[str] | None = None) -> int:
                 return 1
             project_root = Path(rest[0])
             key = rest[1]
-            ctx, project = _ctx_for_project_root(project_root)
+            ctx, project = context_for_project(project_root)
             wontdo_item(ctx, project, key)
 
         elif verb == "delete_item":
@@ -3613,7 +4392,7 @@ def _cli_main(argv: list[str] | None = None) -> int:
             project_root = Path(rest[0])
             key = rest[1]
             force = len(rest) > 2 and rest[2] == "1"
-            ctx, project = _ctx_for_project_root(project_root)
+            ctx, project = context_for_project(project_root)
             delete_item(ctx, project, key, force=force)
 
         elif verb == "reset_item":
@@ -3627,7 +4406,7 @@ def _cli_main(argv: list[str] | None = None) -> int:
             key = rest[1]
             keep_artifacts = len(rest) > 2 and rest[2] == "1"
             force = len(rest) > 3 and rest[3] == "1"
-            ctx, project = _ctx_for_project_root(project_root)
+            ctx, project = context_for_project(project_root)
             reset_item(ctx, project, key, keep_artifacts=keep_artifacts, force=force)
 
         elif verb == "set_marker":
@@ -3728,8 +4507,8 @@ def _cli_main(argv: list[str] | None = None) -> int:
                 f"write: unknown verb {verb!r}\n"
                 "  verbs: halt, unhalt, halt_after, halt_global, unhalt_global,"
                 " defer, undefer, set_version_ceiling, switch_provider, deposit_intake,"
-                " close_item, wontdo_item, delete_item, reset_item, set_marker, remove_marker,"
-                " render_marker, render_ensure_marker,"
+                " close_item, set_needs_operator, wontdo_item, delete_item, reset_item,"
+                " set_marker, remove_marker, render_marker, render_ensure_marker,"
                 " get_markers, scan_queue",
                 file=sys.stderr,
             )
@@ -3787,6 +4566,32 @@ def _print_refusal(exc: OpsError) -> None:
         emit_error_contract(contract["error"], contract["message"], contract["remedy"])
 
 
+def _cli_set_needs_operator(rest: list[str]) -> int:
+    """Run ``set_needs_operator PROJECT_ROOT KEY QUESTION``.
+
+    Prints the inbox entry written (or the matching one already open) to
+    stdout.  A refusal prints the dual-channel block through the shared
+    emitter and exits with the ops exit code (``cli_exit_code``).
+    """
+    if len(rest) != 3:
+        print(
+            "write set_needs_operator: PROJECT_ROOT, KEY and QUESTION arguments are required",
+            file=sys.stderr,
+        )
+        return 1
+    # Imported here: overwatch.inbox imports this package.
+    from pgai_agent_kanban.overwatch.inbox import render_entry
+
+    try:
+        ctx, project = context_for_project(Path(rest[0]))
+        entry = set_needs_operator(ctx, project, rest[1], rest[2])
+    except OpsError as exc:
+        _print_refusal(exc)
+        return cli_exit_code(exc)
+    print(render_entry(entry))
+    return 0
+
+
 def _cli_set_version_ceiling(rest: list[str]) -> int:
     """Run ``set_version_ceiling KANBAN_ROOT PROJECT SHOW MINOR MAJOR NO_MINOR NO_MAJOR DRY_RUN``.
 
@@ -3830,36 +4635,6 @@ def _cli_switch_provider(rest: list[str]) -> int:
         return 1
     print(change.narration)
     return 0
-
-
-def _ctx_for_project_root(project_root: Path) -> tuple[OpsContext, str]:
-    """Derive an OpsContext and project name from an absolute project root path.
-
-    Expects PROJECT_ROOT to follow the layout:
-        <kanban_root>/projects/<project>/
-
-    Args:
-        project_root: Absolute path to the project root directory.
-
-    Returns:
-        Tuple of (OpsContext, project_name).
-
-    Raises:
-        OpsError: If project_root does not match the expected layout.
-    """
-    project_root = project_root.resolve()
-    # Derive: kanban_root = project_root.parent.parent, project = project_root.name
-    # Validate: <kanban_root>/projects/<project> == project_root
-    project_name = project_root.name
-    kanban_root = project_root.parent.parent
-    ctx = OpsContext(kanban_root=kanban_root)
-    derived = ctx.project_root(project_name).resolve()
-    if derived != project_root:
-        raise OpsError(
-            f"write: cannot derive project from path {project_root} "
-            f"(expected layout <kanban_root>/projects/<project>/)"
-        )
-    return ctx, project_name
 
 
 if __name__ == "__main__":

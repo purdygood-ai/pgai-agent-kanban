@@ -27,54 +27,56 @@
 # never a silent CODER fallback) on a bad or unrecognized value. Defined at
 # source time, available as soon as this file is sourced.
 #
-# Dependencies (must already be sourced/defined by the caller before this
-# file's functions are called)
-# -----------------------------------------------------------------------
-#   None beyond python3 on PATH (used by all four functions' heredocs).
+# Dependencies
+# ------------
+#   md_field.sh — read_md_field, the one bash section reader; self-sourced
+#   below unless the caller already defines it. Every README section here
+#   is read with the README reading: any letter case, any run of blanks
+#   after "##", and the next "##" line -- a "###" subheading included --
+#   ends the section. python3 on PATH (the reader runs as a module).
 #
 # Sourced by wake_common.sh alongside its other README-metadata-adjacent
 # stages; has no dependency on wake_bootstrap.sh or wake_task_state.sh
 # globals, so sourcing order relative to those two is not load-bearing.
 
+# shellcheck source=md_field.sh
+declare -F read_md_field >/dev/null || source "$(dirname "${BASH_SOURCE[0]}")/md_field.sh"
+
 # get_role_from_readme <readme-path>
-# Extracts the raw ## Role value, uppercased and trimmed. Prints an empty
-# string when the section is absent or empty. Does NOT validate or default
-# the value — callers must check the result against role_is_valid_agent
-# and fail closed (BLOCKED, never a silent CODER fallback) on a bad value.
+# Extracts the raw ## Role value, uppercased and trimmed; a "CODER | WRITER"
+# choice list reads as its first entry. Prints an empty string when the
+# section is absent or empty; returns 1, printing nothing, when the README
+# cannot be read. Does NOT validate or default the value — callers must
+# check the result against role_is_valid_agent and fail closed (BLOCKED,
+# never a silent CODER fallback) on a bad value.
 get_role_from_readme() {
-  local readme="$1"
-  python3 - "$readme" <<'PY'
-import pathlib, re, sys
-text = pathlib.Path(sys.argv[1]).read_text()
-m = re.search(r'(^## Role[^\S\n]*)((?:\n(?!##)[^\n]*)*?)(\n+##|\n*\Z)', text, flags=re.M)
-if not m:
-    print("")
-    raise SystemExit(0)
-role = m.group(2).strip().split('|')[0].strip().upper()
-print(role)
-PY
+  local value rc=0
+  value="$(read_md_field --end-at-subheading "$1" Role)" || rc=$?
+  [[ $rc -eq 1 ]] && return 1
+  value="${value%%|*}"
+  value="${value#"${value%%[![:space:]]*}"}"
+  value="${value%"${value##*[![:space:]]}"}"
+  printf '%s\n' "${value^^}"
 }
 
 # get_assigned_agent_from_readme <readme-path>
-# Extracts the raw ## Assigned Agent value, uppercased and trimmed. Prints
-# an empty string when the section is absent, empty, or explicitly "none"
-# (case-insensitive) — those all mean "not present" to dispatch. A
-# non-empty result may still be invalid; callers validate with
-# role_is_valid_agent before using it to select a subagent.
+# Extracts the raw ## Assigned Agent value, uppercased and trimmed (first
+# entry of a "|" choice list, as get_role_from_readme). Prints an empty
+# string when the section is absent, empty, or explicitly "none"
+# (case-insensitive) — those all mean "not present" to dispatch; returns 1,
+# printing nothing, when the README cannot be read. A non-empty result may
+# still be invalid; callers validate with role_is_valid_agent before using
+# it to select a subagent.
 get_assigned_agent_from_readme() {
-  local readme="$1"
-  python3 - "$readme" <<'PY'
-import pathlib, re, sys
-text = pathlib.Path(sys.argv[1]).read_text()
-m = re.search(r'(^## Assigned Agent[^\S\n]*)((?:\n(?!##)[^\n]*)*?)(\n+##|\n*\Z)', text, flags=re.M)
-if not m:
-    print("")
-    raise SystemExit(0)
-value = m.group(2).strip().split('|')[0].strip().upper()
-if not value or value == "NONE":
-    value = ""
-print(value)
-PY
+  local value rc=0
+  value="$(read_md_field --end-at-subheading "$1" "Assigned Agent")" || rc=$?
+  [[ $rc -eq 1 ]] && return 1
+  value="${value%%|*}"
+  value="${value#"${value%%[![:space:]]*}"}"
+  value="${value%"${value##*[![:space:]]}"}"
+  value="${value^^}"
+  [[ "$value" == "NONE" ]] && value=""
+  printf '%s\n' "$value"
 }
 
 # role_is_valid_agent <value>
@@ -88,17 +90,20 @@ role_is_valid_agent() {
   esac
 }
 
+# get_model_override_from_readme <readme-path>
+# Prints the ## Force Model value, or -- when that heading is absent -- the
+# ## Model Override value, trimmed. Prints nothing when neither heading is
+# present or the value is empty or "none" (any case); returns 1, printing
+# nothing, when the README cannot be read. Both headings take any run of
+# blanks between their words.
 get_model_override_from_readme() {
-  local readme="$1"
-  python3 - "$readme" <<'PY'
-import pathlib, re, sys
-text = pathlib.Path(sys.argv[1]).read_text()
-m = re.search(r'^##\s+(?:Force\s+Model|Model\s+Override)[^\S\n]*\n(.*?)(\n+##|\Z)', text, flags=re.S | re.M | re.I)
-if not m:
-    raise SystemExit(0)
-value = m.group(1).strip()
-if not value or value.lower() == 'none':
-    raise SystemExit(0)
-print(value)
-PY
+  local readme="$1" value rc=0
+  value="$(read_md_field --free-spacing --end-at-subheading "$readme" "Force Model")" || rc=$?
+  if [[ $rc -eq 3 ]]; then
+    rc=0
+    value="$(read_md_field --free-spacing --end-at-subheading "$readme" "Model Override")" || rc=$?
+  fi
+  [[ $rc -eq 1 ]] && return 1
+  [[ $rc -eq 0 && -n "$value" && "${value,,}" != "none" ]] || return 0
+  printf '%s\n' "$value"
 }

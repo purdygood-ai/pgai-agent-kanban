@@ -17,6 +17,9 @@ What is pinned here:
     named, a bug name matching no file or several) is refused dual-channel
     with exit 2 and writes nothing.
   - --help carries a worked back-fill example.
+  - Every remedy the module emits contains no ``team/scripts/``; each one
+    that re-runs the command names ``<root>/scripts/restamp-fixed-in.sh``
+    under the kanban root that owns the ledger, as installed.
   - Correction mode (--replace-from): a named done bug whose value is
     exactly the named wrong version is rewritten to --version, an empty one
     is stamped, and every unnamed bug is byte-for-byte unchanged; a named bug
@@ -113,6 +116,18 @@ def _run(root: pathlib.Path, args: list[str], *, cwd: pathlib.Path | None = None
 
 def _fixed_in(path: pathlib.Path) -> str:
     return parse_bug_file(path).fixed_in
+
+
+def _remedy_words(stderr: str) -> list[str]:
+    """The shell words of the refusal's remedy line."""
+    remedy = [line for line in stderr.splitlines() if line.startswith("remedy:")]
+    assert remedy, f"no remedy line: {stderr!r}"
+    return shlex.split(remedy[0].split(":", 1)[1])
+
+
+def _installed_script(root: pathlib.Path) -> str:
+    """restamp-fixed-in.sh as installed under the sandbox *root*."""
+    return str(root / "scripts" / "restamp-fixed-in.sh")
 
 
 # ---------------------------------------------------------------------------
@@ -266,7 +281,66 @@ def test_remedy_names_the_project_in_hand(tmp_path: pathlib.Path) -> None:
 
     result = _run(root, ["--project", _PROJECT, "--version", "bad", "BUG-0001"], tmp_path=tmp_path)
 
-    assert f"remedy:  team/scripts/restamp-fixed-in.sh --project {_PROJECT} --version v1.4.0" in result.stderr
+    words = _remedy_words(result.stderr)
+    assert words[:5] == [_installed_script(root), "--project", _PROJECT, "--version", "v1.4.0"], words
+
+
+# Every refusal the module emits, as (arguments after --project, error key,
+# whether the remedy re-runs restamp-fixed-in.sh). The others list or grep
+# the ledger instead.
+_MODULE_REFUSALS = [
+    (["BUG-0001"], "fixed_in_restamp.version_missing", True),
+    (["--version", "latest", "BUG-0001"], "fixed_in_restamp.version_malformed", True),
+    (["--version", "v2.26.1"], "fixed_in_restamp.no_bugs_named", True),
+    (["--version", "v2.26.1", "--replace-from", "latest", "BUG-0001"],
+     "fixed_in_restamp.replace_from_malformed", True),
+    (["--version", "v2.26.1", "--replace-from", "v2.26.4", "BUG-0001", "BUG-0003"],
+     "fixed_in_restamp.replace_from_mismatch", True),
+    (["--version", "v2.26.1", "--replace-from", "v2.26.4", "BUG-0003"],
+     "fixed_in_restamp.replace_from_mismatch", False),
+    (["--version", "v2.26.1", "BUG-9999"], "fixed_in_restamp.bug_not_found", False),
+    (["--version", "v2.26.1", "BUG-0005"], "fixed_in_restamp.bug_ambiguous", False),
+]
+
+
+@pytest.mark.parametrize(
+    ("args", "error_key", "reruns_script"),
+    _MODULE_REFUSALS,
+    ids=[
+        "version-missing", "version-malformed", "no-bugs-named", "replace-from-malformed",
+        "replace-from-mismatch-rerun", "replace-from-mismatch-inspect", "bug-not-found", "bug-ambiguous",
+    ],
+)
+def test_every_module_remedy_names_the_installed_script(
+    tmp_path: pathlib.Path, args: list[str], error_key: str, reruns_script: bool
+) -> None:
+    root = tmp_path / "root"
+    bugs = _ledger(root)
+    # A second file for the ledger's not-named bug makes its id ambiguous; only that case names it.
+    (bugs / "BUG-0005-a-second-file.md").write_text(_bug_text("BUG-0005-a-second-file", "done"), encoding="utf-8")
+
+    result = _run(root, ["--project", _PROJECT, *args], tmp_path=tmp_path)
+
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert f"error:   {error_key}" in result.stderr, result.stderr
+    assert "team/scripts/" not in result.stderr, result.stderr
+    words = _remedy_words(result.stderr)
+    if reruns_script:
+        assert words[:3] == [_installed_script(root), "--project", _PROJECT], words
+    else:
+        assert "restamp-fixed-in.sh" not in " ".join(words), words
+
+
+def test_missing_bugs_directory_remedy_names_no_repository_path(tmp_path: pathlib.Path) -> None:
+    root = tmp_path / "root"
+    (root / "projects" / _PROJECT).mkdir(parents=True)
+    (root / "tmp").mkdir()
+
+    result = _run(root, ["--project", _PROJECT, "--version", "v2.26.1", "BUG-0001"], tmp_path=tmp_path)
+
+    assert "error:   fixed_in_restamp.bugs_dir_missing" in result.stderr, result.stderr
+    assert "team/scripts/" not in result.stderr, result.stderr
+    assert _remedy_words(result.stderr) == ["ls", str(root / "projects")], result.stderr
 
 
 # ---------------------------------------------------------------------------
@@ -389,10 +463,10 @@ class TestCorrectionMode:
         assert "BUG-0003-already-recorded.md (has v1.0.0)" in result.stderr, result.stderr
         assert "\nmessage: " in result.stderr and "\nremedy:  " in result.stderr, result.stderr
         # The remedy re-runs the correction on the bugs that do qualify.
-        assert (
-            f"remedy:  team/scripts/restamp-fixed-in.sh --project {_PROJECT} --version {_RIGHT} "
-            f"--replace-from {_WRONG} BUG-0011-shipped-earlier"
-        ) in result.stderr, result.stderr
+        assert _remedy_words(result.stderr) == [
+            _installed_script(root), "--project", _PROJECT, "--version", _RIGHT,
+            "--replace-from", _WRONG, "BUG-0011-shipped-earlier",
+        ], result.stderr
         assert "replaced" not in result.stdout and "stamped" not in result.stdout, result.stdout
         assert _snapshot(bugs) == before
 

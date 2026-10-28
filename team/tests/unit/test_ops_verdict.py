@@ -20,7 +20,13 @@ Coverage:
      on purpose are recorded beside the old ones with their reason.
   3. The report: details per project only, a posture refusal carried rather
      than raised (and never printed over), the JSON and block shapes, the
-     CLI's refusals, and that resolving reads without writing.
+     CLI's refusals, and that resolving reads without writing. Both HALTED
+     remedies (a HALT file alone, and an OVERWATCH Decision recorded) name
+     the unhalt.sh an installed kanban carries under its root, shell-quoted
+     when the root contains a space; the STUCK-LOCK remedy and the
+     --details lock violation line name the installed release-locks.sh and
+     why.sh the same way, and every SOP-core.md and lock_provenance.sh
+     citation names the installed file under the root.
   4. The shell-faithful readers against the shell itself: the xargs-style
      state normaliser, the tab-separated read, the project lock matcher and
      the stale-lock threshold and its derivation.
@@ -32,6 +38,7 @@ import hashlib
 import json
 import os
 import pathlib
+import shlex
 import subprocess
 import sys
 
@@ -221,6 +228,115 @@ def _small_root(tmp_path: pathlib.Path) -> pathlib.Path:
     return root
 
 
+@pytest.mark.parametrize("root_name", ["root", "kanban root"])
+@pytest.mark.parametrize("with_decision", [False, True])
+def test_a_halted_remedy_names_the_installed_unhalt_script(tmp_path, root_name, with_decision):
+    root = tmp_path / root_name
+    cases.projects_cfg(root, [("alpha", 1, True)])
+    alpha = cases.project(root, "alpha")
+    cases.write(alpha / "HALT", "# ship-policy\n")
+    if with_decision:
+        cases.release_state(alpha, "v1.0.0", cases.decision("C", "v1.0.0", "escalated to a human"))
+
+    result = verdict.resolve_project_verdict(root, "alpha", now=cases.NOW)
+
+    assert result.verdict == verdict.VERDICT_HALTED
+    assert ("OVERWATCH Decision recorded" in result.cause) is with_decision
+    assert "team/scripts/unhalt.sh" not in result.remedy
+    prefix = "once the underlying issue is resolved, run: "
+    assert prefix in result.remedy and result.line.endswith(result.remedy)
+    printed = result.remedy.split(prefix, 1)[1]
+    assert shlex.split(printed) == [f"{root}/scripts/unhalt.sh", "--project", "alpha"]
+    if " " in root_name:
+        assert printed.startswith(f"'{root}/scripts/unhalt.sh'")
+    assert "team/SOP-core.md" not in result.remedy
+    assert f"({root}/SOP-core.md, 'HALT Flags')" in result.remedy
+
+
+#: The [wake] budget overrides the stale-lock threshold reads before kanban.cfg;
+#: an in-process resolve must not inherit a caller's values for them.
+_WAKE_BUDGET_NAMES = ("MAX_RUNTIME_SECONDS", "MAX_TASK_SECONDS", "KILL_GRACE_SECONDS")
+
+
+@pytest.fixture
+def default_stale_threshold(monkeypatch):
+    """Resolve the stale-lock threshold from its defaults, whatever the caller's environment holds."""
+    for name in _WAKE_BUDGET_NAMES:
+        monkeypatch.delenv(name, raising=False)
+
+
+def _stuck_lock_root(tmp_path: pathlib.Path, root_name: str, holder_pid: str, record_text=None) -> pathlib.Path:
+    """A board whose one project has queued work beside an aged-out lock held by *holder_pid*."""
+    root = tmp_path / root_name
+    cases.projects_cfg(root, [("alpha", 1, True)])
+    alpha = cases.project(root, "alpha")
+    cases.task(alpha, "PM-20260101-050-queued", "BACKLOG", cases.NOW - 9000)
+    if record_text is None:
+        record_text = cases.record("wake-coder", holder_pid, "wake-chain:alpha", "none", cases.stamp(cases.NOW - 40000))
+    cases.lock(root, "repo-wake-alpha", record_text, cases.NOW - 30000)
+    return root
+
+
+@pytest.mark.parametrize("root_name", ["root", "kanban root"])
+@pytest.mark.parametrize("holder", ["dead", "live"])
+def test_a_stuck_lock_remedy_names_the_installed_scripts_quoted(tmp_path, default_stale_threshold, root_name, holder):
+    pid = cases.DEAD_PID if holder == "dead" else str(os.getpid())
+    root = _stuck_lock_root(tmp_path, root_name, pid)
+
+    result = verdict.resolve_project_verdict(root, "alpha", now=cases.NOW)
+
+    assert result.verdict == verdict.VERDICT_STUCK_LOCK
+    assert "team/" not in result.remedy and result.line.endswith(result.remedy)
+    release, rest = result.remedy.split("release it: ", 1)[1].split(" (", 1)
+    why_details = rest.split(" lists every lock's full provenance", 1)[0]
+    force = ["--force"] if holder == "live" else []
+    assert shlex.split(release) == [f"{root}/scripts/release-locks.sh", "--release", "repo-wake-alpha", *force]
+    assert shlex.split(why_details) == [f"{root}/scripts/why.sh", "--project", "alpha", "--details"]
+    if " " in root_name:
+        assert release.startswith(f"'{root}/scripts/release-locks.sh'")
+        assert why_details.startswith(f"'{root}/scripts/why.sh'")
+
+
+def test_a_lock_with_no_provenance_cites_the_installed_lock_library(tmp_path, default_stale_threshold):
+    root = _stuck_lock_root(tmp_path, "kanban root", cases.DEAD_PID, record_text="")
+
+    result = verdict.resolve_project_verdict(root, "alpha", now=cases.NOW)
+
+    assert result.verdict == verdict.VERDICT_STUCK_LOCK
+    assert "team/" not in result.cause
+    assert f"({root}/scripts/lib/lock_provenance.sh, 'Truncate-free release')" in result.cause
+    release = result.remedy.split("release it: ", 1)[1].split(" (", 1)[0]
+    assert shlex.split(release) == [f"{root}/scripts/release-locks.sh", "--release", "repo-wake-alpha"]
+
+
+def test_the_details_lock_violation_names_the_installed_release_script(tmp_path, default_stale_threshold):
+    root = _stuck_lock_root(tmp_path, "kanban root", cases.DEAD_PID, record_text="")
+
+    report = verdict.resolve_verdicts(root, ["alpha"], details=True, now=cases.NOW)
+    text = verdict._render_locks_text(report.details)
+
+    (violation,) = [line for line in text.splitlines() if "VIOLATION" in line]
+    assert "team/" not in violation
+    assert f'({root}/scripts/lib/lock_provenance.sh, "Truncate-free release")' in violation
+    command = violation.split(" -- run ", 1)[1].rsplit(" to inspect or clear it.", 1)[0]
+    assert shlex.split(command) == [f"{root}/scripts/release-locks.sh"]
+    assert command == f"'{root}/scripts/release-locks.sh'"
+
+
+@pytest.mark.parametrize("state", ["BLOCKED", "WORKING"])
+def test_blocked_and_stalled_remedies_cite_the_installed_sop_core(tmp_path, state):
+    root = tmp_path / "kanban root"
+    cases.projects_cfg(root, [("alpha", 1, True)])
+    alpha = cases.project(root, "alpha")
+    cases.task(alpha, "CODER-1", state, cases.NOW - 3 * 3600)
+
+    result = verdict.resolve_project_verdict(root, "alpha", now=cases.NOW)
+
+    assert result.exit_code in (verdict.EXIT_BLOCKED, verdict.EXIT_RUNNING_STALLED)
+    assert "team/SOP-core.md" not in result.remedy
+    assert f"({root}/SOP-core.md, 'Standard Task States'" in result.remedy
+
+
 def test_details_need_exactly_one_project(tmp_path):
     root = _small_root(tmp_path)
     with pytest.raises(ValueError):
@@ -370,6 +486,24 @@ def test_project_lock_files_match_the_shell_matcher(tmp_path):
     expected = _lock_bash(root, 'pgai_lock_files_for_project "$1"', "alpha").splitlines()
     assert ops_locks.project_lock_files(str(locks), "alpha") == expected
     assert ops_locks.project_lock_files(str(root / "absent"), "alpha") == []
+
+
+def test_project_lock_files_match_the_shell_matcher_for_hyphenated_projects(tmp_path):
+    root = tmp_path / "root"
+    locks = root / "locks"
+    for name in ("beta", "alpha-beta", "x", "coder-x"):
+        (root / "projects" / name).mkdir(parents=True)
+    for name in ("repo-wake-beta.lock", "repo-wake-alpha-beta.lock", "overwatch-alpha-beta.lock",
+                 "overwatch-runaway-beta.lock", "wake-batch-coder-alpha-beta.lock", "wake-batch-coder-beta.lock",
+                 "wake-batch-coder-x.lock", "x-beta.lock"):
+        cases.write(locks / name, "")
+    cases.write(locks / "wake-batch-coder-x.record", "holder=wake-batch\npid=1\nop=wake-batch:coder:x\ntask=none\n")
+    for project in ("beta", "alpha-beta", "x", "coder-x"):
+        expected = _lock_bash(root, 'pgai_lock_files_for_project "$1"', project).splitlines()
+        assert ops_locks.project_lock_files(str(locks), project) == expected, project
+    assert [pathlib.Path(p).name for p in ops_locks.project_lock_files(str(locks), "beta")] == [
+        "overwatch-runaway-beta.lock", "repo-wake-beta.lock", "wake-batch-coder-beta.lock", "x-beta.lock",
+    ]
 
 
 @pytest.mark.parametrize(

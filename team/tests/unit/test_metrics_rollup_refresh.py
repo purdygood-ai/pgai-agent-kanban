@@ -325,9 +325,11 @@ def test_document_workflow_rollup_keeps_its_workflow_type(tmp_path: pathlib.Path
 def test_failed_aggregator_run_is_a_warning_and_rollup_is_unchanged(
     tmp_path: pathlib.Path, rc_with_release_task_pending
 ) -> None:
-    """With python3 failing on PATH, the refresh still returns 0 under strict
-    mode, narrates a WARNING naming the rollup, and leaves the rollup's bytes
-    exactly as finalize wrote them."""
+    """With the aggregator's python3 run failing, the refresh still returns 0
+    under strict mode, narrates a WARNING naming the rollup, and leaves the
+    rollup's bytes exactly as finalize wrote them. The shim fails only the
+    aggregator; every other python3 call (the Release Version read) runs the
+    real interpreter."""
     root, release = rc_with_release_task_pending
     _write_tokens(release, input_tokens=5000, output_tokens=800, elapsed_seconds=300)
     bytes_before = _rollup_path(root).read_bytes()
@@ -335,7 +337,11 @@ def test_failed_aggregator_run_is_a_warning_and_rollup_is_unchanged(
     shim_dir = tmp_path / "shim"
     shim_dir.mkdir()
     shim = shim_dir / "python3"
-    shim.write_text("#!/usr/bin/env bash\necho 'aggregator unavailable' >&2\nexit 3\n")
+    shim.write_text(
+        "#!/usr/bin/env bash\n"
+        'case " $* " in *metrics_aggregator.py*) echo \'aggregator unavailable\' >&2; exit 3 ;; esac\n'
+        f'exec "{sys.executable}" "$@"\n'
+    )
     shim.chmod(0o755)
     shimmed_path = f"{shim_dir}{os.pathsep}{os.environ.get('PATH', '')}"
 

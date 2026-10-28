@@ -69,6 +69,28 @@ Top-level plan fields:
                                         Each slug must match a file in artifacts/ (glob <slug>.*).
                                         Missing slugs cause a hard error (exit 1).
                                         Absent = start-fresh path (WRITER works from brief only).
+    needs_operator          list[obj] — items the plan leaves out of every ticket because a
+                                        human must answer first: {"item": KEY, "question": TEXT}.
+                                        Each is set needs-operator with its question in the
+                                        operator inbox (ops.write.set_needs_operator).
+    ride_along              list[str] — deferred bugs ticketed inside this requirement RC.
+                                        Checked by lib/ride_along_lint.py (bundle_mixing must be
+                                        ride-along, at most ride_along_max, none high or critical,
+                                        none naming a file the requirement's ## Deliverables
+                                        names); each accepted bug is listed in the requirement's
+                                        ## Bundled Items and set running
+                                        (ops.write.ride_along_item).
+                            Both fields are checked before anything is written (a failed
+                            check exits 1, nothing written) and recorded after every other
+                            check, before the first task folder.
+                            Bundled-item coverage: when the requirement carries
+                            ## Bundled Items, every item listed there must be named by at
+                            least one ticket (its ID, BUG-NNNN or PRIORITY-NNNN, appears in any of the
+                            ticket's text fields), listed under needs_operator, or an
+                            accepted ride_along bug. Otherwise the plan is refused before
+                            anything is written: exit 1, error key
+                            materialize.bundled_item_unassigned, naming every uncovered
+                            item. A requirement without ## Bundled Items is not checked.
 
 The materializer:
 - Assigns final task IDs (AGENT-YYYYMMDD-SEQ-slug)
@@ -78,7 +100,9 @@ The materializer:
   Constraints, Acceptance Criteria, Notes) name RC branches in the project's
   prefixed form (a bare "rc/vX.Y.Z" becomes "<branch_prefix>rc/vX.Y.Z")
 - Applies the targeted-test acceptance policy (lib/acceptance_policy.py) to
-  plan-authored CODER and WRITER tickets
+  plan-authored CODER and WRITER tickets, with the runner commands the
+  project's own project.cfg [testing] section names (targeted_test_command,
+  pre_merge_command); a project that names neither gets no runner criterion
 - Appends task IDs to per-agent queue files based on assigned_agent or role:
     CODER -> tasks/queues/coder_backlog.md
     WRITER -> tasks/queues/writer_backlog.md
@@ -185,14 +209,38 @@ from lib.workflow_loader import load_workflow, WorkflowError
 # pgai_agent_kanban package lives one level up from pm-agent/ (i.e. under team/).
 # Insert team/ onto sys.path so the import works from any caller working directory.
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from lib.acceptance_policy import apply_acceptance_policy, format_policy_notes
+from lib.acceptance_policy import RunnerConfig, apply_acceptance_policy, format_policy_notes
+from lib.ride_along_lint import describe as _describe_lint, error_key as _lint_error_key, lint_ride_along
 from pgai_agent_kanban.lib import ini as _ini
 from pgai_agent_kanban.lib import project_cfg as _project_cfg
+from pgai_agent_kanban.lib.branch_prefix import (
+    InvalidBranchPrefixError as _InvalidBranchPrefixError,
+    bare_branch_prefix_from_cfg as _bare_branch_prefix_from_cfg,
+)
+from pgai_agent_kanban.lib.git_remote import (
+    DEFAULT_REMOTE_NAME as _DEFAULT_REMOTE_NAME,
+    InvalidRemoteName as _InvalidRemoteName,
+    resolve_git_remote_name as _resolve_git_remote_name_for,
+)
 from pgai_agent_kanban.cm.read_state_field import (
     read_release_state_field as _read_release_state_field,
 )
+from pgai_agent_kanban.archive.lookup import classify_item_id as _classify_item_id
+from pgai_agent_kanban.lib.bundle_items import parse_bundled_item_paths as _parse_bundled_item_paths
 from pgai_agent_kanban.lib.terminal_states import is_terminal as _bundle_is_terminal
 from pgai_agent_kanban.lib.error_contract import emit_error_contract as _emit_error_contract
+from pgai_agent_kanban.ops.context import OpsContext as _OpsContext
+from pgai_agent_kanban.ops.errors import ContractError as _ContractError, OpsError as _OpsError
+from pgai_agent_kanban.ops.write import (
+    check_needs_operator as _check_needs_operator,
+    ride_along_item as _ride_along_item,
+    set_needs_operator as _set_needs_operator,
+)
+from pgai_agent_kanban.task_status import (
+    first_value_line as _first_value_line,
+    read_section as _read_section,
+    section_value as _section_value,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -368,9 +416,11 @@ def refuse_non_explicit_target_version(raw: str, release_shaped: bool,
     script = Path(__file__).resolve()
     rerun = f"python3 {script} {plan_path} --team-root {team_root}"
     if requirements_path and requirements_path.lower() != "none":
+        reader = script.parent.parent / "pgai_agent_kanban" / "task_status.py"
         remedy = (
             f"Copy the version discovery wrote into the requirements file "
-            f"(grep -A2 '^## Target Version' {requirements_path}) into "
+            f"(python3 {reader} read {requirements_path} "
+            f"--section 'Target Version' --value) into "
             f"target_version in {plan_path}, then re-run: {rerun}"
         )
     else:
@@ -1022,35 +1072,50 @@ def get_active_rc(team_root):
 def _resolve_branch_prefix(team_root):
     """Return the configured branch_prefix for the project, or '' when absent.
 
-    Reads ``[project] branch_prefix`` from ``<team_root>/project.cfg``.
-    Strips surrounding quotes so that ``branch_prefix = ""`` is treated as
-    empty, not as the 2-char string ``""``.
-    Validates the value against ``[A-Za-z0-9_-]*``; returns ``''`` silently
-    if the value fails validation so that misconfigured installs degrade to
-    no-prefix behavior rather than breaking materialisation.
+    Reads ``<team_root>/project.cfg`` ``[project] branch_prefix`` through
+    ``lib/branch_prefix.py`` (``bare_branch_prefix_from_cfg``), which answers
+    exactly what ``pp_branch_prefix`` prints for the file: an inline comment
+    stripped, a key outside ``[project]`` ignored, ``branch_prefix = ""``
+    read as empty. A value ``pp_branch_prefix`` refuses (characters outside
+    ``[A-Za-z0-9_-]``, a single-quoted ``'ai_'``) is reported on stderr and
+    read as no prefix, so a misconfigured install degrades to no-prefix
+    behavior rather than breaking materialisation.
 
     Empty return value means "no prefix" — callers produce ``rc/<version>``
     which is today's behavior for self-build and other pure-AI projects.
     """
-    import re as _re
     cfg_path = Path(team_root) / "project.cfg"
-    raw = _read_cfg_field(cfg_path, "branch_prefix")
-    # _read_cfg_field already strips surrounding whitespace and quotes, but
-    # double-quote stripping is belt-and-suspenders here.
-    raw = raw.strip().strip('"').strip("'")
-    if not raw:
-        return ""
-    # Validate: only letters, digits, underscore, and hyphen are allowed.
-    if not _re.match(r"^[A-Za-z0-9_-]+$", raw):
-        import sys as _sys
+    try:
+        return _bare_branch_prefix_from_cfg(cfg_path)
+    except _InvalidBranchPrefixError as exc:
         print(
             f"pm_materialize: _resolve_branch_prefix: invalid branch_prefix "
-            f"{raw!r} in project.cfg — characters outside [A-Za-z0-9_-] are "
+            f"{exc.value!r} in project.cfg — characters outside [A-Za-z0-9_-] are "
             f"not permitted; falling back to no prefix.",
-            file=_sys.stderr,
+            file=sys.stderr,
         )
         return ""
-    return raw
+
+
+def _resolve_git_remote_name(team_root):
+    """Return the project's git remote name, for the ticket text that names it.
+
+    ``[project] git_remote_name`` from ``<team_root>``'s project.cfg (else
+    PROJECT.cfg) through ``lib/git_remote.py``, the resolver every push,
+    fetch and ``ls-remote`` the release machinery builds uses; ``origin``
+    when the key is absent or blank. A value that resolver refuses is
+    reported on stderr and read as the default, so a misconfigured install
+    still materialises (the CM verbs refuse the value themselves).
+    """
+    try:
+        return _resolve_git_remote_name_for(team_root, Path(team_root).name)
+    except _InvalidRemoteName as exc:
+        print(
+            f"pm_materialize: _resolve_git_remote_name: {exc.message} "
+            f"Ticket text names '{_DEFAULT_REMOTE_NAME}' instead.",
+            file=sys.stderr,
+        )
+        return _DEFAULT_REMOTE_NAME
 
 
 # ---------------------------------------------------------------------------
@@ -1328,8 +1393,10 @@ _WORKTREE_REQUIRING_ROLES = frozenset({"TESTER"})
 def _read_source_branch_from_requirements(requirements_path: str) -> str:
     """Parse the ``## Source Branch`` field from a requirements document.
 
-    Returns the stripped value when found, or an empty string when the
-    file is absent, unreadable, or lacks the field.
+    Returns the first value line of the section (``task_status.first_value_line``:
+    blank, ``#`` and HTML-comment lines are skipped), or an empty string when
+    the file is absent, unreadable, or lacks the field.  The heading matches
+    in any letter case.
 
     Parameters
     ----------
@@ -1343,16 +1410,7 @@ def _read_source_branch_from_requirements(requirements_path: str) -> str:
         text = Path(requirements_path).read_text(encoding="utf-8")
     except OSError:
         return ""
-    # Match "## Source Branch" as a section header (possibly followed by a
-    # blank line) and capture the next non-blank, non-header line.
-    for i, line in enumerate(text.splitlines()):
-        if line.strip().lower() == "## source branch":
-            # Scan ahead for the first non-empty, non-header line.
-            for rest in text.splitlines()[i + 1:]:
-                stripped = rest.strip()
-                if stripped and not stripped.startswith("#"):
-                    return stripped
-    return ""
+    return _first_value_line(_read_section(text, "Source Branch") or "")
 
 
 def _resolve_plan_source_branch(plan: dict, requirements_path: str) -> str:
@@ -1671,7 +1729,10 @@ def find_collision_folder(tasks_root: Path, role: str, slug: str):
 def get_task_state(task_dir: Path) -> str:
     """Return the ## State value from a task folder's status.md, or '' if unreadable.
 
-    Parses the first non-blank, non-comment line after a '## State' heading.
+    Reads the section through ``task_status.read_section`` with its exact
+    heading reading (the line reads ``## State`` once stripped; the next line
+    starting ``##`` ends it) and returns the first non-blank, non-comment
+    line of the body (``task_status.first_value_line``).
     Returns the stripped state string (e.g. 'WONT-DO', 'DONE', 'BACKLOG'),
     or an empty string when the file is absent or the section is missing.
     """
@@ -1679,28 +1740,17 @@ def get_task_state(task_dir: Path) -> str:
     if not status_path.is_file():
         return ""
     try:
-        lines = status_path.read_text(encoding="utf-8").splitlines()
+        text = status_path.read_text(encoding="utf-8")
     except OSError:
         return ""
-    in_state = False
-    for line in lines:
-        stripped = line.strip()
-        if stripped == "## State":
-            in_state = True
-            continue
-        if in_state:
-            if stripped.startswith("##"):
-                # Hit next section without finding a value
-                break
-            if stripped and not stripped.startswith("#"):
-                return stripped
-    return ""
+    return _first_value_line(_read_section(text, "State", exact_heading=True) or "")
 
 
 def get_task_readme_release_version(task_dir: Path) -> str:
     """Return the ## Release Version value from a task folder's README.md, or '' if unreadable.
 
-    Parses the first non-blank, non-comment line after a '## Release Version' heading.
+    Reads the section as :func:`get_task_state` reads ``## State`` and takes
+    the first non-blank, non-comment line of the body.
     Returns the stripped version string (e.g. 'v0.1.0', 'v0.42.7'),
     or an empty string when the file is absent, the section is missing, or the
     value is 'none'.
@@ -1712,21 +1762,11 @@ def get_task_readme_release_version(task_dir: Path) -> str:
     if not readme_path.is_file():
         return ""
     try:
-        lines = readme_path.read_text(encoding="utf-8").splitlines()
+        text = readme_path.read_text(encoding="utf-8")
     except OSError:
         return ""
-    in_section = False
-    for line in lines:
-        stripped = line.strip()
-        if stripped == "## Release Version":
-            in_section = True
-            continue
-        if in_section:
-            if stripped.startswith("##"):
-                break
-            if stripped and not stripped.startswith("#"):
-                return "" if stripped.lower() == "none" else stripped
-    return ""
+    value = _first_value_line(_read_section(text, "Release Version", exact_heading=True) or "")
+    return "" if value.lower() == "none" else value
 
 
 def _parse_semver_tuple(version: str):
@@ -2013,16 +2053,41 @@ def validate_team_root(team_root_path):
     return True
 
 
-def apply_targeted_test_policy(task, task_id, role, acceptance_criteria, constraints, notes):
+def resolve_test_runner_config(team_root):
+    """The plan's project's runner commands, as a ``RunnerConfig``.
+
+    Reads ``[testing] targeted_test_command`` and ``[testing]
+    pre_merge_command`` from the project config under *team_root*
+    (``project.cfg``, else a legacy ``PROJECT.cfg``) by the
+    ``_pp_read_cfg_key`` rules, the same answer ``pp_targeted_test_command``
+    and ``pp_pre_merge_command`` in team/scripts/lib/project_paths.sh give
+    for the same file. A missing file, section or key, or a blank value,
+    reads as empty: that criterion is not added. Nothing falls back to
+    kanban.cfg or to another project's commands.
+    """
+    cfg_file = _project_cfg.project_cfg_file(Path(team_root))
+    if cfg_file is None:
+        return RunnerConfig()
+    return RunnerConfig(
+        targeted_command=_project_cfg.read_cfg_key(cfg_file, "testing", "targeted_test_command").strip(),
+        pre_merge_command=_project_cfg.read_cfg_key(cfg_file, "testing", "pre_merge_command").strip(),
+    )
+
+
+def apply_targeted_test_policy(task, task_id, role, acceptance_criteria, constraints, notes,
+                               runner_config=None):
     """Apply the targeted-test acceptance policy to one ticket being emitted.
 
-    Returns ``(acceptance_criteria, constraints, notes)`` to render. CODER and
-    WRITER tickets have every full gated-runner invocation rewritten to a
-    targeted ``--files`` run, carry the fixed targeted-test constraint, and
-    end their acceptance criteria with the fixed pre-merge criterion (see
-    lib/acceptance_policy.py). Each rewrite is narrated on stderr and
-    recorded in the returned notes; placing the pre-merge criterion is not
-    a rewrite and is neither narrated nor noted.
+    Returns ``(acceptance_criteria, constraints, notes)`` to render.
+    *runner_config* is the project's ``RunnerConfig``
+    (``resolve_test_runner_config``); ``None`` means none configured. CODER
+    and WRITER tickets have every full invocation of a configured runner
+    rewritten to the project's targeted run, carry the targeted-test
+    constraint, and end their acceptance criteria with the project's
+    pre-merge criterion — each only when the project configures the command
+    it comes from (see lib/acceptance_policy.py). Each rewrite is narrated
+    on stderr and recorded in the returned notes; placing the pre-merge
+    criterion is not a rewrite and is neither narrated nor noted.
 
     Materializer-injected tickets (``_synthetic``: CM bookends, TESTER verify,
     the feature-workflow branch setup, document-pipeline steps) are returned
@@ -2032,7 +2097,9 @@ def apply_targeted_test_policy(task, task_id, role, acceptance_criteria, constra
     if task.get("_synthetic"):
         return acceptance_criteria, constraints, notes
 
-    result = apply_acceptance_policy(role, acceptance_criteria, constraints)
+    result = apply_acceptance_policy(
+        role, acceptance_criteria, constraints, runner_config=runner_config,
+    )
     for rw in result.rewrites:
         action = (
             "dropped a duplicate full-runner" if rw.merged
@@ -2040,7 +2107,7 @@ def apply_targeted_test_policy(task, task_id, role, acceptance_criteria, constra
         )
         print(
             f"[pm-materialize] acceptance-policy: {task_id}: {action} {rw.field} "
-            f"to a targeted --files run: {rw.original!r}",
+            f"to the targeted run: {rw.original!r}",
             file=sys.stderr,
         )
 
@@ -2115,6 +2182,7 @@ def create_task_folder(task, team_root, dry_run=False, release_version="none", r
 
     acceptance_criteria, constraints, notes = apply_targeted_test_policy(
         task, task_id, role, acceptance_criteria, constraints, notes,
+        runner_config=resolve_test_runner_config(team_root),
     )
 
     # Prose names RC branches the way the repository does: a bare
@@ -2778,7 +2846,8 @@ def build_cm_task_ids(version, start_seq, date_str):
 
 
 def inject_feature_workflow_tasks(tasks, source_branch, test_required, parent_branch,
-                                   date_str, base_seq, owner, git_repo="none"):
+                                   date_str, base_seq, owner, git_repo="none",
+                                   git_remote=_DEFAULT_REMOTE_NAME, branch_prefix=""):
     """Inject a CODER create-shared-branch ticket as ticket 1 for the shared-branch
     decomposition mode (workflow_type="feature").
 
@@ -2800,6 +2869,10 @@ def inject_feature_workflow_tasks(tasks, source_branch, test_required, parent_br
     - Adds the create-shared-branch task ID as a dependency for all work tasks.
     - Appends a TESTER task (prereqs = all work task IDs) when test_required=True.
 
+    *git_remote* is the project's remote (``_resolve_git_remote_name``) and
+    *branch_prefix* its branch prefix; the create-shared-branch ticket names
+    both rather than ``origin`` and a bare ``main``.
+
     Returns the list of synthetic tasks added.
     """
     # Build the create-shared-branch task ID — new format: ROLE-DATE-NNN-slug (no owner prefix)
@@ -2820,22 +2893,22 @@ def inject_feature_workflow_tasks(tasks, source_branch, test_required, parent_br
         "feature_branch": "none",
         "goal": (
             f"Create the shared feature branch '{source_branch}' from '{parent_branch}' "
-            f"and push it to origin. All feature tasks in this workflow will branch from "
+            f"and push it to {git_remote}. All feature tasks in this workflow will branch from "
             f"and merge back into '{source_branch}'."
         ),
         "inputs": [],
         "context_paths": [],
         "required_output": (
-            f"Branch '{source_branch}' exists on origin and is up to date with "
+            f"Branch '{source_branch}' exists on {git_remote} and is up to date with "
             f"'{parent_branch}'."
         ),
         "constraints": [
-            f"Branch from '{parent_branch}', not from main.",
-            f"Push '{source_branch}' to origin after creating it.",
+            f"Branch from '{parent_branch}', not from {branch_prefix}main.",
+            f"Push '{source_branch}' to {git_remote} after creating it.",
             "Do not create any other branches. Do not modify any files.",
         ],
         "acceptance_criteria": [
-            f"git ls-remote origin {source_branch} returns a commit SHA.",
+            f"git ls-remote {git_remote} {source_branch} returns a commit SHA.",
             f"Branch '{source_branch}' is at the same commit as '{parent_branch}'.",
         ],
         "depends_on": [],
@@ -2901,7 +2974,8 @@ def inject_feature_workflow_tasks(tasks, source_branch, test_required, parent_br
 
 
 def inject_cm_bookends(tasks, target_version, date_str, base_seq, owner, git_repo="none",
-                       human_approval_required="auto", test_required=True):
+                       human_approval_required="auto", test_required=True,
+                       git_remote=_DEFAULT_REMOTE_NAME):
     """Inject CM-open, optional TESTER, optional HUMAN-APPROVE, and CM-release tasks.
 
     Must be called AFTER assign_task_ids() so that work tasks already have
@@ -2920,6 +2994,9 @@ def inject_cm_bookends(tasks, target_version, date_str, base_seq, owner, git_rep
     test_required controls whether a TESTER task is injected:
         True  (default) — inject TESTER between work tasks and CM-release.
         False           — skip TESTER; CM-release depends only on work tasks.
+
+    git_remote is the project's remote (``_resolve_git_remote_name``), which
+    the CM-release criterion names.
 
     Mutates `tasks` in-place:
     - Prepends a CM-open synthetic task (no prereqs).
@@ -3125,7 +3202,7 @@ def inject_cm_bookends(tasks, target_version, date_str, base_seq, owner, git_rep
         "context_paths": [],
         "required_output": f"Release {target_version} published.",
         "constraints": ["cm_operation: release"],
-        "acceptance_criteria": [f"Release {target_version} has been tagged on the prefixed main branch, and pushed to origin when the project's push_to_remote is true."],
+        "acceptance_criteria": [f"Release {target_version} has been tagged on the prefixed main branch, and pushed to {git_remote} when the project's push_to_remote is true."],
         "depends_on": [],
         "prerequisite_ids": cm_release_prereqs,
         "notes": f"Automated CM task. cm_operation=release target_version={target_version}",
@@ -3466,46 +3543,6 @@ def inject_document_workflow_tasks(tasks, sections, date_str, base_seq, owner,
     tasks.extend(all_synthetic)
 
     return all_synthetic
-
-
-def _read_cfg_field(cfg_path, field_name):
-    """Read a single key = value field from a project.cfg (or PROJECT.cfg) file.
-
-    Reads the file line-by-line and returns the first value found for
-    ``field_name``.  Handles both INI format (``key = value``) and
-    bare-assignment format (``key=value``).  Strips surrounding whitespace
-    and optional quotes.  Returns an empty string when the field is absent
-    or the file does not exist.
-
-    Parameters
-    ----------
-    cfg_path:
-        Path-like or string pointing to the project.cfg file.  May be None
-        or point to a non-existent file — both return empty string silently.
-    field_name:
-        The bare key name to look for (e.g. ``'review_agent'``).
-
-    Returns
-    -------
-    str
-        The stripped value, or ``''`` when absent/unreadable.
-    """
-    if not cfg_path:
-        return ""
-    cfg_path = Path(cfg_path)
-    if not cfg_path.is_file():
-        return ""
-    try:
-        for line in cfg_path.read_text(encoding="utf-8").splitlines():
-            stripped = line.strip()
-            if "=" not in stripped or stripped.startswith("#"):
-                continue
-            key, _, val = stripped.partition("=")
-            if key.strip() == field_name:
-                return val.strip().strip("'\"")
-    except OSError:
-        pass
-    return ""
 
 
 def load_workflow_capabilities(workflow_type: str, kanban_root=None) -> dict:
@@ -3935,7 +3972,7 @@ def evaluate_when_predicate(predicate, foreach_produced_items, workflow_agents,
         # True when the project's project.cfg declares a non-empty 'review_agent'
         # field.  The workflow YAML agents block is not the authority for this
         # predicate — project.cfg is the single source of truth.
-        return bool(_read_cfg_field(project_cfg_path, "review_agent").strip())
+        return bool(_project_cfg.read_first_assignment(project_cfg_path, "review_agent").strip())
 
     raise ValueError(
         f"Unknown when predicate '{predicate}'. "
@@ -4473,15 +4510,44 @@ def create_human_approve_folder(task, team_root, dry_run=False, tasks_root=None)
     return task_id
 
 
+# Files only the kanban's own source tree carries, relative to its root.
+# A dev tree holding all of them is the kanban building itself.
+KANBAN_SOURCE_TREE_MARKERS = (
+    "install.sh",
+    "team/SOP-core.md",
+    "team/pm-agent/pm_materialize.py",
+)
+
+
+def is_kanban_source_tree(dev_tree_path) -> bool:
+    """Return True when *dev_tree_path* is a checkout of the kanban's own source.
+
+    Decided by the tree's contents (every path in
+    ``KANBAN_SOURCE_TREE_MARKERS`` is a file in it), never by project name.
+    """
+    root = Path(dev_tree_path)
+    return all((root / marker).is_file() for marker in KANBAN_SOURCE_TREE_MARKERS)
+
+
+def default_workspace_label(dev_tree_path) -> str:
+    """The narration label for a default workspace that is the project's dev tree.
+
+    ``self-build`` only when the dev tree is the kanban's own source tree;
+    every other project's git checkout is ``project dev tree``.
+    """
+    if is_kanban_source_tree(dev_tree_path):
+        return "self-build"
+    return "project dev tree"
+
+
 def ensure_default_workspace(team_root, project_name, tasks):
     """If no tasks specify a working directory, create a default workspace and assign it.
 
-    For self-build (the kanban building itself), the default workspace must be
-    the dev tree, NOT a subdirectory of the live install. Detection: if
-    PGAI_DEV_TREE_PATH is set and exists as a git checkout, treat this as a
-    self-build and use the dev tree directly. Otherwise, fall back to the
-    default of team_root/workspaces/projects/<project_name> for non-self-build
-    projects.
+    When the project's resolved dev tree is a git checkout, the default
+    workspace is that dev tree, NOT a subdirectory of the live install, and
+    the narration labels it with ``default_workspace_label``: ``self-build``
+    for the kanban's own source tree, ``project dev tree`` for any other
+    project. Otherwise, fall back to team_root/workspaces/projects/<project_name>.
     """
     needs_default = False
     for task in tasks:
@@ -4493,7 +4559,7 @@ def ensure_default_workspace(team_root, project_name, tasks):
     if not needs_default:
         return
 
-    # Prefer dev tree as default workspace for self-build scenarios.
+    # Prefer the project's dev tree when it is a git checkout.
     dev_tree = _resolve_dev_tree_path(team_root)
     dev_tree_path = Path(dev_tree)
     use_dev_tree = (
@@ -4504,11 +4570,12 @@ def ensure_default_workspace(team_root, project_name, tasks):
     if use_dev_tree:
         default_workspace = dev_tree_path
         print(
-            f"[pm-materialize] Default workspace (self-build): {default_workspace}",
+            f"[pm-materialize] Default workspace "
+            f"({default_workspace_label(dev_tree_path)}): {default_workspace}",
             file=sys.stderr,
         )
     else:
-        # Historical default for non-self-build projects.
+        # A project with no git dev tree gets a workspace under the project root.
         default_workspace = Path(team_root) / "workspaces" / "projects" / (project_name or "unnamed")
         default_workspace.mkdir(parents=True, exist_ok=True)
         print(f"[pm-materialize] Default workspace: {default_workspace}", file=sys.stderr)
@@ -4814,6 +4881,272 @@ def dedupe_materialization_tasks(tasks: list, emit_cm_bookends: bool = True) -> 
     return kept_tasks, narrations, len(narrations)
 
 
+# ---------------------------------------------------------------------------
+# Plan intake fields: needs_operator and ride_along
+# ---------------------------------------------------------------------------
+
+#: Keys a needs_operator entry may carry its item under, first match wins.
+_NEEDS_OPERATOR_ITEM_KEYS = ("item", "key", "bug")
+
+
+class PlanIntakeRefused(Exception):
+    """The plan's needs_operator or ride_along fields failed a check.
+
+    Attributes:
+        error:    Stable machine key of the first problem.
+        problems: Every problem, one plain-language line each.
+    """
+
+    def __init__(self, error: str, problems: list) -> None:
+        super().__init__("; ".join(problems))
+        self.error = error
+        self.problems = problems
+
+
+class PlanIntake:
+    """The checked needs_operator and ride_along fields of one plan.
+
+    Attributes:
+        ctx:            OpsContext for the kanban root the project sits under.
+        project:        The project name.
+        needs_operator: ``(item, question)`` pairs, in plan order.
+        ride_along:     The accepted ride-along bugs (ride_along_lint.RideAlongBug).
+        requirement:    The requirement file the ride-alongs are listed in.
+        parked:         The item file each needs_operator entry resolved to,
+                        in plan order.
+    """
+
+    def __init__(self, ctx, project, needs_operator, ride_along, requirement, parked=()):
+        self.ctx = ctx
+        self.project = project
+        self.needs_operator = needs_operator
+        self.ride_along = ride_along
+        self.requirement = requirement
+        self.parked = tuple(parked)
+
+
+def _plan_intake_project(team_root: str):
+    """``(kanban_root, project)`` for a project root ``<kanban_root>/projects/<project>``.
+
+    ``None`` for any other layout: the ops verbs that record both fields
+    address an item by kanban root and project name.
+    """
+    root = Path(team_root).resolve()
+    if root.parent.name != "projects":
+        return None
+    return root.parent.parent, root.name
+
+
+def _needs_operator_entries(raw) -> tuple:
+    """``(entries, problems)`` for a plan's needs_operator value.
+
+    Each entry is an object naming the item (``item``; ``key`` or ``bug``
+    read the same way) and the operator ``question``.
+    """
+    if not isinstance(raw, list):
+        return [], [f"needs_operator must be a list of {{\"item\", \"question\"}} objects, "
+                    f"not {type(raw).__name__}"]
+    entries, problems = [], []
+    for entry in raw:
+        item = ""
+        question = ""
+        if isinstance(entry, dict):
+            item = next(
+                (entry[k].strip() for k in _NEEDS_OPERATOR_ITEM_KEYS
+                 if isinstance(entry.get(k), str) and entry[k].strip()),
+                "",
+            )
+            question = entry.get("question") if isinstance(entry.get("question"), str) else ""
+        if not item or not question.strip():
+            problems.append(f"needs_operator entry {entry!r} must name an item and a non-empty question")
+            continue
+        entries.append((item, question.strip()))
+    return entries, problems
+
+
+def check_plan_intake_fields(plan: dict, team_root: str, requirements_path: str):
+    """Check a plan's needs_operator and ride_along fields; write nothing.
+
+    Returns ``None`` when the plan carries neither field (nothing to record;
+    :func:`uncovered_bundled_items` still checks that every bundled item is
+    ticketed). Otherwise
+    every needs_operator entry is checked as the ops verb checks it
+    (``ops.write.check_needs_operator``) and the ride_along list is run
+    through the plan lint (``lib/ride_along_lint.py``).
+
+    Returns:
+        A :class:`PlanIntake`.
+
+    Raises:
+        PlanIntakeRefused: naming every problem found.
+    """
+    if "needs_operator" not in plan and "ride_along" not in plan:
+        return None
+    raw_needs = plan.get("needs_operator")
+    raw_ride = plan.get("ride_along")
+    if raw_needs in (None, []) and raw_ride in (None, []):
+        return None
+
+    located = _plan_intake_project(team_root)
+    if located is None:
+        raise PlanIntakeRefused("materialize.plan_intake_layout", [
+            f"needs_operator and ride_along are recorded through the ops verbs, which need a "
+            f"project root of the form KANBAN_ROOT/projects/NAME; {team_root} is not one",
+        ])
+    kanban_root, project = located
+    ctx = _OpsContext(kanban_root=kanban_root)
+
+    keyed = []  # (error key, problem)
+    needs_entries = []
+    parked = []
+    if raw_needs not in (None, []):
+        needs_entries, shape_problems = _needs_operator_entries(raw_needs)
+        keyed += [("materialize.needs_operator_malformed", p) for p in shape_problems]
+        for item, question in needs_entries:
+            try:
+                parked.append(_check_needs_operator(ctx, project, item, question).resolve())
+            except _ContractError as exc:
+                keyed.append((exc.error, f"needs_operator {item}: {exc.message}"))
+            except _OpsError as exc:
+                keyed.append(("materialize.needs_operator_unreadable", f"needs_operator {item}: {exc}"))
+
+    lint = lint_ride_along(
+        raw_ride, kanban_root=kanban_root, project=project, requirements_path=requirements_path,
+    )
+    keyed += [(_lint_error_key(lint.findings), f"ride_along {f.describe()}") for f in lint.findings]
+
+    parked_paths = set(parked)
+    for bug in lint.accepted:
+        if bug.path.resolve() in parked_paths:
+            keyed.append(("materialize.plan_intake_conflict",
+                          f"{bug.path.name} is in both needs_operator and ride_along; an item is "
+                          f"either parked on an operator question or ticketed, never both"))
+
+    if keyed:
+        raise PlanIntakeRefused(keyed[0][0], [problem for _, problem in keyed])
+    requirement = Path(requirements_path) if lint.accepted else None
+    return PlanIntake(ctx, project, needs_entries, list(lint.accepted), requirement, parked)
+
+
+def apply_plan_intake_fields(intake: "PlanIntake") -> list:
+    """Record a checked plan's needs_operator and ride_along entries.
+
+    Each needs_operator item is set ``needs-operator`` with its question in
+    the operator inbox (``ops.write.set_needs_operator``); each ride-along
+    bug is listed in the requirement's ``## Bundled Items`` and set
+    ``running`` (``ops.write.ride_along_item``). Both verbs are idempotent,
+    so a re-run after a failure repeats nothing already written.
+
+    Returns:
+        One narration line per write.
+
+    Raises:
+        OpsError: the first write that failed; the ones before it stand.
+    """
+    lines = []
+    for item, question in intake.needs_operator:
+        entry = _set_needs_operator(intake.ctx, intake.project, item, question)
+        lines.append(f"needs-operator: {entry.source} parked on inbox entry {entry.entry_id}")
+    for bug in intake.ride_along:
+        path = _ride_along_item(intake.ctx, intake.project, bug.key, intake.requirement)
+        lines.append(f"ride-along: {path.name} listed in {intake.requirement.name} and set running")
+    return lines
+
+
+# ---------------------------------------------------------------------------
+# Bundled-item coverage: every bundled item is ticketed or asked about
+# ---------------------------------------------------------------------------
+
+
+def _ticket_text(value) -> str:
+    """Every string in a plan task value (nested lists and objects included),
+    one per line; numbers and other scalars contribute nothing."""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, dict):
+        return "\n".join(_ticket_text(v) for v in value.values())
+    if isinstance(value, (list, tuple)):
+        return "\n".join(_ticket_text(v) for v in value)
+    return ""
+
+
+def bundled_item_id(name: str) -> str:
+    """The ID a ticket cites the item file *name* by.
+
+    ``BUG-NNNN`` / ``PRIORITY-NNNN`` for a numbered bug or priority
+    (``archive.lookup.classify_item_id``'s canonical form), else the file
+    stem.
+    """
+    stem = name[:-3] if name.lower().endswith(".md") else name
+    parsed = _classify_item_id(stem)
+    if parsed is not None and parsed.number is not None:
+        return parsed.canonical
+    return stem
+
+
+def _item_citation_re(name: str):
+    """A pattern matching a citation of the item file *name* in ticket text.
+
+    A numbered item is cited by its ID in any spelling ``classify_item_id``
+    reads -- any case, a ``-``, ``_``, space or nothing after the prefix,
+    leading zeros or none -- not preceded by a letter or digit and never
+    followed by another digit, so a number is never matched inside a longer
+    one. Any other item is cited by its whole file stem.
+    """
+    stem = name[:-3] if name.lower().endswith(".md") else name
+    parsed = _classify_item_id(stem)
+    if parsed is not None and parsed.number is not None:
+        prefix = parsed.canonical.split("-", 1)[0]
+        return re.compile(rf"(?<![A-Za-z0-9]){prefix}[-_ ]?0*{parsed.number}(?![0-9])", re.IGNORECASE)
+    return re.compile(rf"(?<![A-Za-z0-9]){re.escape(stem)}(?![A-Za-z0-9])", re.IGNORECASE)
+
+
+def uncovered_bundled_items(plan: dict, requirements_path: str, intake=None) -> list:
+    """The requirement's ``## Bundled Items`` the plan leaves unassigned.
+
+    An item is covered when at least one plan ticket names it (its ID, see
+    :func:`bundled_item_id`, appears in any of the ticket's text fields),
+    when a ``needs_operator`` entry resolved to its file, or when it is an
+    accepted ``ride_along`` bug (the materializer lists those in
+    ``## Bundled Items`` itself). The list is read by
+    ``lib.bundle_items.parse_bundled_item_paths``, and items are matched by
+    file name as that module matches them, so a bundle written on another
+    install root still names the same item. Reads only; writes nothing.
+
+    Args:
+        plan:              The plan JSON.
+        requirements_path: The requirement file being decomposed, or ``none``.
+        intake:            The checked :class:`PlanIntake`, or ``None`` when
+                           the plan carries neither intake field.
+
+    Returns:
+        The uncovered item file names in listed order, repeats dropped. Empty
+        when the requirement is ``none`` or unreadable, or lists no item.
+    """
+    if not requirements_path or requirements_path.strip().lower() == "none":
+        return []
+    try:
+        text = Path(requirements_path).read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return []
+    listed = []
+    for item_path in _parse_bundled_item_paths(text):
+        name = Path(item_path).name
+        if name and name not in listed:
+            listed.append(name)
+    if not listed:
+        return []
+    covered = set()
+    if intake is not None:
+        covered.update(path.name for path in intake.parked)
+        covered.update(bug.path.name for bug in intake.ride_along)
+    tickets = [_ticket_text(task) for task in plan.get("tasks") or [] if isinstance(task, dict)]
+    return [
+        name for name in listed
+        if name not in covered and not any(_item_citation_re(name).search(ticket) for ticket in tickets)
+    ]
+
+
 def main():
     """Run the materializer CLI: turn a PM plan JSON into task folders and queue lines.
 
@@ -5027,12 +5360,10 @@ def main():
         _req_path = Path(requirements_path)
         if _req_path.is_file():
             _req_text = _req_path.read_text(encoding="utf-8", errors="replace")
-            _status_re = re.compile(
-                r'^##\s+Status\s*\n\s*(\S+)', re.M | re.IGNORECASE
-            )
-            _status_m = _status_re.search(_req_text)
-            if _status_m:
-                _req_status_raw = _status_m.group(1).strip()
+            # First whitespace-delimited token of the ## Status value.
+            _status_tokens = _section_value(_req_text, "Status").split()
+            if _status_tokens:
+                _req_status_raw = _status_tokens[0]
                 if _bundle_is_terminal(_req_status_raw):
                     print(
                         f"[pm-materialize] skipping {_req_path.name}: "
@@ -5181,6 +5512,66 @@ def main():
     if not parent_branch or parent_branch.lower() == "none":
         parent_branch = "main"
     print(f"[pm-materialize] parent_branch: {parent_branch}", file=sys.stderr)
+
+    # Step 0: the plan's needs_operator and ride_along fields. Checked here,
+    # before the first directory or file is written, so a refusal leaves no
+    # task folder, no queue line and no status change. A plan carrying
+    # neither field skips this step entirely.
+    try:
+        _plan_intake = check_plan_intake_fields(plan, team_root, requirements_path)
+    except PlanIntakeRefused as _intake_refusal:
+        _plan_abs = plan_path.resolve()
+        # BLOCK-WORTHY: materializing past a failed check would ticket a bug
+        # the operator's bundle_mixing keeps out of requirement RCs, let a
+        # high-severity or deliverable-overlapping bug ride along, or park an
+        # item the needs-operator verb refuses; nothing has been written when
+        # this fires.
+        _emit_error_contract(
+            _intake_refusal.error,
+            f"pm_materialize refused {_plan_abs}: the plan's needs_operator / ride_along "
+            f"fields failed {len(_intake_refusal.problems)} check(s) — "
+            + "; ".join(_intake_refusal.problems)
+            + ". No task folder was written.",
+            f"Correct needs_operator and ride_along in {_plan_abs} so every check passes, "
+            f"then re-run: python3 {Path(__file__).resolve()} {_plan_abs} --team-root {team_root}",
+        )
+        # CENSUS-ANCHOR: pm-materialize-03
+        sys.exit(1)
+    if _plan_intake is not None:
+        print(
+            f"[pm-materialize] Plan intake fields checked: "
+            f"{len(_plan_intake.needs_operator)} needs_operator, "
+            f"{len(_plan_intake.ride_along)} ride_along.",
+            file=sys.stderr,
+        )
+
+    # Step 0b: every item the requirement lists under ## Bundled Items is
+    # named by a ticket, parked under needs_operator, or a ride-along.
+    # Checked before anything is written, like Step 0; a requirement without
+    # ## Bundled Items passes untouched.
+    _uncovered = uncovered_bundled_items(plan, requirements_path, _plan_intake)
+    if _uncovered:
+        _plan_abs = plan_path.resolve()
+        _example_id = bundled_item_id(_uncovered[0])
+        # BLOCK-WORTHY: an invariant by design -- a bundled item no ticket
+        # names and no question parks would go running with the RC and
+        # reach the operator only as a generic carried item, with no PM
+        # question; nothing has been written when this fires.
+        _emit_error_contract(
+            "materialize.bundled_item_unassigned",
+            f"pm_materialize refused {_plan_abs}: {len(_uncovered)} item(s) listed under "
+            f"## Bundled Items in {requirements_path} are named by no ticket and not listed "
+            f"under needs_operator — {', '.join(_uncovered)}. Every bundled item is either "
+            f"named (by its ID) in at least one ticket or parked on an operator question. "
+            f"No task folder was written.",
+            f"Name {_example_id} in a ticket of {_plan_abs}, or add "
+            f'{{"item": "{_example_id}", "question": "What should the fix for {_example_id} do?"}} '
+            f"under needs_operator, and the same for every other item named above, then re-run: "
+            f"python3 {Path(__file__).resolve()} {_plan_abs} --team-root {team_root} "
+            f"--requirements-path {requirements_path}",
+        )
+        # CENSUS-ANCHOR: pm-materialize-05
+        sys.exit(1)
 
     # Step 1a: roster guard — verify every plan task's role is in the plugin's
     # declared agents roster.  This is the fail-closed mirror to capability-gated
@@ -5414,6 +5805,8 @@ def main():
             base_seq=feature_base_seq,
             owner=args.owner,
             git_repo=plan_git_repo,
+            git_remote=_resolve_git_remote_name(team_root),
+            branch_prefix=_resolve_branch_prefix(team_root),
         )
         if synthetic:
             _labels = [t["task_id"] for t in synthetic]
@@ -5481,6 +5874,7 @@ def main():
                 git_repo=plan_git_repo,
                 human_approval_required=human_approval_required,
                 test_required=test_required,
+                git_remote=_resolve_git_remote_name(team_root),
             )
             if synthetic:
                 _har_norm = (human_approval_required or "auto").strip().lower()
@@ -5704,6 +6098,36 @@ def main():
             file=sys.stderr,
         )
         sys.exit(1)
+
+    # Step 4c: record the plan's needs_operator and ride_along entries, after
+    # every fail-closed check above and before the first task folder. Both
+    # ops verbs are idempotent, so a re-run after a failure here repeats
+    # nothing already written.
+    if _plan_intake is not None and args.dry_run:
+        for _item, _question in _plan_intake.needs_operator:
+            print(f"[dry-run] Would set {_item} needs-operator: {_question}")
+        for _bug in _plan_intake.ride_along:
+            print(f"[dry-run] Would list {_bug.path.name} as a ride-along and set it running")
+    elif _plan_intake is not None:
+        try:
+            for _line in apply_plan_intake_fields(_plan_intake):
+                print(f"[pm-materialize] {_line}", file=sys.stderr)
+        except _OpsError as _intake_error:
+            _plan_abs = plan_path.resolve()
+            # BLOCK-WORTHY: writing the tickets without the exclusions and
+            # ride-alongs recorded would leave an excluded item with no
+            # question and a ride-along that no requirement lists; no task
+            # folder has been written when this fires.
+            _emit_error_contract(
+                getattr(_intake_error, "error", "materialize.plan_intake_write_failed"),
+                f"pm_materialize stopped before writing any task folder for {_plan_abs}: "
+                f"recording its needs_operator / ride_along entries failed: "
+                f"{getattr(_intake_error, 'message', _intake_error)}",
+                f"Fix the cause, then re-run (entries already recorded are left as they are): "
+                f"python3 {Path(__file__).resolve()} {_plan_abs} --team-root {team_root}",
+            )
+            # CENSUS-ANCHOR: pm-materialize-04
+            sys.exit(1)
 
     created_tasks = []
     for task in ordered_tasks:

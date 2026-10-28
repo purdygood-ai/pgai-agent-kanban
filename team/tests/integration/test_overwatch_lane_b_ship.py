@@ -22,7 +22,8 @@ pgai_agent_kanban.overwatch.intent, which the pre-existing Lane A fixture
 never needed to copy.
 
 Coverage:
-  - Golden path: a ship-policy HALT (TESTER BLOCKED, trigger-1) whose
+  - Golden path: a ship-policy HALT (systemic risk high, trigger-2, under
+    ship_posture = matrix; a BLOCKED TESTER task no longer HALTs) whose
     evidence is fully explained by a live INTENT.md entry classifies Lane
     B, force-ships the RC through the REAL cm/release.sh subprocess (not a
     mock), and release-state.md afterwards carries both an "## Operator
@@ -147,7 +148,9 @@ def _build_kanban_root(
         f"git_repo_url = git@example.com:{project_name}.git\ngit_remote_name = origin\n"
         "workflow_type = release\nis_self_build = false\npush_to_remote = false\n\n"
         "[versioning]\nmax_patch = 99\nmax_minor = 9\nmax_major = 0\n\n"
-        f"[release]\nmax_rc_retries = 3\noverwatch_resolve = {'true' if overwatch_resolve else 'false'}\n",
+        f"[release]\nmax_rc_retries = 3\noverwatch_resolve = {'true' if overwatch_resolve else 'false'}\n"
+        # matrix keeps trigger 2 a stop; under the always default it ships on its own.
+        "ship_posture = matrix\n",
         encoding="utf-8",
     )
     (proj / "release-state.md").write_text(
@@ -239,11 +242,10 @@ def _commit_on_branch(
 def _build_tester_task(
     kanban_root: pathlib.Path, project_name: str, task_id: str, release_version: str,
 ) -> pathlib.Path:
-    """A BLOCKED-state TESTER task: cm/release.sh's own ship-policy stage
-    (trigger-1) HALTs on this shape (test_cm_release_operator_force_override.
-    py's own proven fixture shape). Deliberately BLOCKED rather than DONE:
-    resolution_stage.py's find_tester_report() only considers a DONE TESTER
-    task "found", so this task contributes no findings to classify_lane() —
+    """A DONE TESTER task whose report reads systemic_risk=high with no
+    finding blocks: cm/release.sh's own ship-policy stage HALTs on trigger-2
+    under ship_posture = matrix (regression and integrity read unknown).
+    With no findings the task contributes nothing to classify_lane() —
     Lane A's regression check fails closed (no findings), leaving Lane B's
     INTENT.md match the only positive path, exactly what these tests need.
     """
@@ -256,12 +258,12 @@ def _build_tester_task(
         encoding="utf-8",
     )
     (task_dir / "status.md").write_text(
-        f"# Status\n\n## Task\n{task_id}\n\n## Role\nTESTER\n\n## State\nBLOCKED\n",
+        f"# Status\n\n## Task\n{task_id}\n\n## Role\nTESTER\n\n## State\nDONE\n",
         encoding="utf-8",
     )
     (task_dir / "artifacts" / "report.md").write_text(
         f"# Verification Report: {release_version}\n\n"
-        "## Recommendation\nPASS\n\n## Systemic Risk\nlow\n\n"
+        "## Recommendation\nPASS\n\n## Systemic Risk\nhigh\n\n"
         "## Findings\n\nNo bug, gap, or stale-assertion findings — suites green.\n\n"
         "## Lint Findings (non-blocking)\n\nNone.\n",
         encoding="utf-8",
@@ -289,7 +291,7 @@ def _build_lane_b_fixture(tmp_path: pathlib.Path, project_name: str, version: st
     on the RC branch (makes operator_commits_in_lineage extract True, so
     the block fails the shipped CANCEL-AND-REBUNDLE matrix row before ever
     reaching classify_lane() — same technique test_overwatch_lane_a_drill.
-    py's own module docstring documents), a BLOCKED TESTER task (trigger-1),
+    py's own module docstring documents), a high-risk TESTER report (trigger-2),
     and an unforced cm/release.sh run that produces a real ship-policy
     HALT exactly as CM's own chain would.
 
@@ -311,17 +313,17 @@ def _build_lane_b_fixture(tmp_path: pathlib.Path, project_name: str, version: st
         "feat: add feature for lane b ship test", return_branch="main",
     )
 
-    tester_task_id = f"TESTER-20260910-{version[-1]}50-lane-b-blocked"
+    tester_task_id = f"TESTER-20260910-{version[-1]}50-lane-b-high-risk"
     _build_tester_task(kanban_root, project_name, tester_task_id, version)
 
     result_first = _run_cm_script(_RELEASE_SCRIPT_REL, [], kanban_root, project_name, repo_root=repo_path)
     assert result_first.returncode != 0, (
-        f"cm/release.sh (unforced) was expected to HALT on trigger-1.\n"
+        f"cm/release.sh (unforced) was expected to HALT on trigger-2.\n"
         f"stdout: {result_first.stdout}\nstderr: {result_first.stderr}"
     )
     combined_first = result_first.stdout + result_first.stderr
-    assert "cm-release.trigger-1.tester-blocked" in combined_first, (
-        f"Expected the unforced run to HALT on trigger-1.\noutput:\n{combined_first}"
+    assert "cm-release.trigger-2.systemic-risk-high" in combined_first, (
+        f"Expected the unforced run to HALT on trigger-2.\noutput:\n{combined_first}"
     )
     halt_path = proj / "HALT"
     assert halt_path.is_file(), "Expected a project-scoped ship-policy HALT file after the unforced run."

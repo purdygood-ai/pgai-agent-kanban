@@ -10,6 +10,10 @@
 #   3. When no dev tree is configured, the check skips silently.
 #   4. Source is side-effect-free.
 #   5. bash -n passes.
+#   6. Run by overwatch-sweep.sh, the check is kanban-only: with two
+#      projects, the kanban's own (installed VERSION behind its dev tree)
+#      gets the one divergence record and the other gets none, only a
+#      check-not-applicable row.
 #
 # All work is done in a self-contained tmpdir using a real git repo as the
 # dev tree. The live kanban installation is never touched.
@@ -317,6 +321,67 @@ if git -C "${T6_DEV}" diff --quiet HEAD 2>/dev/null; then
     _pass "version-divergence/dev-tree-not-modified"
 else
     _fail "version-divergence/dev-tree-not-modified"
+fi
+
+# ===========================================================================
+# TEST 7: Through the sweep, kanban-only: the kanban project whose installed
+# VERSION is behind its dev tree is reported; another project gets no record
+# ===========================================================================
+echo ""
+echo "=== TEST 7: Sweep runs the check for the kanban's own project only ==="
+
+SWEEP_SCRIPT="$(cd "${LIB_DIR}/.." && pwd)/overwatch-sweep.sh"
+T7_ROOT="${FIXTURE_DIR}/t7"
+T7_KANBAN_DEV="${FIXTURE_DIR}/t7-kanban-dev"
+T7_OTHER_DEV="${FIXTURE_DIR}/t7-other-dev"
+# The kanban source: install.sh and the team/pgai_agent_kanban package.
+mkdir -p "${T7_KANBAN_DEV}/team/pgai_agent_kanban"
+: > "${T7_KANBAN_DEV}/install.sh"
+: > "${T7_KANBAN_DEV}/team/pgai_agent_kanban/__init__.py"
+_build_fixture_dev_tree "${T7_KANBAN_DEV}" "v2.50.0"
+_build_fixture_dev_tree "${T7_OTHER_DEV}" "v0.33.2"
+_build_fixture_kanban "${T7_ROOT}" "kanban-project" "${T7_KANBAN_DEV}"
+_build_fixture_kanban "${T7_ROOT}" "other-project" "${T7_OTHER_DEV}"
+printf '[project:kanban-project]\npriority=1\n\n[project:other-project]\npriority=2\n' > "${T7_ROOT}/projects.cfg"
+mkdir -p "${T7_ROOT}/tmp"
+# The installed kanban is behind its dev tree.
+echo "v2.49.2" > "${T7_ROOT}/VERSION"
+
+T7_EXIT=0
+T7_OUT="$(env -u PGAI_DEV_TREE_PATH -u PGAI_TASKS_DIR -u PGAI_PROJECT_ROOT -u OVERWATCH_PROJECT \
+    KANBAN_ROOT="${T7_ROOT}" \
+    PGAI_AGENT_KANBAN_ROOT_PATH="${T7_ROOT}" \
+    PGAI_AGENT_KANBAN_TEMP_DIR="${T7_ROOT}/tmp" \
+    bash "${SWEEP_SCRIPT}" --only version-divergence 2>&1)" || T7_EXIT=$?
+
+if (( T7_EXIT == 0 )); then
+    _pass "sweep-kanban-only/exit-zero"
+else
+    _fail "sweep-kanban-only/exit-zero" "exit ${T7_EXIT}: ${T7_OUT}"
+fi
+
+T7_KANBAN_LOG="${T7_ROOT}/projects/kanban-project/overwatch/actions.log"
+T7_OTHER_LOG="${T7_ROOT}/projects/other-project/overwatch/actions.log"
+T7_KANBAN_RECORDS="$(awk -F'\t' '$2 == "check-version-divergence"' "${T7_KANBAN_LOG}" 2>/dev/null | wc -l)"
+T7_OTHER_RECORDS="$(awk -F'\t' '$2 == "check-version-divergence"' "${T7_OTHER_LOG}" 2>/dev/null | wc -l)"
+
+if (( T7_KANBAN_RECORDS == 1 )) \
+    && awk -F'\t' '$2 == "check-version-divergence" && $4 == "report:version-divergence"' "${T7_KANBAN_LOG}" | grep -q "installed=v2.49.2"; then
+    _pass "sweep-kanban-only/kanban-behind-reported"
+else
+    _fail "sweep-kanban-only/kanban-behind-reported" "expected one report:version-divergence row; log: $(cat "${T7_KANBAN_LOG}" 2>/dev/null)"
+fi
+
+if (( T7_OTHER_RECORDS == 0 )); then
+    _pass "sweep-kanban-only/other-project-no-record"
+else
+    _fail "sweep-kanban-only/other-project-no-record" "log: $(cat "${T7_OTHER_LOG}" 2>/dev/null)"
+fi
+
+if awk -F'\t' '$4 == "check-not-applicable"' "${T7_OTHER_LOG}" 2>/dev/null | grep -q "version-divergence"; then
+    _pass "sweep-kanban-only/other-project-not-applicable"
+else
+    _fail "sweep-kanban-only/other-project-not-applicable" "log: $(cat "${T7_OTHER_LOG}" 2>/dev/null)"
 fi
 
 # ===========================================================================

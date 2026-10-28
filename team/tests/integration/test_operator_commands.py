@@ -371,12 +371,12 @@ class TestShowCommand:
         """
         root = two_project_root
         task_id = "CODER-20260628-T001-show-status-test"
-        task_dir = _build_task_folder(root, "project_a", task_id, state="BACKLOG")
+        task_dir = _build_task_folder(root, "project-a", task_id, state="BACKLOG")
         original_content = (task_dir / "status.md").read_text(encoding="utf-8")
 
         result = _run_operator(
             _SHOW_SCRIPT,
-            ["--project", "project_a", "--key", task_id, "--file", "status"],
+            ["--project", "project-a", "--key", task_id, "--file", "status"],
             root,
         )
 
@@ -402,11 +402,11 @@ class TestShowCommand:
         """
         root = two_project_root
         task_id = "CODER-20260628-T002-show-readme-test"
-        _build_task_folder(root, "project_a", task_id)
+        _build_task_folder(root, "project-a", task_id)
 
         result = _run_operator(
             _SHOW_SCRIPT,
-            ["--project", "project_a", "--key", task_id, "--file", "readme"],
+            ["--project", "project-a", "--key", task_id, "--file", "readme"],
             root,
         )
 
@@ -427,12 +427,12 @@ class TestShowCommand:
         """
         root = two_project_root
         bug_file = _build_bug_file(
-            root, "project_a", bug_id="BUG-0100", slug="show-intake-test"
+            root, "project-a", bug_id="BUG-0100", slug="show-intake-test"
         )
 
         result = _run_operator(
             _SHOW_SCRIPT,
-            ["--project", "project_a", "--key", "BUG-0100-show-intake-test"],
+            ["--project", "project-a", "--key", "BUG-0100-show-intake-test"],
             root,
         )
 
@@ -457,7 +457,7 @@ class TestShowCommand:
 
         result = _run_operator(
             _SHOW_SCRIPT,
-            ["--project", "project_a", "--key", "CODER-99999999-MISSING-TASK"],
+            ["--project", "project-a", "--key", "CODER-99999999-MISSING-TASK"],
             root,
         )
 
@@ -490,12 +490,12 @@ class TestShowReadmeCommand:
         """
         root = two_project_root
         task_id = "CODER-20260628-T003-show-readme-script-test"
-        task_dir = _build_task_folder(root, "project_a", task_id)
+        task_dir = _build_task_folder(root, "project-a", task_id)
         original_readme = (task_dir / "README.md").read_text(encoding="utf-8")
 
         result = _run_operator(
             _SHOW_README_SCRIPT,
-            ["--project", "project_a", "--key", task_id],
+            ["--project", "project-a", "--key", task_id],
             root,
         )
 
@@ -521,13 +521,13 @@ class TestShowReadmeCommand:
         """
         root = two_project_root
         task_id = "CODER-20260628-T004-show-readme-prefix-test"
-        task_dir = _build_task_folder(root, "project_a", task_id)
+        task_dir = _build_task_folder(root, "project-a", task_id)
         original_readme = (task_dir / "README.md").read_text(encoding="utf-8")
         prefix_key = "CODER-20260628-T004"
 
         result = _run_operator(
             _SHOW_README_SCRIPT,
-            ["--project", "project_a", "--key", prefix_key],
+            ["--project", "project-a", "--key", prefix_key],
             root,
         )
 
@@ -551,13 +551,13 @@ class TestShowReadmeCommand:
         """
         root = two_project_root
         _build_bug_file(
-            root, "project_a", bug_id="BUG-0101", slug="show-readme-refusal-test"
+            root, "project-a", bug_id="BUG-0101", slug="show-readme-refusal-test"
         )
         bug_key = "BUG-0101-show-readme-refusal-test"
 
         result = _run_operator(
             _SHOW_README_SCRIPT,
-            ["--project", "project_a", "--key", bug_key],
+            ["--project", "project-a", "--key", bug_key],
             root,
         )
 
@@ -589,7 +589,7 @@ class TestShowReadmeCommand:
 
         result = _run_operator(
             _SHOW_README_SCRIPT,
-            ["--project", "project_a", "--key", "CODER-99999999-MISSING-TASK"],
+            ["--project", "project-a", "--key", "CODER-99999999-MISSING-TASK"],
             root,
         )
 
@@ -632,11 +632,11 @@ class TestResetCommand:
         """
         root = two_project_root
         task_id = "CODER-20260628-T010-reset-to-backlog"
-        task_dir = _build_task_folder(root, "project_a", task_id, state="DONE")
+        task_dir = _build_task_folder(root, "project-a", task_id, state="DONE")
 
         result = _run_operator(
             _RESET_SCRIPT,
-            ["--project", "project_a", "--key", task_id],
+            ["--project", "project-a", "--key", task_id],
             root,
         )
 
@@ -658,11 +658,11 @@ class TestResetCommand:
         """
         root = two_project_root
         task_id = "CODER-20260628-T011-reset-marker-sync"
-        _build_task_folder(root, "project_a", task_id, state="DONE")
+        _build_task_folder(root, "project-a", task_id, state="DONE")
 
         # Pre-condition: mark the backlog marker as [x] to simulate a prior close.
         backlog_file = (
-            root / "projects" / "project_a" / "tasks" / "queues" / "coder_backlog.md"
+            root / "projects" / "project-a" / "tasks" / "queues" / "coder_backlog.md"
         )
         if backlog_file.exists():
             text = backlog_file.read_text(encoding="utf-8")
@@ -671,14 +671,14 @@ class TestResetCommand:
 
         result = _run_operator(
             _RESET_SCRIPT,
-            ["--project", "project_a", "--key", task_id],
+            ["--project", "project-a", "--key", task_id],
             root,
         )
 
         assert result.returncode == 0, (
             f"reset.sh exited non-zero.\nstdout: {result.stdout}\nstderr: {result.stderr}"
         )
-        marker = _read_backlog_marker(root, "project_a", task_id)
+        marker = _read_backlog_marker(root, "project-a", task_id)
         assert marker == "" or marker == " ", (
             f"Expected backlog marker to be open (space or empty) after reset, got: {marker!r}.\n"
             f"backlog content:\n{backlog_file.read_text(encoding='utf-8')}"
@@ -694,11 +694,11 @@ class TestResetCommand:
         """
         root = two_project_root
         task_id = "CODER-20260628-T012-reset-refuses-working"
-        task_dir = _build_task_folder(root, "project_a", task_id, state="WORKING")
+        task_dir = _build_task_folder(root, "project-a", task_id, state="WORKING")
 
         result = _run_operator(
             _RESET_SCRIPT,
-            ["--project", "project_a", "--key", task_id],
+            ["--project", "project-a", "--key", task_id],
             root,
         )
 
@@ -721,13 +721,13 @@ class TestResetCommand:
         """
         root = two_project_root
         bug_file = _build_bug_file(
-            root, "project_a", bug_id="BUG-0110", slug="reset-intake-test",
+            root, "project-a", bug_id="BUG-0110", slug="reset-intake-test",
             status="running",
         )
 
         result = _run_operator(
             _RESET_SCRIPT,
-            ["--project", "project_a", "--key", "BUG-0110-reset-intake-test"],
+            ["--project", "project-a", "--key", "BUG-0110-reset-intake-test"],
             root,
         )
 
@@ -751,12 +751,12 @@ class TestResetCommand:
         root = two_project_root
         bug_id = "BUG-0111"
         slug = "reset-marker-intake"
-        _build_bug_file(root, "project_a", bug_id=bug_id, slug=slug, status="running")
+        _build_bug_file(root, "project-a", bug_id=bug_id, slug=slug, status="running")
         bug_key = f"{bug_id}-{slug}"
 
         # Pre-condition: mark the bug backlog entry as [x].
         bug_backlog = (
-            root / "projects" / "project_a" / "tasks" / "queues" / "bug_backlog.md"
+            root / "projects" / "project-a" / "tasks" / "queues" / "bug_backlog.md"
         )
         if bug_backlog.exists():
             text = bug_backlog.read_text(encoding="utf-8")
@@ -765,14 +765,14 @@ class TestResetCommand:
 
         result = _run_operator(
             _RESET_SCRIPT,
-            ["--project", "project_a", "--key", bug_key],
+            ["--project", "project-a", "--key", bug_key],
             root,
         )
 
         assert result.returncode == 0, (
             f"reset.sh on intake item exited non-zero.\nstdout: {result.stdout}\nstderr: {result.stderr}"
         )
-        marker = _read_bug_backlog_marker(root, "project_a", bug_key)
+        marker = _read_bug_backlog_marker(root, "project-a", bug_key)
         assert marker == "" or marker == " ", (
             f"Expected bug backlog marker to be open after reset, got: {marker!r}.\n"
             f"backlog content:\n{bug_backlog.read_text(encoding='utf-8')}"
@@ -797,11 +797,11 @@ class TestCloseCommand:
         """
         root = two_project_root
         task_id = "CODER-20260628-T020-close-to-done"
-        task_dir = _build_task_folder(root, "project_a", task_id, state="BACKLOG")
+        task_dir = _build_task_folder(root, "project-a", task_id, state="BACKLOG")
 
         result = _run_operator(
             _CLOSE_SCRIPT,
-            ["--project", "project_a", "--key", task_id],
+            ["--project", "project-a", "--key", task_id],
             root,
         )
 
@@ -823,21 +823,21 @@ class TestCloseCommand:
         """
         root = two_project_root
         task_id = "CODER-20260628-T021-close-marker-sync"
-        _build_task_folder(root, "project_a", task_id, state="BACKLOG")
+        _build_task_folder(root, "project-a", task_id, state="BACKLOG")
 
         result = _run_operator(
             _CLOSE_SCRIPT,
-            ["--project", "project_a", "--key", task_id],
+            ["--project", "project-a", "--key", task_id],
             root,
         )
 
         assert result.returncode == 0, (
             f"close.sh exited non-zero.\nstdout: {result.stdout}\nstderr: {result.stderr}"
         )
-        marker = _read_backlog_marker(root, "project_a", task_id)
+        marker = _read_backlog_marker(root, "project-a", task_id)
         assert marker == "x", (
             f"Expected backlog marker to be [x] after close, got: {marker!r}.\n"
-            f"coder_backlog.md:\n{(root / 'projects' / 'project_a' / 'tasks' / 'queues' / 'coder_backlog.md').read_text(encoding='utf-8')}"
+            f"coder_backlog.md:\n{(root / 'projects' / 'project-a' / 'tasks' / 'queues' / 'coder_backlog.md').read_text(encoding='utf-8')}"
         )
 
     def test_close_bug_intake_item_with_state_done(
@@ -850,13 +850,13 @@ class TestCloseCommand:
         """
         root = two_project_root
         bug_file = _build_bug_file(
-            root, "project_a", bug_id="BUG-0120", slug="close-done-test"
+            root, "project-a", bug_id="BUG-0120", slug="close-done-test"
         )
         bug_key = "BUG-0120-close-done-test"
 
         result = _run_operator(
             _CLOSE_SCRIPT,
-            ["--project", "project_a", "--key", bug_key, "--state", "done"],
+            ["--project", "project-a", "--key", bug_key, "--state", "done"],
             root,
         )
 
@@ -880,22 +880,22 @@ class TestCloseCommand:
         root = two_project_root
         bug_id = "BUG-0121"
         slug = "close-marker-intake"
-        _build_bug_file(root, "project_a", bug_id=bug_id, slug=slug)
+        _build_bug_file(root, "project-a", bug_id=bug_id, slug=slug)
         bug_key = f"{bug_id}-{slug}"
 
         result = _run_operator(
             _CLOSE_SCRIPT,
-            ["--project", "project_a", "--key", bug_key],
+            ["--project", "project-a", "--key", bug_key],
             root,
         )
 
         assert result.returncode == 0, (
             f"close.sh on intake exited non-zero.\nstdout: {result.stdout}\nstderr: {result.stderr}"
         )
-        marker = _read_bug_backlog_marker(root, "project_a", bug_key)
+        marker = _read_bug_backlog_marker(root, "project-a", bug_key)
         assert marker == "x", (
             f"Expected bug backlog marker to be [x] after close, got: {marker!r}.\n"
-            f"bug_backlog.md:\n{(root / 'projects' / 'project_a' / 'tasks' / 'queues' / 'bug_backlog.md').read_text(encoding='utf-8')}"
+            f"bug_backlog.md:\n{(root / 'projects' / 'project-a' / 'tasks' / 'queues' / 'bug_backlog.md').read_text(encoding='utf-8')}"
         )
 
     def test_close_reports_key_not_found_for_missing_task(
@@ -910,7 +910,7 @@ class TestCloseCommand:
 
         result = _run_operator(
             _CLOSE_SCRIPT,
-            ["--project", "project_a", "--key", "CODER-99999999-NO-TASK"],
+            ["--project", "project-a", "--key", "CODER-99999999-NO-TASK"],
             root,
         )
 
@@ -926,14 +926,14 @@ class TestCloseCommand:
         remedy closes the item as wont-do; the bug file and its marker are
         untouched."""
         root = two_project_root
-        bug_file = _build_bug_file(root, "project_a", bug_id="BUG-0130", slug="close-superseded")
+        bug_file = _build_bug_file(root, "project-a", bug_id="BUG-0130", slug="close-superseded")
         bug_key = "BUG-0130-close-superseded"
         before = bug_file.read_text(encoding="utf-8")
-        marker_before = _read_bug_backlog_marker(root, "project_a", bug_key)
+        marker_before = _read_bug_backlog_marker(root, "project-a", bug_key)
 
         result = _run_operator(
             _CLOSE_SCRIPT,
-            ["--project", "project_a", "--key", bug_key, "--state", "superseded"],
+            ["--project", "project-a", "--key", bug_key, "--state", "superseded"],
             root,
         )
 
@@ -943,27 +943,27 @@ class TestCloseCommand:
         assert "error:   close.invalid_state" in lines, result.stderr
         assert any(line.startswith("message: ") for line in lines), result.stderr
         remedy = next(line for line in lines if line.startswith("remedy: "))
-        assert f"--project project_a --key {bug_key} --state wont-do --note" in remedy, remedy
+        assert f"--project project-a --key {bug_key} --state wont-do --note" in remedy, remedy
         assert bug_file.read_text(encoding="utf-8") == before
-        assert _read_bug_backlog_marker(root, "project_a", bug_key) == marker_before
+        assert _read_bug_backlog_marker(root, "project-a", bug_key) == marker_before
 
     def test_close_with_state_wont_do_still_closes_an_intake_item(
         self, two_project_root: pathlib.Path
     ) -> None:
         """wont-do, one of the two closed states, still closes a bug."""
         root = two_project_root
-        bug_file = _build_bug_file(root, "project_a", bug_id="BUG-0131", slug="close-wont-do")
+        bug_file = _build_bug_file(root, "project-a", bug_id="BUG-0131", slug="close-wont-do")
         bug_key = "BUG-0131-close-wont-do"
 
         result = _run_operator(
             _CLOSE_SCRIPT,
-            ["--project", "project_a", "--key", bug_key, "--state", "wont-do", "--note", "duplicate"],
+            ["--project", "project-a", "--key", bug_key, "--state", "wont-do", "--note", "duplicate"],
             root,
         )
 
         assert result.returncode == 0, f"stdout: {result.stdout}\nstderr: {result.stderr}"
         assert "## Status\nwont-do\n" in bug_file.read_text(encoding="utf-8")
-        assert _read_bug_backlog_marker(root, "project_a", bug_key) == "x"
+        assert _read_bug_backlog_marker(root, "project-a", bug_key) == "x"
 
     def test_close_help_offers_only_the_closed_states(self, two_project_root: pathlib.Path) -> None:
         """close.sh --help lists done and wont-do and never offers superseded."""
@@ -1008,11 +1008,11 @@ class TestWontdoCommand:
         """
         root = two_project_root
         task_id = "CODER-20260628-T030-mark-wontdo"
-        task_dir = _build_task_folder(root, "project_a", task_id, state="BACKLOG")
+        task_dir = _build_task_folder(root, "project-a", task_id, state="BACKLOG")
 
         result = _run_operator(
             _WONTDO_SCRIPT,
-            ["--project", "project_a", "--key", task_id],
+            ["--project", "project-a", "--key", task_id],
             root,
         )
 
@@ -1035,21 +1035,21 @@ class TestWontdoCommand:
         """
         root = two_project_root
         task_id = "CODER-20260628-T031-wontdo-marker-sync"
-        _build_task_folder(root, "project_a", task_id, state="BACKLOG")
+        _build_task_folder(root, "project-a", task_id, state="BACKLOG")
 
         result = _run_operator(
             _WONTDO_SCRIPT,
-            ["--project", "project_a", "--key", task_id],
+            ["--project", "project-a", "--key", task_id],
             root,
         )
 
         assert result.returncode == 0, (
             f"wontdo.sh exited non-zero.\nstdout: {result.stdout}\nstderr: {result.stderr}"
         )
-        marker = _read_backlog_marker(root, "project_a", task_id)
+        marker = _read_backlog_marker(root, "project-a", task_id)
         assert marker == "x", (
             f"Expected backlog marker [x] after wontdo; got: {marker!r}.\n"
-            f"coder_backlog.md:\n{(root / 'projects' / 'project_a' / 'tasks' / 'queues' / 'coder_backlog.md').read_text(encoding='utf-8')}"
+            f"coder_backlog.md:\n{(root / 'projects' / 'project-a' / 'tasks' / 'queues' / 'coder_backlog.md').read_text(encoding='utf-8')}"
         )
 
     def test_wontdo_stdout_confirms_operation(
@@ -1062,11 +1062,11 @@ class TestWontdoCommand:
         """
         root = two_project_root
         task_id = "CODER-20260628-T032-wontdo-stdout-confirm"
-        _build_task_folder(root, "project_a", task_id)
+        _build_task_folder(root, "project-a", task_id)
 
         result = _run_operator(
             _WONTDO_SCRIPT,
-            ["--project", "project_a", "--key", task_id],
+            ["--project", "project-a", "--key", task_id],
             root,
         )
 
@@ -1094,12 +1094,12 @@ class TestDeleteCommand:
         """
         root = two_project_root
         task_id = "CODER-20260628-T040-delete-done-task"
-        task_dir = _build_task_folder(root, "project_a", task_id, state="DONE")
+        task_dir = _build_task_folder(root, "project-a", task_id, state="DONE")
         assert task_dir.exists(), "Pre-condition: task directory must exist before delete."
 
         result = _run_operator(
             _DELETE_SCRIPT,
-            ["--project", "project_a", "--key", task_id],
+            ["--project", "project-a", "--key", task_id],
             root,
         )
 
@@ -1122,11 +1122,11 @@ class TestDeleteCommand:
         """
         root = two_project_root
         task_id = "CODER-20260628-T041-delete-guard-backlog"
-        task_dir = _build_task_folder(root, "project_a", task_id, state="BACKLOG")
+        task_dir = _build_task_folder(root, "project-a", task_id, state="BACKLOG")
 
         result = _run_operator(
             _DELETE_SCRIPT,
-            ["--project", "project_a", "--key", task_id],
+            ["--project", "project-a", "--key", task_id],
             root,
         )
 
@@ -1149,11 +1149,11 @@ class TestDeleteCommand:
         """
         root = two_project_root
         task_id = "CODER-20260628-T042-delete-force-backlog"
-        task_dir = _build_task_folder(root, "project_a", task_id, state="BACKLOG")
+        task_dir = _build_task_folder(root, "project-a", task_id, state="BACKLOG")
 
         result = _run_operator(
             _DELETE_SCRIPT,
-            ["--project", "project_a", "--key", task_id, "--force"],
+            ["--project", "project-a", "--key", task_id, "--force"],
             root,
         )
 
@@ -1174,11 +1174,11 @@ class TestDeleteCommand:
         """
         root = two_project_root
         task_id = "CODER-20260628-T043-delete-dry-run"
-        task_dir = _build_task_folder(root, "project_a", task_id, state="DONE")
+        task_dir = _build_task_folder(root, "project-a", task_id, state="DONE")
 
         result = _run_operator(
             _DELETE_SCRIPT,
-            ["--project", "project_a", "--key", task_id, "--dry-run"],
+            ["--project", "project-a", "--key", task_id, "--dry-run"],
             root,
         )
 
@@ -1210,12 +1210,12 @@ class TestHaltCommand:
         that the discovery pipeline checks before running any step.
         """
         root = two_project_root
-        halt_file = root / "projects" / "project_a" / "HALT"
+        halt_file = root / "projects" / "project-a" / "HALT"
         assert not halt_file.exists(), "Pre-condition: HALT file must not exist."
 
         result = _run_operator(
             _HALT_SCRIPT,
-            ["--project", "project_a"],
+            ["--project", "project-a"],
             root,
         )
 
@@ -1239,19 +1239,19 @@ class TestHaltCommand:
         root = two_project_root
 
         # First halt.
-        _run_operator(_HALT_SCRIPT, ["--project", "project_a"], root)
+        _run_operator(_HALT_SCRIPT, ["--project", "project-a"], root)
 
         # Second halt — must succeed without error.
         result = _run_operator(
             _HALT_SCRIPT,
-            ["--project", "project_a"],
+            ["--project", "project-a"],
             root,
         )
 
         assert result.returncode == 0, (
             f"Second halt.sh invocation exited non-zero.\nstdout: {result.stdout}\nstderr: {result.stderr}"
         )
-        assert (root / "projects" / "project_a" / "HALT").exists(), (
+        assert (root / "projects" / "project-a" / "HALT").exists(), (
             "HALT file must still exist after a second halt invocation."
         )
 
@@ -1260,23 +1260,23 @@ class TestHaltCommand:
     ) -> None:
         """halt.sh creates HALT only in the specified project's directory.
 
-        Per-project HALT must be scoped: halting project_a must not create a
-        HALT file in project_b's directory or at the kanban root.
+        Per-project HALT must be scoped: halting project-a must not create a
+        HALT file in project-b's directory or at the kanban root.
         """
         root = two_project_root
 
         result = _run_operator(
             _HALT_SCRIPT,
-            ["--project", "project_a"],
+            ["--project", "project-a"],
             root,
         )
 
         assert result.returncode == 0
-        assert (root / "projects" / "project_a" / "HALT").exists(), (
-            "HALT file must be created in project_a."
+        assert (root / "projects" / "project-a" / "HALT").exists(), (
+            "HALT file must be created in project-a."
         )
-        assert not (root / "projects" / "project_b" / "HALT").exists(), (
-            "HALT must not be created in project_b when only project_a is halted."
+        assert not (root / "projects" / "project-b" / "HALT").exists(), (
+            "HALT must not be created in project-b when only project-a is halted."
         )
         assert not (root / "HALT").exists(), (
             "Per-project halt must not create a global HALT at the kanban root."
@@ -1362,11 +1362,11 @@ class TestHaltGlobalCommand:
 
         assert result.returncode == 0
         assert (root / "HALT").exists(), "Global HALT must be created at root."
-        assert not (root / "projects" / "project_a" / "HALT").exists(), (
-            "halt-global must not create a per-project HALT in project_a."
+        assert not (root / "projects" / "project-a" / "HALT").exists(), (
+            "halt-global must not create a per-project HALT in project-a."
         )
-        assert not (root / "projects" / "project_b" / "HALT").exists(), (
-            "halt-global must not create a per-project HALT in project_b."
+        assert not (root / "projects" / "project-b" / "HALT").exists(), (
+            "halt-global must not create a per-project HALT in project-b."
         )
 
 
@@ -1396,21 +1396,21 @@ class TestIntakeCommand:
             encoding="utf-8",
         )
 
-        (root / "projects" / "project_a" / "bugs").mkdir(parents=True, exist_ok=True)
+        (root / "projects" / "project-a" / "bugs").mkdir(parents=True, exist_ok=True)
 
         result = _run_operator(
             _INTAKE_SCRIPT,
-            ["--project", "project_a", str(staged_file)],
+            ["--project", "project-a", str(staged_file)],
             root,
         )
 
         assert result.returncode == 0, (
             f"intake.sh exited non-zero.\nstdout: {result.stdout}\nstderr: {result.stderr}"
         )
-        deposited = root / "projects" / "project_a" / "bugs" / "BUG-0200-intake-routing-test.md"
+        deposited = root / "projects" / "project-a" / "bugs" / "BUG-0200-intake-routing-test.md"
         assert deposited.exists(), (
             f"Expected deposited file at {deposited}.\n"
-            f"bugs/ contents: {list((root / 'projects' / 'project_a' / 'bugs').iterdir())}\n"
+            f"bugs/ contents: {list((root / 'projects' / 'project-a' / 'bugs').iterdir())}\n"
             f"stdout: {result.stdout}"
         )
 
@@ -1431,18 +1431,18 @@ class TestIntakeCommand:
             encoding="utf-8",
         )
 
-        (root / "projects" / "project_a" / "priority").mkdir(parents=True, exist_ok=True)
+        (root / "projects" / "project-a" / "priority").mkdir(parents=True, exist_ok=True)
 
         result = _run_operator(
             _INTAKE_SCRIPT,
-            ["--project", "project_a", str(staged_file)],
+            ["--project", "project-a", str(staged_file)],
             root,
         )
 
         assert result.returncode == 0, (
             f"intake.sh for priority file exited non-zero.\nstdout: {result.stdout}\nstderr: {result.stderr}"
         )
-        deposited = root / "projects" / "project_a" / "priority" / "PRIORITY-0010-intake-priority-test.md"
+        deposited = root / "projects" / "project-a" / "priority" / "PRIORITY-0010-intake-priority-test.md"
         assert deposited.exists(), (
             f"Expected deposited file at {deposited}.\n"
             f"stdout: {result.stdout}"
@@ -1466,7 +1466,7 @@ class TestIntakeCommand:
 
         result = _run_operator(
             _INTAKE_SCRIPT,
-            ["--project", "project_a", str(staged_file)],
+            ["--project", "project-a", str(staged_file)],
             root,
         )
 
@@ -1484,7 +1484,7 @@ class TestIntakeCommand:
         be refused (exit 3).  The existing file must remain unchanged.
         """
         root = two_project_root
-        priority_dir = root / "projects" / "project_a" / "priority"
+        priority_dir = root / "projects" / "project-a" / "priority"
         priority_dir.mkdir(parents=True, exist_ok=True)
 
         # Pre-create the target file.
@@ -1502,7 +1502,7 @@ class TestIntakeCommand:
 
         result = _run_operator(
             _INTAKE_SCRIPT,
-            ["--project", "project_a", str(staged_file)],
+            ["--project", "project-a", str(staged_file)],
             root,
         )
 
@@ -1530,7 +1530,7 @@ class TestIntakeCommand:
         must be what survives, and no deposit temp file may remain.
         """
         root = two_project_root
-        priority_dir = root / "projects" / "project_a" / "priority"
+        priority_dir = root / "projects" / "project-a" / "priority"
         priority_dir.mkdir(parents=True, exist_ok=True)
         basename = "PRIORITY-0203-same-basename.md"
 
@@ -1581,7 +1581,7 @@ class TestIntakeCommand:
         env_a["PYTHONPATH"] = str(shim_dir) + os.pathsep + env_a["PYTHONPATH"]
 
         proc_a = subprocess.Popen(
-            ["bash", str(_INTAKE_SCRIPT), "--project", "project_a", str(staged_a)],
+            ["bash", str(_INTAKE_SCRIPT), "--project", "project-a", str(staged_a)],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
@@ -1603,7 +1603,7 @@ class TestIntakeCommand:
             # A is past its pre-check and holding; B lands in that window.
             result_b = _run_operator(
                 _INTAKE_SCRIPT,
-                ["--project", "project_a", str(staged_b)],
+                ["--project", "project-a", str(staged_b)],
                 root,
             )
         finally:
@@ -1643,11 +1643,11 @@ class TestIntakeCommand:
             "# BUG-0202: intake-path-output\n\n## Status\nopen\n",
             encoding="utf-8",
         )
-        (root / "projects" / "project_a" / "bugs").mkdir(parents=True, exist_ok=True)
+        (root / "projects" / "project-a" / "bugs").mkdir(parents=True, exist_ok=True)
 
         result = _run_operator(
             _INTAKE_SCRIPT,
-            ["--project", "project_a", str(staged_file)],
+            ["--project", "project-a", str(staged_file)],
             root,
         )
 
@@ -1688,14 +1688,14 @@ class TestCloseShForeignCwd:
         """
         root = two_project_root
         task_id = "CODER-20260628-T060-close-foreign-cwd"
-        task_dir = _build_task_folder(root, "project_a", task_id, state="BACKLOG")
+        task_dir = _build_task_folder(root, "project-a", task_id, state="BACKLOG")
 
         foreign_cwd = tmp_path / "foreign_cwd"
         foreign_cwd.mkdir(parents=True, exist_ok=True)
 
         result = _run_operator_scrubbed_foreign_cwd(
             _CLOSE_SCRIPT,
-            ["--project", "project_a", "--key", task_id],
+            ["--project", "project-a", "--key", task_id],
             root,
             foreign_cwd,
         )
@@ -1723,7 +1723,7 @@ class TestCloseShForeignCwd:
         """
         root = two_project_root
         bug_file = _build_bug_file(
-            root, "project_a", bug_id="BUG-0130", slug="close-foreign-cwd-intake"
+            root, "project-a", bug_id="BUG-0130", slug="close-foreign-cwd-intake"
         )
         bug_key = "BUG-0130-close-foreign-cwd-intake"
 
@@ -1732,7 +1732,7 @@ class TestCloseShForeignCwd:
 
         result = _run_operator_scrubbed_foreign_cwd(
             _CLOSE_SCRIPT,
-            ["--project", "project_a", "--key", bug_key, "--state", "done"],
+            ["--project", "project-a", "--key", bug_key, "--state", "done"],
             root,
             foreign_cwd,
         )
@@ -1956,14 +1956,14 @@ class TestScrubbedEnvCensusCloser:
         provide PYTHONPATH at all).
         """
         root = two_project_root
-        task_dir = _build_task_folder(root, "project_a", task_id, state="BACKLOG")
+        task_dir = _build_task_folder(root, "project-a", task_id, state="BACKLOG")
 
         foreign_cwd = tmp_path / foreign_cwd_name
         foreign_cwd.mkdir(parents=True, exist_ok=True)
 
         result = _run_operator_scrubbed_foreign_cwd(
             _CLOSE_SCRIPT,
-            ["--project", "project_a", "--key", task_id],
+            ["--project", "project-a", "--key", task_id],
             root,
             foreign_cwd,
         )

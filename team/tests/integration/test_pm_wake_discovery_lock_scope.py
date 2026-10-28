@@ -13,22 +13,21 @@ real CLI is reached):
      nothing is written or dispatched. The log carries the chain-busy idle
      exit before any scan line -- no "active ceilings" line and no Step 1/2
      narration -- and nothing is bundled, though an open bug is waiting.
-  2. In that same fixture, the repo lock is not held by the PM wake while
-     discovery runs: a separate process's non-blocking acquire succeeds
-     from inside discovery's chain-busy check.
-  3. Idle chain with an open bug: discovery bundles it, every discovery
-     write happens while the wake holds the repo lock again, the scan
-     before it ran without the lock, and the post-discovery dispatch runs
-     under the lock.
+  2. In that same fixture, the PM wake keeps its chain's repo lock while
+     discovery runs: a separate process's non-blocking acquire is
+     contended from inside discovery's chain-busy check.
+  3. Idle chain with an open bug: discovery bundles it, the scan and every
+     discovery write happen while the wake holds its chain lock, and the
+     post-discovery dispatch runs under that same hold.
 
 How the lock is observed. The fixture appends a probe block to the copied
 scripts/lib/wake_driver.sh (by its end every function the probe wraps is
 defined), wrapping -- in the fixture copy only -- discovery_run_pipeline
 itself, discovery's chain-busy check, its three scan steps, its
-write-phase gate and the two functions that take the repo lock for it,
+write-phase gate and the two functions that confirm or take the repo lock for it,
 its three writers, and process_one_task. Each wrapper appends one line to a
 record file, in call order: the function's name (prefixed "lock_path" for
-the gate and the two lock takers) and whether the wake's own
+the gate and those two functions) and whether the wake's own
 pid is the holder named in the repo lock's provenance at that moment, and,
 inside the chain-busy check, whether a separate process can take the lock
 with a non-blocking pgai_lock_acquire right then. discovery_run_pipeline's
@@ -126,12 +125,12 @@ for _fx_fn in discovery_step_bugs discovery_step_priority discovery_step_require
     _fx_wrap "$_fx_fn" "$_fx_fn"
 done
 # Discovery reaches the repo lock only through its write-phase gate, which
-# takes it with the PM wake's hook or with discovery's own taker; those
-# are recorded as "lock_path <function>". pgai_lock_acquire itself is not
+# confirms the PM wake's hold through its hook or takes the lock with
+# discovery's own taker; those are recorded as "lock_path <function>". pgai_lock_acquire itself is not
 # wrapped: its declare -f copy is not faithful (bash re-emits its
 # `1>&"$_fd"` provenance write as `&> "$_fd"`, a file named by the fd
 # number), so the copy would take the lock without recording provenance.
-for _fx_fn in _disc_enter_write_phase wd_discovery_take_repo_lock _disc_take_own_write_lock; do
+for _fx_fn in _disc_enter_write_phase wd_discovery_confirm_repo_lock _disc_take_own_write_lock; do
     _fx_wrap "$_fx_fn" "lock_path ${_fx_fn}"
 done
 unset _fx_fn
@@ -270,7 +269,7 @@ def _bundles(root: pathlib.Path) -> list[pathlib.Path]:
     return sorted((root / "projects" / _PROJECT / "requirements").glob("*-bundle-*.md"))
 
 
-def test_busy_chain_pm_wake_exits_fast_logs_busy_exit_first_and_never_holds_the_lock(tmp_path):
+def test_busy_chain_pm_wake_exits_fast_logs_busy_exit_first_and_keeps_the_chain_lock(tmp_path):
     """"Fast" is proved by the work done, not by a stopwatch: once discovery
     is entered, the chain-busy check is the only thing that runs before it
     returns idle -- no scan step, no lock acquisition, no write, no
@@ -293,9 +292,9 @@ def test_busy_chain_pm_wake_exits_fast_logs_busy_exit_first_and_never_holds_the_
     assert _bundles(root) == [], "a busy chain must not be bundled into"
 
     checks = [line for line in record if line.startswith("chain_check")]
-    assert checks == ["chain_check wake=FREE probe=ACQUIRED"], (
-        "discovery must run without the PM wake holding the repo lock, so a "
-        f"concurrent non-blocking acquire succeeds; record: {record}"
+    assert checks == ["chain_check wake=HELD probe=CONTENDED"], (
+        "discovery must run under the PM wake's chain lock, so a concurrent "
+        f"non-blocking acquire is contended; record: {record}"
     )
     assert not any(line.startswith("_disc_") for line in record), record
 
@@ -303,7 +302,7 @@ def test_busy_chain_pm_wake_exits_fast_logs_busy_exit_first_and_never_holds_the_
     from_discovery = record[record.index("discovery_enter"):]
     assert from_discovery == [
         "discovery_enter",
-        "chain_check wake=FREE probe=ACQUIRED",
+        "chain_check wake=HELD probe=CONTENDED",
         "discovery_return status=idle",
     ], (
         "a busy chain must leave discovery straight after the chain-busy check "
@@ -328,12 +327,15 @@ def test_idle_chain_pm_wake_bundles_under_the_lock_and_dispatches_under_it(tmp_p
     assert "## Status\nrunning" in bug_text
 
     checks = [line for line in record if line.startswith("chain_check")]
-    assert checks[0] == "chain_check wake=FREE probe=ACQUIRED", (
-        f"the unlocked scan must start without the lock; record: {record}"
+    assert checks == ["chain_check wake=HELD probe=CONTENDED"] * 2, (
+        "the scan's chain check and the write phase's re-check must both run "
+        f"under the PM wake's chain lock; record: {record}"
     )
-    assert checks[1:] == ["chain_check wake=HELD probe=CONTENDED"], (
-        f"the write phase must re-check the chain under the lock; record: {record}"
+    assert "lock_path wd_discovery_confirm_repo_lock wake=HELD" in record, record
+    assert not any(line.startswith("lock_path _disc_take_own_write_lock") for line in record), (
+        f"the PM wake's discovery must not take a lock of its own; record: {record}"
     )
+    assert "repo lock kept through discovery" in output, output
 
     writes = [line for line in record if line.startswith("_disc_")]
     assert {line.split()[0] for line in writes} == {
@@ -346,4 +348,4 @@ def test_idle_chain_pm_wake_bundles_under_the_lock_and_dispatches_under_it(tmp_p
     assert dispatches[-1] == "process_one_task wake=HELD", record
     assert "post-discovery iteration: chain idle and discovery produced work, processing" in output
     lock_file = root / "locks" / f"repo-wake-{_PROJECT}.lock"
-    assert not lock_file.exists(), "the end-of-chain release must drop the re-taken lock"
+    assert not lock_file.exists(), "the end-of-chain release must drop the chain lock"

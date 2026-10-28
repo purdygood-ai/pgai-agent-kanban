@@ -20,12 +20,18 @@
 # Public entry points
 # --------------------
 #   discovery_step_bugs <project_name>
-#       Step 1 of the pipeline. Scans bugs/ for unhandled BUG-*.md files and
+#       Step 1 of the pipeline. First closes re-filed duplicates (live bugs
+#       that are one defect) down to one record each
+#       (_disc_close_refile_duplicates) and parks carried bugs on an
+#       operator question (_disc_convert_carried_items), each inside the
+#       write phase. Then scans bugs/ for unhandled BUG-*.md files and
 #       bundles all of them EXCEPT the ones the deferral gate
 #       (discovery_defer.sh's _disc_bug_deferral_filter) holds back at or
-#       below the resolved deferral level -- unless the hygiene sweep
-#       condition fires (bug queue and requirements queue both empty), in
-#       which case the held-back litter is what gets bundled. Mint governor:
+#       below the resolved deferral level -- unless a deferral bound is
+#       exceeded ([release] deferred_max_count / deferred_max_age_days) or
+#       the hygiene sweep condition fires (bug queue and requirements queue
+#       both empty), in which case the held-back litter is what gets
+#       bundled. Mint governor:
 #       declines (returns 1, narrating the holder's path) when a bug-type
 #       bundle already pending in requirements/ (## Status not yet a
 #       terminal value -- done or wont-do -- and neither superseded by an
@@ -36,7 +42,8 @@
 #       bundle or the mint governor declined (caller proceeds to Step 2).
 #       Called directly by discovery_run_pipeline in discovery.sh.
 #   discovery_step_priority <project_name>
-#       Step 2 of the pipeline. Same shape as Step 1 but for priority/ items,
+#       Step 2 of the pipeline. Same shape as Step 1 but for priority/ items
+#       (carried items are parked the same way; no re-file close),
 #       with an additional max_priorities_per_run cap, numeric-ascending
 #       sort, and its own instance of the same mint governor (guarding
 #       priority-type bundles instead of bug-type ones). Only reached when
@@ -64,7 +71,7 @@
 #   team/scripts/lib/discovery_guards.sh — _disc_active_rc_blocks,
 #     _disc_check_ceiling_and_log, _disc_git_tag_exists.
 #   team/scripts/lib/discovery_items.sh — _disc_check_bug_id_collisions,
-#     _disc_find_unhandled_items.
+#     _disc_convert_carried_items, _disc_find_unhandled_items.
 #   team/scripts/lib/discovery_defer.sh — _disc_bug_deferral_filter (the
 #     bug-step deferral gate discovery_step_bugs applies before bundling).
 #   team/scripts/lib/discovery_state.sh — _disc_write_bundle,
@@ -73,8 +80,9 @@
 #     WF_LOAD_ERROR.
 #   team/scripts/lib/discovery.sh itself — the log() shim, TEAM_ROOT for
 #     locating pm-agent.sh, and _disc_enter_write_phase (each step takes the
-#     repo lock through it once it has found something to bundle, before
-#     the mint governor and the write; the scan before it runs unlocked).
+#     repo lock through it once it has found something to write -- a
+#     re-filed duplicate to close, a carried item to park, or a bundle to
+#     mint, the last before the mint governor; the scans run unlocked).
 #   team/scripts/lib/error_contract.sh — self-sourced below (mirrors
 #     lib/discovery_guards.sh's own self-sourcing idiom) so
 #     pgai_emit_error_contract is available whether this file is sourced
@@ -82,7 +90,8 @@
 #     tests do.
 #   team/scripts/lib/pp_run_ops.sh — self-sourced below when the caller
 #     has not defined pp_run_ops; _disc_pending_bundle_of_type reads the
-#     bundling slot through pgai_agent_kanban.lib.bundle_items pending.
+#     bundling slot through pgai_agent_kanban.lib.bundle_items pending, and
+#     _disc_close_refile_duplicates runs pgai_agent_kanban.discovery.refile_loop.
 #
 # python3 must be on PATH via the sourced helpers above (no direct heredocs
 # in this file).
@@ -285,7 +294,8 @@ _disc_pending_bundle_of_type() {
 #   3. the project's release tag for vX.Y.Z exists (pp_prefix_tag: the
 #      branch_prefix in front, e.g. ai_vX.Y.Z; bare vX.Y.Z with no prefix) --
 #      exact match in the project's own dev tree (_disc_git_tag_exists: local
-#      tags, then origin unless PGAI_GIT_LOCAL_ONLY is set)
+#      tags, then the project's git_remote_name unless PGAI_GIT_LOCAL_ONLY
+#      is set)
 #
 # Fresh-system semantics: if Last Released = v0.0.0 (or unset), starts at v0.0.1.
 #
@@ -372,7 +382,7 @@ discovery_compute_next_patch() {
         # tag is the project's release tag name (branch_prefix + version),
         # the same name release tags with, so a hybrid repo's bare tags from
         # another lane never take this lane's slot.
-        if _disc_git_tag_exists "${_tag_prefix}${candidate}" "$_dev_tree"; then
+        if _disc_git_tag_exists "${_tag_prefix}${candidate}" "$_dev_tree" "$project_name"; then
             continue
         fi
 
@@ -380,6 +390,30 @@ discovery_compute_next_patch() {
         echo "$candidate"
         return 0
     done
+}
+
+# ---------------------------------------------------------------------------
+# _disc_close_refile_duplicates <project_name> <bugs_dir>
+#
+# Closes every live bug that is the same defect as another live bug as
+# 'duplicate', with a pointer to the kept record (lowest-numbered, or the
+# lowest-numbered 'running' one; a running bug is never closed) -- see
+# the --help of pgai_agent_kanban.discovery.refile_loop. Reads first; only
+# when there is something to close does it enter the write phase, and a
+# deferred write phase leaves the duplicates for the next pass. Each closure
+# narrates one stderr line naming the closed and kept IDs. Always returns 0.
+# ---------------------------------------------------------------------------
+_disc_close_refile_duplicates() {
+    local project_name="$1" bugs_dir="$2" planned
+    planned="$(pp_run_ops pgai_agent_kanban.discovery.refile_loop list "$bugs_dir")" || planned=""
+    [[ -n "$planned" ]] || return 0
+    if ! _disc_enter_write_phase "$project_name" "discovery_step_bugs"; then
+        log "discovery_step_bugs: re-filed duplicate bugs left live until the next pass"
+        return 0
+    fi
+    pp_run_ops pgai_agent_kanban.discovery.refile_loop close "$bugs_dir" >&2 \
+        || log "discovery_step_bugs: WARNING: the re-file duplicate close exited non-zero; the next pass retries"
+    return 0
 }
 
 # ---------------------------------------------------------------------------
@@ -409,6 +443,12 @@ discovery_step_bugs() {
     # consistently, but this guard detects out-of-band creations.
     _disc_check_bug_id_collisions "$bugs_dir"
 
+    # Re-file loop detector: collapse live same-defect bugs to one record
+    # before the scan, so a closed duplicate is never bundled. Never a gate.
+    _disc_close_refile_duplicates "$project_name" "$bugs_dir"
+    # Carried bugs: parked on an operator question, never bundled again.
+    _disc_convert_carried_items "$project_name" "$bugs_dir" "discovery_step_bugs"
+
     # Quarantine state dir: tracks per-file rejection counts across cron firings.
     local state_dir
     state_dir="$(pp_project_root "$project_name")/.discovery-state"
@@ -434,9 +474,10 @@ discovery_step_bugs() {
     # Deferral gate: hold back every bug at or below the resolved deferral
     # level so it never triggers a bundle -- the founding rule that a
     # deferred bug never opens an RC. See discovery_defer.sh for the
-    # severity-vs-posture decision and the hygiene-sweep condition that
-    # eventually bundles the held-back litter once the bug queue and the
-    # requirements queue are both empty.
+    # severity-vs-posture decision, the deferral bounds that bundle the
+    # held-back litter once it has waited too long or grown too large, and
+    # the hygiene-sweep condition that bundles it once the bug queue and
+    # the requirements queue are both empty.
     unhandled_files="$(_disc_bug_deferral_filter "$project_name" "$unhandled_files")" || return 1
     if [[ -z "$unhandled_files" ]]; then
         return 1
@@ -606,6 +647,8 @@ discovery_step_priority() {
     local state_dir
     state_dir="$(pp_project_root "$project_name")/.discovery-state"
 
+    # Carried priority items: same conversion as discovery_step_bugs.
+    _disc_convert_carried_items "$project_name" "$priority_dir" "discovery_step_priority"
     local unhandled_files
     unhandled_files="$(_disc_find_unhandled_items "$priority_dir" "$priority_backlog" "PRIORITY-" "$state_dir" "$project_name")"
 

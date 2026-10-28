@@ -46,10 +46,22 @@ Python scope:
   scripts/*.py              Python CLI entry points
   pgai_agent_kanban/**/*.py package modules (excluding env.py and tests)
 
+FINDINGS
+--------
+CONVERT (quality class, team/SOP-core.md "Gates and Refusals"): a script
+that reads the kanban root without the canonical resolver is a contract
+gap, not a failure of the run that finds it.  Each violation is printed
+and recorded as one finding (``kind`` is ``bash-missing-prelude``,
+``bash-prelude-order`` or ``python-direct-env-read``); with
+--findings-file the findings are written as a JSON array (the shape
+pgai_agent_kanban.lint.findings defines), which the gated runners merge
+per instance with gated_runner_merge_findings_file.  The pre-merge
+engine's env-bootstrap guard (pgai_agent_kanban.testing.pre_merge) reads
+the same findings file and fails on any entry.
+
 EXIT CODES
 ----------
-  0   All checks pass (lint is green for both sides).
-  1   One or more violations found; see stdout for details.
+  0   Scan ran, whatever it found (violations are findings, not failures).
   2   Usage error or the specified directory was not found.
 
 USAGE
@@ -61,6 +73,9 @@ USAGE
                           script lives at team/scripts/).
   --bash-only             Run only the bash-side check.
   --python-only           Run only the Python-side check.
+  --findings-file PATH    Write the findings as a JSON array to PATH
+                          (parent directories created; written even when
+                          empty).
   --verbose, -v           Print each file as it is checked.
 
 EXAMPLES
@@ -76,6 +91,10 @@ EXAMPLES
 
   # Python side only:
   python3 team/scripts/lint_env_bootstrap.py --python-only
+
+  # Record findings for a downstream merge:
+  python3 team/scripts/lint_env_bootstrap.py \\
+      --findings-file "${PGAI_AGENT_KANBAN_TEMP_DIR}/lint/env_bootstrap.json"
 """
 
 from __future__ import annotations
@@ -85,7 +104,27 @@ import os
 import re
 import sys
 from pathlib import Path
-from typing import NamedTuple
+from typing import NamedTuple, Optional
+
+# The finding shape and the error-contract emitter live in the team package
+# beside scripts/; this script is run directly as well as imported, so the
+# package root is put on sys.path from this file's own location.
+_TEAM_DIR = Path(__file__).resolve().parent.parent  # team/
+if str(_TEAM_DIR) not in sys.path:
+    sys.path.insert(0, str(_TEAM_DIR))
+from pgai_agent_kanban.lib.error_contract import emit_error_contract  # noqa: E402
+from pgai_agent_kanban.lint.findings import (  # noqa: E402
+    display_path,
+    quality_finding,
+    write_findings_file,
+)
+
+_LINT_NAME = "env_bootstrap"
+
+# Violation kinds, carried on each finding as its ``kind`` key.
+_KIND_BASH_MISSING_PRELUDE = "bash-missing-prelude"
+_KIND_BASH_PRELUDE_ORDER = "bash-prelude-order"
+_KIND_PYTHON_DIRECT_READ = "python-direct-env-read"
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -136,10 +175,20 @@ _PY_DIRECT_ENV_READ_RE = re.compile(
 
 
 class Violation(NamedTuple):
-    """A single lint violation."""
+    """A single lint violation.
+
+    ``line`` is the 1-indexed line the violation points at (the direct read,
+    or the first use a late prelude follows), ``None`` when it names the
+    whole file; ``kind`` is one of the ``_KIND_*`` values above, and
+    ``prelude_line`` the late prelude's line for a ``bash-prelude-order``
+    violation.
+    """
 
     path: Path
     message: str
+    line: Optional[int] = None
+    kind: str = ""
+    prelude_line: Optional[int] = None
 
 
 # ---------------------------------------------------------------------------
@@ -393,6 +442,7 @@ def check_bash_side(
                             f"references {_ROOT_VAR} but does not source an approved prelude "
                             f"(env_bootstrap.sh or wake_common.sh)"
                         ),
+                        kind=_KIND_BASH_MISSING_PRELUDE,
                     )
                 )
                 continue
@@ -413,6 +463,9 @@ def check_bash_side(
                             f"the source must appear before the first usage so "
                             f"the script bootstraps correctly from a fresh shell"
                         ),
+                        line=use_line,
+                        kind=_KIND_BASH_PRELUDE_ORDER,
+                        prelude_line=src_line,
                     )
                 )
 
@@ -579,6 +632,8 @@ def check_python_side(
                             f"import resolve_kanban_root from pgai_agent_kanban.env instead: "
                             f"{line_content!r}"
                         ),
+                        line=lineno,
+                        kind=_KIND_PYTHON_DIRECT_READ,
                     )
                 )
 
@@ -593,7 +648,48 @@ def check_python_side(
 def _report_violations(violations: list[Violation], side: str) -> None:
     """Print violation messages to stdout, one per line."""
     for v in violations:
-        print(f"[{side}] FAIL {v.path}: {v.message}")
+        print(f"[{side}] {v.path}: {v.message}")
+
+
+def _remedy(v: Violation, *, scripts_dir: Path, relint: str) -> str:
+    """A runnable remedy for one violation, ending with the re-check.
+
+    A bash script with no prelude gets the ``sed`` that inserts the
+    canonical ``source`` line, with the prelude path relative to the
+    script's own directory, after its first line (the shebang). A late
+    prelude or a direct Python read needs an edit no command can make
+    safely, so the remedy names the exact file and lines, then re-checks.
+    """
+    if v.kind == _KIND_BASH_MISSING_PRELUDE:
+        prelude = os.path.relpath(scripts_dir / "lib" / "env_bootstrap.sh", v.path.parent)
+        source_line = f'source "$(dirname "${{BASH_SOURCE[0]}}")/{prelude}"'
+        return f"sed -i '1a {source_line}' \"{v.path}\" && {relint}"
+    if v.kind == _KIND_BASH_PRELUDE_ORDER:
+        return (
+            f"in {v.path}, move the prelude source on line {v.prelude_line} above line "
+            f"{v.line} (the first use of {_ROOT_VAR}), then re-check: {relint}"
+        )
+    return (
+        f"in {v.path}, replace the os.environ read of {_ROOT_VAR} on line {v.line} with "
+        f"resolve_kanban_root() imported from pgai_agent_kanban.env, then re-check: {relint}"
+    )
+
+
+def _findings(violations: list[Violation], *, team_dir: Path, scripts_dir: Path) -> list[dict]:
+    """One quality finding per violation, each with its own runnable remedy."""
+    repo_root = team_dir.parent
+    relint = f'python3 "{Path(__file__).resolve()}" --team-dir "{team_dir}"'
+    return [
+        quality_finding(
+            _LINT_NAME,
+            f"{display_path(v.path, repo_root)}: {v.message}",
+            _remedy(v, scripts_dir=scripts_dir, relint=relint),
+            file=display_path(v.path, repo_root),
+            line=v.line,
+            kind=v.kind,
+        )
+        for v in violations
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -607,13 +703,14 @@ def _build_parser() -> argparse.ArgumentParser:
         description=(
             "Class-closer lint: assert the env-bootstrap contract on bash entry points "
             "(must source env_bootstrap.sh or wake_common.sh) and Python entry points "
-            "(must not read PGAI_AGENT_KANBAN_ROOT_PATH via os.environ directly)."
+            "(must not read PGAI_AGENT_KANBAN_ROOT_PATH via os.environ directly).  "
+            "Quality class: each violation is a finding, and the lint exits 0 "
+            "whatever it finds."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
             "Exit codes:\n"
-            "  0  All checks pass.\n"
-            "  1  One or more violations found.\n"
+            "  0  Scan ran, whatever it found (violations are findings).\n"
             "  2  Usage error or directory not found.\n"
         ),
     )
@@ -639,6 +736,15 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Run only the Python-side check.",
     )
     parser.add_argument(
+        "--findings-file",
+        metavar="PATH",
+        default=None,
+        help=(
+            "Write the findings as a JSON array to PATH (parent directories "
+            "created; written even when empty).  Findings are printed either way."
+        ),
+    )
+    parser.add_argument(
         "--verbose",
         "-v",
         action="store_true",
@@ -649,7 +755,12 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Run both-sides env-bootstrap lint and return an exit code."""
+    """Run the env-bootstrap lint over the selected sides.
+
+    Exit codes: 0 whatever was found (each violation is a quality finding,
+    printed and written to --findings-file); 2 usage error, or the team/ or
+    scripts/ directory not found.
+    """
     parser = _build_parser()
     args = parser.parse_args(argv)
 
@@ -690,24 +801,32 @@ def main(argv: list[str] | None = None) -> int:
         _report_violations(python_violations, side="python")
         all_violations.extend(python_violations)
 
-    if all_violations:
-        count = len(all_violations)
-        sides = []
-        if run_bash:
-            sides.append("bash")
-        if run_python:
-            sides.append("python")
-        print(
-            f"\nlint_env_bootstrap: {count} violation(s) found "
-            f"(sides checked: {', '.join(sides)})"
-        )
-        return 1
+    findings = _findings(all_violations, team_dir=team_dir, scripts_dir=scripts_dir)
+    write_findings_file(args.findings_file, findings, lint="lint_env_bootstrap")
 
     sides = []
     if run_bash:
         sides.append("bash")
     if run_python:
         sides.append("python")
+
+    if all_violations:
+        print(
+            f"\nlint_env_bootstrap: {len(all_violations)} violation(s) found "
+            f"(sides checked: {', '.join(sides)})"
+        )
+        # CENSUS-ANCHOR: env-bootstrap-01
+        # CONVERT: a kanban-root read outside the canonical resolver is a
+        # contract gap with zero runtime-failure risk to this run -- recorded
+        # as findings; returns 0.
+        emit_error_contract(
+            "lint.env-bootstrap",
+            f"{len(findings)} kanban-root access(es) under {team_dir} bypass the canonical "
+            "resolver (env_bootstrap.sh / resolve_kanban_root); each is listed above.",
+            findings[0]["remedy"],
+        )
+        return 0
+
     print(f"lint_env_bootstrap: OK (sides checked: {', '.join(sides)})")
     return 0
 

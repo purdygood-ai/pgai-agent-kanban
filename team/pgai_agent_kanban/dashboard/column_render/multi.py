@@ -7,7 +7,8 @@ each project keeps its share of the column whatever the others hold.  Each
 row is prefixed with a project tag — the status glyph in the project's
 ``display_color``, or ``[<first four letters>] `` without colour — and its
 text is coloured by the item's board status (``pgai_agent_kanban.board``,
-the classifier ``GET /board`` uses).
+the classifier ``GET /board`` uses) and followed by its status marker
+(``cells.status_marker``: carried, and needs-operator with colour off).
 
 Rows per project
 ----------------
@@ -60,6 +61,7 @@ from pgai_agent_kanban.board import (
     classify_intake_status,
     classify_requirement,
     get_target_version_for_item,
+    intake_carried_names,
     read_intake_status,
 )
 from pgai_agent_kanban.dashboard.column_render.cells import (
@@ -70,6 +72,7 @@ from pgai_agent_kanban.dashboard.column_render.cells import (
     display_status,
     middle_position_window,
     status_color,
+    status_marker,
     truncate_ansi,
 )
 from pgai_agent_kanban.dashboard.column_render.single import parse_max_rows, queue_items
@@ -231,6 +234,7 @@ def gather_project_entries(
         if source.input_dir == "none" or not pathlib.Path(source.input_dir).is_dir():
             return []
         is_req = column_type == "requirements"
+        carried = frozenset() if is_req else intake_carried_names(pathlib.Path(source.input_dir))
         entries = []
         for path in pathlib.Path(source.input_dir).iterdir():
             if not path.is_file() or not path.name.endswith(".md") or path.name.upper().startswith("README"):
@@ -243,7 +247,7 @@ def gather_project_entries(
                 )
             else:
                 raw_status = read_intake_status(path)
-                board_status = classify_intake_status(raw_status)
+                board_status = classify_intake_status(raw_status, path.name, carried)
             glyph = source.defer.suffix(cid, raw_status, use_color) if column_type == "bugs" else ""
             entries.append({
                 "proj_name": source.name,
@@ -300,8 +304,8 @@ def _project_tag_color(hex_color: str, palette: Palette) -> str:
 
 
 def _tagged_row(entry: dict, width: int, palette: Palette, status_glyph: str) -> str:
-    """Render one entry as "<tag><text><glyph>", fitting *width* visible characters."""
-    glyph = entry.get("defer_glyph", "")
+    """Render one entry as "<tag><text><marker><glyph>", fitting *width* visible characters."""
+    glyph = status_marker(entry["status"], palette.use_color) + entry.get("defer_glyph", "")
     if palette.use_color:
         tag = f"{_project_tag_color(entry['proj_color'], palette)}{status_glyph}{palette.reset} "
         tag_vis = len(status_glyph) + 1
@@ -310,8 +314,8 @@ def _tagged_row(entry: dict, width: int, palette: Palette, status_glyph: str) ->
         tag = f"[{entry['proj_name'][:4]}] "
         tag_vis = len(tag)
         text = entry["display_id"]
-    # The deferral glyph follows the ID, so every ID starts right after the
-    # tag whether or not its card carries a glyph.
+    # The status marker and deferral glyph follow the ID, so every ID starts
+    # right after the tag whether or not its card carries either.
     avail = max(1, width - tag_vis - len(glyph))
     return tag + truncate_ansi(text, avail, palette) + glyph
 

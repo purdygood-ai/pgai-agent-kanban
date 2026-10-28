@@ -199,7 +199,7 @@ if ! projects_cfg_has "${_fc_project}"; then
     pgai_emit_error_contract \
         "freshness_gate.unregistered_project" \
         "--project '${_fc_project}' is not registered in $(projects_cfg_path)." \
-        "Register the project first: team/scripts/add-project.sh --project ${_fc_project}; or correct --project to a name already listed in $(projects_cfg_path)."
+        "Register the project first: $(printf '%q' "${KANBAN_ROOT}/scripts/add-project.sh") --project $(printf '%q' "${_fc_project}"); or correct --project to a name already listed in $(projects_cfg_path)."
     # CENSUS-ANCHOR: deep-verify-freshness-check-01
     exit 1
 fi

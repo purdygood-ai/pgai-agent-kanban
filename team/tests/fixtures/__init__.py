@@ -10,7 +10,7 @@ installed_root  — Build a temp directory that mirrors the installed (not dev)
                   an earlier defect (tests run in dev tree where shim was present).
 
 two_project     — Build a temp kanban root containing two registered projects
-                  (project_a, project_b). Closes an earlier defect (single-project
+                  (project-a, project-b). Closes an earlier defect (single-project
                   fixtures only; cross-project isolation untested).
 
 log_stub        — Faithful stub of the production log() bash function that

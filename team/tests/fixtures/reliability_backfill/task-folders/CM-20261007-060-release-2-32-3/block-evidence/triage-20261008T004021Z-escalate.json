@@ -1,0 +1,41 @@
+{
+  "action": "escalate",
+  "backups": {
+    "queue": "/home/op/pgai_agent_kanban/projects/pgai-agent-kanban/overwatch/backups/2026-10-08T00:40:20Z/CM-20261007-060-release-2-32-3/cm_backlog.md",
+    "status.md": "/home/op/pgai_agent_kanban/projects/pgai-agent-kanban/overwatch/backups/2026-10-08T00:40:20Z/CM-20261007-060-release-2-32-3/status.md"
+  },
+  "block_epoch": "2026-10-08T00:38:49+00:00",
+  "block_record": {
+    "attempts": 0,
+    "cooldown_until": "none",
+    "evidence": "none",
+    "first_blocked_at": "2026-10-08T00:38:49+00:00",
+    "last_blocked_at": "2026-10-08T00:38:49+00:00",
+    "owner_role": "CM",
+    "reason_code": "agent_unclassified",
+    "resume": "fresh"
+  },
+  "decision": {
+    "action": "escalate",
+    "attempt": null,
+    "backoff": null,
+    "cooldown_s": 0,
+    "cooldown_until": null,
+    "detail": "agent_unclassified blocks always stay with a human",
+    "max_attempts": 0,
+    "not_before": null,
+    "params": {},
+    "reason_code": "agent_unclassified",
+    "verification": null,
+    "why": "block-classifier.always-human"
+  },
+  "detail": "the agent blocked its own task without naming a reason code; ## Blockers holds its explanation",
+  "epoch_restarted": false,
+  "needs_human_before": "yes",
+  "outcome": "escalate",
+  "reason_code": "agent_unclassified",
+  "recorded_at": "2026-10-08T00:40:21+00:00",
+  "task_id": "CM-20261007-060-release-2-32-3",
+  "triage_enabled": true,
+  "verification": null
+}

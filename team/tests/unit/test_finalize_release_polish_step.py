@@ -13,6 +13,10 @@ Behaviour under test:
      commit, which holds the polished notes.
   4. A tag that is not on main's tip, or one already published on the
      remote, is refused before anything is staged or committed.
+  5. The refusal's set-aside remedy writes its patch under the temp root
+     PGAI_AGENT_KANBAN_TEMP_DIR names (resolved through lib/temp.sh).
+  6. A copy of the script whose lib/ has no temp.sh refuses dual-channel,
+     naming the missing path, before touching the repository.
 
 Design: a throwaway kanban root and a local dev repository under tmp_path;
 the script runs with a scrubbed environment from an unrelated directory.
@@ -26,6 +30,7 @@ from __future__ import annotations
 
 import os
 import pathlib
+import shutil
 import signal
 import subprocess
 import sys
@@ -93,7 +98,8 @@ def _failing_writer_path(tmp_path: pathlib.Path) -> pathlib.Path:
     return stub
 
 
-def _finalize(tmp_path: pathlib.Path, root: pathlib.Path, extra_env: dict | None = None):
+def _finalize(tmp_path: pathlib.Path, root: pathlib.Path, extra_env: dict | None = None,
+              script: pathlib.Path = _FINALIZE):
     cwd = tmp_path / "elsewhere"
     cwd.mkdir(exist_ok=True)
     (tmp_path / "home").mkdir(exist_ok=True)
@@ -109,7 +115,7 @@ def _finalize(tmp_path: pathlib.Path, root: pathlib.Path, extra_env: dict | None
         extra_env=env_extra,
     )
     proc = subprocess.Popen(
-        ["bash", str(_FINALIZE), "--project", _PROJECT, "--yes", _VERSION],
+        ["bash", str(script), "--project", _PROJECT, "--yes", _VERSION],
         stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         text=True, env=env, cwd=str(cwd), start_new_session=True,
     )
@@ -204,3 +210,40 @@ def test_published_tag_is_refused(tmp_path: pathlib.Path) -> None:
     assert "cm-finalize-release.polish-would-strand-tag" in err, _diag(rc, out, err)
     assert "already published on origin" in err
     assert _refs(repo) == refs_before
+
+
+def test_set_aside_patch_lands_under_the_temp_root(tmp_path: pathlib.Path) -> None:
+    repo, root = _build(tmp_path)
+    (repo / "later.txt").write_text("later\n", encoding="utf-8")
+    _git(repo, "add", "later.txt")
+    _git(repo, "commit", "-m", "later work")
+    temp_root = root / "tmp"
+    patch = temp_root / f"{_PROJECT}-{pathlib.PurePosixPath(_NOTES).stem}-notes-polish.patch"
+
+    rc, out, err = _finalize(tmp_path, root)
+
+    assert rc != 0, _diag(rc, out, err)
+    set_aside = f"git -C '{repo}' diff -- '{_NOTES}' > '{patch}'"
+    assert set_aside in err, _diag(rc, out, err)
+    subprocess.run(["bash", "-c", set_aside], check=True, capture_output=True, timeout=_TIMEOUT_SECONDS)
+    assert patch.is_file() and "Polished notes." in patch.read_text(encoding="utf-8")
+
+
+def test_missing_temp_sh_refuses_before_touching_the_repository(tmp_path: pathlib.Path) -> None:
+    repo, root = _build(tmp_path)
+    scripts = tmp_path / "broken_install" / "scripts"
+    shutil.copytree(_TEAM_DIR / "scripts" / "lib", scripts / "lib",
+                    ignore=shutil.ignore_patterns("temp.sh", "__pycache__"))
+    (scripts / "cm").mkdir()
+    broken = scripts / "cm" / _FINALIZE.name
+    shutil.copy2(_FINALIZE, broken)
+    refs_before = _refs(repo)
+
+    rc, out, err = _finalize(tmp_path, root, script=broken)
+
+    assert rc != 0, _diag(rc, out, err)
+    assert "error:   cm-finalize-release.temp-sh-missing" in err, _diag(rc, out, err)
+    assert str(scripts / "lib" / "temp.sh") in err, _diag(rc, out, err)
+    assert "remedy:" in err, _diag(rc, out, err)
+    assert _refs(repo) == refs_before
+    assert _git(repo, "status", "--porcelain") == f" M {_NOTES}\n", "the pending polish is left as it was"

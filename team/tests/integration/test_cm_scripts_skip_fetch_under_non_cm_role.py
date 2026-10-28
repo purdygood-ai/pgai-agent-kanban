@@ -41,6 +41,7 @@ import pytest
 
 from tests.fixtures.binary_guard import require_binary
 from tests.fixtures.git_network_stub import install_git_network_stub
+from tests.fixtures.section_reader_modules import copy_section_reader_modules
 
 _TEAM_DIR = pathlib.Path(__file__).resolve().parents[2]
 _CM_SCRIPTS_DIR = _TEAM_DIR / "scripts" / "cm"
@@ -124,6 +125,7 @@ def _build_board(tmp_path: pathlib.Path, real_git: str) -> tuple[pathlib.Path, p
         (root / "pgai_agent_kanban" / "cm" / py_file.name).write_text(
             py_file.read_text(encoding="utf-8"), encoding="utf-8"
         )
+    copy_section_reader_modules(root / "pgai_agent_kanban")
     return root, repo
 
 

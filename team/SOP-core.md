@@ -12,7 +12,7 @@ These are the kanban's first principles, read by every role on every wake.
 - **Bugs heal.** The next iteration is the default repair path — almost everything wrong with a release is fixed by the loop coming around again, not by stopping it.
 - **Quality findings never stop the loop.** They carry zero risk of runtime failure; they are noted and carried into the next turn.
 - **Blocking is the rare exception.** Reserved for work that moves the system backwards: destructive failures, unusable builds, or verification unable to run at all.
-- **Ownership.** TESTER is the sole author of verification reports and of the bugs that record quality findings; CM notes those findings and ships.
+- **Ownership.** TESTER is the sole author of verification reports and files the bugs its findings call for; the autonomous filers — the release script, the gated runners' lint filer, DEEP-VERIFY and OVERWATCH — file the rest. Every filer deposits through the intake path, which keeps one record per defect by refusing a draft that reports an existing live bug. CM notes those findings and ships.
 
 ## Purpose and Participants
 
@@ -20,7 +20,7 @@ Operate as a coordinated work system: clear ownership, safe behavior, traceable 
 
 ## Role Swim Lanes
 
-Each role has a swim lane — a boundary limiting what it may do; cross-lane actions are process violations even when the agent is capable of them. Six vertical agents move work through the RC pipeline, each doing one thing only: **PO** expands a validated human brief into a requirements document under `requirements/` and queues a PM ticket; **PM** decomposes requirements documents into tickets; **CODER** implements; **WRITER** authors documents, role files and SOPs; **TESTER** observes and files bug reports as individual files in `bugs/`; **CM** ships releases, manages RC branches and owns origin. A seventh, OVERWATCH, observes the running system and never advances a release. What each role must NOT do is stated once, in that role's own file.
+Each role has a swim lane — a boundary limiting what it may do; cross-lane actions are process violations even when the agent is capable of them. Six vertical agents move work through the RC pipeline, each doing one thing only: **PO** expands a validated human brief into a requirements document under `requirements/` and queues a PM ticket; **PM** decomposes requirements documents into tickets; **CODER** implements; **WRITER** authors documents, role files and SOPs; **TESTER** observes and files bug reports as individual files in `bugs/`; **CM** ships releases, manages RC branches and owns origin. A seventh, OVERWATCH, observes the running system and never advances a release on its own judgment; its one ship path runs on the operator's declared intent (`roles/OVERWATCH.md`, Lane B). What each role must NOT do is stated once, in that role's own file.
 
 A role that discovers work in another lane files a handoff — bug report, ticket, or status note — and stops, trusting the next role with its part.
 
@@ -32,7 +32,7 @@ The shared team tree is rooted at `${PGAI_AGENT_KANBAN_ROOT_PATH}`, default `$HO
 
 `$PGAI_PROJECT_ROOT` resolves to the active project's root, `${PGAI_AGENT_KANBAN_ROOT_PATH}/projects/<project-name>/`, and every per-project path is relative to it: task folders at `tasks/<TASK-ID>/`, agent queues at `tasks/queues/<agent>_backlog.md`, artifacts at `artifacts/<name>/`, and `requirements/`, `priority/` intake, `bugs/` reports and `project.cfg` directly beneath.
 
-In single-project mode `$PGAI_PROJECT_ROOT` defaults to `$PGAI_AGENT_KANBAN_ROOT_PATH`, so legacy paths still resolve. Project names must match `^[a-z0-9][a-z0-9-]*$`.
+In single-project mode `$PGAI_PROJECT_ROOT` defaults to `$PGAI_AGENT_KANBAN_ROOT_PATH`, so legacy paths still resolve. Project names must match `^[a-z0-9][a-z0-9-]*$`: the projects.cfg registry readers list no other name, and the wake, `import-project.sh` and the document verbs enforce it.
 
 ## Standard Task States
 
@@ -65,7 +65,7 @@ In a live install the path is `scripts/task-status.sh`; either copy resolves the
 
 **What it writes.** `## State` always, plus `## Needs Human`, `## Summary`, and `## Blockers` when their flags are given; omit a flag and that section is untouched. `--state BLOCKED` also writes the task's `## Block Record`, which OVERWATCH's block triage reads, and `--state DONE` or `WONT-DO` removes it. Everything else — `## Artifacts`, `## Next Recommended Step`, `## Instruction Conflicts`, `## Blocked By Agent`, `## Blocked Reason`, any role-specific section — is written directly. Record which agent and model you are as the first words of `## Summary` (`Agent: <role>, Model: <id>`); `## Model` is wake-stamped, so never edit it.
 
-**Classify every block you set.** With `--state BLOCKED`, pass `--reason-code` from the closed agent list. `agent_operator_data_action` means the fix is one allowlisted operator data command, given as typed `--action-args` (today `verb=restamp-fixed-in project=<name> version=vX.Y.Z bugs=BUG-NNNN[,BUG-NNNN]`); OVERWATCH may run it and requeue you. Anything else is `agent_unclassified`, which always escalates to a human. Prose never substitutes for the typed arguments.
+**Classify every block you set.** With `--state BLOCKED`, pass `--reason-code` from the closed agent list. `agent_operator_data_action` means the fix is one allowlisted operator data command, given as typed `--action-args` (today `verb=restamp-fixed-in project=<name> version=vX.Y.Z bugs=BUG-NNNN[,BUG-NNNN]`); OVERWATCH may run it and requeue you. `agent_transient_provider_error` means a transient provider error — an overloaded, rate-limited, failed or safeguard-aborted model call — stopped the work, not the task itself. Anything else is `agent_unclassified`. OVERWATCH requeues either of the last two after 15, 30 and 60 minutes, and only then parks its question in the operator inbox. Prose never substitutes for the typed arguments.
 
 Hand-editing still parses, so older task folders and by-hand operator procedures are not broken; the tool is the taught path rather than a new gate, because it removes the reformatting failure a small model hits when it writes the state in a reasonable-but-nonstandard shape. **Every markdown `## State` block shown in a role file is reference output** — what the tool produces — never something to transcribe by hand.
 
@@ -110,7 +110,7 @@ Each line is a Markdown list item — a leading `- ` (part of the shape, not dec
 | `[B]` | BLOCKED | wake reconciliation from `## State`, or wake prep on a task rediscovered still WORKING |
 | `[x]` | DONE or WONT-DO | wake reconciliation from `## State` |
 
-**Agents never edit queue files** — not their own entry, not `bug_backlog.md`. The one exception is PO, whose procedure appends its PM ticket's line to `pm_backlog.md` (`roles/PO.md`, Step 7). Set `## State` with the status-writer tool and the wake renders the marker. `[ ]` is canonical; the alias `[]` is accepted by parsers, but the wake script always writes `[ ]`. Any other character inside the brackets is an error — PM and the dashboard scripts compute queue depth and progress from these.
+**Agents never edit queue files by hand** — not their own entry, not `bug_backlog.md`. The queue writers are exactly these: wake reconciliation and the wake prerequisite check (the markers above); PO, whose procedure appends its PM ticket's line to `pm_backlog.md` (`roles/PO.md`, Step 7); PM's materializer and the ops module, which register the tasks and items a plan creates; discovery, which maintains the bug and priority caches; and OVERWATCH's cache-marker check, which flips a cache marker back to match the file's `## Status`. Set `## State` with the status-writer tool and the wake renders the marker. `[ ]` is canonical; the alias `[]` is accepted by parsers, but the wake script always writes `[ ]`. Any other character inside the brackets is an error — PM and the dashboard scripts compute queue depth and progress from these.
 
 **`status.md` is the single truth; the marker is derived.** A task's state is what its own `## State` says; the marker renders that state, written by the same transition and never chosen separately. Idle, discovery, and readiness decisions read task state, never a marker character. Before invoking an agent the wake script reconciles the two — a non-`BACKLOG` state corrects the marker and skips the task (`WORKING` corrects to `[B]` with a stuck-task log line), a `BACKLOG` task with unmet prerequisites becomes `WAITING` — and an end-of-cycle pass returns satisfied `[W]` entries to `BACKLOG`, which is how WAITING re-enters the queue without human intervention.
 
@@ -234,13 +234,13 @@ This rubric rates a finding that exists; whether a check was entitled to block a
 
 Severity says how bad a finding is; two further fields, read only on a finding whose own `Systemic Risk` is `high`, say what shipping it costs. **Regression** is `yes` when this RC's own work introduced it, `no` when it predates this RC. **Integrity** is `breakage` or `destructive` for a suite breakage or a destructive-path failure, `none` for neither. An absent or unrecognized value in either reads as `unknown`. Which combinations ship and which stop is `roles/CM.md`; the report fields are `roles/TESTER.md`.
 
-**Calibration, at the two boundaries that get argued.** A real but unexercised defect in a shipped artefact is **medium**, not `high`: nothing is failing today and not using it is itself the workaround — and it predates the RC (`Regression: no`, `Integrity: none`), so it ships as a known issue and carries into the next iteration. A command that worked in the last release and exits non-zero in this one is **high**, not `medium`: "the operator can do it by hand" is a recovery, not a workaround — and the previous release proves this RC introduced it (`Regression: yes`), which stops the release in that project's lane until it is fixed or an operator overrides on the record.
+**Calibration, at the two boundaries that get argued.** A real but unexercised defect in a shipped artefact is **medium**, not `high`: nothing is failing today and not using it is itself the workaround — and it predates the RC (`Regression: no`, `Integrity: none`), so it ships as a known issue and carries into the next iteration. A command that worked in the last release and exits non-zero in this one is **high**, not `medium`: "the operator can do it by hand" is a recovery, not a workaround — and the previous release proves this RC introduced it (`Regression: yes`). A `Systemic Risk: high` finding with `Regression: yes` is what the ship policy acts on — the severity word alone never stops anything: under `ship_posture = matrix` it stops the release in that project's lane until it is fixed or an operator overrides on the record; under the default `always` it ships `NON-FUNCTIONAL` with an Auto-Ship Event (`roles/CM.md`, "Ship policy").
 
 **A rating is never softened to reach a preferred ship outcome.** Lowering `high` to `medium`, or calling this RC's own regression pre-existing, because the honest rating would stop the line corrupts the one input the decision is computed from — invisibly, since the report still reads as honest. When the stop looks disproportionate, argue that in the report's prose where a reader can weigh it; the remedies are an operator override on the record or a ticket against this rubric, never a quieter number.
 
 ## HALT Flags
 
-`HALT` flag files pause the chain. Every role honors them; **only the operator ever removes one**.
+`HALT` flag files pause the chain. Every role honors them. **An operator's HALT is removed only by the operator.** The one other remover is OVERWATCH's decision wake, which clears a chain HALT — one CM's release or an OVERWATCH repair wrote — once that HALT's own cause check passes or its resolution-matrix row prescribes it (`roles/OVERWATCH.md`); it never touches a HALT the operator placed.
 
 - **Presence check.** Wake scripts check at the start of each cycle, before task selection. A present flag is logged and the script exits cleanly — status 0, not an error.
 - **In-flight work is untouched.** A WORKING task stays WORKING; the running agent is not interrupted. HALT changes no task states. A HALT that appears after you were dispatched does not stop you: finish the task and exit normally. A role's own "no HALT" prerequisite is checked once, when the task starts.
@@ -249,30 +249,32 @@ Severity says how bad a finding is; two further fields, read only on a finding w
 
 `HALT-AFTER` is a soft variant: the chain keeps running until a named event drains, then it promotes itself to `HALT`. It does not gate wakes while draining, so a role that sees one keeps working. **Conversion happens only at RC close** — no token promotes while `## Active RC` is anything but `none`; a drain satisfied mid-RC is latched and converts once the RC closes, so a release in flight always finishes rather than freezing half-built. Tokens, drain semantics, that invariant in full, and CM's ship-time spend of a version-pinned sentinel live in `roles/CM.md`.
 
-A third signal, `SUBSTRATE_BROKEN`, means the wake substrate itself — config loader, queue parser, agent dispatch, lockfile invariants — found an inconsistency it cannot safely work around. Pause rather than advance the chain or mutate task state: unstable substrate corrupts queues, lockfiles, and task folders undetectably. Treat it as a blocking pre-flight failure and exit.
-
 ## Deferral Posture
 
 Low bugs are real, but must not set the tempo. **A deferred bug never triggers an RC** — it waits while the chain works requirements; a bug ABOVE the level opens a bugfix RC as always.
 
-Four `[release]` keys configure it, in `kanban.cfg` or a project's `project.cfg`. Booleans are `true`/`false` only; `on`/`off` refuse loud with the accepted set.
+Eight `[release]` keys configure it, in `kanban.cfg` or a project's `project.cfg`. Booleans are `true`/`false` only; `on`/`off` refuse loud with the accepted set.
 
 | Key | Accepted | Default | Effect |
 |---|---|---|---|
 | `deferred_bugs` | `true`\|`false` | `false` | Master switch: whether bugs are deferred at all. |
 | `deferred_bug_level` | `low`\|`medium`\|`high` | `low` | Defers every bug at or below this severity. At `high` only a `critical` bug still triggers an RC; every settable rung waits for that trigger or for deferral to lift — the operator-knows-best case, not a warning. |
 | `defer_piggyback` | `true`\|`false` | `true` | When a bug above the level triggers an RC, carry every deferred bug onto it; `false` sends the trigger alone. |
+| `deferred_max_age_days` | a whole number of days | unset: no bound | When every open bug is deferred and the oldest is older than this, discovery bundles the deferred bugs whatever the requirements queue holds. |
+| `deferred_max_count` | a whole number | unset: no bound | When every open bug is deferred and more than this many are, discovery bundles them the same way. |
+| `bundle_mixing` | `separate`\|`ride-along` | `separate` | `separate` keeps deferred bugs out of requirement RCs; `ride-along` lets PM add up to `ride_along_max` of them to one. |
+| `ride_along_max` | a whole number | `3` | The most deferred bugs one requirement RC may carry under `ride-along`. |
 | `deep_verify` | `weekly`\|`off` (aliases `true`\|`false`) | `weekly` | The DEEP-VERIFY cadence — a mode, not a boolean, so it stands outside the strictness rule above; every reader accepts all four spellings. |
 
 **Two vocabularies, deliberately different widths.** A bug's own `**Severity:**` field is ranked on `low < medium < high < critical` (matched case-insensitively, tolerant of surrounding whitespace and one trailing period). `deferred_bug_level` accepts `low|medium|high` and nothing else: `critical` — the build-blocking rung "Rating a Finding" defines — is not a settable level, and both the config loader and the posture resolver refuse it dual-channel naming the accepted set. The gap is the mechanism, not an oversight: a level names the highest rung the chain may be told to wait on, no accepted value outranks `critical`, so a critical bug is kept at every setting rather than deferred by any of them. A severity outside those four words, or absent, is neither ranked nor deferred — it resolves to `unparseable`, stays a candidate that can trigger an RC, and is narrated naming the file, so a typo parks nothing silently.
 
 **Precedence, highest first: campaign file, then `project.cfg`, then `kanban.cfg`, then the built-in default.** `defer_piggyback` is a bare boolean and stays one — "triggered" means "above the level" by construction, so there is no second threshold; a carry narrates its count and trigger and marks each carried item on its own bundle line, and the consolidation cap is `roles/PM.md`.
 
-The `DEFER-LOW-BUGS` campaign file is project-scoped over root-scoped, as HALT is. Armed, it forces `deferred_bugs=true` and `deferred_bug_level=low`, leaves `defer_piggyback` to the tiers below, and names the release it runs until; CM removes it when that or a later version ships. Unparseable, it refuses loud, never silently off. **The hygiene sweep** is the only way a deferred bug bundles on its own: it fires when every unhandled bug is deferred and the requirements queue holds nothing unprocessed.
+The `DEFER-LOW-BUGS` campaign file is project-scoped over root-scoped, as HALT is. Armed, it forces `deferred_bugs=true` and `deferred_bug_level=low`, leaves `defer_piggyback` to the tiers below, and names the release it runs until; CM removes it when that or a later version ships. Unparseable, it refuses loud, never silently off. A deferred bug bundles on its own when a deferral bound is exceeded or through **the hygiene sweep**, which fires when every unhandled bug is deferred and the requirements queue holds nothing unprocessed.
 
 ## Temporary File Convention
 
-All framework subsystems write temporary files under one configurable directory instead of scattering them across `/tmp`: `PGAI_AGENT_KANBAN_TEMP_DIR`, default `/tmp/pgai_kanban_tmp`. Wake scripts export the resolved value so every subagent inherits it, and the dispatch prompt names each agent's scratch subtree. Write scratch and diagnostic output there; never create bare `/tmp` entries. Bash callers source `scripts/lib/temp.sh` and its `pgai_mktemp` family; Python honours the env var when set and falls back to the system temp directory. Leave your scratch in your subtree when you finish; do not spend effort deleting it.
+All framework subsystems write temporary files under one configurable directory instead of scattering them across `/tmp`: `PGAI_AGENT_KANBAN_TEMP_DIR`, default `/tmp/pgai_kanban_tmp`. Wake scripts export the resolved value so every subagent inherits it, and the dispatch prompt names each agent's scratch subtree. Write scratch and diagnostic output there; never create bare `/tmp` entries. Bash callers source `scripts/lib/temp.sh` and its `pgai_mktemp` family; Python callers use `resolve_temp_root` (`pgai_agent_kanban.lib.temp_root`). Both resolve the env var first, then `kanban.cfg [paths]`, then the last-resort root `/tmp/pgai_kanban_tmp`. Leave your scratch in your subtree when you finish; do not spend effort deleting it.
 
 Enforcement is report-only: the wake bracket appends a `## Temp Litter` section to `status.md` naming any fresh entry outside the framework root, and deletes nothing. Litter is a hygiene report, not a failure.
 
@@ -292,7 +294,7 @@ The matching artifact is the `*_example` / `.env.example` file for an environmen
 
 ## Scope: what you may fix next to your task
 
-Change what the task names. Two adjacent fixes are always in scope: an **identical defect in a byte-duplicate sibling** of the code you are changing, and **a sentence in a file you are editing that your own change makes false**. Anything else you notice — a different defect, stale text elsewhere — goes in `## Summary` for TESTER to file; do not fix it unasked.
+Change what the task names. Two adjacent fixes are always in scope: an **identical defect in a byte-duplicate sibling** of the code you are changing, and **a sentence in a file you are editing that your own change makes false**. When the fact your task changes is also stated in a file the task does not name, the Naming rule governs: fix that statement too — it is the same fact — and list it in `## Summary`; a different stale fact in the same file stays out of scope. Anything else you notice — a different defect, stale text elsewhere — goes in `## Summary` for TESTER to file; do not fix it unasked.
 
 ## Resource safety
 

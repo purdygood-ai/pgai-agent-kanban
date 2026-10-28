@@ -100,6 +100,10 @@ other route runs its script:
                                            runs the archive plan and returns the planned
                                            moves per category in stdout -- the same text
                                            archive.sh --dry-run prints -- and moves nothing.
+  POST /operations/inbox-answer          → overwatch: inbox.answer_entry (CLI: inbox.sh
+                                           --project <name> answer --id <ID> --answer <text>;
+                                           the verb's read is GET /projects/{name}/inbox in
+                                           routers/projects.py, overwatch: inbox.read_inbox)
 
 Design:
   - All endpoints are POST only; no GET verbs on this router.
@@ -113,7 +117,10 @@ Design:
     HTTP 422 before touching the filesystem; it then writes its content to a
     fresh per-request directory under <temp root>/intake (route_temp_root) and
     deposits that file; the dry-run description names it as the positional
-    source argument of the equivalent intake.sh call.
+    source argument of the equivalent intake.sh call. A BUG-* draft that
+    reports the same defect as a live bug is deposit_intake's own
+    ``intake.same_defect`` refusal: exit_code 5, HTTP 409, the message naming
+    the live bug's ID -- what intake.sh prints and exits with.
   - unwind-rc's HALT + Active-RC pre-flight guards surface via the envelope as
     cm.unwind.unwind_rc prints them (non-zero exit_code, stderr populated).
   - ship-rc's pre-flight checks, git steps and release-hook HALTs surface the
@@ -132,7 +139,8 @@ Design:
 Routes that call the shared ops function (halt, unhalt, halt-after,
 halt-global, unhalt-global, defer, undefer, set-version-ceiling,
 switch-provider, create-project, add-project, remove-project, release-locks,
-cancel-rc, unwind-rc, ship-rc, intake, close, wontdo, delete, reset, archive):
+cancel-rc, unwind-rc, ship-rc, intake, close, wontdo, delete, reset, archive,
+inbox-answer):
   - The route runs the steps its CLI script runs around the ops call, in the
     script's order: resolve ``project`` through
     ``ops.resolve.resolve_project_name`` (the twin of the scripts'
@@ -182,6 +190,13 @@ cancel-rc, unwind-rc, ship-rc, intake, close, wontdo, delete, reset, archive):
     returns (1 refused, 2 stopped at a failing item, 3 skipped on a held
     repo lock), as the script does; run_archive resolves the project name
     itself.
+    ``inbox-answer`` resolves ``project`` like the other project-scoped
+    routes, then makes the one ``overwatch.inbox.answer_entry`` call and
+    reports its refusals at the codes ``ops.errors.cli_exit_code`` gives (2
+    bad input or an entry already closed, 3 an unknown entry, 4 a file
+    failure), as ``inbox.sh answer`` does; ``id`` and ``answer`` are passed
+    as sent, so the module's own ``inbox.bad_entry_id`` /
+    ``inbox.empty_answer`` refusals reach the caller unchanged.
   - ``adapter.ops_call`` is the one place an ``OpsError`` becomes envelope
     material: the exit code the ops CLI uses for it
     (``ops.errors.cli_exit_code``), the function's own stderr plus the error
@@ -314,6 +329,7 @@ is the sole access-control mechanism.
 from __future__ import annotations
 
 import json
+import os
 import pathlib
 import shlex
 import subprocess
@@ -325,6 +341,8 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict
 
 from ..dependencies import route_temp_root
+from ..dependencies import route_script_path as _script_path
+from ..dependencies import route_scripts_dir as _scripts_dir
 from ..adapter import (
     HTTP_UNPROCESSABLE_ENTITY,
     OpsOutcome,
@@ -354,7 +372,13 @@ from ...ops import resolve as ops_resolve
 from ...ops import write as ops_write
 from ...ops.context import OpsContext
 from ...ops.errors import IoError, Refused
-from ..validation import ComponentRefused, require_component
+from ...overwatch import inbox as overwatch_inbox
+from ...overwatch.halt_provenance import (
+    halt_global_command,
+    installed_script_command,
+    unhalt_global_command,
+)
+from ..component_refusal import _component_refusal, example_body_curl as _example_curl
 
 __all__ = ["router"]
 
@@ -364,17 +388,6 @@ router = APIRouter(prefix="/operations", tags=["operations"])
 # ---------------------------------------------------------------------------
 # Internal helpers (mirroring reads.py conventions)
 # ---------------------------------------------------------------------------
-
-
-def _scripts_dir(request: Request) -> pathlib.Path:
-    """Return the scripts/ directory path from the app's ApiConfig."""
-    kanban_root: pathlib.Path = request.app.state.api_cfg.kanban_root
-    return kanban_root / "scripts"
-
-
-def _script_path(request: Request, relative: str) -> str:
-    """Resolve a script path relative to scripts/ and return it as a string."""
-    return str(_scripts_dir(request) / relative)
 
 
 def _make_envelope(result: ShellResult, warnings: list[str] | None = None) -> JSONResponse:
@@ -721,20 +734,35 @@ def _make_dual_channel_envelope(
     )
 
 
-def _cli_remedy(script_rel: str, planned_argv: list[str]) -> str:
+def _installed_command(request: Request, script_rel: str, *args: str) -> str:
+    """Return the command that runs *script_rel* as installed under this server's kanban root.
+
+    The text is ``<kanban root>/scripts/<script_rel>`` followed by *args*,
+    every part shell-quoted (``halt_provenance.installed_script_command``),
+    with the kanban root made absolute so the command runs as printed from
+    any directory.
+    """
+    kanban_root = os.path.abspath(request.app.state.api_cfg.kanban_root)
+    return installed_script_command(kanban_root, script_rel, *args)
+
+
+def _cli_remedy(request: Request, script_rel: str, planned_argv: list[str]) -> str:
     """Return the runnable CLI form of *planned_argv* as a fallback remedy.
 
     Used by every ``_make_dual_channel_envelope`` caller for a script that
     refused with plain stderr text and so printed no remedy of its own. The
-    command is re-rendered from the argv the route actually built --
-    ``team/scripts/`` plus the script's census-relative path
-    (``halt.sh``, ``cm/cancel-rc.sh``), then every flag and value the caller
-    sent, shell-quoted -- so it is pasteable exactly as printed, with no
-    placeholder.
+    command is re-rendered from the argv the route actually built: the
+    installed script under the kanban root this server answers for --
+    ``<kanban root>/scripts/`` plus the script's census-relative path
+    (``halt.sh``, ``cm/cancel-rc.sh``) -- then every flag and value the
+    caller sent, each part shell-quoted, so it is pasteable exactly as
+    printed from any directory, with no placeholder. For the halt routes the
+    command is the text ``halt_provenance.halt_command`` (and its unhalt and
+    global siblings) gives for the same root.
     """
     return (
         "Fix the condition the message names, then re-run the CLI form: "
-        + shlex.join([f"team/scripts/{script_rel}", *planned_argv[1:]])
+        + _installed_command(request, script_rel, *planned_argv[1:])
     )
 
 
@@ -779,54 +807,6 @@ def _missing_field_refusal(
         _example_curl(request, example_body),
         warnings,
     )
-
-
-def _component_refusal(
-    request: Request,
-    verb: str,
-    fields: dict[str, object],
-    example_body: str,
-    warnings: list[str],
-) -> JSONResponse | None:
-    """Refuse a body whose project, key or selector field is not one plain name.
-
-    The one place every action route's confinement check lands (see
-    ``validation.require_component`` for what is refused and why). Each
-    entry of *fields* maps a body field name to the value the body carried;
-    an absent value (``None`` or ``""``) is skipped, because whether a field
-    is required is the route's own ``validate_required`` check, which runs
-    first. The first refused field returns HTTP 422 with the dual-channel
-    triple ``<verb_snake>.<field>_invalid`` -- ``remove_project.project_invalid``,
-    ``close.key_invalid`` -- a message naming the field and what is wrong
-    with it, and a runnable curl remedy re-sending *example_body*. Called
-    before the dry-run short-circuit, so a refused value is never described,
-    resolved, joined into a path, written or dispatched.
-
-    Returns:
-        None when every supplied field is a plain name; otherwise the 422
-        refusal response.
-    """
-    for field, value in fields.items():
-        if value is None or value == "":
-            continue
-        try:
-            require_component(value, field)
-        except ComponentRefused as exc:
-            triple = exc.contract(verb, _example_curl(request, example_body))
-            # BLOCK-WORTHY (docs/blocking-site-census.md): an invariant by
-            # design -- the field becomes a path component, a glob prefix, a
-            # sentinel line or an argv value, so a value that is not one
-            # plain name could reach outside the kanban root or change what
-            # runs. Refused here, dual-channel, before anything acts on it.
-            # CENSUS-ANCHOR: operations-field-not-component-01
-            return _refusal_response(
-                HTTP_UNPROCESSABLE_ENTITY,
-                triple["error"],
-                triple["message"],
-                triple["remedy"],
-                warnings,
-            )
-    return None
 
 
 # Example values the registry routes' value refusals re-send, per field.
@@ -912,35 +892,30 @@ def _contract_refusal(error: str, message: str, remedy: str) -> ShellResult:
     )
 
 
-def _example_curl(request: Request, example_body: str) -> str:
-    """Return a runnable curl line re-sending *example_body* to this route.
-
-    Builds the remedy for an API-layer refusal from the request's own URL,
-    so the printed command targets the server the caller actually reached
-    (never a placeholder host). *example_body* is a literal JSON string the
-    caller can paste as-is.
-    """
-    return (
-        f"curl -sS -X POST {request.url} -H 'Content-Type: application/json' "
-        f"-d '{example_body}'"
-    )
-
-
-def _routable_intake_example_curl(request: Request, project: str) -> str:
+def _routable_intake_example_curl(request: Request, project: str, refused_name: str) -> str:
     """Return a runnable curl line re-sending an intake request under a routable name.
 
     The remedy for every intake refusal that is about the filename itself
     (a path, or a bare name no routing prefix matches): the same route, the
-    caller's *project*, and the example name ``BUG-0001-example.md``, which
-    routes to ``bugs/``. Nothing in it names a temp file, so it is runnable
-    whether or not the refused request wrote anything.
+    caller's *project*, and a bare example name that keeps *refused_name*'s
+    routing prefix, so the re-sent body deposits where the refused one would
+    have gone. The example name is ``ops.write._bare_intake_example`` -- the
+    one intake.sh's own refusal offers -- so the API and CLI suggest the same
+    name: ``PRIORITY-0042-a%2Fb.md`` gives ``PRIORITY-0042-example.md``,
+    ``v1.2.3..x.md`` gives ``v1.2.3-example.md``, and a name with no
+    routing prefix gives ``BUG-0001-example.md``. Only the matched prefix
+    reaches the remedy, never the rest of the refused value. Nothing in it
+    names a temp file, so it is runnable whether or not the refused request
+    wrote anything.
     """
+    example_name = ops_write._bare_intake_example(refused_name)
+    example_id = example_name.removesuffix("-example.md")
     return _example_curl(
         request,
         json.dumps({
             "project": project,
-            "filename": "BUG-0001-example.md",
-            "content": "# BUG-0001 example",
+            "filename": example_name,
+            "content": f"# {example_id} example",
         }),
     )
 
@@ -1060,7 +1035,7 @@ class HaltAfterBody(BaseModel):
         key:     Optional drain event token (``rc``, ``pm``, ``coder``,
                  ``writer``, ``tester``, ``cm``), armed verbatim when given;
                  when absent the CLI's own default, ``rc``, is armed.
-        until:   Optional release boundary (e.g. ``v2.20.1``, leading ``v``
+        until:   Optional release boundary (e.g. ``v1.2.3``, leading ``v``
                  optional); arms the versioned ``rc:vX.Y.Z`` token directly.
                  rc scope only — refused, as halt-after.sh refuses, when
                  combined with a non-rc ``key`` or when not ``vX.Y.Z``.
@@ -1083,7 +1058,7 @@ class DeferBody(BaseModel):
                  at the API layer -- a missing project is rejected with a
                  generic 422 before anything runs, matching the halt/unhalt
                  convention.
-        until:   Release boundary the campaign runs until (e.g. ``v2.20.0``).
+        until:   Release boundary the campaign runs until (e.g. ``v1.2.3``).
                  Passed verbatim to ``ops.write.defer``, the function
                  defer.sh reaches. Deliberately NOT validated at the API
                  layer: an empty or malformed value is passed as-is, and the
@@ -1221,7 +1196,7 @@ class ResetBody(BaseModel):
     The resolved selector value is the key the reset resolves, exactly as
     reset.sh's ``--key``; the item type follows from what it names (agent tasks
     are ``ROLE-YYYYMMDD-NNN`` prefixed; bug intake is ``BUG-*``; priority intake
-    is ``PRIORITY-*``; requirement intake is a version string such as ``v0.1.2``).
+    is ``PRIORITY-*``; requirement intake is a version string such as ``v1.2.3``).
 
     Fields:
         project:        Project name.
@@ -1229,7 +1204,7 @@ class ResetBody(BaseModel):
         agent:          Agent task ID (e.g. ``CODER-20260101-001-slug``).
         bug:            Bug intake key (e.g. ``BUG-0042``).
         priority:       Priority intake key (e.g. ``PRIORITY-0007``).
-        requirement:    Requirement intake version (e.g. ``v0.1.2``).
+        requirement:    Requirement intake version (e.g. ``v1.2.3``).
         keep_artifacts: When True, artifacts/ is kept (reset.sh's ``--keep-artifacts``).
         force:          When True, stale-worktree cleanup (git worktree remove,
                         prune, rm -rf) runs before the normal amnesia reset
@@ -1262,10 +1237,13 @@ class CloseBody(BaseModel):
     Fields:
         project: Project name.
         key:     Task key or intake identifier to close.
-        state:   Close state override (``done`` or ``wont-do``; default
-                 ``done``), as close.sh's ``--state``; intake-only.
+        state:   Close state override (``done``, ``wont-do`` or
+                 ``duplicate``; default ``done``), as close.sh's ``--state``;
+                 intake-only.  ``duplicate`` needs a ``note`` naming the
+                 surviving item.
         note:    Optional note text, as close.sh's ``--note``; recorded in
-                 an intake item's ``## Close Note``.
+                 an intake item's ``## Close Note``.  Required for
+                 ``duplicate``, where it names the surviving item.
         dry_run: When True, short-circuits dispatch — nothing is closed.
 
     Required fields are declared Optional so a body that omits one is refused
@@ -1358,7 +1336,7 @@ class UnwindRcBody(BaseModel):
     Fields:
         project: Project name (exact, or an unambiguous prefix of a
                  registered name, as the CLI's ``--project``).
-        key:     RC version to unwind (e.g. ``v1.2.0``).
+        key:     RC version to unwind (e.g. ``v1.2.3``).
         confirm: The confirmation (required unless ``dry_run`` is True):
                  ``true``, or the typed phrase ``unwind-rc <project> <key>``
                  byte-for-byte (no trimming, no case-folding). The CLI asks
@@ -1744,6 +1722,40 @@ class ArchiveBody(BaseModel):
     reconcile_queues: bool = False
 
 
+class InboxAnswerBody(BaseModel):
+    """Body for POST /operations/inbox-answer.
+
+    Mirrors ``inbox.sh answer``'s flags. ``project`` is declared Optional so
+    a body that omits it is refused by the route itself, dual-channel
+    (``_missing_field_refusal``), rather than by the framework's
+    ``{"detail": [...]}`` validation list.
+
+    Fields:
+        project: Project whose inbox holds the entry (exact, or an
+                 unambiguous prefix of a registered name, as the CLI's
+                 ``--project``). Required.
+        id:      Entry ID, e.g. ``INBOX-0001`` (case and leading zeros
+                 ignored; the CLI's ``--id``).
+        answer:  The answer to record (the CLI's ``--answer``). A second
+                 answer replaces the first.
+        dry_run: When True, describes the equivalent CLI call and changes
+                 nothing.
+
+    ``id`` and ``answer`` are not checked at this layer: an absent one reads
+    as ``""`` and both go to ``overwatch.inbox.answer_entry`` as sent, so a
+    malformed or empty value is refused under the module's own machine key
+    (``inbox.bad_entry_id``, ``inbox.empty_answer``) -- the key
+    ``inbox.sh answer`` prints for the same call.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    project: Optional[str] = None
+    id: Optional[str] = None
+    answer: Optional[str] = None
+    dry_run: bool = False
+
+
 # ---------------------------------------------------------------------------
 # POST /operations/halt
 # ---------------------------------------------------------------------------
@@ -1837,7 +1849,7 @@ def post_halt(body: HaltBody, request: Request) -> JSONResponse:
         outcome.as_shell_result(),
         warnings,
         fallback_error="halt.refused",
-        fallback_remedy=_cli_remedy("halt.sh", planned_argv),
+        fallback_remedy=_cli_remedy(request, "halt.sh", planned_argv),
     )
 
 
@@ -1932,7 +1944,7 @@ def post_unhalt(body: HaltBody, request: Request) -> JSONResponse:
         outcome.as_shell_result(),
         warnings,
         fallback_error="unhalt.refused",
-        fallback_remedy=_cli_remedy("unhalt.sh", planned_argv),
+        fallback_remedy=_cli_remedy(request, "unhalt.sh", planned_argv),
     )
 
 
@@ -1971,7 +1983,7 @@ def post_halt_after(body: HaltAfterBody, request: Request) -> JSONResponse:
                                ``{"project": P, "until": "vX.Y.Z"}`` arms
                                exactly what ``halt-after.sh --project P
                                --until vX.Y.Z`` arms.
-    - ``until``   (optional) — release boundary (e.g. ``v2.20.1``, leading
+    - ``until``   (optional) — release boundary (e.g. ``v1.2.3``, leading
                                ``v`` optional); arms the versioned
                                ``rc:vX.Y.Z`` token directly. rc scope only.
                                Checked as halt-after.sh checks it, with the
@@ -2048,9 +2060,14 @@ def post_halt_after(body: HaltAfterBody, request: Request) -> JSONResponse:
         fallback_error="halt_after.refused",
         fallback_remedy=(
             "Fix the condition the message names, then re-run the CLI form: "
-            f"team/scripts/halt-after.sh --project {body.project}"
-            + (f" --key {body.key}" if body.key else "")
-            + (f" --until {body.until}" if body.until else "")
+            + _installed_command(
+                request,
+                "halt-after.sh",
+                "--project",
+                body.project,
+                *(("--key", body.key) if body.key else ()),
+                *(("--until", body.until) if body.until else ()),
+            )
         ),
     )
 
@@ -2060,7 +2077,9 @@ def _halt_after_result(request: Request, project_raw: str, key_raw: str, until_r
 
     The checks run in halt-after.sh's order -- ``until`` with a non-rc
     ``key``, then a malformed ``until``, then project resolution -- each
-    refusing with the script's own dual-channel block at exit code 1; then
+    refusing with the script's own dual-channel block at exit code 1 (a
+    command a remedy names is the installed script under this server's
+    kanban root); then
     ``ops.write.halt_after`` writes the token (``rc:vX.Y.Z`` for a valid
     ``until``, else ``key``, else ``rc``) and ``stdout`` carries the
     script's arm confirmation.
@@ -2074,9 +2093,10 @@ def _halt_after_result(request: Request, project_raw: str, key_raw: str, until_r
         return _contract_refusal(
             "halt-after.until_scope_mismatch",
             f"halt-after.sh: --until targets a release boundary; scope '{key_raw}' has none.",
-            f"Drop --until to arm the {key_raw} scope's own drain (team/scripts/halt-after.sh "
-            f"--key {key_raw}), or drop --key {key_raw} to arm the versioned rc scope "
-            "(team/scripts/halt-after.sh --project your-project --until vX.Y.Z).",
+            f"Drop --until to arm the {key_raw} scope's own drain "
+            f"({_installed_command(request, 'halt-after.sh', '--key', key_raw)}), "
+            f"or drop --key {key_raw} to arm the versioned rc scope "
+            f"({_installed_command(request, 'halt-after.sh', '--project', 'your-project', '--until', 'vX.Y.Z')}).",
         )
 
     until_normalised = ""
@@ -2100,7 +2120,7 @@ def _halt_after_result(request: Request, project_raw: str, key_raw: str, until_r
             return _contract_refusal(
                 "halt-after.until_malformed",
                 f"halt-after.sh: --until value '{until_raw}' is not well-formed semver (expected vX.Y.Z).",
-                "Re-run with a well-formed version, e.g. --until v2.14.0.",
+                "Re-run with a well-formed version, e.g. --until v1.2.3.",
             )
 
     ctx = _ops_context(request)
@@ -2160,7 +2180,7 @@ def post_defer(body: DeferBody, request: Request) -> JSONResponse:
 
     - ``project`` (required) — project name or unambiguous prefix.
     - ``until``   (required by the operation, NOT pre-validated here) — release
-                                boundary the campaign runs until (e.g. ``v2.20.0``).
+                                boundary the campaign runs until (e.g. ``v1.2.3``).
                                 A missing or malformed value is passed verbatim
                                 to ``ops.write.defer``, whose dual-channel refusal
                                 (``defer.until_required`` / ``defer.until_malformed``)
@@ -2231,7 +2251,7 @@ def post_defer(body: DeferBody, request: Request) -> JSONResponse:
         outcome.as_shell_result(),
         warnings,
         fallback_error="defer.refused",
-        fallback_remedy=_cli_remedy("defer.sh", planned_argv),
+        fallback_remedy=_cli_remedy(request, "defer.sh", planned_argv),
     )
 
 
@@ -2320,7 +2340,7 @@ def post_undefer(body: UndeferBody, request: Request) -> JSONResponse:
         outcome.as_shell_result(),
         warnings,
         fallback_error="undefer.refused",
-        fallback_remedy=_cli_remedy("undefer.sh", planned_argv),
+        fallback_remedy=_cli_remedy(request, "undefer.sh", planned_argv),
     )
 
 
@@ -2355,7 +2375,7 @@ def _halt_global_result(request: Request) -> ShellResult:
     failure = _contract_refusal(
         "halt_global.sentinel_create_failed",
         f"halt-global.sh: failed to create global HALT sentinel at {halt_path}.",
-        f"Check that {kanban_root} is writable by the current user, then re-run team/scripts/halt-global.sh.",
+        f"Check that {kanban_root} is writable by the current user, then re-run {halt_global_command(kanban_root)}.",
     )
     return ShellResult(1, outcome.stdout, outcome.stderr + failure.stderr)
 
@@ -2393,7 +2413,7 @@ def _unhalt_global_result(request: Request) -> ShellResult:
     failure = _contract_refusal(
         "unhalt_global.sentinel_remove_failed",
         f"unhalt-global.sh: failed to remove global HALT sentinel at {halt_path}.",
-        f"Check that {kanban_root} is writable by the current user, then re-run team/scripts/unhalt-global.sh.",
+        f"Check that {kanban_root} is writable by the current user, then re-run {unhalt_global_command(kanban_root)}.",
     )
     return ShellResult(1, outcome.stdout, outcome.stderr + failure.stderr)
 
@@ -2454,7 +2474,7 @@ def post_halt_global(request: Request, body: HaltGlobalBody = HaltGlobalBody()) 
         _halt_global_result(request),
         warnings,
         fallback_error="halt_global.refused",
-        fallback_remedy=_cli_remedy("halt-global.sh", planned_argv),
+        fallback_remedy=_cli_remedy(request, "halt-global.sh", planned_argv),
     )
 
 
@@ -2514,7 +2534,7 @@ def post_unhalt_global(request: Request, body: HaltGlobalBody = HaltGlobalBody()
         _unhalt_global_result(request),
         warnings,
         fallback_error="unhalt_global.refused",
-        fallback_remedy=_cli_remedy("unhalt-global.sh", planned_argv),
+        fallback_remedy=_cli_remedy(request, "unhalt-global.sh", planned_argv),
     )
 
 
@@ -2553,7 +2573,7 @@ def post_reset(body: ResetBody, request: Request) -> JSONResponse:
     - ``agent``          (optional) — agent task ID (e.g. ``CODER-20260101-001-slug``).
     - ``bug``            (optional) — bug intake key (e.g. ``BUG-0042``).
     - ``priority``       (optional) — priority intake key (e.g. ``PRIORITY-0007``).
-    - ``requirement``    (optional) — requirement intake version (e.g. ``v0.1.2``).
+    - ``requirement``    (optional) — requirement intake version (e.g. ``v1.2.3``).
     - ``keep_artifacts`` (optional, bool) — when True, passes ``--keep-artifacts``.
     - ``force``          (optional, bool) — when True, passes ``--force`` to perform
                                             stale-worktree cleanup before the reset.
@@ -2692,7 +2712,7 @@ def post_reset(body: ResetBody, request: Request) -> JSONResponse:
         outcome.as_shell_result(),
         warnings,
         fallback_error="reset.refused",
-        fallback_remedy=_cli_remedy("reset.sh", planned_argv),
+        fallback_remedy=_cli_remedy(request, "reset.sh", planned_argv),
     )
 
 
@@ -2722,11 +2742,19 @@ def post_close(body: CloseBody, request: Request) -> JSONResponse:
 
     - ``project`` (required) — project name.
     - ``key``     (required) — task key or intake identifier.
-    - ``state``   (optional) — close state (``done`` or ``wont-do``, the
-                               closed states); intake-only; defaults to ``done``.
-                               Any other value (the retired ``superseded``
-                               included) is refused ``close.invalid_state``.
-    - ``note``    (optional) — note text recorded in the intake item's ``## Close Note``.
+    - ``state``   (optional) — close state (``done``, ``wont-do`` or
+                               ``duplicate``, the closed states); intake-only;
+                               defaults to ``done``.  Any other value (the
+                               retired ``superseded`` included) is refused
+                               ``close.invalid_state``.  ``duplicate`` needs a
+                               ``note`` naming an existing bug, priority or
+                               requirement other than the item being closed;
+                               without one it is refused
+                               ``close.duplicate_pointer_missing`` and nothing
+                               is written.
+    - ``note``    (optional) — note text recorded in the intake item's ``## Close Note``;
+                               required for ``duplicate``, where it names the
+                               surviving item (``duplicate of BUG-NNNN``).
     - ``dry_run`` (optional, bool) — when True, returns the planned action description
                                       without closing anything.
 
@@ -2799,7 +2827,7 @@ def post_close(body: CloseBody, request: Request) -> JSONResponse:
         outcome.as_shell_result(),
         warnings,
         fallback_error="close.refused",
-        fallback_remedy=_cli_remedy("close.sh", planned_argv),
+        fallback_remedy=_cli_remedy(request, "close.sh", planned_argv),
     )
 
 
@@ -2900,7 +2928,7 @@ def post_wontdo(body: WontdoBody, request: Request) -> JSONResponse:
         outcome.as_shell_result(),
         warnings,
         fallback_error="wontdo.refused",
-        fallback_remedy=_cli_remedy("wontdo.sh", planned_argv),
+        fallback_remedy=_cli_remedy(request, "wontdo.sh", planned_argv),
     )
 
 
@@ -3006,7 +3034,7 @@ def post_delete(body: DeleteBody, request: Request) -> JSONResponse:
         outcome.as_shell_result(),
         warnings,
         fallback_error="delete.refused",
-        fallback_remedy=_cli_remedy("delete.sh", planned_argv),
+        fallback_remedy=_cli_remedy(request, "delete.sh", planned_argv),
     )
 
 
@@ -3166,7 +3194,7 @@ def post_intake(body: IntakeBody, request: Request) -> JSONResponse:
                 HTTP_UNPROCESSABLE_ENTITY,
                 exc.error,
                 f"intake refused the body: {exc.message} Nothing was written.",
-                _routable_intake_example_curl(request, body.project),
+                _routable_intake_example_curl(request, body.project, body.filename),
                 warnings,
             )
         # A bare but unroutable name is refused below by route_intake_name,
@@ -3189,7 +3217,7 @@ def post_intake(body: IntakeBody, request: Request) -> JSONResponse:
     project, outcome = _resolve_project(ctx, body.project)
     if project is not None:
         with ops_call() as outcome:
-            ops_write.route_intake_name(project, temp_file_path)
+            ops_write.route_intake_name(project, temp_file_path, ctx.kanban_root)
             _write_intake_temp_file(temp_intake_dir, temp_file_path, body.content)
             deposited = ops_write.deposit_intake(ctx, project, temp_file_path)
         if outcome.ok:
@@ -3199,13 +3227,15 @@ def post_intake(body: IntakeBody, request: Request) -> JSONResponse:
         # route_intake_name refused before the temp file was written, so the
         # CLI form would name a file that does not exist. The remedy re-sends
         # the request under a routable example name instead, as the
-        # bare-filename refusal above does.
+        # bare-filename refusal above does; an unroutable name has no
+        # routing prefix to keep, so the example is BUG-0001-example.md.
         fallback_remedy = (
             "Nothing was written. Re-send the request with a filename that routes, "
-            "for example: " + _routable_intake_example_curl(request, project or body.project)
+            "for example: "
+            + _routable_intake_example_curl(request, project or body.project, body.filename)
         )
     else:
-        fallback_remedy = _cli_remedy("intake.sh", planned_argv)
+        fallback_remedy = _cli_remedy(request, "intake.sh", planned_argv)
     return _make_dual_channel_envelope(
         outcome.as_shell_result(),
         warnings,
@@ -3260,7 +3290,7 @@ def post_unwind_rc(body: UnwindRcBody, request: Request) -> JSONResponse:
     Body fields:
 
     - ``project`` (required) — project name.
-    - ``key``     (required) — RC version to unwind (e.g. ``v1.2.0``).
+    - ``key``     (required) — RC version to unwind (e.g. ``v1.2.3``).
     - ``confirm`` (required unless ``dry_run`` is true) — ``true``, or exactly
                   ``unwind-rc <project> <key>``. Missing, ``false`` or empty →
                   422 ``unwind_rc.confirm_required``; any other string → 422
@@ -3396,7 +3426,7 @@ def post_unwind_rc(body: UnwindRcBody, request: Request) -> JSONResponse:
         outcome.as_shell_result(),
         warnings,
         fallback_error="unwind_rc.refused",
-        fallback_remedy=_cli_remedy("unwind-rc.sh", planned_argv),
+        fallback_remedy=_cli_remedy(request, "unwind-rc.sh", planned_argv),
     )
 
 
@@ -3524,7 +3554,7 @@ def post_set_version_ceiling(body: SetVersionCeilingBody, request: Request) -> J
         outcome.as_shell_result(),
         warnings,
         fallback_error="set_version_ceiling.refused",
-        fallback_remedy=_cli_remedy("set-version-ceiling.sh", planned_argv),
+        fallback_remedy=_cli_remedy(request, "set-version-ceiling.sh", planned_argv),
     )
 
 
@@ -3609,7 +3639,7 @@ def post_switch_provider(body: SwitchProviderBody, request: Request) -> JSONResp
         outcome.as_shell_result(),
         warnings,
         fallback_error="switch_provider.refused",
-        fallback_remedy=_cli_remedy("switch-provider.sh", planned_argv),
+        fallback_remedy=_cli_remedy(request, "switch-provider.sh", planned_argv),
     )
 
 
@@ -3713,6 +3743,7 @@ def post_create_project(body: CreateProjectBody, request: Request) -> JSONRespon
             git_remote=body.git_remote or None,
             dev_tree=body.dev_tree or None,
             git_repo=body.git_repo or None,
+            kanban_root=request.app.state.api_cfg.kanban_root,
         )
     except ops_projects.ProjectValueRefused as exc:
         return _project_value_refusal(request, exc, warnings)
@@ -3768,7 +3799,7 @@ def post_create_project(body: CreateProjectBody, request: Request) -> JSONRespon
         outcome.as_shell_result(),
         warnings,
         fallback_error="create_project.refused",
-        fallback_remedy=_cli_remedy("create-project.sh", planned_argv),
+        fallback_remedy=_cli_remedy(request, "create-project.sh", planned_argv),
     )
 
 
@@ -3823,9 +3854,10 @@ def post_add_project(body: AddProjectBody, request: Request) -> JSONResponse:
       ``{"error": "add_project.<field>_required", "message": str, "remedy": str,
       "warnings": list}`` at 422 when this layer refused a body missing a
       required field, and the same shape under ``add_project.project_invalid``
-      for a ``project`` that is not one name a projects.cfg section can hold
-      (letters, digits, ``_`` and ``-``), before anything runs -- never the
-      framework's ``{"detail": [...]}`` list.
+      for a ``project`` that does not satisfy the project-name rule
+      (lowercase letters, digits and ``-``, starting with a lowercase letter
+      or digit), before anything runs -- never the framework's
+      ``{"detail": [...]}`` list.
 
     HTTP status: 200 on exit_code 0, the refusal's own status on non-zero
     (404 / 409 / 422, else 500), 422 on validation failure.
@@ -3886,7 +3918,7 @@ def post_add_project(body: AddProjectBody, request: Request) -> JSONResponse:
         outcome.as_shell_result(),
         warnings,
         fallback_error="add_project.refused",
-        fallback_remedy=_cli_remedy("add-project.sh", planned_argv),
+        fallback_remedy=_cli_remedy(request, "add-project.sh", planned_argv),
     )
 
 
@@ -4036,7 +4068,7 @@ def post_remove_project(body: RemoveProjectBody, request: Request) -> JSONRespon
         outcome.as_shell_result(),
         warnings,
         fallback_error="remove_project.refused",
-        fallback_remedy=_cli_remedy("remove-project.sh", planned_argv),
+        fallback_remedy=_cli_remedy(request, "remove-project.sh", planned_argv),
     )
 
 
@@ -4192,7 +4224,7 @@ def post_ship_rc(body: ShipRcBody, request: Request) -> JSONResponse:
         outcome.as_shell_result(),
         warnings,
         fallback_error="ship_rc.refused",
-        fallback_remedy=_cli_remedy("ship-rc.sh", planned_argv),
+        fallback_remedy=_cli_remedy(request, "ship-rc.sh", planned_argv),
     )
 
 
@@ -4451,7 +4483,7 @@ def post_wake_now(body: WakeNowBody, request: Request) -> JSONResponse:
         result,
         warnings,
         fallback_error="wake_now.refused",
-        fallback_remedy=_cli_remedy("wake-now.sh", planned_argv),
+        fallback_remedy=_cli_remedy(request, "wake-now.sh", planned_argv),
     )
 
 
@@ -4736,7 +4768,7 @@ def post_cancel_rc(body: CancelRcBody, request: Request) -> JSONResponse:
         fallback_remedy=(
             "Fix the condition the message names, then re-run the CLI form, "
             "which prints the full plan and prompts before changing anything: "
-            f"team/scripts/cm/cancel-rc.sh --project {body.project} --key {body.key}"
+            + _installed_command(request, "cm/cancel-rc.sh", "--project", body.project, "--key", body.key)
         ),
     )
 
@@ -4859,9 +4891,8 @@ def post_release_locks(body: ReleaseLocksBody, request: Request) -> JSONResponse
         warnings,
         fallback_error="release_locks.refused",
         fallback_remedy=(
-            "Run team/scripts/release-locks.sh with no flags to list every lock "
-            "by name, then re-run: team/scripts/release-locks.sh --release "
-            f"{body.release}"
+            f"Run {_installed_command(request, 'release-locks.sh')} with no flags to list every lock "
+            f"by name, then re-run: {_installed_command(request, 'release-locks.sh', '--release', body.release)}"
         ),
     )
 
@@ -4998,5 +5029,89 @@ def post_archive(body: ArchiveBody, request: Request) -> JSONResponse:
         result,
         warnings,
         fallback_error="archive.refused",
-        fallback_remedy=_cli_remedy("archive.sh", planned_argv),
+        fallback_remedy=_cli_remedy(request, "archive.sh", planned_argv),
+    )
+
+
+# ---------------------------------------------------------------------------
+# POST /operations/inbox-answer
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/inbox-answer",
+    summary="Answer an open operator inbox entry",
+    response_description=(
+        "JSON envelope with exit_code, stdout and stderr of the answer (the "
+        "same entry text and exit code inbox.sh answer produces)."
+    ),
+)
+def post_inbox_answer(body: InboxAnswerBody, request: Request) -> JSONResponse:
+    """Record an answer on an open entry in a project's operator inbox.
+
+    Calls ``pgai_agent_kanban.overwatch.inbox.answer_entry`` -- the function
+    ``inbox.sh answer`` reaches through ``pp_run_ops`` -- after resolving
+    ``project`` exactly as inbox.sh does; no subprocess is started. The
+    entry stays open until it is closed (``inbox.sh close``); listing it is
+    ``GET /projects/{name}/inbox``.
+
+    Body fields:
+
+    - ``project`` (required) — project name.
+    - ``id``      — entry ID, e.g. ``INBOX-0001``.
+    - ``answer``  — the answer text.
+    - ``dry_run`` (optional, bool) — when True, returns the equivalent CLI
+                                      call without changing the inbox.
+
+    Response envelope (exit_code 0):
+      ``{"exit_code": int, "stdout": str, "stderr": str, "warnings": list}``
+      -- ``stdout`` is the answered entry in the inbox file's own shape, the
+      text ``inbox.sh answer`` prints.
+
+    Response on a refused call:
+      ``{"exit_code": int, "stdout": str, "stderr": str, "error": str,
+      "message": str, "remedy": str, "warnings": list}`` carrying the
+      module's own triple, the one ``inbox.sh answer`` prints:
+      ``inbox.unknown_entry`` (404), ``inbox.entry_closed``,
+      ``inbox.empty_answer`` and ``inbox.lock_busy`` (409),
+      ``inbox.bad_entry_id`` (409), ``project_resolve.not_found`` (404);
+      ``{"error": "inbox.project_required", "message": str, "remedy": str,
+      "warnings": list}`` at 422 when the body carries no ``project``, and
+      ``inbox.project_invalid`` at 422 for one that is not one plain name,
+      both before anything is read.
+    """
+    known_fields = list(InboxAnswerBody.model_fields.keys())
+    warnings = _capture_unknown_fields(body.model_extra or {}, known_fields)
+    example_body = '{"project": "my-app", "id": "INBOX-0001", "answer": "keep"}'
+
+    try:
+        validate_required({"project": body.project}, required_keys=["project"])
+    except ValidationError as exc:
+        return _missing_field_refusal(request, "inbox", exc, example_body, warnings)
+
+    refused = _component_refusal(request, "inbox", {"project": body.project}, example_body, warnings)
+    if refused is not None:
+        return refused
+
+    script = _script_path(request, "inbox.sh")
+    flags: dict = {"project": body.project, "id": body.id, "answer": body.answer}
+    planned_argv = [script, "answer", *build_argv(script, flags)[1:]]
+
+    short_circuit = _dry_run_envelope(body.dry_run, planned_argv, warnings)
+    if short_circuit is not None:
+        return short_circuit
+
+    ctx = _ops_context(request)
+    project, outcome = _resolve_project(ctx, body.project)
+    if project is not None:
+        with ops_call() as outcome:
+            entry = overwatch_inbox.answer_entry(ctx, project, body.id or "", body.answer or "")
+        if outcome.ok:
+            outcome.stdout += overwatch_inbox.render_entry(entry) + "\n"
+
+    return _make_dual_channel_envelope(
+        outcome.as_shell_result(),
+        warnings,
+        fallback_error="inbox.refused",
+        fallback_remedy=_cli_remedy(request, "inbox.sh", planned_argv),
     )

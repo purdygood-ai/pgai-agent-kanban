@@ -38,6 +38,10 @@
 #   itself uses, rendered via the ledger module's own format_record rather
 #   than a second hand-rolled block format)
 #
+# The rendering is pgai_agent_kanban.ops.read.render_deep_verify_status,
+# reached through pp_run_ops as the get_deep_verify_status verb of
+# pgai_agent_kanban.ops.
+#
 # Exit codes:
 #   0   Status printed to stdout.
 #   1   Usage error (undeclared flag, missing --project).
@@ -100,43 +104,10 @@ fi
 
 _dvs_project="$(pp_resolve_project_name "${_dvs_project}")" || exit 1
 
-PYTHONPATH="$(pp_pythonpath)" python3 - "${PGAI_AGENT_KANBAN_ROOT_PATH}" "${_dvs_project}" <<'PY'
-import sys
-
-from pgai_agent_kanban.deep_verify.ledger import DeepVerifyRecord, format_record
-from pgai_agent_kanban.ops.context import OpsContext
-from pgai_agent_kanban.ops.errors import NotFound, Refused
-from pgai_agent_kanban.ops.read import get_deep_verify_status
-
-kanban_root, project = sys.argv[1], sys.argv[2]
-ctx = OpsContext(kanban_root=kanban_root)
-
-try:
-    status = get_deep_verify_status(ctx, project)
-except NotFound as exc:
-    print(f"deep-verify-status.sh: {exc}", file=sys.stderr)
-    sys.exit(2)
-except Refused as exc:
-    # str(exc) is already the dual-channel error/message/remedy block --
-    # printed verbatim, never re-worded.
-    print(str(exc), file=sys.stderr)
-    sys.exit(3)
-
-print(f"project: {project}")
-print(f"mode: {status['mode']}")
-
-latest = status["latest"]
-if latest is None:
-    print("latest: never-run")
-else:
-    print(
-        f"latest: {latest['verdict']} "
-        f"({latest['timestamp']}, {latest['version']}, {latest['commit']})"
-    )
-
-entries = status["entries"]
-print(f"\nLedger ({len(entries)} entries):")
-for entry in entries:
-    print(format_record(DeepVerifyRecord.from_dict(entry)))
-    print()
-PY
+# pgai_agent_kanban.ops.read.render_deep_verify_status prints the status
+# (exit 0), or refuses: exit 2 for a project with no directory, exit 3 for a
+# malformed ledger or an unrecognized deep_verify value.
+_dvs_rc=0
+pp_run_ops pgai_agent_kanban.ops get_deep_verify_status \
+    "${PGAI_AGENT_KANBAN_ROOT_PATH}" "${_dvs_project}" || _dvs_rc=$?
+exit "${_dvs_rc}"

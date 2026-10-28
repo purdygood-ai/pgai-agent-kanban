@@ -44,19 +44,43 @@
 #
 # Format detection
 # ----------------
-# The library inspects the first non-comment, non-blank line of projects.cfg:
-#   - Starts with '[' → INI mode
-#   - Otherwise       → colon-legacy mode (deprecation warning emitted once)
+# The library inspects the first non-comment, non-blank line of projects.cfg
+# (a comment line starts with '#' or ';', after optional whitespace):
+#   - Starts with '[' after optional whitespace → INI mode
+#   - Otherwise → colon-legacy mode (deprecation warning emitted once)
+# pgai_agent_kanban.lib.ini.projects_registry reads the same file as INI by
+# the same rule, so both readers list the same projects.
 #
 # INI parsing notes
 # -----------------
-# - Section header regex: ^\[project:([a-zA-Z0-9_-]+)\]$
+# - Section header: [project:NAME] alone on its line, NAME matching the
+#   project-name rule PROJECTS_CFG_NAME_RE (lib/projects_cfg.sh), matched
+#   after leading and trailing whitespace is dropped, so an indented header,
+#   a header with trailing spaces and a file with CRLF line endings read as
+#   they do for the Python registry
+#   (pgai_agent_kanban.lib.ini.projects_registry); a header followed by a
+#   trailing comment ("[project:alpha] # first") is no project section. The
+#   awk readers share the rule through PROJECTS_CFG_AWK_HEADER
+#   (lib/projects_cfg.sh).
+#   A [project:...] section whose name does not match that rule
+#   ([project:bad.name], [project:bad name], [project:My_App]) registers no
+#   project and ends the project section before it; no reader credits its keys to any
+#   project, and projects_cfg_unaccepted_names lists its name so a caller
+#   can report it.
 #   Other section patterns (wrong brackets, typos) emit a line-pointing error.
 # - Field key regex: ^[a-z_]+[[:space:]]*= (lowercase letters, underscores, optional whitespace around =)
-# - Duplicate [project:NAME] sections: last-wins (later section silently
-#   overwrites data from the earlier one). This matches the behavior most
-#   operators expect from INI-style files and avoids hard errors during
-#   hand-editing. A future WRITER task may add a lint command if needed.
+# - Duplicate [project:NAME] sections: last-wins per key (a later section
+#   overwrites the keys it sets and leaves the others). This matches the
+#   behavior most operators expect from INI-style files and avoids hard
+#   errors during hand-editing. projects_cfg_list lists the name once, at
+#   its first section's position, sorted by the last priority any of its
+#   sections sets -- as ini.projects_registry reads it. The per-field
+#   readers (projects_cfg_priority, projects_cfg_field and so
+#   projects_cfg_enabled, projects_cfg_max_rows, projects_cfg_color) and the
+#   bulk loader _projects_cfg_parse_ini read each key from the last section
+#   that sets it, and a key only an earlier section sets keeps that value --
+#   the same per-key merge as ini.projects_registry.
+#   projects_cfg_registration prints the first section only.
 # - Empty [project:NAME] sections (no fields) are valid. All fields default
 #   to their code defaults when not present.
 #
@@ -64,13 +88,20 @@
 # ----------
 #   projects_cfg_path                       — echo path to projects.cfg
 #   projects_cfg_ensure                     — create projects.cfg with header if missing
-#   projects_cfg_list                       — echo project names in priority order, one per line.
+#   projects_cfg_list [--registration-order]
+#                                           — echo project names in priority order, one per line
+#                                             (--registration-order: in projects.cfg file order).
 #                                             Exits non-zero with a clear error when projects.cfg
 #                                             is missing or empty.
+#   projects_cfg_unaccepted_names           — echo, once each in file order, the name of every
+#                                             [project:...] section whose name the registry does
+#                                             not accept (projects_cfg_list never lists it).
+#                                             Prints nothing and returns 0 when there is none.
 #   projects_cfg_active                     — like projects_cfg_list but excludes halted projects
 #                                             (those with a per-project HALT file). Requires
 #                                             lib/project_paths.sh sourced first.
 #   projects_cfg_has <name>                 — return 0 if registered, 1 otherwise
+#   projects_cfg_registration <name>        — echo <name>'s INI section or colon-legacy line verbatim
 #   projects_cfg_add <name> [priority]      — register a project; idempotent
 #   projects_cfg_remove <name>              — unregister; idempotent
 #   projects_cfg_priority <name>            — echo the priority for <name>, or empty if unregistered
@@ -194,8 +225,9 @@ EOF
 
 # ---------------------------------------------------------------------------
 # projects_cfg_format <path>
-# Echo 'ini' if the file's first non-comment, non-blank line starts with '['.
-# Echo 'colon-legacy' otherwise.
+# Echo 'ini' if the file's first non-comment, non-blank line starts with '['
+# (after optional whitespace). Echo 'colon-legacy' otherwise. A comment line
+# starts with '#' or ';' after optional whitespace.
 # Returns 0 on success. Returns 1 if the path argument is missing.
 #
 # Special case: when the file contains only comments and blank lines (no data
@@ -224,10 +256,10 @@ projects_cfg_format() {
 
     local fmt
     fmt="$(awk '
-        /^[[:space:]]*#/ { next }
+        /^[[:space:]]*[#;]/ { next }
         /^[[:space:]]*$/ { next }
         {
-            if (substr($0, 1, 1) == "[") {
+            if ($0 ~ /^[[:space:]]*\[/) {
                 print "ini"
             } else {
                 print "colon-legacy"
@@ -274,12 +306,15 @@ projects_cfg_format() {
 #
 # Callers must declare these as associative arrays (declare -A) before calling.
 #
-# Duplicate [project:NAME] sections: last-wins. Data from the earlier section
-# is silently overwritten by the later one.
+# Duplicate [project:NAME] sections merge per key: each array holds the value
+# from the last section that sets the matching key, a key only an earlier
+# section sets keeps that value, and a key no section sets keeps its default
+# (enabled "true", the others empty) -- the same merge as the per-field
+# readers and ini.projects_registry.
 #
-# Malformed section headers (lines starting with '[' that do not match
-# ^\[project:([a-zA-Z0-9_-]+)\]$) emit a line-pointing error to stderr
-# and are skipped (parsing continues).
+# Malformed section headers (lines starting with '[' that are not
+# [project:NAME] with NAME matching PROJECTS_CFG_NAME_RE, lib/projects_cfg.sh)
+# emit a line-pointing error to stderr and are skipped (parsing continues).
 #
 # dashboard_max_rows is validated to [5, 100]. Values outside that range
 # are clamped and a warning is emitted to stderr.
@@ -305,20 +340,27 @@ _projects_cfg_parse_ini() {
 
         # Section header?
         if [[ "${_line:0:1}" == "[" ]]; then
-            # Validate section header matches ^\[project:([a-zA-Z0-9_-]+)\]$
-            if [[ "$_line" =~ ^\[project:([a-zA-Z0-9_-]+)\]$ ]]; then
+            # A [project:NAME] header whose NAME the project-name rule accepts.
+            _cur_name=""
+            if [[ "$_line" =~ ^\[project:(.*)\]$ ]]; then
                 _cur_name="${BASH_REMATCH[1]}"
-                # Initialize defaults for this section (last-wins: re-init on
-                # duplicate section — any previously parsed data is overwritten)
-                projects_priority["$_cur_name"]=""
-                projects_color["$_cur_name"]=""
-                projects_max_rows["$_cur_name"]=""
-                projects_enabled["$_cur_name"]="true"
-                projects_description["$_cur_name"]=""
+                [[ "$_cur_name" =~ $PROJECTS_CFG_NAME_RE ]] || _cur_name=""
+            fi
+            if [[ -n "$_cur_name" ]]; then
+                # Initialize defaults the first time a name is seen only. A
+                # repeated section merges per key: the keys it sets overwrite
+                # the earlier values, every other key keeps its value.
+                # projects_enabled is always set here, so it marks "seen".
+                if [[ -z "${projects_enabled["$_cur_name"]+set}" ]]; then
+                    projects_priority["$_cur_name"]=""
+                    projects_color["$_cur_name"]=""
+                    projects_max_rows["$_cur_name"]=""
+                    projects_enabled["$_cur_name"]="true"
+                    projects_description["$_cur_name"]=""
+                fi
             else
                 echo "[projects.cfg] ERROR: malformed section header at line ${_line_no}: ${_line}" >&2
-                echo "[projects.cfg]        Expected: [project:NAME] where NAME matches [a-zA-Z0-9_-]+" >&2
-                _cur_name=""
+                echo "[projects.cfg]        Expected: [project:NAME] where NAME matches ${PROJECTS_CFG_NAME_RE}" >&2
             fi
             continue
         fi
@@ -718,10 +760,28 @@ projects_cfg_migrate_comment_block() {
 }
 
 # ---------------------------------------------------------------------------
-# projects_cfg_list — echo project names in priority order, one per line.
-# Skips comments and blank lines.
+# _projects_cfg_list_order <priority|registration>
+# Internal filter for projects_cfg_list. Reads "<line>\t<priority>\t<name>"
+# rows in file order and writes them sorted by priority then file line
+# ("priority"), or unchanged ("registration").
+# ---------------------------------------------------------------------------
+_projects_cfg_list_order() {
+    if [[ "${1:-}" == "registration" ]]; then
+        cat
+    else
+        sort -k2,2n -k1,1n
+    fi
+}
+
+# ---------------------------------------------------------------------------
+# projects_cfg_list [--registration-order] — echo project names in priority
+# order, one per line. Skips comments and blank lines.
 #
 # Works with both INI and colon-legacy formats (format detected automatically).
+# An INI name registered by more than one [project:NAME] section is listed
+# once, at its first section's position, with the last priority set. A
+# [project:...] section whose name the registry rejects ([project:bad.name])
+# ends the section before it, so a priority under it is no project's.
 #
 # Sort order:
 #   Primary key:   priority (ascending, numeric). An absent or non-integer
@@ -731,10 +791,17 @@ projects_cfg_migrate_comment_block() {
 #                  projects.cfg (earlier file position = higher priority
 #                  among equal-priority projects).
 #
+# --registration-order skips the priority sort: names come out in the order
+# their entries appear in projects.cfg, so the first line is the first
+# project registered in the file.
+#
 # When projects.cfg is missing or contains no registered projects, exits
 # non-zero with a clear error — no silent default fallback.
 # ---------------------------------------------------------------------------
 projects_cfg_list() {
+    local order="priority"
+    [[ "${1:-}" == "--registration-order" ]] && order="registration"
+
     local cfg
     cfg="$(projects_cfg_path)"
 
@@ -746,16 +813,23 @@ projects_cfg_list() {
         if [[ "$fmt" == "ini" ]]; then
             # INI format: parse sections in order, emit sorted by priority.
             # Use awk to collect (line_number, priority, name) then sort.
-            names="$(awk '
+            names="$(awk "${PROJECTS_CFG_AWK_HEADER}"'
                 /^[[:space:]]*#/ { next }
                 /^[[:space:]]*$/ { next }
-                /^\[project:[a-zA-Z0-9_-]+\]$/ {
-                    # Extract name between "[project:" and "]"
-                    cur = substr($0, 10, length($0) - 10)
-                    section_line[cur] = NR
-                    section_order[++n_sections] = cur
+                (hdr = project_header($0)) != "" {
+                    cur = hdr
+                    # A repeated section adds no second entry: the name
+                    # keeps its first position, and its priority is the
+                    # last one any of its sections sets.
+                    if (!(cur in section_line)) {
+                        section_line[cur] = NR
+                        section_order[++n_sections] = cur
+                    }
                     next
                 }
+                # A [project:...] section with a rejected name is no
+                # project: its keys belong to none.
+                project_section($0) { cur = ""; next }
                 /^[[:space:]]*\[/ { next }   # other section types — skip
                 /^[a-z_]+[[:space:]]*=/ && cur != "" {
                     eq = index($0, "=")
@@ -779,7 +853,7 @@ projects_cfg_list() {
                         printf "%010d\t%d\t%s\n", section_line[nm], p, nm
                     }
                 }
-            ' "$cfg" | sort -k2,2n -k1,1n | awk -F'\t' '{ print $3 }')"
+            ' "$cfg" | _projects_cfg_list_order "$order" | awk -F'\t' '{ print $3 }')"
         else
             # Colon-legacy format: existing sort logic (no deprecation warning here;
             # the warning is emitted by _projects_cfg_emit_deprecation_warning via
@@ -795,7 +869,7 @@ projects_cfg_list() {
                     if (prio !~ /^[+-]?[0-9]+$/) prio = 999
                     printf "%010d\t%d\t%s\n", NR, prio, name
                 }
-            ' "$cfg" | sort -k2,2n -k1,1n | awk -F'\t' '{ print $3 }')"
+            ' "$cfg" | _projects_cfg_list_order "$order" | awk -F'\t' '{ print $3 }')"
         fi
     fi
 
@@ -806,6 +880,35 @@ projects_cfg_list() {
     fi
 
     echo "$names"
+}
+
+# ---------------------------------------------------------------------------
+# projects_cfg_unaccepted_names — echo the name of every [project:...]
+# section of an INI projects.cfg whose name the registry does not accept:
+# project_section recognises it, project_header refuses its name
+# (PROJECTS_CFG_AWK_HEADER, lib/projects_cfg.sh). [project:bad.name] gives
+# "bad.name", [project:bad name] "bad name", [project:] an empty line.
+#
+# Names come out in file order, each once, exactly as written between
+# "[project:" and the closing "]". projects_cfg_list never lists them, so a
+# caller that must not lose a mistyped registration (wake-batch.sh) reads
+# both. A missing projects.cfg, a colon-legacy one (whose names
+# projects_cfg_list prints as written) and a registry with no such section
+# print nothing. Always returns 0.
+# ---------------------------------------------------------------------------
+projects_cfg_unaccepted_names() {
+    local cfg
+    cfg="$(projects_cfg_path)"
+    [[ -f "$cfg" && -r "$cfg" ]] || return 0
+    [[ "$(projects_cfg_format "$cfg")" == "ini" ]] || return 0
+    awk "${PROJECTS_CFG_AWK_HEADER}"'
+        /^[[:space:]]*#/ { next }
+        project_section($0) && project_header($0) == "" {
+            name = project_section_name($0)
+            if (!(name in seen)) { seen[name] = 1; print name }
+        }
+    ' "$cfg" || true
+    return 0
 }
 
 # ---------------------------------------------------------------------------
@@ -835,7 +938,7 @@ projects_cfg_active() {
 # projects.cfg sets enabled=false for it.
 #
 # The one answer the wake loop, PM discovery, the OVERWATCH sweep and the
-# daily OVERWATCH wake skip a project on; `why` (pgai_agent_kanban/ops/
+# overwatch wake skip a project on; `why` (pgai_agent_kanban/ops/
 # verdict.py) reads the same rule through the Python twin,
 # pgai_agent_kanban.lib.ini.project_enabled -- a change to the rule here
 # needs the same change there.
@@ -881,7 +984,10 @@ projects_cfg_disabled_skip_line() {
 }
 
 # ---------------------------------------------------------------------------
-# projects_cfg_has <name> — return 0 if registered, 1 otherwise
+# projects_cfg_has <name> — return 0 if registered, 1 otherwise. In an INI
+# registry <name> is registered when a header project_header accepts names
+# it (PROJECTS_CFG_AWK_HEADER), so a name projects_cfg_list does not list --
+# [project:bad.name], [project:My_App] -- is not registered here either.
 # ---------------------------------------------------------------------------
 projects_cfg_has() {
     local name="$1"
@@ -895,15 +1001,70 @@ projects_cfg_has() {
     fmt="$(projects_cfg_format "$cfg")"
 
     if [[ "$fmt" == "ini" ]]; then
-        grep -qE "^\[project:${name}\]$" "$cfg"
+        # The header rule every registry reader uses: leading and trailing
+        # whitespace (a CRLF's CR included) ignored, the name held to
+        # PROJECTS_CFG_NAME_RE.
+        awk -v n="$name" "${PROJECTS_CFG_AWK_HEADER}"'
+            project_header($0) == n { found = 1; exit }
+            END { exit !found }
+        ' "$cfg"
     else
         grep -qE "^[[:space:]]*${name}[[:space:]]*:" "$cfg"
     fi
 }
 
 # ---------------------------------------------------------------------------
+# projects_cfg_registration <name> — echo <name>'s registration exactly as
+# projects.cfg holds it, for a caller that records or copies the entry.
+#
+#   INI          — the first [project:NAME] section: its header line and
+#                  every line after it (comments and blank lines included)
+#                  up to the next line starting with '[' (after optional
+#                  whitespace) or end of file.
+#   colon-legacy — the first data line whose name field is NAME, e.g.
+#                  "NAME:1:#378ADD".
+#
+# Lines are printed unaltered; the header is found by the same rule as
+# projects_cfg_has, so leading and trailing whitespace on it is tolerated. Returns 0
+# with the text on stdout, or 1 with nothing printed when NAME is empty,
+# projects.cfg is missing, or NAME is not registered.
+# ---------------------------------------------------------------------------
+projects_cfg_registration() {
+    local name="${1:-}"
+    [[ -z "$name" ]] && return 1
+
+    local cfg
+    cfg="$(projects_cfg_path)"
+    [[ -f "$cfg" ]] || return 1
+
+    if [[ "$(projects_cfg_format "$cfg")" == "ini" ]]; then
+        awk -v n="$name" "${PROJECTS_CFG_AWK_HEADER}"'
+            !found && project_header($0) == n { found = 1; print; next }
+            found && /^[[:space:]]*\[/ { exit }
+            found { print }
+            END { exit !found }
+        ' "$cfg"
+    else
+        awk -v n="$name" '
+            /^[[:space:]]*#/ { next }
+            /^[[:space:]]*$/ { next }
+            {
+                colon = index($0, ":")
+                if (colon == 0) next
+                field = substr($0, 1, colon - 1)
+                gsub(/^[[:space:]]+|[[:space:]]+$/, "", field)
+                if (field == n) { found = 1; print; exit }
+            }
+            END { exit !found }
+        ' "$cfg"
+    fi
+}
+
+# ---------------------------------------------------------------------------
 # projects_cfg_priority <name> — echo the priority value for <name>.
 # Returns 0 with the priority on stdout if registered. Returns 1 silently if not.
+# INI: the priority of the last [project:NAME] section that sets one
+# (_projects_cfg_ini_value in lib/projects_cfg.sh).
 # ---------------------------------------------------------------------------
 projects_cfg_priority() {
     local name="$1"
@@ -917,24 +1078,7 @@ projects_cfg_priority() {
     fmt="$(projects_cfg_format "$cfg")"
 
     if [[ "$fmt" == "ini" ]]; then
-        awk -v n="$name" '
-            /^[[:space:]]*#/ { next }
-            /^[[:space:]]*$/ { next }
-            /^\[project:[a-zA-Z0-9_-]+\]$/ {
-                cur = substr($0, 10, length($0) - 10)
-                next
-            }
-            /^[[:space:]]*\[/ { cur = ""; next }
-            /^[a-z_]+[[:space:]]*=/ && cur == n {
-                eq = index($0, "=")
-                key = substr($0, 1, eq - 1)
-                val = substr($0, eq + 1)
-                gsub(/^[[:space:]]+|[[:space:]]+$/, "", key)
-                gsub(/^[[:space:]]+|[[:space:]]+$/, "", val)
-                if (key == "priority") { print val; found=1; exit }
-            }
-            END { if (!found) exit 1 }
-        ' "$cfg"
+        _projects_cfg_ini_value "$cfg" "$name" priority || return 1
     else
         awk -F: -v n="$name" '
             /^[[:space:]]*#/ { next }
@@ -955,7 +1099,8 @@ projects_cfg_priority() {
 # Returns the per-project value if set, or 20 (the code default) if absent.
 #
 # Precedence (highest to lowest):
-#   1. Per-project dashboard_max_rows in projects.cfg
+#   1. Per-project dashboard_max_rows in projects.cfg (from the last
+#      [project:NAME] section that sets it -- _projects_cfg_ini_value)
 #   2. DASHBOARD_MAX_ROWS env var (global fallback from kanban.cfg [dashboard] max_rows)
 #   3. Code default: 20
 #
@@ -989,24 +1134,7 @@ projects_cfg_max_rows() {
     [[ -f "$cfg" ]] || { echo "$default_rows"; return 0; }
 
     local raw_val
-    raw_val="$(awk -v n="$name" '
-        /^[[:space:]]*#/ { next }
-        /^[[:space:]]*$/ { next }
-        /^\[project:[a-zA-Z0-9_-]+\]$/ {
-            cur = substr($0, 10, length($0) - 10)
-            next
-        }
-        /^[[:space:]]*\[/ { cur = ""; next }
-        /^[a-z_]+[[:space:]]*=/ && cur == n {
-            eq = index($0, "=")
-            key = substr($0, 1, eq - 1)
-            val = substr($0, eq + 1)
-            gsub(/^[[:space:]]+|[[:space:]]+$/, "", key)
-            gsub(/^[[:space:]]+|[[:space:]]+$/, "", val)
-            if (key == "dashboard_max_rows") { print val; found=1; exit }
-        }
-        END { if (!found) exit 1 }
-    ' "$cfg" 2>/dev/null)"
+    raw_val="$(_projects_cfg_ini_value "$cfg" "$name" dashboard_max_rows 2>/dev/null)"
 
     if [[ -z "$raw_val" ]]; then
         # Field absent — use global fallback or code default
@@ -1039,6 +1167,12 @@ projects_cfg_max_rows() {
 # Returns 1 (with empty stdout) when the project is not registered or the
 # field is absent.
 #
+# INI: a project registered by more than one [project:NAME] section reads
+# <field> from the last section that sets it, and a field only an earlier
+# section sets keeps that value (_projects_cfg_ini_value in
+# lib/projects_cfg.sh), as pgai_agent_kanban.lib.ini.projects_registry reads
+# the same file.
+#
 # <field> must be a recognized INI key name (priority, description, enabled,
 # dashboard_color, dashboard_max_rows, or any future dashboard_* key).
 #
@@ -1064,28 +1198,7 @@ projects_cfg_field() {
         [[ -f "$cfg" ]] || return 1
 
         local result
-        result="$(awk -v n="$name" -v f="$field" '
-            /^[[:space:]]*#/ { next }
-            /^[[:space:]]*$/ { next }
-            /^\[project:[a-zA-Z0-9_-]+\]$/ {
-                cur = substr($0, 10, length($0) - 10)
-                next
-            }
-            /^[[:space:]]*\[/ { cur = ""; next }
-            /^[a-z_]+[[:space:]]*=/ && cur == n {
-                eq = index($0, "=")
-                key = substr($0, 1, eq - 1)
-                val = substr($0, eq + 1)
-                gsub(/^[[:space:]]+|[[:space:]]+$/, "", key)
-                gsub(/^[[:space:]]+|[[:space:]]+$/, "", val)
-                if (key == f) { print val; found=1; exit }
-            }
-            END { if (!found) exit 1 }
-        ' "$cfg")"
-
-        if [[ $? -ne 0 ]]; then
-            return 1
-        fi
+        result="$(_projects_cfg_ini_value "$cfg" "$name" "$field")" || return 1
         echo "$result"
         return 0
     else
@@ -1146,9 +1259,9 @@ projects_cfg_add() {
             if [[ "$fmt" == "ini" ]]; then
                 local tmp
                 tmp="$(pgai_mktemp projects_tmp)"
-                awk -v n="$name" -v p="$priority" -v c="$color" '
-                    /^\[project:[a-zA-Z0-9_-]+\]$/ {
-                        cur = substr($0, 10, length($0) - 10)
+                awk -v n="$name" -v p="$priority" -v c="$color" "${PROJECTS_CFG_AWK_HEADER}"'
+                    (hdr = project_header($0)) != "" {
+                        cur = hdr
                         in_target = (cur == n)
                         print; next
                     }
@@ -1278,9 +1391,9 @@ projects_cfg_remove() {
     if [[ "$fmt" == "ini" ]]; then
         # Remove the entire [project:NAME] section (header + all key=value lines
         # until the next section or end of file).
-        awk -v n="$name" '
-            /^\[project:[a-zA-Z0-9_-]+\]$/ {
-                cur = substr($0, 10, length($0) - 10)
+        awk -v n="$name" "${PROJECTS_CFG_AWK_HEADER}"'
+            (hdr = project_header($0)) != "" {
+                cur = hdr
                 if (cur == n) { skip = 1; next }
                 skip = 0; print; next
             }

@@ -75,7 +75,7 @@ _WORKFLOW_PLUGINS = ["release", "document", "testing-only"]
 
 def _build_testing_only_kanban_root(
     parent: pathlib.Path,
-    project_name: str = "cert_proj",
+    project_name: str = "cert-proj",
     source_branch: str = "rc/v1.22.4",
 ) -> pathlib.Path:
     """Build a minimal kanban root for a testing-only project.
@@ -425,11 +425,11 @@ class TestOneTicketTestingOnlyPipeline:
         root = _build_testing_only_kanban_root(
             tmp_path, source_branch=source_branch
         )
-        proj = root / "projects" / "cert_proj"
+        proj = root / "projects" / "cert-proj"
         req_path = str(proj / "requirements" / "v1.0.0-one-ticket-testing-run.md")
 
         plan = _build_one_tester_plan(
-            project_name="cert_proj",
+            project_name="cert-proj",
             source_branch=source_branch,
             requirements_path=req_path,
         )
@@ -463,11 +463,11 @@ class TestOneTicketTestingOnlyPipeline:
         root = _build_testing_only_kanban_root(
             tmp_path, source_branch=source_branch
         )
-        proj = root / "projects" / "cert_proj"
+        proj = root / "projects" / "cert-proj"
         req_path = str(proj / "requirements" / "v1.0.0-one-ticket-testing-run.md")
 
         plan = _build_one_tester_plan(
-            project_name="cert_proj",
+            project_name="cert-proj",
             source_branch=source_branch,
             requirements_path=req_path,
         )
@@ -526,11 +526,11 @@ class TestOneTicketTestingOnlyPipeline:
         root = _build_testing_only_kanban_root(
             tmp_path, source_branch=source_branch
         )
-        proj = root / "projects" / "cert_proj"
+        proj = root / "projects" / "cert-proj"
         req_path = str(proj / "requirements" / "v1.0.0-one-ticket-testing-run.md")
 
         plan = _build_one_tester_plan(
-            project_name="cert_proj",
+            project_name="cert-proj",
             source_branch=source_branch,
             requirements_path=req_path,
         )
@@ -588,11 +588,11 @@ class TestOneTicketTestingOnlyPipeline:
         root = _build_testing_only_kanban_root(
             tmp_path, source_branch=source_branch
         )
-        proj = root / "projects" / "cert_proj"
+        proj = root / "projects" / "cert-proj"
         req_path = str(proj / "requirements" / "v1.0.0-one-ticket-testing-run.md")
 
         plan = _build_one_tester_plan(
-            project_name="cert_proj",
+            project_name="cert-proj",
             source_branch=source_branch,
             requirements_path=req_path,
         )
@@ -685,11 +685,11 @@ class TestOneTicketTestingOnlyPipeline:
         root = _build_testing_only_kanban_root(
             tmp_path, source_branch=source_branch
         )
-        proj = root / "projects" / "cert_proj"
+        proj = root / "projects" / "cert-proj"
         req_path = proj / "requirements" / "v1.0.0-one-ticket-testing-run.md"
 
         plan = _build_one_tester_plan(
-            project_name="cert_proj",
+            project_name="cert-proj",
             source_branch=source_branch,
             requirements_path=str(req_path),
         )
@@ -815,11 +815,11 @@ class TestOneTicketTestingOnlyPipeline:
         root = _build_testing_only_kanban_root(
             tmp_path, source_branch=source_branch
         )
-        proj = root / "projects" / "cert_proj"
+        proj = root / "projects" / "cert-proj"
         req_path = proj / "requirements" / "v1.0.0-one-ticket-testing-run.md"
 
         plan = _build_one_tester_plan(
-            project_name="cert_proj",
+            project_name="cert-proj",
             source_branch=source_branch,
             requirements_path=str(req_path),
         )
@@ -935,11 +935,11 @@ class TestOneTicketTestingOnlyPipeline:
         root = _build_testing_only_kanban_root(
             tmp_path, source_branch=source_branch
         )
-        proj = root / "projects" / "cert_proj"
+        proj = root / "projects" / "cert-proj"
         req_path = str(proj / "requirements" / "v1.0.0-one-ticket-testing-run.md")
 
         plan = _build_one_tester_plan(
-            project_name="cert_proj",
+            project_name="cert-proj",
             source_branch=source_branch,
             requirements_path=req_path,
         )
@@ -987,11 +987,11 @@ class TestOneTicketTestingOnlyPipeline:
         root = _build_testing_only_kanban_root(
             tmp_path, source_branch=source_branch
         )
-        proj = root / "projects" / "cert_proj"
+        proj = root / "projects" / "cert-proj"
         req_path = str(proj / "requirements" / "v1.0.0-one-ticket-testing-run.md")
 
         plan = _build_one_tester_plan(
-            project_name="cert_proj",
+            project_name="cert-proj",
             source_branch=source_branch,
             requirements_path=req_path,
         )
@@ -1040,7 +1040,7 @@ _WAKE_HARNESS = _TEAM_DIR / "scripts" / "wake" / "harness.sh"
 
 def _build_harness_kanban_root(
     parent: pathlib.Path,
-    project_name: str = "cert_proj",
+    project_name: str = "cert-proj",
     source_branch: str = "rc/v1.22.4",
 ) -> pathlib.Path:
     """Build a kanban root configured for the harness wake provider.
@@ -1242,11 +1242,11 @@ class TestOneTicketWakeDispatchClosure:
         """
         source_branch = "rc/v1.22.4"
         root = _build_harness_kanban_root(tmp_path, source_branch=source_branch)
-        proj = root / "projects" / "cert_proj"
+        proj = root / "projects" / "cert-proj"
         req_path = proj / "requirements" / "v1.0.0-one-ticket-testing-run.md"
 
         plan = _build_one_tester_plan(
-            project_name="cert_proj",
+            project_name="cert-proj",
             source_branch=source_branch,
             requirements_path=str(req_path),
         )
@@ -1324,11 +1324,11 @@ class TestOneTicketWakeDispatchClosure:
         """
         source_branch = "rc/v1.22.4"
         root = _build_harness_kanban_root(tmp_path, source_branch=source_branch)
-        proj = root / "projects" / "cert_proj"
+        proj = root / "projects" / "cert-proj"
         req_path = proj / "requirements" / "v1.0.0-one-ticket-testing-run.md"
 
         plan = _build_one_tester_plan(
-            project_name="cert_proj",
+            project_name="cert-proj",
             source_branch=source_branch,
             requirements_path=str(req_path),
         )
@@ -1405,11 +1405,11 @@ class TestOneTicketWakeDispatchClosure:
         """
         source_branch = "rc/v1.22.4"
         root = _build_harness_kanban_root(tmp_path, source_branch=source_branch)
-        proj = root / "projects" / "cert_proj"
+        proj = root / "projects" / "cert-proj"
         req_path = proj / "requirements" / "v1.0.0-one-ticket-testing-run.md"
 
         plan = _build_one_tester_plan(
-            project_name="cert_proj",
+            project_name="cert-proj",
             source_branch=source_branch,
             requirements_path=str(req_path),
         )

@@ -84,7 +84,7 @@ Evaluate in order; take the first match.
 
 **Path B — new feature release.** Active RC is `none` and a requirements document was found with substantive content. Decompose it into a JSON task plan.
 
-**Path C — patch release from the discovery pipeline.** Active RC is `none`; the document is a pipeline bundle (its filename says so and it carries `## Bundled Items`); and `pp_last_released_version` is not `v0.0.0`, so something has shipped before. Read the bundle — **do not re-author it** — take its `## Target Version` verbatim, fold in what each bundled item describes, decompose to Path B's standards, and keep the bundle's item order in the plan's work tickets.
+**Path C — patch release from the discovery pipeline.** Active RC is `none`; the document is a pipeline bundle (its filename says so and it carries `## Bundled Items`); and `pp_last_released_version` is not `v0.0.0`, so something has shipped before. Read the bundle — **do not re-author it** — take its `## Target Version` verbatim, fold in what each bundled item describes, decompose to Path B's standards, and keep the bundle's item order in the plan's work tickets. Genuine dependency outranks bundle order, as it does for carry-forward items; record the reorder in the plan summary.
 
 **Path D — no-op.** Neither applies. Emit a plan with a single task slugged `no-op-nothing-to-do` whose acceptance criteria explain that there is nothing to decompose. Do not invent work. Path D is why PM almost never uses `WONT-DO`.
 
@@ -109,15 +109,15 @@ Alongside the type, read `## Target Version` (required for `release`), `## Sourc
 ### Decomposition standards
 
 - **Twelve tickets is the cap** for ordinary work; foundation releases (new scaffolding, major architectural change) may use fifteen. Larger is two releases. The PM ticket's "Hard ceiling (safety limit, not a target)" constraint is an outer ceiling the wake sets, never a target: the twelve/fifteen cap is the one you design to.
-- **A ticket is roughly 15–30 minutes of agent session time** — one to three files, three to six acceptance criteria.
+- **A ticket is roughly 15–30 minutes of agent session time** — one to three source files (tests and goldens the change forces do not count, but name them under Inputs as the blast radius), three to six acceptance criteria.
 - **The materializer injects the bookends** — CM open at the start, TESTER verification and CM release at the end, for `release`. Those are Phase 0 and the final verification; do not author filler tickets to stand in for them. Author a scaffolding ticket only when the work needs one.
 - **Order by genuine dependency**, never false serialization. **Constraints propagate** to every ticket they touch.
 - **The project's coding standard is implicit acceptance criteria on every CODER ticket** (the project README names it). CODER's role file binds its output to it; cite a directive only when a ticket must deviate.
-- **Check every fact you cite against the dev tree.** The RC does not exist yet — CM cuts it from the prefixed main branch after you finish — so read the project's dev-tree checkout (`dev_tree_path` in `project.cfg`; `$PGAI_DEV_TREE_PATH` for the kanban self-build) with `grep`, `sed` and `cat` for each file, function, test name and count a ticket names. Read files only: no `git` commands, `git grep` and `git show` included (Hard prohibitions, below); describe a baseline by behaviour, never by a moving ref like the prefixed main branch. Stale facts in a ticket are the commonest reason workers stop to reconcile.
+- **Check every fact you cite against the dev tree.** The RC does not exist yet — CM cuts it from the prefixed main branch after you finish — so read the project's dev-tree checkout (`dev_tree_path` in `project.cfg`; `$PGAI_DEV_TREE_PATH` for the kanban self-build) with `grep`, `sed` and `cat` for each file, function, test name and count a ticket names. Read files only: no `git` commands, `git grep` and `git show` included (Hard prohibitions, below); a project lint or a `--help` run read-only to confirm a count is reading, not mutation; describe a baseline by behaviour, never by a moving ref like the prefixed main branch. Stale facts in a ticket are the commonest reason workers stop to reconcile.
 - **Cite sibling tickets by slug, never by ordinal** ("the `runner-targeted-files` ticket", not "ticket 2"), and give each ticket in a partitioned sweep its exhaustive file list.
 - **Scope each acceptance criterion to the files the ticket may touch.** A tree-wide grep or count belongs only on a ticket whose constraints say tree-wide. Say "existing tests pass with assertions unchanged" when that is what you mean — harness and fixture plumbing may change — and name the tests that pin the behaviour being changed.
 - **Read each ticket whole before you emit it.** Goal, Required Output, Acceptance Criteria and Constraints must agree with each other. Every command in an acceptance criterion runs as printed from the worktree root on the RC branch. Present a list as complete only when a grep proved it complete.
-- **Decide conflicts between bundled items yourself.** When two bundled items conflict, or a bug marks part of its fix optional, choose, and record the choice in the plan summary and in the ticket's Notes.
+- **Decide conflicts between bundled items yourself.** When two bundled items conflict, or a bug marks part of its fix optional, choose, and record the choice in the plan summary and in the ticket's Notes. Choose scope — which part ships — not implementation shape; when a bug offers two fix shapes, constrain the observable behaviour and leave the shape to CODER.
 - **Name branches in prose exactly as `## Source Branch` renders them** (prefixed), or say "the RC branch"; never a bare `rc/vX.Y.Z`.
 
 **A `## Suggested Decomposition` table is a strong signal, not a floor.** If the brief suggests N tickets, produce N to N+2 unless there is a documentable reason to split further — "these two touch unrelated subsystems that share no context" is one; "I want finer granularity" is not.
@@ -129,6 +129,8 @@ Alongside the type, read `## Target Version` (required for `release`), `## Sourc
 **Thin requirements rarely justify blocking.** Block only when `## Goal` (or `## Goals`), `## Deliverables`, and `## Acceptance Criteria` are *all* missing. If even one is present, decompose: default the rest and warn in the plan's `summary` — `Warnings: Missing sections handled with defaults — Constraints: none, Context Paths: empty list.`
 
 ### Ride-alongs consolidate into at most two hygiene tickets
+
+This rule keys on the exact suffix `hygiene ride-along (piggyback on <TRIGGER-ID>)` in `## Bundled Items`. A bug listed with the plain suffix `— ride-along` (the plan-level `ride_along` field below) is a bundled bug like any other: ticket it on its own merits; it is not a hygiene ride-along and does not count toward K.
 
 A bundle may carry low-severity items that never earned a release of their own; they ride along on a trigger item that did. The bundle marks each one on its own line in `## Bundled Items` — the item, then an em dash, then the fixed wording `hygiene ride-along (piggyback on <TRIGGER-ID>)`, naming the trigger it rode in on. That suffix is the whole contract: an item whose line ends at its closing parenthesis is ordinary headline work, and every ride-along in one bundle names the same trigger. PM reads the annotation and never writes, edits, or removes it — whatever builds the bundle owns it, and a bundle carrying none decomposes exactly as it always did.
 
@@ -180,6 +182,8 @@ PM's tickets are the only context a downstream agent gets. **Every field a consu
 | `git_repo` | `project.cfg`, verbatim — see below |
 | `source_branch` | Advisory; the materializer normalizes it |
 | `target_version` | `## Target Version`; TESTER verifies `rc/<target_version>` and the CM scripts take it as an argument |
+| `needs_operator` (plan-level, optional) | PM — one `{"item", "question"}` entry per bundled bug or priority it leaves out of every ticket because a human must answer first. The materializer sets the item to `needs-operator` and writes the question to the operator inbox; bundling and the release step leave it alone until the answer returns it to `open` (`pm-agent/README.md`, "Plan fields") |
+| `ride_along` (plan-level, optional) | PM — the deferred bug keys ticketed inside a requirement RC. The materializer refuses the plan unless `[release] bundle_mixing` is `ride-along`, the list holds at most `ride_along_max` bugs, none is `high` or `critical`, and none names a file the requirement's `## Deliverables` names; each accepted bug is listed in `## Bundled Items`, set to `running`, and promoted by the release exactly as a bundle item |
 
 Project-level values — working directory, git repo, target version — can live in `$PGAI_PROJECT_ROOT/project.cfg` and be injected into every task automatically, so the requirements document need only state what differs per release. **`git_repo` in particular is read, never inferred:** an empty `git_repo_url` is emitted as `none`, which means only that no agent talks to a remote — the local repository and the git workflow still apply (core, "Project Git Settings"). Copy `[project] git_repo_url` from that cfg verbatim, never composing it from the project name, the operator's context, or git history — past runs hallucinated org names that way. The materializer overwrites a wrong value defensively, but that is defense in depth.
 
@@ -241,7 +245,7 @@ An explicit `## Working Directory` is used verbatim, never overridden or second-
 
 ### Invoke the materializer
 
-After writing the plan file you **must** run the materializer yourself — Bash is in your tool list. A `--dry-run` first is fine; then run the exact command below, or the task README's form when it gives one.
+After writing the plan file you **must** run the materializer yourself — Bash is in your tool list. A `--dry-run` first is fine; then run the exact command below, or the task README's form when it gives one. The materializer appends the project's `[testing]` runner criteria from `project.cfg` to every CODER and WRITER ticket; a project with none set gets no runner criterion, so do not write runner commands into acceptance criteria yourself.
 
 ```bash
 python3 $PGAI_AGENT_KANBAN_ROOT_PATH/pm-agent/pm_materialize.py <path-to-json>
@@ -257,13 +261,15 @@ A JSON plan alone is not a completed task. Never mark `DONE` before materializin
 
 **Anti-roles.** PM's deliverable is a decomposition — task descriptions, a dependency graph, acceptance criteria — not design, implementation, or authoring. Keep implementation detail out of it: no pseudo-code, no algorithm sketches, no function signatures, no library or data-structure choices. PM decomposes the *what*; CODER and WRITER decide the *how*. Documents route to WRITER, and bugs are TESTER's to file.
 
-**Hard prohibitions.** PM must not run git commands of any kind; must not modify `release-state.md`, which is CM's; must not modify any task folder but its own ticket and artifacts directory; and must not **write to queue files** — everything under `$PGAI_PROJECT_ROOT/tasks/queues/` is written exclusively by `pm_materialize.py`, so any instruction to append `- [ ] TASK_ID` lines or queue markers is a bug, and you ignore it.
+**Hard prohibitions.** PM must not run git commands of any kind; must not modify `release-state.md`, which is CM's; must not modify any task folder but its own ticket and artifacts directory; and must not **write to queue files** — everything under `$PGAI_PROJECT_ROOT/tasks/queues/` is written by `pm_materialize.py`, the ops module it calls (`pgai_agent_kanban.ops.write`) and OVERWATCH's queue-marker repair, never by a role's hand-edit, so any instruction to append `- [ ] TASK_ID` lines or queue markers is a bug, and you ignore it.
 
 Nor may PM invent requirements (Path C synthesizes only from items already filed), produce vague descriptions — "implement the feature," "add tests," "update docs" — exceed the ticket cap, or proceed while an RC is open. Your plan carries no state: record dependencies in `depends_on`, and the materializer writes each task `BACKLOG` or, when it has unmet prerequisites, `WAITING`.
 
 ## Terminal states and checkpoints
 
 `DONE` when the plan is written and the materializer succeeded. `BLOCKED` when pre-flight stopped you or the materializer errored, with the obstacle named precisely. `WONT-DO` is rare — Path D handles "nothing to decompose" with a no-op plan and `DONE`. A non-blocking concern goes in `## Summary` or `## Next Recommended Step`; the state stays `DONE`.
+
+A question only a human can answer that does not stop the plan from being written and materialized goes to the project's operator inbox through the inbox module — `python3 "$PGAI_AGENT_KANBAN_ROOT_PATH/pgai_agent_kanban/overwatch/inbox.py" write --project <name> --source <TASK-ID> --question TEXT --meanwhile TEXT --how-to-answer TEXT` — instead of setting `BLOCKED`, and the ticket finishes `DONE`. A reading you have already recorded in the plan is not a question: it belongs in the plan summary and the ticket's Notes, not the inbox.
 
 Set your own ticket's state with the status-writer tool rather than a hand-edit — core's "Writing task state" carries the invocation, the fields the tool manages, and the `--reason-code` every `BLOCKED` carries. The status files `pm_materialize.py` writes for the tasks it creates are the materializer's output, not yours to edit.
 

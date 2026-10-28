@@ -16,6 +16,8 @@
 #   "is there nothing else left in the requirements queue for the chain to
 #    do, so the hygiene sweep may bundle the litter?"
 #                          -> _disc_requirements_queue_empty
+#   "have the deferred bugs waited past a configured bound?"
+#                          -> _disc_deferral_bound_exceeded
 #   "given this tick's candidate bug files, which ones does
 #    discovery_step_bugs actually bundle?"
 #                          -> _disc_bug_deferral_filter (the orchestration;
@@ -94,12 +96,16 @@
 #           "piggybacking N deferred bugs (trigger: <trigger-id> <severity>)"
 #           once, naming the count and the chosen trigger.
 #         - deferred_bugs=true and every candidate is deferred: echoes the
-#           deferred set ONLY when _disc_requirements_queue_empty also
-#           holds (the hygiene sweep firing); otherwise echoes nothing, so
-#           the caller bundles nothing this tick and every deferred bug
-#           stays untouched. A deferred bug never becomes a trigger, so the
-#           piggyback carry never applies here -- there is no kept item to
-#           ride along on.
+#           deferred set when a deferral bound is exceeded
+#           (_disc_deferral_bound_exceeded: more than deferred_max_count
+#           bugs deferred, or the oldest older than deferred_max_age_days)
+#           whatever the requirements queue holds, or else when
+#           _disc_requirements_queue_empty holds (the hygiene sweep
+#           firing); otherwise echoes nothing, so the caller bundles
+#           nothing this tick and every deferred bug stays untouched. With
+#           neither bound key set, only the hygiene sweep can fire. A
+#           deferred bug never becomes a trigger, so the piggyback carry
+#           never applies here -- there is no kept item to ride along on.
 #       Every deferral decision narrates via the caller's log() shim: a run
 #       that defers bugs states the count and the resolved level; a run
 #       that lets every bug through says nothing new. Returns 1 only when
@@ -321,6 +327,59 @@ _disc_requirements_queue_empty() {
 }
 
 # ---------------------------------------------------------------------------
+# _disc_deferral_bound_exceeded <deferred_files> <deferred_count> <max_count> <max_age_days>
+#
+# Returns 0 when the deferred bugs have waited past a configured bound,
+# 1 when no bound is exceeded. Both bounds come from resolve_defer_posture
+# already validated as whole numbers; an empty bound is unset and never
+# fires, so with both empty this is always 1 and reads no file.
+#
+#   count: fires when <deferred_count> is strictly greater than <max_count>.
+#   age:   fires when the oldest deferred bug's age in whole days -- from
+#          its "**Date:**" header (BUG-TEMPLATE.md) to today, UTC, read by
+#          pgai_agent_kanban.discovery.items bug-ages -- is strictly greater
+#          than <max_age_days>. A bug with no parseable date is narrated by
+#          name and never fires the age bound.
+#
+# Every bound that fires narrates one line naming the key and its value, so
+# the run says which bound opened the bundle. Narration only: nothing is
+# written to stdout, since the caller's stdout is the bundle list.
+# ---------------------------------------------------------------------------
+_disc_deferral_bound_exceeded() {
+    local deferred_files="$1" deferred_count="$2" max_count="$3" max_age_days="$4"
+    local fired=1
+
+    if [[ -n "$max_count" ]] && (( deferred_count > 10#$max_count )); then
+        log "discovery_step_bugs: deferral bound deferred_max_count=${max_count} exceeded -- ${deferred_count} bug(s) deferred"
+        fired=0
+    fi
+
+    if [[ -n "$max_age_days" ]]; then
+        local ages oldest_age="" oldest_file="" oldest_date=""
+        ages="$(printf '%s\n' "$deferred_files" | pp_run_ops pgai_agent_kanban.discovery.items bug-ages)"
+        local _path _age _date
+        while IFS=$'\t' read -r _path _age _date; do
+            [[ -z "$_path" ]] && continue
+            if [[ "$_age" == "-" || -z "$_age" ]]; then
+                log "discovery_step_bugs: WARNING Date field in $(basename "$_path") is missing or unparseable ('${_date}'); it never fires deferred_max_age_days"
+                continue
+            fi
+            if [[ -z "$oldest_age" ]] || (( _age > oldest_age )); then
+                oldest_age="$_age"
+                oldest_file="$_path"
+                oldest_date="$_date"
+            fi
+        done <<< "$ages"
+        if [[ -n "$oldest_age" ]] && (( oldest_age > 10#$max_age_days )); then
+            log "discovery_step_bugs: deferral bound deferred_max_age_days=${max_age_days} exceeded -- oldest deferred bug $(basename "${oldest_file%.md}") dated ${oldest_date} is ${oldest_age} day(s) old"
+            fired=0
+        fi
+    fi
+
+    return "$fired"
+}
+
+# ---------------------------------------------------------------------------
 # _disc_bug_deferral_filter <project_name> <candidate_files>
 # See "Public entry points" above.
 #
@@ -339,6 +398,7 @@ _disc_bug_deferral_filter() {
     }
 
     local deferred_bugs="" deferred_level="" defer_piggyback=""
+    local max_age_days="" max_count=""
     while IFS= read -r _line; do
         [[ -z "$_line" ]] && continue
         local _field="${_line%%=*}"
@@ -347,6 +407,8 @@ _disc_bug_deferral_filter() {
             deferred_bugs) deferred_bugs="${_rest%%|*}" ;;
             deferred_bug_level) deferred_level="${_rest%%|*}" ;;
             defer_piggyback) defer_piggyback="${_rest%%|*}" ;;
+            deferred_max_age_days) max_age_days="${_rest%%|*}" ;;
+            deferred_max_count) max_count="${_rest%%|*}" ;;
         esac
     done <<< "$posture"
     deferred_bugs="${deferred_bugs:-false}"
@@ -432,11 +494,20 @@ _disc_bug_deferral_filter() {
         return 0
     fi
 
-    # Every candidate is deferred. The hygiene sweep bundles the held-back
-    # litter, but only when there is truly nothing else for the chain to
-    # do -- the requirements queue must also hold no unprocessed
-    # requirement. Deferral sets the tempo down; it does not set it to
-    # zero.
+    # Every candidate is deferred. A deferral bound caps how long they may
+    # wait: once more than deferred_max_count are held, or the oldest is
+    # older than deferred_max_age_days, they bundle whatever the
+    # requirements queue holds. Unset bounds never fire.
+    if _disc_deferral_bound_exceeded "$deferred" "$deferred_count" "$max_count" "$max_age_days"; then
+        log "discovery_step_bugs: deferral bound exceeded; bundling ${deferred_count} deferred bug(s) held at level=${deferred_level}"
+        printf '%s\n' "$deferred"
+        return 0
+    fi
+
+    # Otherwise the hygiene sweep bundles the held-back litter, but only
+    # when there is truly nothing else for the chain to do -- the
+    # requirements queue must also hold no unprocessed requirement.
+    # Deferral sets the tempo down; it does not set it to zero.
     if _disc_requirements_queue_empty "$project_name"; then
         log "discovery_step_bugs: hygiene sweep -- bug queue and requirements queue both empty; bundling ${deferred_count} deferred bug(s) held at level=${deferred_level}"
         printf '%s\n' "$deferred"

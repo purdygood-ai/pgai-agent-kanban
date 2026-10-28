@@ -106,8 +106,8 @@ require_dev_tree() {
         echo "${_ctx} resolved to a value, and no self-located fallback applied." >&2
         echo "" >&2
         echo "To fix (pick one):" >&2
-        echo "  1. export PGAI_DEV_TREE_PATH=\"\$HOME/develop/pgai-agent-kanban\"   # example — use your actual checkout path" >&2
-        echo "  2. printf '[paths]\\ndev_tree_path = %s\\n' \"\$HOME/develop/pgai-agent-kanban\" >> \"${_ctx}\"   # example — use your actual checkout path" >&2
+        echo "  1. export PGAI_DEV_TREE_PATH=\"/srv/develop/my-app\"   # example — use your actual checkout path" >&2
+        echo "  2. printf '[paths]\\ndev_tree_path = %s\\n' \"/srv/develop/my-app\" >> \"${_ctx}\"   # example — use your actual checkout path" >&2
         echo "  3. Re-run the command that invoked this gate." >&2
         echo "" >&2
         echo "Rule: every gated runner requires a resolvable dev-tree path before it can" >&2
@@ -126,7 +126,7 @@ require_dev_tree() {
         echo "" >&2
         echo "To fix:" >&2
         echo "  1. ls -la \"${_path}\"                          # confirm it is really absent" >&2
-        echo "  2. export PGAI_DEV_TREE_PATH=\"\$HOME/develop/pgai-agent-kanban\"   # example — point at the real checkout" >&2
+        echo "  2. export PGAI_DEV_TREE_PATH=\"/srv/develop/my-app\"   # example — point at the real checkout" >&2
         echo "     # or edit [paths] dev_tree_path in ${_ctx} to the real checkout path" >&2
         echo "  3. Re-run the command that invoked this gate." >&2
         echo "" >&2

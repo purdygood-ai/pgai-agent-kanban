@@ -179,6 +179,8 @@ dev_tree_path =
 tmp_root = /tmp
 # Framework's temp subdirectory under tmp_root. Full temp path is
 # ${tmp_root}/${tmp_subdir}. Default: pgai_kanban_tmp
+# Each key left absent or blank takes its own default, so setting only
+# tmp_root = /data gives /data/pgai_kanban_tmp.
 tmp_subdir = pgai_kanban_tmp
 # Per-project temp directory NAMING (the subdirectory name nested under the
 # framework temp root above) is configured per-project in project.cfg via the
@@ -330,12 +332,18 @@ container_stop_timeout_seconds = 1800
 # with error key config_loader.wake.not_an_integer rather than reaching the
 # wake loop's arithmetic. An empty value takes the key's default.
 
-# Max tasks the wake loop will process in one firing before exiting.
-# Prevents one agent from monopolizing the cron slot.
+# Max tasks one wake batch processes before exiting. A wake-batch.sh firing
+# starts one batch per registered, enabled project, and this cap applies to
+# each (project, agent) batch, so one firing can run up to this many tasks
+# per project. Prevents one agent from monopolizing a project's cron slot.
 # Default: 5
 max_tasks_per_wake = 5
 
-# Max walltime (seconds) before the wake loop exits even if tasks remain.
+# Max walltime (seconds) before a wake batch exits even if tasks remain.
+# Like max_tasks_per_wake it applies to each (project, agent) batch: a
+# wake-batch.sh firing starts one batch per registered, enabled project, so
+# "batch" below means one project's batch. A provider wake script run
+# directly works every project in turn as one batch under this cap.
 # The outermost of the three runtime ceilings, which must nest
 # task < project <= batch (max_task_seconds < max_project_seconds <= this).
 # A task dispatched late in the batch is capped at the remaining batch
@@ -348,11 +356,14 @@ max_runtime_seconds = 14400
 # Default: 5
 pause_between_tasks = 5
 
-# Halt the wake loop when a task finishes in BLOCKED state.
-# Subsequent tasks usually depend on the blocked one, so this is the
-# safer default.
-# Default: true
-stop_on_blocked = true
+# What a task that finishes in BLOCKED state stops.
+#   false: only itself and its dependants -- a task whose ## Prerequisites
+#          names it stays WAITING, and the batch goes on to the next
+#          independent task. Other projects are never affected.
+#   true:  the whole batch for that project -- nothing further is
+#          dispatched there this firing. Set true to restore that stop.
+# Default: false
+stop_on_blocked = false
 
 # Operator stop file. Touch it to stop the wake batches gracefully.
 #   Scope:   every running batch of every agent, across every registered
@@ -415,11 +426,25 @@ pm_max_tasks = 15
 max_task_seconds = 5400
 
 # Per-project runtime cap (seconds).
-# Each project in the multi-project iteration gets its own elapsed clock that
-# resets at the start of run_project_chain.  When the project's elapsed time
-# exceeds max_project_seconds the project task loop exits and the next project
-# gets its own fresh clock.  This prevents a stalled project 1 from consuming
-# the entire batch budget and starving projects 2..N.
+# Each project gets its own elapsed clock.  run_project_chain starts it once
+# the project's repo lock is held and the agent's backlog file has been
+# found, before the per-project setup; when that clock exceeds
+# max_project_seconds the task loop exits.  The per-project setup (config
+# load, dev-tree check, reconciliation, model preflight and the dispatch
+# gate) and the idle pass, including any wait to retake the repo lock there,
+# count against max_project_seconds as well as max_runtime_seconds.  Only
+# the work before the clock starts -- wake bootstrap, path resolution,
+# OVERWATCH block triage, the initial repo-lock wait (up to
+# lock_wait_seconds, default 120) and the backlog check -- counts against
+# max_runtime_seconds alone, whose clock starts when the wake starts.
+# A wake-batch.sh firing starts one batch per registered, enabled project, so
+# each (project, agent) batch is one project: there this key and
+# max_runtime_seconds bound the same batch.  This cap trips first only when
+# it is lower than max_runtime_seconds by more than that pre-clock time; with
+# a smaller gap, or equal caps, max_runtime_seconds trips first.
+# Only a provider wake script run directly (wake/claude.sh, wake/codex.sh)
+# works every project in turn as one batch; there each project gets a fresh
+# clock of this value while max_runtime_seconds caps the whole run.
 #
 # The wake log names the bound that tripped — "(task)", "(project)", or
 # "(batch)" — so operators can tell which limit fired at a glance.
@@ -440,6 +465,13 @@ max_project_seconds = 14400
 # the hard kill.  Both signals go to the provider's whole process group; the
 # grace window is measured against the group, not just the CLI's own pid, and
 # the same window bounds how long finalization waits for the group to empty.
+# Whenever an agent run ends -- normal exit or timeout -- every process it
+# started that is still running (a background job, a nohup, a tool in a
+# session of its own) gets SIGTERM, then SIGKILL after this many seconds;
+# each one is logged with its pid and command in the batch log and the
+# task's logs/process-reap.log.  cleanup.sh uses the same value (from the
+# environment; 30 when unset) before removing a temp directory a process
+# still runs in.
 # Override at invocation: KILL_GRACE_SECONDS=<N> wake-batch.sh ...
 # Default: 30
 kill_grace_seconds = 30
@@ -550,6 +582,11 @@ systemic_block_reasons = invalid_effort_config,workflow_type_unparseable,plugin_
 #              (op=wake-chain:<project>). Any other holder -- an OVERWATCH
 #              repair, an operator tool, a lock with no record -- and a
 #              refused acquisition defer at once, as before.
+#   When:      on the batch's first pass, only when no other project
+#              remains in the batch after this one (a single-project batch
+#              included); while others remain, the project defers after
+#              one attempt so they run first. The end-of-iteration retry
+#              waits within the project's remaining budget.
 #   Bounded:   never past the batch's remaining max_runtime_seconds; the
 #              wait stops as soon as the operator stop_file appears. One
 #              budget per project per firing: the end-of-iteration retry
@@ -736,16 +773,15 @@ trivial_log_hours = 6
 # unbudgeted; the lint never fails).
 budget_bytes_coder = 77824
 
-# TESTER budget: 116KB — re-baselined against an assembled total of
-# 112455 bytes, measured after the SOP-core.md growth and the latest
-# roles/TESTER.md corrections; the stack sat 1863 bytes over the previous
-# 110592-byte budget, so the growth is carried deliberately under the
-# headroom policy above rather than trimmed. TESTER carries the largest
-# role file in the catalog (verification procedures), so its budget stays
-# the largest of the seven.
-# Shipped value: 118784. No in-code default (absent = role reported
+# TESTER budget: 124KB — re-baselined against an assembled total of
+# 120131 bytes, measured after the SOP-core.md growth; the stack sat 1347
+# bytes over the previous 118784-byte budget, so the growth is carried
+# deliberately under the headroom policy above rather than trimmed.
+# TESTER carries the largest role file in the catalog (verification
+# procedures), so its budget stays the largest of the seven.
+# Shipped value: 126976. No in-code default (absent = role reported
 # unbudgeted; the lint never fails).
-budget_bytes_tester = 118784
+budget_bytes_tester = 126976
 
 # PO budget: 72KB — re-baselined against an assembled total of 67631
 # bytes (previous 65536-byte budget was 2095 bytes over after SOP-core.md
@@ -755,40 +791,40 @@ budget_bytes_tester = 118784
 # unbudgeted; the lint never fails).
 budget_bytes_po = 73728
 
-# PM budget: 88KB — re-baselined against an assembled total of 83130
-# bytes (previous 81920-byte budget was 1210 bytes over; see headroom
+# PM budget: 96KB — re-baselined against an assembled total of 90780
+# bytes (previous 90112-byte budget was 668 bytes over; see headroom
 # policy above).
-# Shipped value: 90112. No in-code default (absent = role reported
+# Shipped value: 98304. No in-code default (absent = role reported
 # unbudgeted; the lint never fails).
-budget_bytes_pm = 90112
+budget_bytes_pm = 98304
 
-# WRITER budget: 76KB — re-baselined against an assembled total
-# of 70453 bytes (previous 69632-byte budget was 821 bytes over; see
+# WRITER budget: 84KB — re-baselined against an assembled total
+# of 79448 bytes (previous 77824-byte budget was 1624 bytes over; see
 # headroom policy above).
-# Shipped value: 77824. No in-code default (absent = role reported
+# Shipped value: 86016. No in-code default (absent = role reported
 # unbudgeted; the lint never fails).
-budget_bytes_writer = 77824
+budget_bytes_writer = 86016
 
-# CM budget: 100KB — re-baselined against an assembled total of 95180
-# bytes, which sat 972 bytes over the previous 94208-byte budget after
+# CM budget: 112KB — re-baselined against an assembled total of 106595
+# bytes, which sat 4195 bytes over the previous 102400-byte budget after
 # CM's governance stack grew. The growth is carried deliberately under
 # the headroom policy above rather than trimmed, because CM's reading
 # list is governance procedure and those files take fact fixes only.
 # CM's role file is the release-operations procedure (branch/tag/ship
 # mechanics), the most procedurally dense of the six pipeline roles
 # after TESTER, so it keeps the largest margin of the non-TESTER roles.
-# Shipped value: 102400. No in-code default (absent = role reported
+# Shipped value: 114688. No in-code default (absent = role reported
 # unbudgeted; the lint never fails).
-budget_bytes_cm = 102400
+budget_bytes_cm = 114688
 
-# OVERWATCH budget: 88KB — re-baselined against an assembled total of
-# 84289 bytes (previous 81920-byte budget was 2369 bytes over; see
+# OVERWATCH budget: 96KB — re-baselined against an assembled total of
+# 92036 bytes (previous 90112-byte budget was 1924 bytes over; see
 # headroom policy above). OVERWATCH sits outside the six-agent pipeline
 # but is included in every read-order manifest and byte budget for
 # catalog completeness.
-# Shipped value: 90112. No in-code default (absent = role reported
+# Shipped value: 98304. No in-code default (absent = role reported
 # unbudgeted; the lint never fails).
-budget_bytes_overwatch = 90112
+budget_bytes_overwatch = 98304
 
 
 # ---------------------------------------------------------------------------
@@ -796,13 +832,14 @@ budget_bytes_overwatch = 90112
 # ---------------------------------------------------------------------------
 # The kanban-wide values for: the RC retry ceiling (max_rc_retries), the
 # bug-deferral posture (deferred_bugs, deferred_bug_level, defer_piggyback),
-# the DEEP-VERIFY cadence and window (deep_verify,
-# deep_verify_offhours_window), OVERWATCH's autonomous-resolution switch
-# (overwatch_resolve), the ship posture (ship_posture,
-# ship_posture_confirm_remote) and the container-tier image selection
-# (container_images). Every key here except container_images can be
-# overridden by a project's own project.cfg [release] section — see
-# project.cfg_example.
+# the deferral bounds and bundle mixing (deferred_max_age_days,
+# deferred_max_count, bundle_mixing, ride_along_max), the DEEP-VERIFY
+# cadence and window (deep_verify, deep_verify_offhours_window),
+# OVERWATCH's autonomous-resolution switch (overwatch_resolve), the ship
+# posture (ship_posture, ship_posture_confirm_remote) and the
+# container-tier image selection (container_images). Every key here
+# except container_images can be overridden by a project's own project.cfg
+# [release] section — see project.cfg_example.
 [release]
 
 # max_rc_retries: the kanban-wide retry ceiling, consumed by
@@ -886,10 +923,48 @@ deep_verify = weekly
 # Accepted: HH:MM-HH:MM (UTC). Default: 03:00-03:59
 # deep_verify_offhours_window = 03:00-03:59
 
-# overwatch_resolve: the fleet-wide default for whether OVERWATCH may act
-# autonomously on a resolvable CM block, rather than only observing and
-# raising Needs Human as today. Read by pp_overwatch_resolve()
-# (team/scripts/lib/project_paths.sh) and its Python counterpart
+# --- Deferral bounds and bundle mixing ---------------------------------------
+# Four keys capping how long deferred bugs wait and whether they may ride in
+# a requirement RC. Not read by load_config(): the deferral-posture resolver
+# (team/scripts/lib/defer_posture.sh and its Python twin) resolves them
+# project.cfg > kanban.cfg > default and refuses an unaccepted value loud,
+# naming the accepted set. A DEFER-LOW-BUGS campaign file never changes them.
+# A project's own project.cfg [release] section may override any of the
+# four — see project.cfg_example.
+
+# deferred_max_age_days: when every open bug is deferred and the oldest
+# one's **Date:** header is more than this many days ago, discovery opens a
+# bugfix bundle of the deferred bugs even with requirements still queued. A
+# bug with no parseable date is named in the run's narration and never
+# fires this bound. Unset means no bound.
+# Accepted: a non-negative whole number. Default: unset (no bound)
+# deferred_max_age_days =
+
+# deferred_max_count: when every open bug is deferred and more than this
+# many are, discovery opens a bugfix bundle of the deferred bugs even with
+# requirements still queued. Unset means no bound; 0 is accepted and fires
+# as soon as one bug is deferred.
+# Accepted: a non-negative whole number. Default: unset (no bound)
+# deferred_max_count =
+
+# bundle_mixing: whether deferred bugs may ride in a requirement RC.
+# separate keeps them out. ride-along lets the PM add up to ride_along_max
+# deferred bugs to a requirement RC when none is high or critical (an
+# unreadable severity is refused) and none names a file the requirement's
+# deliverables name.
+# Accepted: separate|ride-along. Default: separate
+# bundle_mixing = separate
+
+# ride_along_max: the most deferred bugs one requirement RC may carry when
+# bundle_mixing is ride-along; ignored under separate.
+# Accepted: a non-negative whole number. Default: 3
+# ride_along_max = 3
+
+# overwatch_resolve: the fleet-wide default for whether OVERWATCH's
+# resolution stage may run its lanes on a CM ship-policy HALT its matrix
+# does not resolve, rather than leave that HALT to the matrix alone. Read
+# by pp_overwatch_resolve() (team/scripts/lib/project_paths.sh) and its
+# Python counterpart
 # resolve_overwatch_resolve() (team/pgai_agent_kanban/overwatch/
 # resolution_matrix.py), which check a project's own project.cfg [release]
 # overwatch_resolve first and fall back to this kanban-wide default when
@@ -900,8 +975,11 @@ deep_verify = weekly
 # playbooks (Lane A: rewrite-and-recycle a bad-fix regression; Lane B: ship
 # a HALT whose cause matches a declared operator INTENT.md entry) without
 # waiting for a human — see team/roles/OVERWATCH.md, "Autonomous Block
-# Resolution". Everything else still escalates to Needs Human exactly as
-# today, unconditionally, whatever this key is set to.
+# Resolution". Everything else (Lane C) becomes one operator-inbox entry
+# reading the cause and the options; nothing is executed. Whatever this key
+# is set to, the blocked CM task behind a HALT the stage leaves in place is
+# decided like any other block: its classifier row's verb while the row's
+# budget allows, then its operator-inbox question, with Needs Human cleared.
 #
 # Unlike max_rc_retries above, absence is never an error and never means
 # "on" — the key is commented out here on purpose so a fresh install ships
@@ -937,20 +1015,28 @@ deep_verify = weekly
 # overwatch/resolution_matrix.py), which check a project's own project.cfg
 # [release] ship_posture first and fall back to this kanban-wide value when
 # that project's key is absent or blank — see project.cfg_example for the
-# per-project override.
+# per-project override. A project opts back into stopping on these triggers
+# with ship_posture = matrix in its own project.cfg.
+#
+# Absent or blank here and in the project's project.cfg resolves to always.
+# A push_to_remote = true lane still needs ship_posture_confirm_remote = true
+# (below) for always to take effect; without it the lane resolves to matrix
+# — silently when always is only the built-in default, with one warning
+# line when a cfg file sets it.
 #
 # An unrecognized value (a typo such as 'alwasy') resolves to matrix and
 # prints one warning line naming the file and the value. It is never a
 # refusal: the caller carries on under matrix.
-# Accepted: matrix|always. Default: matrix (absent/blank -> matrix)
-ship_posture = matrix
+# Accepted: matrix|always. Default: always (absent/blank -> always)
+ship_posture = always
 
 # ship_posture_confirm_remote: the remote-lane guard on ship_posture. On a
 # project whose project.cfg [project] push_to_remote is true (the default),
 # ship_posture = always takes effect only when this key is also exactly
 # true; anything else (absent, blank, false, a typo) resolves the posture
-# to matrix and prints one warning line, so a lane that publishes to origin
-# never slips into always by accident. On a push_to_remote = false lane
+# to matrix, so a lane that publishes to origin never slips into always by
+# accident. One warning line is printed when a cfg file set always, none
+# when always is only the built-in default. On a push_to_remote = false lane
 # this key is not consulted. Read through the same project.cfg-then-
 # kanban.cfg chain as ship_posture — setting it here confirms always for
 # every remote lane that inherits it, so prefer the per-project override.
@@ -1093,10 +1179,14 @@ block_triage = true
 # The count is the Block Record's "requeues" line (its reasons are in
 # "requeue_reasons"); it survives re-blocks, epoch restarts and a return to
 # BACKLOG, and goes only when the task reaches DONE or WONT-DO. Once the
-# count reaches the budget, the next block that would be requeued is
-# escalated instead: Needs Human yes and an OVERWATCH Diagnosis naming
-# every reason code seen. A recomputed completion gate (a branch already
-# merged, closed as DONE) is not a requeue and is never refused or counted.
+# count reaches the budget, the next block that would be requeued goes to
+# its classifier row's decision instead: the row's verb while the row's own
+# budget allows, then its operator-inbox question, which clears Needs Human
+# and leaves the task BLOCKED. A recomputed completion gate (a branch
+# already merged, closed as DONE) is not a requeue and is never refused or
+# counted. A project with no release-state.md has no decision wake: plain
+# block triage runs there, and a spent budget escalates the block with an
+# OVERWATCH Diagnosis naming every reason code seen.
 #
 # Read by resolve_requeue_budget() (team/pgai_agent_kanban/overwatch/
 # block_requeue.py), which checks a project's own project.cfg [overwatch]
@@ -1105,10 +1195,11 @@ block_triage = true
 # per-project override. Absent or blank in both resolves to 3, which is no
 # lower than any classifier row's max_attempts, so a task that blocks again
 # and again for one reason reaches its row's own ceiling exactly as before.
-# 0 requeues nothing: every block that would be requeued escalates. A value
-# that is not a whole number (a sign, a unit, a decimal point, a word)
-# refuses loud: the block-triage sweep plans nothing for that project and
-# logs the refusal, naming the value and the file.
+# 0 requeues nothing: every block that would be requeued goes straight to
+# its classifier row's decision. A value that is not a whole number (a
+# sign, a unit, a decimal point, a word) refuses loud: the block-triage
+# sweep plans nothing for that project and logs the refusal, naming the
+# value and the file.
 # Accepted: a non-negative whole number. Default: 3
 requeue_budget = 3
 
@@ -1123,6 +1214,68 @@ requeue_budget = 3
 # a value that is not a whole number is reported on stderr and 3600 is used.
 # Accepted: a non-negative whole number of seconds. Default: 3600
 leaked_listener_min_age_seconds = 3600
+
+# --- Runaway detector ---------------------------------------------------------
+# The one path by which OVERWATCH stops a project. Four counters, each a
+# threshold on how often the chain repeats itself on one project; when the
+# events inside a counter's window EXCEED its threshold, the detector
+# (team/pgai_agent_kanban/overwatch/runaway.py) writes a chain HALT at
+# projects/<name>/HALT naming the counter, its threshold and its last
+# events, and one entry in projects/<name>/operator-inbox.md. Only that
+# project stops. Events and trips persist in
+# projects/<name>/overwatch/runaway-counters.json; after a trip only newer
+# events count again, so resuming never re-trips on the same evidence.
+# Each key is read from a project's own project.cfg [overwatch] first, then
+# here -- see project.cfg_example for the per-project override. Absent or
+# blank resolves to the default below; 0 turns that counter off; a value
+# that is not a whole number refuses loud: here, loading kanban.cfg refuses
+# naming the key; in a project.cfg, the detector checks nothing for that
+# project until it is fixed. The defaults are conservative: far
+# above what a healthy release cycle reaches.
+
+# runaway_releases_per_hour: releases shipped (release-state/<version>.json
+# outcome shipped) on one project within one hour. 6 releases in an hour
+# trip the default.
+# Accepted: a non-negative whole number. Default: 5
+runaway_releases_per_hour = 5
+
+# runaway_rc_cycles_per_day: RCs opened and then cancelled
+# (release-state records with outcome cancelled, active or archived under
+# release-state/history/) on one project within one day. 3 cycles in a day
+# trip the default.
+# Accepted: a non-negative whole number. Default: 2
+runaway_rc_cycles_per_day = 2
+
+# runaway_reason_repeats: blocks of ONE task with the SAME reason code
+# within seven days, counted from each task's ## Block Record, which the
+# detector's observe step reads each time the decision wake runs. Nothing
+# reports a block as it happens, so two blocks of one task written between
+# two of those reads count once. A block that follows an OVERWATCH
+# triage requeue (the Block Record's requeues rose since the task's
+# previous block) is a retry on a requeue ladder and is not counted; once
+# [overwatch] requeue_budget is spent, every block counts. The 4th counted
+# block trips the default: the block that ends a 3-requeue ladder reaches
+# its row's decision, and a task that keeps blocking after that trips on
+# its third further block.
+# Accepted: a non-negative whole number. Default: 3
+runaway_reason_repeats = 3
+
+# runaway_inbox_entries_per_day: operator inbox entries written on one
+# project within one day, not counting the entries the detector itself
+# writes. 21 entries in a day trip the default.
+# Accepted: a non-negative whole number. Default: 20
+runaway_inbox_entries_per_day = 20
+
+# halt_after_auto_resume: whether a HALT written by a HALT-AFTER promotion,
+# once its drain has completed, may be cleared by OVERWATCH and replaced by
+# an inbox entry saying the project stopped as armed and how to resume.
+# false keeps today's behaviour: the operator clears it with unhalt.sh.
+# Resolved by resolve_halt_after_auto_resume() in
+# team/pgai_agent_kanban/overwatch/runaway.py (project.cfg first, then
+# here); read by OVERWATCH's HALT-clearing stage. An unrecognized value
+# (a typo, 'yes', 'on') refuses loud.
+# Accepted: true|false. Default: false
+halt_after_auto_resume = false
 
 
 # ---------------------------------------------------------------------------
@@ -1203,8 +1356,9 @@ shell_out_timeout_seconds = 300
 # ---------------------------------------------------------------------------
 # Read by the test runners through config_testing_workers,
 # config_testing_coverage and config_testing_pre_merge_affected_cap in
-# team/scripts/lib/config_loader.sh. Every key here is kanban-wide:
-# project.cfg has no [testing] section and no per-project override. An
+# team/scripts/lib/config_loader.sh. Every key here is kanban-wide: no
+# project.cfg overrides it. A project.cfg's own [testing] section holds
+# different keys, that project's runner commands (project.cfg_example). An
 # unrecognized value refuses loud, naming the accepted set and the sed edit
 # that fixes it; load_config does not read this section, so a typo here
 # stops a test run, never a wake.

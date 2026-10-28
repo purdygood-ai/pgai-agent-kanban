@@ -12,10 +12,11 @@ chain every per-project key uses::
     <kanban_root>/kanban.cfg                       [archive] archive_count
     built-in default                               55
 
-The project's config file is located and read by the same rules the bash
-resolvers apply (``pgai_agent_kanban.lib.project_cfg``: ``project.cfg``,
-else a legacy ``PROJECT.cfg``; values read with the bash ``read_ini`` line
-rules, inline comments stripped).
+The chain is walked by the shared resolver
+(``pgai_agent_kanban.lib.project_cfg.resolve_tiered_cfg_value``), by the same
+rules the bash resolvers apply: ``project.cfg``, else a legacy
+``PROJECT.cfg``; values read with the bash ``read_ini`` line rules, inline
+comments stripped. This module validates the winning value.
 
 A value must be decimal digits only. Leading zeros are accepted (``055``
 reads as 55). Anything else — a sign, a unit, a decimal point, a word — is
@@ -45,7 +46,7 @@ import shlex
 from typing import Optional, TextIO, Union
 
 from pgai_agent_kanban.archive.layout import live_layout
-from pgai_agent_kanban.lib import ini, project_cfg
+from pgai_agent_kanban.lib import project_cfg
 from pgai_agent_kanban.lib.error_contract import emit_error_contract, format_error_contract
 
 __all__ = [
@@ -149,29 +150,19 @@ def resolve_archive_count(kanban_root: PathLike, project: str) -> ArchiveCount:
         ArchiveLayoutError: *project* is not a valid project name.
     """
     root = pathlib.Path(kanban_root)
-    tiers = []
-    project_file = project_cfg.project_cfg_file(live_layout(root, project).root)
-    if project_file is not None:
-        tiers.append((TIER_PROJECT_CFG, project_file))
-    tiers.append((TIER_KANBAN_CFG, root / "kanban.cfg"))
-
-    for tier, cfg in tiers:
-        if tier == TIER_PROJECT_CFG:
-            raw = project_cfg.read_cfg_key(cfg, ARCHIVE_SECTION, ARCHIVE_COUNT_KEY)
-        else:
-            raw = ini.read_line_value(cfg, ARCHIVE_SECTION, ARCHIVE_COUNT_KEY) or ""
-        if not raw:
-            continue
-        if not _DIGITS_RE.fullmatch(raw):
-            # CONVERT (docs/blocking-site-census.md): an invalid count stops
-            # archiving for this project only. effective_archive_count()
-            # prints this refusal and archives nothing; no wake, release or
-            # other project is held by it, and the next run retries.
-            # CENSUS-ANCHOR: archive-count-invalid-01
-            raise _refuse(raw, str(cfg), project)
-        return ArchiveCount(int(raw), tier, str(cfg))
-
-    return ArchiveCount(ARCHIVE_COUNT_DEFAULT, TIER_DEFAULT, "")
+    found = project_cfg.resolve_tiered_cfg_value(
+        root, live_layout(root, project).root, ARCHIVE_SECTION, ARCHIVE_COUNT_KEY
+    )
+    if found.tier == project_cfg.TIER_DEFAULT:
+        return ArchiveCount(ARCHIVE_COUNT_DEFAULT, TIER_DEFAULT, "")
+    if not _DIGITS_RE.fullmatch(found.value):
+        # CONVERT (docs/blocking-site-census.md): an invalid count stops
+        # archiving for this project only. effective_archive_count()
+        # prints this refusal and archives nothing; no wake, release or
+        # other project is held by it, and the next run retries.
+        # CENSUS-ANCHOR: archive-count-invalid-01
+        raise _refuse(found.value, found.source, project)
+    return ArchiveCount(int(found.value), found.tier, found.source)
 
 
 def effective_archive_count(

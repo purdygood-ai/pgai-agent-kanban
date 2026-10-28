@@ -460,3 +460,81 @@ def test_a_failed_extraction_leaves_no_staging_and_every_project_in_place(tmp_pa
     assert result.returncode != 0, f"a broken archive imported cleanly\n{_say(result)}"
     assert _staging_left(box.root) == [], f"the failed import left its staging directory\n{_say(result)}"
     assert _state(box.root) == before, f"a failed import changed the kanban root\n{_say(result)}"
+
+
+# ---------------------------------------------------------------------------
+# Operator notice: the "Suggested next steps" printed after blanking fields
+# ---------------------------------------------------------------------------
+
+
+def _env_specific_export(tmp_path: pathlib.Path, remote_line: str = "") -> pathlib.Path:
+    """An export of ``alpha`` whose project.cfg carries the fields an import blanks,
+    plus *remote_line* (a ``git_remote_name = ...`` line, or nothing)."""
+    box = _alpha_root(tmp_path)
+    cfg = box.project_root / "project.cfg"
+    cfg.write_text(
+        cfg.read_text(encoding="utf-8")
+        + "dev_tree_path = /srv/source-host/alpha\n"
+        + "git_repo_url = git@example.com:alpha.git\n"
+        + (f"{remote_line}\n" if remote_line else ""),
+        encoding="utf-8",
+    )
+    return _export(box, tmp_path)
+
+
+def _next_step(result: subprocess.CompletedProcess, number: int) -> tuple[str, str]:
+    """The narration line of suggested next step *number* and the command line under it."""
+    lines = result.stdout.splitlines()
+    for index, line in enumerate(lines):
+        if re.match(rf"^\s*{number}\.\s+", line) and index + 1 < len(lines):
+            return line.strip(), lines[index + 1].strip()
+    raise AssertionError(f"no suggested next step {number} in the import output\n{_say(result)}")
+
+
+@pytest.mark.parametrize("args, final", [((), "alpha"), (("--name", "alpha-copy"), "alpha-copy")], ids=["own-name", "new-name"])
+def test_the_init_step_names_the_imported_project_by_flag(tmp_path, args, final):
+    export = _env_specific_export(tmp_path)
+    target = _target_root(tmp_path)
+
+    result = _import(target, export, tmp_path, *args)
+
+    assert result.returncode == 0, _say(result)
+    assert "have been blanked" in result.stdout, f"the import blanked no fields\n{_say(result)}"
+    _narration, command = _next_step(result, 2)
+    assert command.split() == ["init-project-git-repo.sh", "--project", final], (
+        f"step 2 does not print a runnable init command for {final!r}: {command!r}\n{_say(result)}"
+    )
+
+
+@pytest.mark.parametrize(
+    "remote_line, remote",
+    [("git_remote_name = upstream", "upstream"), ("", "origin"), ("git_remote_name =", "origin")],
+    ids=["configured", "absent", "blank"],
+)
+def test_the_init_step_names_the_imported_projects_remote(tmp_path, remote_line, remote):
+    export = _env_specific_export(tmp_path, remote_line)
+    target = _target_root(tmp_path)
+
+    result = _import(target, export, tmp_path)
+
+    assert result.returncode == 0, _say(result)
+    narration, _command = _next_step(result, 2)
+    words = re.findall(r"[\w.-]+", narration)
+    assert f"to {remote} " in narration, f"step 2 does not name the remote {remote!r}: {narration!r}\n{_say(result)}"
+    if remote != "origin":
+        assert "origin" not in words, f"step 2 names origin for a project whose remote is {remote!r}: {narration!r}"
+
+
+@pytest.mark.parametrize("args, final", [((), "alpha"), (("--name", "alpha-copy"), "alpha-copy")], ids=["own-name", "new-name"])
+def test_the_ceiling_step_names_the_imported_project_by_flag(tmp_path, args, final):
+    export = _env_specific_export(tmp_path)
+    target = _target_root(tmp_path)
+
+    result = _import(target, export, tmp_path, *args)
+
+    assert result.returncode == 0, _say(result)
+    assert "have been blanked" in result.stdout, f"the import blanked no fields\n{_say(result)}"
+    _narration, command = _next_step(result, 3)
+    assert command.split() == ["set-version-ceiling.sh", "--project", final, "--minor", "<N>"], (
+        f"step 3 does not print a runnable ceiling command for {final!r}: {command!r}\n{_say(result)}"
+    )

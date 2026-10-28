@@ -59,6 +59,13 @@ overwatch_check_blocked_tasks() {
             return 1
         }
     fi
+    if ! declare -F read_md_field >/dev/null 2>&1; then
+        # shellcheck source=../md_field.sh
+        source "${lib_dir}/md_field.sh" 2>/dev/null || {
+            echo "check-blocked-tasks: cannot load md_field.sh from ${lib_dir:-the lib directory}" >&2
+            return 1
+        }
+    fi
     if ! declare -F kanban_task_id_pattern >/dev/null 2>&1; then
         # shellcheck source=../task_ids.sh
         source "${lib_dir}/task_ids.sh" 2>/dev/null || {
@@ -67,7 +74,7 @@ overwatch_check_blocked_tasks() {
         }
     fi
 
-    local queue task_id status_file record needs_human unseen=0
+    local queue task_id status_file record needs_human needs_human_rc unseen=0
     local -A seen=()
     while IFS= read -r queue; do
         [[ -f "${queue}" ]] || continue
@@ -75,11 +82,13 @@ overwatch_check_blocked_tasks() {
             [[ -n "${task_id}" && -z "${seen[${task_id}]:-}" ]] || continue
             seen["${task_id}"]=1
             status_file="${tasks_root}/${task_id}/status.md"
-            record="$(pp_run_ops pgai_agent_kanban.task_status read "${status_file}" \
-                --section "Block Record" 2>/dev/null)" || record=""
+            # read_md_field exits 3 for an absent heading, which reads as
+            # empty here; any other failure is an unreadable status.md.
+            record="$(read_md_field "${status_file}" "Block Record" 2>/dev/null)" || record=""
             [[ -z "${record//[[:space:]]/}" || "${record,,}" == "none" ]] || continue
-            needs_human="$(pp_run_ops pgai_agent_kanban.task_status read "${status_file}" \
-                --section "Needs Human" 2>/dev/null)" || needs_human="unreadable"
+            needs_human_rc=0
+            needs_human="$(read_md_field "${status_file}" "Needs Human" 2>/dev/null)" || needs_human_rc=$?
+            [[ "${needs_human_rc}" -eq 0 || "${needs_human_rc}" -eq 3 ]] || needs_human="unreadable"
             echo "check-blocked-tasks: ${task_id}: BLOCKED with no ## Block Record (Needs Human: ${needs_human:-unrecorded}); block triage cannot act on it" >&2
             unseen=$(( unseen + 1 ))
         done < <(pp_run_ops pgai_agent_kanban.ops scan_queue "${queue}" "${tasks_root}" \

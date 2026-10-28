@@ -33,13 +33,13 @@
 #   Rich mode (color-capable terminal):
 #     Normal:   📝 <ver>  🟢 PM:auto  HALT:off  📅 <day> <time>
 #     Halted:   📝 <ver>  🟢 PM:auto  <red>🛑 HALT GLOBAL<reset>  📅 <day> <time>
-#     Draining: 📝 <ver>  🟢 PM:auto  <yellow>⚠️ HALT-AFTER GLOBAL until v2.9.15<reset>  📅 <day> <time>
+#     Draining: 📝 <ver>  🟢 PM:auto  <yellow>⚠️ HALT-AFTER GLOBAL until vX.Y.Z<reset>  📅 <day> <time>
 #     Pending:  📝 <ver>  🟢 PM:auto  HALT:off  <yellow>✋ APPROVAL(n)<reset>  📅 <day> <time>
-#     Simultaneous: 📝 <ver>  🟢 PM:auto  <red>🛑 HALT GLOBAL<reset>  <yellow>⚠️ HALT-AFTER <proj> until v2.9.15<reset>  ✋ DEFER GLOBAL <=low (n waiting)  📅 <day> <time>
+#     Simultaneous: 📝 <ver>  🟢 PM:auto  <red>🛑 HALT GLOBAL<reset>  <yellow>⚠️ HALT-AFTER <proj> until vX.Y.Z<reset>  ✋ DEFER GLOBAL <=low (n waiting)  📅 <day> <time>
 #   NO_COLOR / TERM=dumb (byte-identical to pre-glyph baseline):
 #     Normal:   <ver>  PM:auto  HALT:off  <day> <time>
 #     Halted:   <ver>  PM:auto  [HALT GLOBAL]  <day> <time>
-#     Draining: <ver>  PM:auto  [HALT-AFTER:GLOBAL until v2.9.15]  <day> <time>
+#     Draining: <ver>  PM:auto  [HALT-AFTER:GLOBAL until vX.Y.Z]  <day> <time>
 #     Pending:  <ver>  PM:auto  HALT:off  [APPROVAL(n)]  <day> <time>
 #   Every HALT/HALT-AFTER/APPROVAL/DEFER segment is independently optional
 #   and may appear in ANY combination simultaneously. Segment order (fixed):
@@ -92,18 +92,20 @@ source "${_SCRIPT_DIR}/../lib/status_glyphs.sh"
 # halt/approval/defer color meanings below).
 # shellcheck source=../lib/dashboard_palette.sh
 source "${_SCRIPT_DIR}/../lib/dashboard_palette.sh"
+# Source the one bash section reader (read_md_field) for the approval-gate
+# ## State reads below.
+# shellcheck source=../lib/md_field.sh
+source "${_SCRIPT_DIR}/../lib/md_field.sh"
 unset _SCRIPT_DIR
 
 # Source optional config files so env-file variables (e.g. PGAI_KANBAN_PM_MODE)
 # are available in fresh subshells (tmux status-right #() syntax).
 [[ -f "$KANBAN_ROOT/bashrc" ]] && source "$KANBAN_ROOT/bashrc" 2>/dev/null || true
 [[ -f "$KANBAN_ROOT/env" ]] && source "$KANBAN_ROOT/env" 2>/dev/null || true
-[[ -f "$HOME/.config/pgai-kanban.cfg" ]] && source "$HOME/.config/pgai-kanban.cfg" 2>/dev/null || true
-# Source: kanban.cfg [chain/paths] — INI format replaces legacy config.cfg
-# read_ini available via project_paths.sh (sourced above).
-if [[ -f "${KANBAN_ROOT}/kanban.cfg" ]]; then
-    export PGAI_KANBAN_PM_MODE="${PGAI_KANBAN_PM_MODE:-$(read_ini "${KANBAN_ROOT}/kanban.cfg" chain pm_mode automatic)}"
-fi
+# Operator user config, then [chain] pm_mode (config_loader.sh).
+# shellcheck source=../lib/config_loader.sh
+source "$(dirname "${BASH_SOURCE[0]}")/../lib/config_loader.sh"
+config_startup_prelude "$KANBAN_ROOT" 2>/dev/null || true
 export PGAI_DEV_TREE_PATH="${PGAI_DEV_TREE_PATH:-$(resolve_global_dev_tree)}"
 
 # ---------------------------------------------------------------------------
@@ -235,7 +237,10 @@ unset _sr_hs_state _sr_hs_scope _sr_hs_event _sr_hs_text _sr_hs_described
 # layout (projects/<name>/tasks/HUMAN-APPROVE-*/status.md) avoids the need
 # to enumerate the projects registry from this script.
 #
-# State field is read with awk: the first non-blank line after "## State".
+# State field is read with read_md_field (lib/md_field.sh): the first
+# non-blank line of the "## State" section. A status.md that does not
+# mention WAITING or BACKLOG anywhere cannot hold either value, so it is
+# skipped without starting the reader.
 # WAITING and BACKLOG both indicate the gate is pending operator action.
 # DONE, WONT-DO, WORKING, or BLOCKED mean the gate has been acted on or is
 # not waiting for human input; they do not contribute to the count.
@@ -250,11 +255,10 @@ _sr_approval_count=0
 
 for _sr_sf in "${KANBAN_ROOT}/projects"/*/tasks/HUMAN-APPROVE-*/status.md; do
     [[ -f "$_sr_sf" ]] || continue
-    _sr_state="$(awk '
-        /^## State[[:space:]]*$/ { found=1; next }
-        found && /^## / { exit }
-        found && /[^[:space:]]/ { print; exit }
-    ' "$_sr_sf" | tr -d '[:space:]' | tr '[:lower:]' '[:upper:]')"
+    grep -qiE 'WAITING|BACKLOG' "$_sr_sf" 2>/dev/null || continue
+    _sr_state="$(read_md_field "$_sr_sf" State 2>/dev/null)" || _sr_state=""
+    _sr_state="${_sr_state%%$'\n'*}"
+    _sr_state="$(printf '%s' "$_sr_state" | tr -d '[:space:]' | tr '[:lower:]' '[:upper:]')"
     if [[ "$_sr_state" == "WAITING" || "$_sr_state" == "BACKLOG" ]]; then
         _sr_approval_count=$(( _sr_approval_count + 1 ))
     fi

@@ -263,7 +263,7 @@ def test_real_comment_after_a_quoted_opener_is_still_skipped(tmp_path: pathlib.P
         pytest.param(f"\n\n{_PROSE}\nsecond line", "", _PROSE, id="blank-lines-before-prose"),
         pytest.param("Value `a < b` and x > y fails", "", "Value `a < b` and x > y fails", id="angle-brackets"),
         pytest.param("**Bold** opening with *emphasis*", "", "**Bold** opening with *emphasis*", id="inline-markup"),
-        pytest.param("", "## Expected\nIt keeps working.\n", "It keeps working.", id="empty-falls-through"),
+        pytest.param("", "## Expected\nIt keeps working.\n", "", id="empty-reads-empty"),
         pytest.param("", "", "", id="empty-last-section"),
     ],
 )

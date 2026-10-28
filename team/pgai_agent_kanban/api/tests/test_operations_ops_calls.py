@@ -45,11 +45,12 @@ cleared.
 
 from __future__ import annotations
 
+import contextlib
 import os
 import pathlib
 import subprocess
 import sys
-from typing import Callable, Generator, NamedTuple, Optional
+from typing import Callable, Generator, Iterator, NamedTuple, Optional
 
 import pytest
 from fastapi.testclient import TestClient
@@ -66,6 +67,7 @@ from pgai_agent_kanban.ops.errors import (
     OpsError,
     Refused,
 )
+from pgai_agent_kanban.overwatch.halt_provenance import installed_script_command
 
 # This file lives at team/pgai_agent_kanban/api/tests/; four levels up is team/.
 _TEAM_DIR = pathlib.Path(__file__).resolve().parent.parent.parent.parent
@@ -119,26 +121,39 @@ def _build_board(root: pathlib.Path) -> pathlib.Path:
     return root
 
 
-@pytest.fixture
-def board(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> pathlib.Path:
-    root = _build_board(tmp_path / "rest_board")
+def _point_server_env_at(root: pathlib.Path, temp_dir: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Point every inherited kanban-root variable of this process at *root*,
+    clearing the pre-resolved ones, so no route can reach a live install."""
     monkeypatch.setenv("PGAI_AGENT_KANBAN_ROOT_PATH", str(root))
     monkeypatch.setenv("KANBAN_ROOT", str(root))
-    monkeypatch.setenv("PGAI_AGENT_KANBAN_TEMP_DIR", str(tmp_path / "server_tmp"))
+    monkeypatch.setenv("PGAI_AGENT_KANBAN_TEMP_DIR", str(temp_dir))
     monkeypatch.delenv("PGAI_PROJECT_NAME", raising=False)
     monkeypatch.delenv("PGAI_PROJECT_ROOT", raising=False)
     monkeypatch.delenv("PGAI_TASKS_DIR", raising=False)
+
+
+@contextlib.contextmanager
+def _api_client(root: pathlib.Path) -> Iterator[TestClient]:
+    """A TestClient whose API kanban_root is *root*."""
+    from pgai_agent_kanban.api.app import create_app
+    from pgai_agent_kanban.api.config import ApiConfig
+
+    cfg = ApiConfig(host="127.0.0.1", port=0, kanban_root=root)
+    with TestClient(create_app(cfg=cfg), raise_server_exceptions=True) as c:
+        yield c
+
+
+@pytest.fixture
+def board(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> pathlib.Path:
+    root = _build_board(tmp_path / "rest_board")
+    _point_server_env_at(root, tmp_path / "server_tmp", monkeypatch)
     return root
 
 
 @pytest.fixture
 def client(board: pathlib.Path) -> Generator[TestClient, None, None]:
     """A TestClient whose API kanban_root is the REST board."""
-    from pgai_agent_kanban.api.app import create_app
-    from pgai_agent_kanban.api.config import ApiConfig
-
-    cfg = ApiConfig(host="127.0.0.1", port=0, kanban_root=board)
-    with TestClient(create_app(cfg=cfg), raise_server_exceptions=True) as c:
+    with _api_client(board) as c:
         yield c
 
 
@@ -424,7 +439,11 @@ def test_success_stdout_and_effect_match_the_cli_script(
 # ---------------------------------------------------------------------------
 
 
-_CLI_REMEDY_PREFIX = "Fix the condition the message names, then re-run the CLI form: team/scripts/"
+# The fallback remedy re-runs the installed script under the API's own kanban
+# root; ``{installed_script}`` is filled per case with
+# ``installed_script_command(board, case.script)``, the shell-quoted
+# ``<board>/scripts/<script>`` the route renders.
+_CLI_REMEDY_PREFIX = "Fix the condition the message names, then re-run the CLI form: {installed_script}"
 
 # An unroutable intake name is refused before the temp file is written, so
 # its remedy re-sends the request under a routable name rather than naming a
@@ -501,7 +520,8 @@ def test_ops_error_reaches_the_caller_as_the_shell_paths_dual_channel_envelope(
     assert body["stdout"] == cli.stdout
     assert body["error"] == case.fallback_key
     assert _normalise(body["message"], board) == _normalise(cli.stderr.strip(), cli_board)
-    assert body["remedy"].startswith(case.remedy_prefix), body["remedy"]
+    remedy_prefix = case.remedy_prefix.format(installed_script=installed_script_command(board, case.script))
+    assert body["remedy"].startswith(remedy_prefix), body["remedy"]
 
 
 @pytest.mark.parametrize(
@@ -582,6 +602,43 @@ def test_wrapper_level_refusal_matches_the_cli_script(
     assert payload["exit_code"] == cli.returncode
     assert _normalise(payload["stderr"], board) == _normalise(cli.stderr, cli_board)
     assert payload["error"] and payload["message"] and payload["remedy"], payload
+
+
+def _remedy_line(stderr: str) -> str:
+    """The value of the ``remedy:`` line of a CLI dual-channel refusal block."""
+    line = next(line for line in stderr.splitlines() if line.startswith("remedy:"))
+    return line[len("remedy:"):].strip()
+
+
+def test_halt_after_scope_refusal_matches_the_cli_script_on_roots_needing_quotes(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With both boards at paths holding a space, the scope-mismatch refusal
+    still reaches an HTTP caller with the CLI's exact stderr and remedy once
+    each board's path is normalised: the route and the script quote the
+    installed script path the same way, so neither remedy splits it."""
+    board = _build_board(tmp_path / "rest board")
+    cli_board = _build_board(tmp_path / "cli board")
+    _point_server_env_at(board, tmp_path / "server_tmp", monkeypatch)
+
+    cli = _run_cli(
+        "halt-after.sh",
+        ["--project", _PROJECT, "--key", "coder", "--until", "v1.2.3"],
+        cli_board,
+        tmp_path / "cli_tmp",
+    )
+    assert cli.returncode != 0, f"halt-after.sh accepted --key coder --until:\n{cli.stdout}"
+
+    with _api_client(board) as client:
+        resp = client.post("/operations/halt-after", json={"project": _PROJECT, "key": "coder", "until": "v1.2.3"})
+    payload = resp.json()
+
+    assert resp.status_code == 500, payload
+    assert set(payload) == _ENVELOPE_REFUSAL_KEYS, payload
+    assert payload["exit_code"] == cli.returncode
+    assert payload["error"] == "halt-after.until_scope_mismatch"
+    assert _normalise(payload["stderr"], board) == _normalise(cli.stderr, cli_board)
+    assert _normalise(payload["remedy"], board) == _normalise(_remedy_line(cli.stderr), cli_board)
 
 
 # ---------------------------------------------------------------------------

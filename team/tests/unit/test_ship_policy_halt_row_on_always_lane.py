@@ -1,7 +1,7 @@
 """
 test_ship_policy_halt_row_on_always_lane.py
 ===========================================
-OVERWATCH's resolution matrix has one row, for trigger class
+OVERWATCH's resolution matrix has one row for trigger class
 "ship-policy-halt": a project HALT file whose header says CM wrote it
 (pgai_agent_kanban.overwatch.resolution_matrix._fact_trigger_class). On a
 lane whose ship posture is "always", the release ships through triggers 2,
@@ -16,16 +16,19 @@ Steps 4c-4f) against a sandbox lane (tests/fixtures/ship_policy_sandbox.py):
     writes a project HALT file that OVERWATCH classifies as
     "ship-policy-halt" -- proof that the fixture really reaches the stop
     the row is about;
-  - under always it ships, writes no HALT file in the project or at the
-    kanban root, and the trigger class OVERWATCH would read for the lane is
-    "unknown", which no matrix row matches.
+  - under always -- set in project.cfg, or the default when the key is
+    absent from both config files of the push_to_remote = false lane -- it
+    ships, writes no HALT file in the project or at the kanban root, and the
+    trigger class OVERWATCH would read for the lane is "unknown", which no
+    matrix row matches.
 
 The row only matches CM's HALT header, so an always lane can still raise
 trigger 1 and the mechanical HALTs (4-11) for it to classify; those are out
 of this invariant and covered as unchanged by the ship-posture tests.
 
-The shipped resolution-matrix.yaml is checked to declare exactly its one
-existing row.
+The shipped resolution-matrix.yaml is checked to declare exactly that one
+ship-policy-halt row; its only other rows are the squash-conflict rows the
+release consults before any HALT exists.
 """
 
 from __future__ import annotations
@@ -50,6 +53,9 @@ _SHIPPED_MATRIX = (
 )
 
 _TRIGGER_FIXTURES = {"trigger-2": KEY_T2, "trigger-3": KEY_T3, "trigger-8": KEY_T8}
+# The postures that resolve to always on the sandbox's local-only lane: set
+# explicitly, and the key left out of both config files (the default).
+_ALWAYS_POSTURES = {"always": "always", "key_absent": None}
 
 
 @pytest.fixture(autouse=True)
@@ -82,9 +88,10 @@ def test_matrix_lane_leaves_a_ship_policy_halt_for_the_row(tmp_path, fixture):
     assert _trigger_class(lane.halt_file) == "ship-policy-halt"
 
 
+@pytest.mark.parametrize("posture_id", sorted(_ALWAYS_POSTURES))
 @pytest.mark.parametrize("fixture", sorted(_TRIGGER_FIXTURES))
-def test_always_lane_leaves_no_trigger_2_3_or_8_halt_for_the_row(tmp_path, fixture):
-    lane = build_lane(tmp_path, fixture, "always")
+def test_always_lane_leaves_no_trigger_2_3_or_8_halt_for_the_row(tmp_path, fixture, posture_id):
+    lane = build_lane(tmp_path, fixture, _ALWAYS_POSTURES[posture_id])
 
     result = run_ship_policy(tmp_path, lane, 'echo "decision=$_SHIP_DECISION"')
 
@@ -97,8 +104,10 @@ def test_always_lane_leaves_no_trigger_2_3_or_8_halt_for_the_row(tmp_path, fixtu
     assert all(row.trigger_class != "unknown" for row in rows), "no row may match a lane with no HALT"
 
 
-def test_shipped_resolution_matrix_declares_exactly_its_existing_row():
-    assert load_matrix(matrix_path=str(_SHIPPED_MATRIX)) == [
+def test_shipped_resolution_matrix_declares_exactly_its_existing_ship_policy_row():
+    rows = load_matrix(matrix_path=str(_SHIPPED_MATRIX))
+    assert {row.trigger_class for row in rows} == {"ship-policy-halt", "squash-conflict"}
+    assert [row for row in rows if row.trigger_class == "ship-policy-halt"] == [
         MatrixRow(
             trigger_class="ship-policy-halt",
             findings_all_filed=True,

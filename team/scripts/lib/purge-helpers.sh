@@ -69,7 +69,9 @@
 #   The final stdout line of every purge_* function is "<count> <bytes>" for
 #   summary accounting.  All stderr output is for diagnostic messages only.
 
-# release_state_value reads Active RC through the one release-state reader.
+# release_state_value reads Active RC through the one release-state reader;
+# cm/common.sh also loads md_field.sh, whose read_md_field reads every
+# other section here.
 # shellcheck source=cm/common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/cm/common.sh"
 # Task folders and the task IDs a bundle names are recognised by the shared
@@ -80,19 +82,21 @@ source "$(dirname "${BASH_SOURCE[0]}")/task_ids.sh"
 
 # ---------------------------------------------------------------------------
 # Internal helper: _purge_read_field <file> <field_name>
-# Parse the body of a "## FieldName" section from a markdown file.
-# Prints the first non-blank line after the matching heading, or empty string.
+# Print the first non-blank line of the "## <field_name>" section of a
+# markdown file, trimmed and otherwise as written, or an empty line when the
+# heading is absent, its body is empty, or the file cannot be read. Always
+# returns 0. The section is read by read_md_field (md_field.sh, loaded
+# through cm/common.sh) with --exact-heading: the heading line must read
+# exactly "## <field_name>" (letter case counts) and the next "##" line ends
+# the section.
 # ---------------------------------------------------------------------------
 _purge_read_field() {
     local file="$1"
     local field="$2"
     local val
-    val="$(awk -v fld="## ${field}" '
-        $0 == fld { found=1; next }
-        found && /^## / { exit }
-        found && /^[[:space:]]*$/ { next }
-        found { print; exit }
-    ' "${file}" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
+    val="$(read_md_field --exact-heading "${file}" "${field}")" || val=""
+    val="${val%%$'\n'*}"
+    val="${val%"${val##*[![:space:]]}"}"
     echo "${val}"
 }
 

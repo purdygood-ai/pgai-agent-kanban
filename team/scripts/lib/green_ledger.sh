@@ -18,7 +18,11 @@
 #
 # LEDGER LOCATION
 # ---------------
-#   ${PGAI_AGENT_KANBAN_TEMP_DIR}/projects/<project>/green-ledger/<rc>/ledger.jsonl
+#   <temp root>/projects/<project>/green-ledger/<rc>/ledger.jsonl
+#
+#   <temp root> pgai_temp_dir's answer (team/scripts/lib/temp.sh): the
+#              PGAI_AGENT_KANBAN_TEMP_DIR override when set and not blank,
+#              otherwise the root kanban.cfg [paths] configures.
 #
 #   <project>  PGAI_PROJECT_NAME, default pgai-agent-kanban (the same
 #              default both runners use for their bug filer).
@@ -138,9 +142,15 @@ _green_ledger_say() {
   printf '[green-ledger] %s\n' "$1"
 }
 
-# release_state_value reads Active RC through the one release-state reader.
+# release_state_value reads Active RC through the one release-state reader;
+# cm/common.sh also loads pp_run_ops from this tree, which reaches the ledger
+# module (pgai_agent_kanban.testing.green_ledger) from the dev-tree team/
+# root and from an install root alike.
 # shellcheck source=cm/common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/cm/common.sh"
+# green_ledger_path takes the temp root from pgai_temp_dir, the one resolver.
+# shellcheck source=temp.sh
+source "$(dirname "${BASH_SOURCE[0]}")/temp.sh"
 
 # ---------------------------------------------------------------------------
 # _green_ledger_rc_scope
@@ -174,8 +184,8 @@ _green_ledger_rc_scope() {
 # See "Public API" above.
 # ---------------------------------------------------------------------------
 green_ledger_path() {
-  local temp_root="${PGAI_AGENT_KANBAN_TEMP_DIR:-}"
-  if [[ -z "$temp_root" ]] && declare -F pgai_temp_dir >/dev/null 2>&1; then
+  local temp_root=""
+  if declare -F pgai_temp_dir >/dev/null 2>&1; then
     temp_root="$(pgai_temp_dir 2>/dev/null || true)"
   fi
   [[ -n "$temp_root" ]] || return 1
@@ -227,8 +237,10 @@ green_ledger_prepare() {
 
 # ---------------------------------------------------------------------------
 # green_ledger_try_reuse
-# See "Public API" above. The ledger itself is parsed by one python3 call,
-# which prints a single "<verdict>\t<detail>" line:
+# See "Public API" above. The ledger itself is parsed by
+# pgai_agent_kanban.testing.green_ledger's verdict verb (reuse_verdict),
+# reached through pp_run_ops, which prints a single "<verdict>\t<detail>"
+# line:
 #   reuse    <recorded_at>            -- every reuse condition holds
 #   norecord <text>                   -- nothing matching at this commit
 #   mismatch <text>                   -- a matching record exists but fails
@@ -262,50 +274,8 @@ green_ledger_try_reuse() {
     return 1
   fi
   local verdict_line verdict detail
-  verdict_line="$(python3 -c '
-import json
-import sys
-
-path, commit, suite, selection, sha = sys.argv[1:6]
-required = ("commit", "suite", "exit", "findings_sha")
-try:
-    with open(path, encoding="utf-8") as fh:
-        lines = fh.read().splitlines()
-except (OSError, UnicodeDecodeError) as exc:
-    print(f"corrupt\tledger {path} is unreadable ({exc.__class__.__name__})")
-    sys.exit(0)
-records = []
-for number, line in enumerate(lines, start=1):
-    if not line.strip():
-        continue
-    try:
-        record = json.loads(line)
-    except ValueError:
-        record = None
-    if not isinstance(record, dict) or any(key not in record for key in required):
-        print(f"corrupt\tledger {path} line {number} is not a ledger record")
-        sys.exit(0)
-    records.append(record)
-matching = [
-    r for r in records
-    if r["commit"] == commit and r["suite"] == suite and r.get("selection", "") == selection
-]
-if not matching:
-    print(f"norecord\tno recorded {suite} run at commit {commit[:12]} with marker selection \"{selection}\"")
-    sys.exit(0)
-last = matching[-1]
-recorded_exit = last["exit"]
-recorded_sha = str(last["findings_sha"])
-recorded_at = last.get("recorded_at") or "at an unknown time"
-if recorded_exit != 0:
-    print(f"mismatch\tthe most recent {suite} run at commit {commit[:12]} exited {recorded_exit}")
-elif last.get("tree_clean") is not True:
-    print(f"mismatch\tthe most recent {suite} run at commit {commit[:12]} ran on a tree with uncommitted changes")
-elif recorded_sha != sha:
-    print(f"mismatch\tthe lint findings hash differs from the recorded run at commit {commit[:12]} ({recorded_sha[:12]} recorded, {sha[:12]} now)")
-else:
-    print(f"reuse\t{recorded_at}")
-' "$GREEN_LEDGER_FILE" "$GREEN_LEDGER_COMMIT" "$GREEN_LEDGER_SUITE" \
+  verdict_line="$(pp_run_ops pgai_agent_kanban.testing.green_ledger verdict -- \
+    "$GREEN_LEDGER_FILE" "$GREEN_LEDGER_COMMIT" "$GREEN_LEDGER_SUITE" \
     "$GREEN_LEDGER_SELECTION" "$GREEN_LEDGER_FINDINGS_SHA" 2>/dev/null || true)"
   verdict="${verdict_line%%$'\t'*}"
   detail="${verdict_line#*$'\t'}"
@@ -327,7 +297,10 @@ else:
 
 # ---------------------------------------------------------------------------
 # green_ledger_record_exit <exit-code>
-# See "Public API" above.
+# See "Public API" above. The record is appended by
+# pgai_agent_kanban.testing.green_ledger's record verb (append_record),
+# reached through pp_run_ops, which prints "ok\t<note>" -- the note names
+# where a malformed ledger was moved, or is empty -- or "failed\t<reason>".
 # ---------------------------------------------------------------------------
 green_ledger_record_exit() {
   local exit_code="${1:-0}"
@@ -339,56 +312,8 @@ green_ledger_record_exit() {
     return 0
   fi
   local outcome
-  outcome="$(python3 -c '
-import json
-import os
-import sys
-from datetime import datetime, timezone
-
-path, commit, suite, selection, exit_code, sha, tree_clean = sys.argv[1:8]
-required = ("commit", "suite", "exit", "findings_sha")
-note = ""
-try:
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    if os.path.exists(path):
-        malformed = False
-        try:
-            with open(path, encoding="utf-8") as fh:
-                for line in fh:
-                    if not line.strip():
-                        continue
-                    try:
-                        rec = json.loads(line)
-                    except ValueError:
-                        rec = None
-                    if not isinstance(rec, dict) or any(k not in rec for k in required):
-                        malformed = True
-                        break
-        except (OSError, UnicodeDecodeError):
-            malformed = True
-        if malformed:
-            os.replace(path, path + ".malformed")
-            note = f"; the malformed ledger was moved aside to {path}.malformed"
-    record = {
-        "recorded_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-        "commit": commit,
-        "suite": suite,
-        "selection": selection,
-        "exit": int(exit_code),
-        "findings_sha": sha,
-        "tree_clean": tree_clean == "true",
-    }
-    line = (json.dumps(record, sort_keys=True) + "\n").encode("utf-8")
-    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o644)
-    try:
-        os.write(fd, line)
-    finally:
-        os.close(fd)
-except (OSError, ValueError) as exc:
-    print(f"failed\t{exc.__class__.__name__}: {exc}")
-    sys.exit(0)
-print(f"ok\t{note}")
-' "$GREEN_LEDGER_FILE" "$GREEN_LEDGER_COMMIT" "$GREEN_LEDGER_SUITE" \
+  outcome="$(pp_run_ops pgai_agent_kanban.testing.green_ledger record -- \
+    "$GREEN_LEDGER_FILE" "$GREEN_LEDGER_COMMIT" "$GREEN_LEDGER_SUITE" \
     "$GREEN_LEDGER_SELECTION" "$exit_code" "$GREEN_LEDGER_FINDINGS_SHA" \
     "$GREEN_LEDGER_TREE_CLEAN" 2>/dev/null || true)"
   case "${outcome%%$'\t'*}" in

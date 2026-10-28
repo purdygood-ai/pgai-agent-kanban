@@ -97,11 +97,13 @@ source "${SCRIPT_DIR}/../lib/script_common.sh"
 # ---------------------------------------------------------------------------
 [[ -f "$KANBAN_ROOT/bashrc" ]]               && source "$KANBAN_ROOT/bashrc"            2>/dev/null || true
 [[ -f "$KANBAN_ROOT/env" ]]                  && source "$KANBAN_ROOT/env"               2>/dev/null || true
-[[ -f "$HOME/.config/pgai-kanban.cfg" ]]     && source "$HOME/.config/pgai-kanban.cfg" 2>/dev/null || true
-# Source: kanban.cfg [chain/paths/dashboard] — INI format replaces legacy config.cfg
+# Operator user config, then [chain] pm_mode (config_loader.sh).
+# shellcheck source=../lib/config_loader.sh
+source "${SCRIPT_DIR}/../lib/config_loader.sh"
+config_startup_prelude "$KANBAN_ROOT" 2>/dev/null || true
+# Source: kanban.cfg [paths/dashboard] — INI format replaces legacy config.cfg
 # read_ini available via project_paths.sh (sourced above).
 if [[ -f "${KANBAN_ROOT}/kanban.cfg" ]]; then
-    export PGAI_KANBAN_PM_MODE="${PGAI_KANBAN_PM_MODE:-$(read_ini "${KANBAN_ROOT}/kanban.cfg" chain pm_mode automatic)}"
     DASHBOARD_ROWS_PER_COLUMN="${DASHBOARD_ROWS_PER_COLUMN:-$(read_ini "${KANBAN_ROOT}/kanban.cfg" dashboard rows_per_column 21)}"
     export DASHBOARD_ROWS_PER_COLUMN
 fi

@@ -5,5 +5,9 @@ Hosts per-project, per-RC on-disk records the rc-metrics reader consumes
 (Wall elapsed already comes from release-state.md / history.csv; this
 package holds the sidecars that carry lifecycle state release-state.md's
 four fixed fields cannot: the blocked-interval ledger (blocked_ledger.py)
-records the minutes an RC spent unable to proceed).
+records every block with its class and cause, including blocks raised
+while no RC is open, and totals the minutes an RC spent unable to proceed).
+reliability.py computes the project's Hands-off and Clean streaks from that
+ledger and the metrics/rc/ rollups, and writes them to
+metrics/reliability.json, whose schema its module docstring documents.
 """

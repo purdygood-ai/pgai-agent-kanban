@@ -21,6 +21,10 @@ Acceptance criteria exercised:
      HALT-AFTER file leaves that file byte-identical.
   6. The arm confirmation for a version-pinned sentinel renders the target
      through describe_token ("until vX.Y.Z"), not a locally composed phrase.
+  7. The scope-mismatch and project-required remedies name this script as
+     installed under the resolved kanban root, shell-quoted exactly as
+     Python's shlex.quote quotes it, so each command runs as printed even
+     when the root's path contains a space.
 
 Tests invoke halt-after.sh via subprocess, exercising the real production
 shell code rather than a reimplementation of it, matching the pattern in
@@ -34,6 +38,8 @@ from __future__ import annotations
 
 import os
 import pathlib
+import re
+import shlex
 import subprocess
 
 # ---------------------------------------------------------------------------
@@ -47,10 +53,15 @@ def _env(kanban_root: pathlib.Path) -> dict[str, str]:
     """An environment repointed at a throwaway kanban root, with
     PGAI_PROJECT_NAME unset -- Live-Install Safety (roles/CODER.md): a
     script invoked in a test must never be able to resolve back to the
-    operator's real kanban root or a real project."""
+    operator's real kanban root or a real project. The five inherited root
+    variables are set or cleared together: the two roots and the temp dir
+    point into the throwaway root, the two pre-resolved exports are cleared."""
     env = dict(os.environ)
-    env.pop("PGAI_PROJECT_NAME", None)
+    for name in ("PGAI_PROJECT_NAME", "PGAI_PROJECT_ROOT", "PGAI_TASKS_DIR"):
+        env.pop(name, None)
     env["PGAI_AGENT_KANBAN_ROOT_PATH"] = str(kanban_root)
+    env["KANBAN_ROOT"] = str(kanban_root)
+    env["PGAI_AGENT_KANBAN_TEMP_DIR"] = str(kanban_root / "tmp")
     return env
 
 
@@ -62,6 +73,20 @@ def _run(args: list[str], kanban_root: pathlib.Path, timeout: int = 15) -> subpr
         env=_env(kanban_root),
         timeout=timeout,
     )
+
+
+def _remedy(stderr: str) -> str:
+    """The value of the ``remedy:`` line of a dual-channel refusal block."""
+    line = next(line for line in stderr.splitlines() if line.startswith("remedy:"))
+    return line[len("remedy:"):].strip()
+
+
+def _spaced_root(tmp_path: pathlib.Path) -> pathlib.Path:
+    """A throwaway kanban root whose path holds a space, so an unquoted
+    path in a remedy would split into two words."""
+    root = tmp_path / "kanban root"
+    root.mkdir()
+    return root
 
 
 # ---------------------------------------------------------------------------
@@ -151,6 +176,41 @@ def test_until_combined_with_the_rc_scope_explicitly_is_not_a_mismatch(
     assert sentinel.read_text(encoding="utf-8").strip() == "rc:v2.20.1"
 
 
+def test_until_scope_mismatch_remedy_names_the_installed_script_shell_quoted(
+    tmp_path: pathlib.Path,
+) -> None:
+    root = _spaced_root(tmp_path)
+    (root / "projects" / "demo").mkdir(parents=True)
+
+    result = _run(["--project", "demo", "--key", "coder", "--until", "v1.2.3"], root)
+
+    assert result.returncode != 0
+    assert "halt-after.until_scope_mismatch" in result.stderr
+    remedy = _remedy(result.stderr)
+    commands = re.findall(r"\(([^()]+)\)", remedy)
+    assert len(commands) == 2, f"expected two parenthesised commands in: {remedy!r}"
+    script = str(root.resolve() / "scripts" / "halt-after.sh")
+    assert shlex.split(commands[0]) == [script, "--key", "coder"], remedy
+    assert shlex.split(commands[1]) == [script, "--project", "your-project", "--until", "vX.Y.Z"], remedy
+
+
+def test_until_scope_mismatch_remedy_quotes_the_script_as_shlex_quote_does(
+    tmp_path: pathlib.Path,
+) -> None:
+    """The remedy's commands are byte-identical to what Python's shlex.quote
+    builds for the same root, so the REST route's twin remedy can match it."""
+    root = _spaced_root(tmp_path)
+    (root / "projects" / "demo").mkdir(parents=True)
+
+    result = _run(["--project", "demo", "--key", "coder", "--until", "v1.2.3"], root)
+
+    assert result.returncode != 0
+    remedy = _remedy(result.stderr)
+    script = shlex.quote(str(root / "scripts" / "halt-after.sh"))
+    assert f"({script} --key coder)" in remedy, remedy
+    assert f"({script} --project your-project --until vX.Y.Z)" in remedy, remedy
+
+
 # ---------------------------------------------------------------------------
 # Refusal: --until with no project resolvable
 # ---------------------------------------------------------------------------
@@ -162,6 +222,21 @@ def test_until_with_no_project_named_refuses(tmp_path: pathlib.Path) -> None:
     assert result.returncode != 0
     assert "error:" in result.stderr
     assert "remedy:" in result.stderr
+
+
+def test_project_required_remedy_names_the_installed_script_shell_quoted(
+    tmp_path: pathlib.Path,
+) -> None:
+    root = _spaced_root(tmp_path)
+
+    result = _run(["--until", "v1.2.3"], root)
+
+    assert result.returncode != 0
+    assert "halt-after.project_required" in result.stderr
+    remedy = _remedy(result.stderr)
+    _, _, example = remedy.partition("e.g. ")
+    script = str(root.resolve() / "scripts" / "halt-after.sh")
+    assert shlex.split(example.rstrip(".")) == [script, "--project", "your-project"], remedy
 
 
 # ---------------------------------------------------------------------------

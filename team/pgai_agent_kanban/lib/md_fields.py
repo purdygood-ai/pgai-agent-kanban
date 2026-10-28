@@ -7,33 +7,23 @@ Those files carry their fields as level-2 headings with the value beneath:
     ## PM Task
     PM-20260101-001-example-requirement
 
-Every Python reader of such a field calls this module rather than carrying
-its own regex. ``status.md`` is not read here: its sections belong to
-``pgai_agent_kanban.task_status``.
+Every section is read by ``pgai_agent_kanban.task_status.read_section``,
+the one section reader, with its ``end_at_subheading`` reading: a ``###``
+subheading ends the body as the next ``##`` heading does. The reader's
+docstring carries the section rules (heading match, inline
+``## Heading: value``, blank lines, missing versus empty, CRLF). This
+module adds the value step on top. ``status.md`` is not read here: its
+sections belong to ``pgai_agent_kanban.task_status``.
 
-What a section is
------------------
-A section starts at a line ``## <heading>`` and its body is every following
-line up to, not including, the next line that begins with ``##`` (or the end
-of the file). An empty section therefore reads as empty — never as the
-heading or text of the section after it. This is the same boundary the
-status.md readers and writers use (``_status_section_re`` in
-``team/scripts/lib/wake_task_state.sh``).
+The value
+---------
+A field's value is the first non-blank line of its section body, stripped:
 
-Variants the writers produce, all read the same way
----------------------------------------------------
-- The heading matches case-insensitively, with any run of whitespace
-  after ``##`` and trailing spaces, tabs or a carriage return after the
-  name. ``## Severity`` does not match ``## Severity Rationale``.
-- Any number of blank lines may sit between the heading and the value.
-- An inline value on the heading line itself, after a colon
-  (``## Status: open``), is the first line of the body.
 - A value wrapped in bold or underscore-bold (``**high**``, ``__high__``)
   reads as the text inside.
 - Trailing text on the value line is part of the value
   (``medium (workaround exists)`` reads as written); a caller that wants a
   single token splits it.
-- CRLF line endings read the same as LF.
 
 Writing
 -------
@@ -69,10 +59,9 @@ Command line
       (:func:`set_value_line`).
 
 The render commands exit 1 with one plain stderr line when FILE cannot be
-read.
+read. ``-h`` or ``--help`` prints this text and exits 0.
 
 Public API:
-    section_body(text, heading) -> str | None
     field_value(text, heading) -> str
     read_body(path, heading) -> str | None
     read_field(path, heading) -> str
@@ -83,20 +72,39 @@ Public API:
 from __future__ import annotations
 
 import os
+import pathlib
 import re
 import sys
 from typing import Optional, Union
+
+# Run by file path (``python3 .../md_fields.py``) or loaded from a file
+# outside its package, this module has no parent package and the interpreter
+# puts only its own directory on sys.path, so the package import below would
+# not resolve. Put this file's own package root -- the directory holding the
+# pgai_agent_kanban/ this file sits in -- at the front of sys.path so the
+# import resolves from the same tree, never another. Imported as a package
+# member, sys.path is left untouched.
+if not __package__:
+    _OWN_PACKAGE_ROOT = str(pathlib.Path(__file__).resolve().parents[2])
+    if _OWN_PACKAGE_ROOT not in sys.path:
+        sys.path.insert(0, _OWN_PACKAGE_ROOT)
+
+from pgai_agent_kanban import task_status  # noqa: E402
 
 __all__ = [
     "field_value",
     "read_body",
     "read_field",
-    "section_body",
     "set_status_text",
     "set_value_line",
 ]
 
 PathLike = Union[str, "os.PathLike[str]"]
+
+# How this module reads a section through ``task_status.read_section``:
+# ``end_at_subheading`` — a ``###`` subheading ends the body, as the next
+# ``##`` heading does.
+_SECTION_READING = {"end_at_subheading": True}
 
 # A value line wholly wrapped in ** or __ — group 2 is the text inside.
 _BOLD_VALUE_RE = re.compile(r"^(\*\*|__)(.+?)\1$")
@@ -134,30 +142,6 @@ def _unbold(value: str) -> str:
     return m.group(2).strip() if m else value
 
 
-def section_body(text: str, heading: str) -> Optional[str]:
-    """Return the body of the first ``## <heading>`` section in *text*.
-
-    Args:
-        text:    Markdown file contents.
-        heading: Heading name without the ``## `` prefix, e.g. ``"PM Task"``.
-
-    Returns:
-        The body with surrounding whitespace removed — ``""`` for an empty
-        section — or ``None`` when the heading is absent. An inline value
-        (``## Status: open``) is the body's first line. Line endings are
-        normalised to ``\\n``.
-    """
-    normalised = text.replace("\r\n", "\n")
-    m = _section_regex(heading).search(normalised)
-    if m is None:
-        return None
-    inline = _inline_value(m.group(1), heading)
-    body = m.group(2).strip()
-    if inline:
-        return f"{inline}\n{body}".strip()
-    return body
-
-
 def field_value(text: str, heading: str) -> str:
     """Return the value of the ``## <heading>`` field in *text*.
 
@@ -172,7 +156,7 @@ def field_value(text: str, heading: str) -> str:
         The value, or ``""`` when the heading is absent or its section is
         empty.
     """
-    body = section_body(text, heading)
+    body = task_status.read_section(text, heading, **_SECTION_READING)
     if not body:
         return ""
     for line in body.splitlines():
@@ -196,13 +180,15 @@ def read_body(path: PathLike, heading: str) -> Optional[str]:
     """Return the ``## <heading>`` section body of the file at *path*.
 
     Returns:
-        As :func:`section_body`; ``None`` also when the file is missing or
-        unreadable.
+        The body ``task_status.read_section`` returns with this module's
+        reading: surrounding whitespace removed, ``""`` for an empty
+        section, ``None`` when the heading is absent, the file is missing
+        or it is unreadable.
     """
     text = _read_text(path)
     if text is None:
         return None
-    return section_body(text, heading)
+    return task_status.read_section(text, heading, **_SECTION_READING)
 
 
 def read_field(path: PathLike, heading: str) -> str:
@@ -244,10 +230,6 @@ def set_status_text(text: str, value: str) -> str:
     Returns:
         The rewritten contents.
     """
-    # Imported here so a read-only caller of this module does not load the
-    # status.md writer and its dependencies.
-    from pgai_agent_kanban import task_status
-
     if task_status.read_section(text, "Status") is not None:
         return task_status.replace_section(text, "Status", value)
     lines = text.splitlines(keepends=True)
@@ -339,6 +321,9 @@ def _render(path: str, rewrite) -> int:
 def main(argv: Optional[list] = None) -> int:
     """Run one command-line command; return its exit code."""
     args = list(sys.argv[1:] if argv is None else argv)
+    if args and args[0] in ("-h", "--help"):
+        print(__doc__.strip())
+        return 0
     command, rest = (args[0], args[1:]) if args else ("", [])
     if command == "read" and len(rest) == 2:
         # Undecodable bytes read as U+FFFD rather than as an absent field, so
@@ -348,7 +333,7 @@ def main(argv: Optional[list] = None) -> int:
                 text = handle.read()
         except OSError:
             return EXIT_FIELD_ABSENT
-        if section_body(text, rest[1]) is None:
+        if task_status.read_section(text, rest[1], **_SECTION_READING) is None:
             return EXIT_FIELD_ABSENT
         print(field_value(text, rest[1]))
         return 0

@@ -1,0 +1,47 @@
+{
+  "action": "requeue_owner",
+  "backups": {
+    "queue": "/home/op/pgai_agent_kanban/projects/pgai-agent-kanban/overwatch/backups/2026-10-12T01:56:11Z/CODER-20261011-088-upgrade-preserve-state/coder_backlog.md",
+    "status.md": "/home/op/pgai_agent_kanban/projects/pgai-agent-kanban/overwatch/backups/2026-10-12T01:56:11Z/CODER-20261011-088-upgrade-preserve-state/status.md"
+  },
+  "block_epoch": "2026-10-12T01:56:07+00:00",
+  "block_record": {
+    "attempts": 0,
+    "cooldown_until": "none",
+    "evidence": "worktree=/tmp/pgai_kanban_tmp/projects/pgai-agent-kanban/worktrees/CODER-20261011-088-upgrade-preserve-state; branch=ai_feature/CODER-20261011-088-upgrade-preserve-state; ahead=1; merged=no; batch_log=/home/op/pgai_agent_kanban/logs/agents/coder-batch-20261011-215602.log#95694-105089; diag=/home/op/pgai_agent_kanban/logs/agents/coder-batch-20261011-215602.log:967; timeout_s=692",
+    "first_blocked_at": "2026-10-12T01:56:07+00:00",
+    "last_blocked_at": "2026-10-12T01:56:07+00:00",
+    "owner_role": "CODER",
+    "reason_code": "per_task_timeout",
+    "resume": "fresh"
+  },
+  "decision": {
+    "action": "requeue_owner",
+    "attempt": 1,
+    "backoff": null,
+    "cooldown_s": 1800,
+    "cooldown_until": "2026-10-12T02:26:19+00:00",
+    "detail": "per_task_timeout: requeue_owner, attempt 1 of 1",
+    "max_attempts": 1,
+    "not_before": null,
+    "params": {
+      "note": "previous attempt was killed at 692s; continue on the existing branch, whose commits are kept, and finish the remaining work in smaller steps",
+      "resume": "branch",
+      "snapshot": [
+        "commits_ahead"
+      ]
+    },
+    "reason_code": "per_task_timeout",
+    "verification": "next_outcome_not_timeout",
+    "why": "block-classifier.row-matched"
+  },
+  "detail": "per_task_timeout: requeue_owner, attempt 1 of 1",
+  "epoch_restarted": false,
+  "needs_human_before": "yes",
+  "outcome": "act",
+  "reason_code": "per_task_timeout",
+  "recorded_at": "2026-10-12T01:56:19+00:00",
+  "task_id": "CODER-20261011-088-upgrade-preserve-state",
+  "triage_enabled": true,
+  "verification": null
+}

@@ -313,13 +313,13 @@ class TestSettleGuardPreventsDoubleHandling:
         We use a large settle window (3600s) so the marker is definitely fresh.
         """
         root = two_project_root
-        bug_file = _add_bug_file(root, "project_a", bug_id="BUG-0100", slug="race-guard-defer")
+        bug_file = _add_bug_file(root, "project-a", bug_id="BUG-0100", slug="race-guard-defer")
 
         # Arm the settle marker to simulate a just-completed reset.
-        _arm_settle_marker(root, "project_a", bug_file)
+        _arm_settle_marker(root, "project-a", bug_file)
 
         # Run discovery with a large settle window so the marker is definitely fresh.
-        result = _run_discovery(root, "project_a", settle_seconds=3600)
+        result = _run_discovery(root, "project-a", settle_seconds=3600)
 
         assert result.returncode == 0, (
             f"discovery_run_pipeline exited non-zero.\nstdout: {result.stdout}\n"
@@ -327,7 +327,7 @@ class TestSettleGuardPreventsDoubleHandling:
         )
 
         # The bug must NOT have been bundled — settle guard deferred it.
-        req_dir = _requirements_dir(root, "project_a")
+        req_dir = _requirements_dir(root, "project-a")
         bundle_files = list(req_dir.glob("*-bugfix-bundle-*.md")) if req_dir.exists() else []
         assert not bundle_files, (
             f"Expected NO bundle when settle guard is active, but found: {bundle_files}\n"
@@ -343,11 +343,11 @@ class TestSettleGuardPreventsDoubleHandling:
         the situation without reading raw filesystem state.
         """
         root = two_project_root
-        bug_file = _add_bug_file(root, "project_a", bug_id="BUG-0101", slug="settle-log-check")
+        bug_file = _add_bug_file(root, "project-a", bug_id="BUG-0101", slug="settle-log-check")
 
-        _arm_settle_marker(root, "project_a", bug_file)
+        _arm_settle_marker(root, "project-a", bug_file)
 
-        result = _run_discovery(root, "project_a", settle_seconds=3600)
+        result = _run_discovery(root, "project-a", settle_seconds=3600)
 
         assert result.returncode == 0
         # The settle guard should emit a log mentioning the item basename.
@@ -366,16 +366,16 @@ class TestSettleGuardPreventsDoubleHandling:
         a discovery tick that occurs after the settle window has expired.
         """
         root = two_project_root
-        bug_file = _add_bug_file(root, "project_a", bug_id="BUG-0102", slug="guard-expires")
+        bug_file = _add_bug_file(root, "project-a", bug_id="BUG-0102", slug="guard-expires")
 
         # Arm the settle marker.
-        _arm_settle_marker(root, "project_a", bug_file)
+        _arm_settle_marker(root, "project-a", bug_file)
 
         # First tick: guard fires, item deferred.
-        result1 = _run_discovery(root, "project_a", settle_seconds=3600)
+        result1 = _run_discovery(root, "project-a", settle_seconds=3600)
         assert result1.returncode == 0
 
-        req_dir = _requirements_dir(root, "project_a")
+        req_dir = _requirements_dir(root, "project-a")
         after_tick1 = list(req_dir.glob("*-bugfix-bundle-*.md")) if req_dir.exists() else []
         assert not after_tick1, (
             "Expected no bundle on first tick (settle guard active).\n"
@@ -383,7 +383,7 @@ class TestSettleGuardPreventsDoubleHandling:
         )
 
         # Second tick: disable settle guard (window=0) — item should now be picked up.
-        result2 = _run_discovery(root, "project_a", settle_seconds=0)
+        result2 = _run_discovery(root, "project-a", settle_seconds=0)
         assert result2.returncode == 0, (
             f"Second discovery tick failed.\nstdout: {result2.stdout}\nstderr: {result2.stderr}"
         )
@@ -405,15 +405,15 @@ class TestSettleGuardPreventsDoubleHandling:
         """
         root = two_project_root
         # Add bug file — no settle marker written.
-        _add_bug_file(root, "project_a", bug_id="BUG-0103", slug="no-settle-file")
+        _add_bug_file(root, "project-a", bug_id="BUG-0103", slug="no-settle-file")
 
-        result = _run_discovery(root, "project_a", settle_seconds=3600)
+        result = _run_discovery(root, "project-a", settle_seconds=3600)
 
         assert result.returncode == 0, (
             f"discovery_run_pipeline failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
         )
 
-        req_dir = _requirements_dir(root, "project_a")
+        req_dir = _requirements_dir(root, "project-a")
         bundle_files = list(req_dir.glob("*-bugfix-bundle-*.md")) if req_dir.exists() else []
         assert bundle_files, (
             "Expected bug bundle when no settle file exists (guard inactive).\n"
@@ -666,7 +666,7 @@ class TestCategoryFirstOrderingFixture:
         root = two_project_root
 
         # Operator-authored requirements file at v0.0.2 (above next-patch for bug).
-        req_dir = _requirements_dir(root, "project_a")
+        req_dir = _requirements_dir(root, "project-a")
         req_dir.mkdir(parents=True, exist_ok=True)
         req_file = req_dir / "v0.0.2-operator-feature.md"
         req_file.write_text(
@@ -680,9 +680,9 @@ class TestCategoryFirstOrderingFixture:
         )
 
         # Unhandled bug file — Step 1 will bundle it at v0.0.1.
-        _add_bug_file(root, "project_a", bug_id="BUG-0200", slug="category-order-test")
+        _add_bug_file(root, "project-a", bug_id="BUG-0200", slug="category-order-test")
 
-        result = _run_discovery(root, "project_a", settle_seconds=0)
+        result = _run_discovery(root, "project-a", settle_seconds=0)
 
         assert result.returncode == 0, (
             f"Pipeline must exit 0.\nstdout: {result.stdout}\nstderr: {result.stderr}"
@@ -721,7 +721,7 @@ class TestCategoryFirstOrderingFixture:
         """
         root = two_project_root
 
-        req_dir = _requirements_dir(root, "project_a")
+        req_dir = _requirements_dir(root, "project-a")
         req_dir.mkdir(parents=True, exist_ok=True)
 
         # Mark v0.0.1 and v0.0.2 as done so compute_next_patch skips them.
@@ -748,9 +748,9 @@ class TestCategoryFirstOrderingFixture:
         )
 
         # Unhandled bug — will land at v0.0.4 (next open slot after v0.0.3).
-        _add_bug_file(root, "project_a", bug_id="BUG-0201", slug="higher-version-bug")
+        _add_bug_file(root, "project-a", bug_id="BUG-0201", slug="higher-version-bug")
 
-        result = _run_discovery(root, "project_a", settle_seconds=0)
+        result = _run_discovery(root, "project-a", settle_seconds=0)
 
         assert result.returncode == 0, (
             f"Pipeline must exit 0.\nstdout: {result.stdout}\nstderr: {result.stderr}"

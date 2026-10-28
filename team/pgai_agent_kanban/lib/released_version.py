@@ -53,8 +53,11 @@ from typing import Optional, Sequence
 
 from pgai_agent_kanban.cm.read_state_field import read_state_field
 from pgai_agent_kanban.lib import git_remote
-from pgai_agent_kanban.lib.branch_prefix import DEFAULT_PROJECT_NAME as FRAMEWORK_PROJECT
-from pgai_agent_kanban.lib.project_cfg import project_cfg_file, read_cfg_key, strip_one_quote_each_side
+from pgai_agent_kanban.lib.branch_prefix import (
+    DEFAULT_PROJECT_NAME as FRAMEWORK_PROJECT,
+    branch_prefix_from_cfg,
+)
+from pgai_agent_kanban.lib.project_cfg import project_cfg_file, read_cfg_key
 from pgai_agent_kanban.lib.semver import version_sort_key
 
 __all__ = [
@@ -133,8 +136,7 @@ def _framework_refs(kanban_root: "pathlib.Path | str") -> Optional[tuple[str, st
         remote = git_remote.remote_name_from_cfg(cfg, FRAMEWORK_PROJECT)
     except git_remote.InvalidRemoteName:
         return None
-    prefix = strip_one_quote_each_side(read_cfg_key(cfg, "project", "branch_prefix"), '"') if cfg else ""
-    return remote, prefix
+    return remote, branch_prefix_from_cfg(cfg)
 
 
 # ---------------------------------------------------------------------------
@@ -220,7 +222,7 @@ def last_released_version(kanban_root: "pathlib.Path | str", project: str) -> st
     if not dev_tree or _git(dev_tree, ["rev-parse", "--git-dir"]) is None:
         return _released_from_state(project_root) or NOTHING_RELEASED
 
-    prefix = strip_one_quote_each_side(read_cfg_key(cfg, "project", "branch_prefix"), '"')
+    prefix = branch_prefix_from_cfg(cfg)
     main_branch = f"{prefix}main"
     # The project's own remote; an invalid git_remote_name skips the remote
     # tier (a read never refuses) and the scan continues from local refs.

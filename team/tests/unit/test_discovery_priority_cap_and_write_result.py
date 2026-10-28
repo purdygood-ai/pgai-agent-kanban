@@ -43,7 +43,7 @@ def _diagnostic(result) -> str:
 
 
 def _fixture(tmp_path: pathlib.Path, priorities: tuple[str, ...]) -> pathlib.Path:
-    root = tmp_path / "project_a"
+    root = tmp_path / "project-a"
     for sub in ("bugs", "priority", "requirements", "tasks/queues"):
         (root / sub).mkdir(parents=True)
     for name in priorities:
@@ -104,7 +104,7 @@ def test_cap_zero_disables_priority_ingest_and_touches_nothing(tmp_path):
     before = item.read_text(encoding="utf-8")
 
     result = _run_step(tmp_path, root, "0", """\
-        discovery_step_priority project_a
+        discovery_step_priority project-a
         echo "RC=$?"
         """)
 
@@ -133,7 +133,7 @@ def test_cap_zero_lets_the_pipeline_reach_the_requirements_step(tmp_path):
         discovery_step_bugs() {{ return 1; }}
         discovery_step_requirements() {{ echo "REQUIREMENTS_STEP_REACHED" >&2; return 1; }}
         DISCOVERY_LAST_STATUS=""
-        _disc_run_pipeline_once project_a
+        _disc_run_pipeline_once project-a
         echo "STATUS=$DISCOVERY_LAST_STATUS"
         """)
 
@@ -147,7 +147,7 @@ def test_cap_one_bundles_only_the_lowest_numbered_priority(tmp_path):
     root = _fixture(tmp_path, ("PRIORITY-0002-b.md", "PRIORITY-0001-a.md"))
 
     result = _run_step(tmp_path, root, "1", """\
-        discovery_step_priority project_a
+        discovery_step_priority project-a
         echo "RC=$?"
         """)
 
@@ -166,7 +166,7 @@ def test_refused_priority_bundle_write_is_not_reported_as_written(tmp_path):
 
     result = _run_step(tmp_path, root, "1", """\
         _disc_write_bundle() { log "_disc_write_bundle: refusing (stub)"; return 1; }
-        discovery_step_priority project_a
+        discovery_step_priority project-a
         echo "RC=$?"
         """)
 
@@ -184,7 +184,7 @@ def test_refused_bug_bundle_write_is_not_reported_as_written(tmp_path):
         _disc_check_bug_id_collisions() { :; }
         _disc_bug_deferral_filter() { printf '%s\n' "$2"; }
         _disc_write_bundle() { log "_disc_write_bundle: refusing (stub)"; return 1; }
-        discovery_step_bugs project_a
+        discovery_step_bugs project-a
         echo "RC=$?"
         """)
 
@@ -210,13 +210,13 @@ def _item_fixture(tmp_path: pathlib.Path, kind: str):
 # the harness script.
 _STEP_CALLS = {
     "PRIORITY": """\
-        rc=0; discovery_step_priority project_a || rc=$?
+        rc=0; discovery_step_priority project-a || rc=$?
         echo "RC=$rc"
         """,
     "BUG": """\
         _disc_check_bug_id_collisions() { :; }
         _disc_bug_deferral_filter() { printf '%s\\n' "$2"; }
-        rc=0; discovery_step_bugs project_a || rc=$?
+        rc=0; discovery_step_bugs project-a || rc=$?
         echo "RC=$rc"
         """,
 }

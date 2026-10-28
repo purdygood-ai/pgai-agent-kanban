@@ -73,12 +73,14 @@ _LIB_NAMES = [
     "env_bootstrap.sh",
     "ini_parser.sh",
     "project_paths.sh",
+    "git_remote_default.sh",
     "error_contract.sh",
     "temp.sh",
     "retired_files_lint.sh",
     "version_stamp.sh",
     "subagent_deploy.sh",
     "script_common.sh",
+    "config_loader.sh",
     "semver.sh",
 ]
 

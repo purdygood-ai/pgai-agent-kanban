@@ -2,8 +2,8 @@
 """
 lint_python_import_completeness.py
 ===================================
-Pre-flight lint that scans Python files for third-party imports and verifies
-each imported package is declared in requirements.txt or requirements-test.txt.
+Pre-flight lint that scans Python files for third-party imports and reports
+each imported package not declared in requirements.txt or requirements-test.txt.
 
 The lint prevents the class of failure where a new import is added to the
 codebase but the corresponding pip package is not added to the requirements
@@ -46,10 +46,18 @@ lint is declared in ``_PACKAGE_TO_IMPORT_NAMES`` below and should be updated
 whenever a new package with a non-obvious import name is added to the
 requirements files.
 
+FINDINGS
+--------
+CONVERT (quality class, team/SOP-core.md "Gates and Refusals"): an
+undeclared import is a packaging gap, not a failure of the run that finds
+it.  Each uncovered (module, file) pair is printed and recorded as one
+finding; with --findings-file the findings are written as a JSON array (the
+shape pgai_agent_kanban.lint.findings defines), which the gated runners
+merge per instance with gated_runner_merge_findings_file.
+
 EXIT CODES
 ----------
-  0   All third-party imports are covered by the requirements union.
-  1   One or more imports are not covered; see stdout for details.
+  0   Scan ran, whatever it found (uncovered imports are findings).
   2   Usage error or the specified directory was not found.
 
 USAGE
@@ -62,6 +70,9 @@ USAGE
   --repo-root PATH        Repository root (default: two levels above team/).
                           Used to locate requirements.txt and
                           requirements-test.txt.
+  --findings-file PATH    Write the findings as a JSON array to PATH
+                          (parent directories created; written even when
+                          empty).
   --verbose, -v           Print each file as it is checked.
 
 EXAMPLES
@@ -73,6 +84,10 @@ EXAMPLES
   python3 team/scripts/lint_python_import_completeness.py \\
       --team-dir /path/to/team \\
       --repo-root /path/to/repo
+
+  # Record findings for a downstream merge:
+  python3 team/scripts/lint_python_import_completeness.py \\
+      --findings-file "${PGAI_AGENT_KANBAN_TEMP_DIR}/lint/python_import_completeness.json"
 """
 
 from __future__ import annotations
@@ -83,6 +98,21 @@ import re
 import sys
 from pathlib import Path
 from typing import NamedTuple
+
+# The finding shape and the error-contract emitter live in the team package
+# beside scripts/; this script is run directly as well as imported, so the
+# package root is put on sys.path from this file's own location.
+_TEAM_DIR = Path(__file__).resolve().parent.parent  # team/
+if str(_TEAM_DIR) not in sys.path:
+    sys.path.insert(0, str(_TEAM_DIR))
+from pgai_agent_kanban.lib.error_contract import emit_error_contract  # noqa: E402
+from pgai_agent_kanban.lint.findings import (  # noqa: E402
+    display_path,
+    quality_finding,
+    write_findings_file,
+)
+
+_LINT_NAME = "python_import_completeness"
 
 # ---------------------------------------------------------------------------
 # Directories scanned relative to team/.
@@ -592,7 +622,7 @@ def _format_remedy_block(
     )
 
     lines = [
-        f"lint_python_import_completeness: FAIL — {len(violations)} uncovered import(s)",
+        f"lint_python_import_completeness: {len(violations)} uncovered import(s)",
         "",
         "Cause(s):",
     ]
@@ -632,14 +662,13 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         description=(
             "Lint that every third-party Python import across team/scripts/, "
             "team/pgai_agent_kanban/, and team/tests/ is declared in "
-            "requirements.txt or requirements-test.txt.  Exits 1 when any "
-            "import is not covered."
+            "requirements.txt or requirements-test.txt.  Quality class: each "
+            "uncovered import is a finding, and the lint exits 0 whatever it finds."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
             "Exit codes:\n"
-            "  0  All third-party imports are covered.\n"
-            "  1  One or more imports are not covered; see stdout.\n"
+            "  0  Scan ran, whatever it found (uncovered imports are findings).\n"
             "  2  Usage error or directory not found.\n"
         ),
     )
@@ -662,6 +691,15 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--findings-file",
+        metavar="PATH",
+        default=None,
+        help=(
+            "Write the findings as a JSON array to PATH (parent directories "
+            "created; written even when empty).  Findings are printed either way."
+        ),
+    )
+    parser.add_argument(
         "--verbose",
         "-v",
         action="store_true",
@@ -671,8 +709,40 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
+def _findings(
+    violations: list[ImportViolation], *, team_dir: Path, repo_root: Path, lint_script: Path
+) -> list[dict]:
+    """One quality finding per uncovered (module, file) pair, each with a
+    runnable remedy: declare the module in the requirements file its
+    importers belong in, then re-check."""
+    by_module: dict[str, list[ImportViolation]] = {}
+    for v in violations:
+        by_module.setdefault(v.module_name, []).append(v)
+    relint = f'python3 "{lint_script}" --team-dir "{team_dir}" --repo-root "{repo_root}"'
+    findings = []
+    for v in violations:
+        target = repo_root / _target_requirements_file(by_module[v.module_name], team_dir)
+        rel = display_path(v.source_file, repo_root)
+        findings.append(
+            quality_finding(
+                _LINT_NAME,
+                f"'{v.module_name}' imported in {rel} is not declared in "
+                "requirements.txt or requirements-test.txt",
+                f'echo "{v.module_name}" >> "{target}" && {relint}',
+                file=rel,
+                module=v.module_name,
+            )
+        )
+    return findings
+
+
 def main(argv: list[str] | None = None) -> int:
-    """Run the import-completeness lint and return an exit code."""
+    """Run the import-completeness lint.
+
+    Exit codes: 0 whatever was found (each uncovered import is a quality
+    finding, printed and written to --findings-file); 2 usage error, or the
+    team/ or repository root directory not found.
+    """
     args = _parse_args(argv)
 
     # Resolve team_dir.
@@ -716,9 +786,13 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     violations = lint_import_completeness(team_dir, repo_root, verbose=args.verbose)
+    lint_script = Path(__file__).resolve()
+    findings = _findings(
+        violations, team_dir=team_dir, repo_root=repo_root, lint_script=lint_script
+    )
+    write_findings_file(args.findings_file, findings, lint="lint_python_import_completeness")
 
     if violations:
-        lint_script = Path(__file__).resolve()
         print(
             "\n"
             + _format_remedy_block(
@@ -729,7 +803,16 @@ def main(argv: list[str] | None = None) -> int:
             ),
             flush=True,
         )
-        return 1
+        # CENSUS-ANCHOR: python-import-completeness-01
+        # CONVERT: an undeclared import is a packaging gap with zero
+        # runtime-failure risk to this run -- recorded as findings; returns 0.
+        emit_error_contract(
+            "lint.python-import-completeness",
+            f"{len(findings)} third-party import(s) under {team_dir} are not declared in "
+            "requirements.txt or requirements-test.txt; each is listed above.",
+            findings[0]["remedy"],
+        )
+        return 0
 
     print(
         "lint_python_import_completeness: ok — all third-party imports are covered.",

@@ -67,6 +67,7 @@ _WAKE_TASK_STATE_LIB = pathlib.Path("scripts/lib/wake_task_state.sh")
 _WAKE_TASK_TRANSITION_LIB = pathlib.Path("scripts/lib/wake_task_transition.sh")
 _WAKE_LIFECYCLE_LIB = pathlib.Path("scripts/lib/wake_lifecycle.sh")
 _OVERWATCH_PROTOCOL_LIB = pathlib.Path("scripts/lib/overwatch_protocol.sh")
+_PROVIDER_SIGNATURES_LIB = pathlib.Path("scripts/lib/provider_signatures.sh")
 
 # Real, checked-in team/scripts/ directory (holds error_contract.sh and
 # temp.sh — handle_working_after_exit now routes its BLOCKED transition
@@ -628,11 +629,18 @@ _SYSTEM_GREP = pathlib.Path("/usr/bin/grep")
 
 
 def _real_extract_re() -> str:
-    """Return the literal `_EXTRACT_RE` value from wake_lifecycle.sh."""
-    text = _WAKE_LIFECYCLE_LIB.read_text(encoding="utf-8")
-    match = re.search(r"^\s*local _EXTRACT_RE='([^']*)'\s*$", text, flags=re.M)
-    assert match, f"no `local _EXTRACT_RE='...'` line found in {_WAKE_LIFECYCLE_LIB}"
-    return match.group(1)
+    """Return the extraction pattern handle_working_after_exit uses: the
+    transient class of the signature table, from its bash reader."""
+    result = subprocess.run(
+        ["bash", "-c", f"source {_PROVIDER_SIGNATURES_LIB} && provider_signature_pattern transient --extract"],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode == 0 and result.stdout.strip(), (
+        f"provider_signature_pattern transient --extract failed: {result.stderr}"
+    )
+    return result.stdout.strip()
 
 
 def _extract_like_cron(line: str) -> str:

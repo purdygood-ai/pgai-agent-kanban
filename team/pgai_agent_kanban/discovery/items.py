@@ -14,14 +14,20 @@ Commands (``python3 -m pgai_agent_kanban.discovery.items <command> ...``):
       candidate when its file name matches the canonical pattern for
       ID_PREFIX (``BUG-`` or ``PRIORITY-``; ``PRIORITY-`` also accepts a
       ``vX.Y.Z-bugfix-<slug>.md`` name) and its ``## Status`` is ``open``
-      or absent -- or ``running`` while every bundle in REQUIREMENTS_DIR
-      that lists it is closed, which is how a release leaves an item it
-      shipped without fixing (see pgai_agent_kanban.lib.bundle_items).
-      A ``running`` item that no bundle in REQUIREMENTS_DIR lists at all
-      is orphaned -- the bundle that set it running was archived, purged
-      or deleted -- and is re-offered too, with a ``WARNING:`` stderr line
-      naming it. ``done`` and ``wont-do`` items are skipped with a stderr
-      line. A name
+      or absent. A ``running`` item that no bundle in REQUIREMENTS_DIR
+      lists at all is orphaned -- the bundle that set it running was
+      archived, purged or deleted -- and is offered again, with a
+      ``WARNING:`` stderr line naming it. Every other item is left out:
+      a ``needs-operator`` item (waiting on an operator answer) and one in
+      a closed state (``done``, ``wont-do``, ``duplicate``) with a
+      ``skipping <name>: ...`` stderr line; a ``running`` item every
+      listing bundle has closed -- carried, which is how a release leaves
+      an item it shipped without fixing (see
+      pgai_agent_kanban.lib.bundle_items) -- with a ``skipping <name>:
+      carried ...`` stderr line, since the discovery pass converts it to
+      ``needs-operator`` (pgai_agent_kanban.discovery.carried) rather than
+      bundling it again; and a ``running`` item a live bundle lists,
+      silently. The scan itself writes no item file. A name
       that does not match is reported on stderr as
       ``ERROR: rejecting <name>: <reason>`` and, when REJECTED_FILE is
       given, appended there as ``<name>\\t<reason>``. The backlog cache is
@@ -55,6 +61,16 @@ Commands (``python3 -m pgai_agent_kanban.discovery.items <command> ...``):
   severity FILE
       Print the text after ``**Severity:**`` in FILE, stripped, or an empty
       line when there is none.
+  bug-ages
+      Read one bug file path per line on stdin and print
+      ``<path>\t<age>\t<date>`` for each, in input order: <date> is the
+      text after the file's ``**Date:**`` header line, stripped, and <age>
+      is the whole number of days from that date to today (UTC). Only the
+      leading ``YYYY-MM-DD`` of <date> is read, so a full ISO timestamp
+      works too. <age> is ``-`` when the header is missing, the date
+      cannot be parsed, or the file cannot be read (never empty, so a bash
+      ``read`` splitting on tabs keeps the columns). Blank input lines are
+      skipped.
   task-state STATUS_FILE
       Print the ``## State`` value of STATUS_FILE upper-cased, or
       ``UNPARSEABLE`` when the section is absent or empty.
@@ -72,6 +88,7 @@ on stderr and exits 2. ``--help`` prints this text and exits 0.
 
 from __future__ import annotations
 
+import datetime
 import pathlib
 import re
 import sys
@@ -97,10 +114,16 @@ from pgai_agent_kanban.lib.ledger_filename_contract import (  # noqa: E402
     build_remedy as _ledger_build_remedy,
     ledger_filename_re as _ledger_filename_re,
 )
-from pgai_agent_kanban.lib.terminal_states import TERMINAL_STATES, canonical_state  # noqa: E402
-from pgai_agent_kanban.task_status import read_section  # noqa: E402
+from pgai_agent_kanban.lib.terminal_states import (  # noqa: E402
+    NEEDS_OPERATOR_STATE,
+    TERMINAL_STATES,
+    canonical_state,
+)
+from pgai_agent_kanban.task_status import read_section, section_value  # noqa: E402
 
 __all__ = [
+    "bug_ages",
+    "bug_filed_date",
     "bug_severity",
     "forget_rejection",
     "order_bundle_items",
@@ -119,8 +142,6 @@ _PATH_C_RE = re.compile(r'^v[0-9]+\.[0-9]+\.[0-9]+-bugfix-\S+\.md$', re.IGNORECA
 # date-optional-AFTER-the-number form from ledger_filename_contract. Any
 # other prefix falls back to the historical loose pattern.
 _LEDGER_PREFIXES = {"BUG-", "PRIORITY-"}
-
-_STATUS_RE = re.compile(r'^##\s+Status\s*\n\s*(\S+)', re.M | re.IGNORECASE)
 
 
 def scan_unhandled_items(
@@ -177,28 +198,40 @@ def scan_unhandled_items(
                 continue
 
             # The ## Status header is the sole gate; a missing header reads
-            # as open. The closed states (lib.terminal_states, done and
-            # wont-do, with the retired "superseded" read as wont-do) are
-            # resolved for good. running is in
+            # as open. The closed states (lib.terminal_states: done,
+            # wont-do, duplicate, with the retired "superseded" read as
+            # wont-do) are resolved for good, and needs-operator waits on
+            # an operator answer that sets it back to open. running is in
             # flight -- unless every bundle listing the item has closed,
-            # which means a release shipped it unfixed (carried), or no
-            # bundle lists it at all, which means its bundle left
-            # requirements/ while it was unfinished (orphaned).
+            # which means a release shipped it unfixed (carried: the
+            # discovery pass converts it to needs-operator, never bundles
+            # it again), or no bundle lists it at all, which means its
+            # bundle left requirements/ while it was unfinished (orphaned:
+            # offered again).
             text = entry.read_text(encoding="utf-8", errors="replace")
-            sm = _STATUS_RE.search(text)
-            if sm:
-                status = sm.group(1).strip().lower()
+            status_tokens = section_value(text, "Status").split()
+            if status_tokens:
+                status = status_tokens[0].lower()
                 if canonical_state(status) in TERMINAL_STATES:
                     print(f"skipping {entry.name}: terminal state '{status}'", file=err)
+                    continue
+                if canonical_state(status) == NEEDS_OPERATOR_STATE:
+                    print(
+                        f"skipping {entry.name}: '{status}' (waiting on an operator-inbox answer,"
+                        " which sets it back to open)",
+                        file=err,
+                    )
                     continue
                 if status == "running":
                     if bundle_items.is_carried(status, entry.name, carried):
                         print(
-                            f"re-offering {entry.name}: its bundle closed with the item still"
-                            " 'running' (carried unfixed)",
+                            f"skipping {entry.name}: carried -- every bundle listing it closed with"
+                            f" it still 'running'; the discovery pass converts it to"
+                            f" {NEEDS_OPERATOR_STATE} instead of bundling it again",
                             file=err,
                         )
-                    elif bundle_items.is_orphaned(status, entry.name, listed):
+                        continue
+                    if bundle_items.is_orphaned(status, entry.name, listed):
                         print(
                             f"WARNING: re-offering {entry.name}: its ## Status is 'running' but no"
                             f" bundle in {requirements_dir} lists it (the bundle that set it"
@@ -257,27 +290,15 @@ def report_bug_id_collisions(bugs_dir: str, scanner_dir: str, *, err: TextIO = s
         print(f"WARNING: {w.message}", file=err)
 
 
-_MARKER_RE = re.compile(r'^\s*##\s+Known Issue Carry Forward\s*$', re.IGNORECASE)
-_HEADING_RE = re.compile(r'^\s*##\s+')
-
-
 def _carries_known_issue(line: str) -> bool:
     """True when the item a bundle line names has a filled Known Issue Carry
-    Forward field. An unreadable file or an empty field reads as unmarked."""
+    Forward field (a non-empty body, as task_status.read_section reads it).
+    An unreadable file or an empty field reads as unmarked."""
     try:
         text = pathlib.Path(line.split("\t", 1)[0]).read_text(encoding="utf-8", errors="replace")
     except OSError:
         return False
-    file_lines = text.splitlines()
-    for i, ln in enumerate(file_lines):
-        if not _MARKER_RE.match(ln):
-            continue
-        for nxt in file_lines[i + 1:]:
-            if not nxt.strip():
-                continue
-            return not _HEADING_RE.match(nxt)
-        return False
-    return False
+    return bool(read_section(text, "Known Issue Carry Forward"))
 
 
 def order_bundle_items(files_raw: str) -> list[str]:
@@ -297,6 +318,54 @@ def bug_severity(path: str) -> str:
         text = handle.read()
     m = _SEVERITY_RE.search(text)
     return m.group(1).strip() if m else ""
+
+
+_DATE_LINE_RE = re.compile(r'^[ \t]*\*\*Date:\*\*[ \t]*(.*)$', re.IGNORECASE | re.MULTILINE)
+_LEADING_DATE_RE = re.compile(r'([0-9]{4})-([0-9]{2})-([0-9]{2})')
+
+
+def bug_filed_date(path: str) -> tuple[Optional[datetime.date], str]:
+    """The date on the ``**Date:**`` header line of the bug file at *path*.
+
+    Returns ``(date, raw)``: *raw* is the header's text, stripped (``""``
+    when the line is absent or the file cannot be read); *date* is its
+    leading ``YYYY-MM-DD`` parsed, or ``None`` when that is missing or not a
+    real calendar date.
+    """
+    try:
+        with open(path, encoding="utf-8", errors="replace") as handle:
+            text = handle.read()
+    except OSError:
+        return None, ""
+    m = _DATE_LINE_RE.search(text)
+    if not m:
+        return None, ""
+    raw = m.group(1).strip()
+    d = _LEADING_DATE_RE.match(raw)
+    if not d:
+        return None, raw
+    try:
+        return datetime.date(int(d.group(1)), int(d.group(2)), int(d.group(3))), raw
+    except ValueError:
+        return None, raw
+
+
+def bug_ages(paths: list[str], today: Optional[datetime.date] = None) -> list[tuple[str, Optional[int], str]]:
+    """``(path, age_days, raw_date)`` for each non-blank path, in order.
+
+    *age_days* is ``(today - filed date).days`` (UTC today by default), or
+    ``None`` when :func:`bug_filed_date` finds no parseable date.
+    """
+    if today is None:
+        today = datetime.datetime.now(datetime.timezone.utc).date()
+    out: list[tuple[str, Optional[int], str]] = []
+    for raw_path in paths:
+        path = raw_path.strip()
+        if not path:
+            continue
+        filed, raw = bug_filed_date(path)
+        out.append((path, None if filed is None else (today - filed).days, raw))
+    return out
 
 
 def task_state(status_file: str) -> str:
@@ -335,6 +404,7 @@ _USAGE = {
     "collisions": "collisions BUGS_DIR SCANNER_DIR",
     "order": "order FILES",
     "severity": "severity FILE",
+    "bug-ages": "bug-ages  (bug file paths on stdin)",
     "task-state": "task-state STATUS_FILE",
     "task-states": "task-states TASKS_DIR  (task IDs on stdin)",
 }
@@ -346,6 +416,7 @@ _ARITY = {
     "collisions": (2, 2),
     "order": (1, 1),
     "severity": (1, 1),
+    "bug-ages": (0, 0),
     "task-state": (1, 1),
     "task-states": (1, 1),
 }
@@ -384,6 +455,9 @@ def main(argv: Optional[list] = None) -> int:
             print(line)
     elif command == "severity":
         print(bug_severity(rest[0]))
+    elif command == "bug-ages":
+        for path, age, raw in bug_ages(sys.stdin.read().splitlines()):
+            print(f"{path}\t{'-' if age is None else age}\t{raw}")
     elif command == "task-state":
         print(task_state(rest[0]))
     elif command == "task-states":

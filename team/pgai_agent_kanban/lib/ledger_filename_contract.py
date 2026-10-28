@@ -38,15 +38,19 @@ completeness but has not been observed in production.
 Which numbers are *taken* is a separate, looser rule than the contract: any
 entry whose name starts with the prefix, a hyphen and exactly four digits
 followed by a non-digit holds that number, whether or not the rest of the
-name passes the contract (see :func:`ledger_taken_re`).  Both numbering
+name passes the contract (see :func:`ledger_taken_re`).  A BUG number is
+also taken when an archived bug holds it: the directories whose entries
+count are :func:`ledger_taken_dirs` — the live directory, plus the
+project's archive ``bugs/`` for a live BUG ledger.  Both numbering
 consumers — :func:`next_free_number` here and the atomic BUG-ID claim in
-team/pm-agent/lib/bug_scanner.py — use it, so the remedy text and the claim
-never disagree about the next free number.
+team/pm-agent/lib/bug_scanner.py — use both rules, so the remedy text and
+the claim never disagree about the next free number.
 
 Public API
 ----------
     ledger_filename_re(prefix, ignore_case=True) -> re.Pattern[str]
     ledger_taken_re(prefix)                     -> re.Pattern[str]
+    ledger_taken_dirs(dir_path, prefix)          -> list[Path]
     classify_defect(name, prefix)                -> str | None
     next_free_number(dir_path, prefix)           -> int
     build_remedy(name, prefix, dir_path)         -> str
@@ -141,6 +145,45 @@ def ledger_taken_re(prefix: str) -> "re.Pattern[str]":
     )
 
 
+def ledger_taken_dirs(dir_path: Union[str, Path], prefix: str) -> "list[Path]":
+    """Return the directories whose entries hold numbers for the ledger at *dir_path*.
+
+    The first entry is always *dir_path* itself.  For the BUG ledger, when
+    *dir_path* is shaped ``<kanban_root>/projects/<project>/bugs``, the
+    project's archive ``<kanban_root>/archive/<project>/bugs`` follows it:
+    a number an archived bug holds is not free.  The archive is derived from
+    *dir_path* alone, the way
+    :func:`pgai_agent_kanban.archive.layout.archive_layout_for_category_dir`
+    derives it, so a sandbox ledger only ever consults that sandbox's
+    archive.  Any other shape (a single-project ``bugs/`` directly under the
+    kanban root, a bare directory) and every other prefix — PRIORITY
+    included — yields *dir_path* alone.
+
+    Nothing touches the filesystem: the archive directory is listed whether
+    or not it exists, and callers skip one that does not.  Callers only read
+    these directories; claim locks and claim records belong to *dir_path*.
+
+    Args:
+        dir_path: The live ledger directory (bugs/ or priority/).
+        prefix:   Ledger prefix ("BUG" or "PRIORITY", with or without
+                  trailing "-").
+
+    Returns:
+        ``[Path(dir_path)]`` or ``[Path(dir_path), <archive bugs dir>]``.
+    """
+    live = Path(dir_path)
+    if _normalize_prefix(prefix) != "BUG":
+        return [live]
+    # Imported here, not at module level: the archive package imports far
+    # more than this contract module needs at import time.
+    from pgai_agent_kanban.archive.layout import CATEGORY_BUGS, archive_layout_for_category_dir
+
+    layout = archive_layout_for_category_dir(live, CATEGORY_BUGS)
+    if layout is None:
+        return [live]
+    return [live, layout.bugs]
+
+
 def classify_defect(name: str, prefix: str) -> Optional[str]:
     """Return the defect class for a filename that fails the ledger gate.
 
@@ -177,18 +220,20 @@ def classify_defect(name: str, prefix: str) -> Optional[str]:
 
 
 def next_free_number(dir_path: Union[str, Path], prefix: str) -> int:
-    """Scan *dir_path* for taken ``<prefix>-NNNN`` numbers and return the next
-    free sequence number.
+    """Scan the ledger at *dir_path* for taken ``<prefix>-NNNN`` numbers and
+    return the next free sequence number.
 
     A number is taken by the :func:`ledger_taken_re` rule: any entry whose
     name starts with the prefix, a hyphen, exactly four digits and then a
     non-digit holds that number, whether or not the rest of the name passes
     :func:`ledger_filename_re`.  ``BUG-0002-v1.2.3-notes-count.md`` (e.g.)
     therefore holds 0002, so the remedy never suggests a number a file in
-    the directory already carries.  Date-first, under-padded and
+    the directory already carries.  Every directory :func:`ledger_taken_dirs`
+    names is scanned, so for a live BUG ledger a number held only by an
+    archived bug is taken too.  Date-first, under-padded and
     over-padded names have no exactly-four-digit field and contribute no
     number, so they cannot poison the high-water mark.  The atomic BUG-ID
-    claim in team/pm-agent/lib/bug_scanner.py applies the same rule, so both
+    claim in team/pm-agent/lib/bug_scanner.py applies the same rules, so both
     return the same next number for the same directory.  The 4-digit field
     is always parsed with ``int()`` (never compared as a string), so "0009"
     and "0036" in the same directory correctly yield 37, not a lexical
@@ -196,7 +241,9 @@ def next_free_number(dir_path: Union[str, Path], prefix: str) -> int:
 
     Args:
         dir_path: Directory to scan (bugs/ or priority/). Missing or
-                   non-directory paths yield 1 (an empty ledger's first slot).
+                   non-directory paths contribute no number, so a missing
+                   ledger with no archived bugs yields 1 (an empty ledger's
+                   first slot).
         prefix:    Ledger prefix ("BUG" or "PRIORITY", with or without
                    trailing "-").
 
@@ -206,8 +253,9 @@ def next_free_number(dir_path: Union[str, Path], prefix: str) -> int:
     taken_re = ledger_taken_re(prefix)
 
     highest = 0
-    d = Path(dir_path)
-    if d.is_dir():
+    for d in ledger_taken_dirs(dir_path, prefix):
+        if not d.is_dir():
+            continue
         for entry in d.iterdir():
             m = taken_re.match(entry.name)
             if not m:

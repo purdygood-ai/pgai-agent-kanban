@@ -2,12 +2,16 @@
 """
 halt_state.py — Compute the current halt state of a kanban project root.
 
-Exposes a single public function:
+The core function:
 
     compute_halt_state(project_root: Path) -> tuple[str, str | None]
 
 Returns a ``(state, event)`` pair that describes whether the project is
-running normally, draining toward a halt, or fully halted.
+running normally, draining toward a halt, or fully halted.  Two display
+pairs build on it: :func:`halt_flag_and_text` (data.sh's per-project
+``HALT_FLAG`` / ``HALT_TEXT``) and :func:`effective_halt_flag_and_text`
+(that pair plus a kanban-wide ``HALT-AFTER``, as the dashboard header
+shows it).
 
 State values
 ------------
@@ -164,6 +168,41 @@ def halt_flag_and_text(project_root: Path, kanban_root: Path) -> "tuple[str, str
         return ("no", f"HALT-AFTER {event}" if event else "HALT-AFTER")
     if (kanban_root / "HALT").is_file():
         return ("yes", "HALT")
+    return ("no", "")
+
+
+def effective_halt_flag_and_text(project_root: Path, kanban_root: Path) -> "tuple[str, str]":
+    """Return ``(flag, text)`` for every HALT a project is under, as the dashboard header shows it.
+
+    :func:`halt_flag_and_text` mirrors ``data.sh``'s per-project
+    ``HALT_FLAG`` / ``HALT_TEXT``, which never reads a kanban-wide
+    ``HALT-AFTER``.  The dashboard header does (``status_line.halt_rows``
+    draws it as ``[HALT-AFTER GLOBAL <event>]``), so this pair adds it as the
+    last fallback.  Precedence, highest first:
+
+    - project ``HALT``                 -> ``("yes", "HALT")``
+    - project ``HALT-AFTER`` event E   -> ``("no", "HALT-AFTER E")``
+    - *kanban_root*/``HALT``           -> ``("yes", "HALT")``
+    - *kanban_root*/``HALT-AFTER`` E   -> ``("no", "HALT-AFTER E")``
+    - otherwise                        -> ``("no", "")``
+
+    A ``HALT-AFTER`` body that is not a valid token reads as absent, at
+    either scope, as :func:`compute_halt_state` reads it.
+
+    Args:
+        project_root: The project's root directory; it need not exist.
+        kanban_root:  The kanban root holding the kanban-wide sentinels.
+
+    Returns:
+        ``(flag, text)``: flag ``"yes"`` or ``"no"``; text ``""``,
+        ``"HALT"``, or ``"HALT-AFTER <event>"``.
+    """
+    flag, text = halt_flag_and_text(project_root, kanban_root)
+    if flag == "yes" or text:
+        return (flag, text)
+    state, event = compute_halt_state(kanban_root)
+    if state == "draining":
+        return ("no", f"HALT-AFTER {event}" if event else "HALT-AFTER")
     return ("no", "")
 
 

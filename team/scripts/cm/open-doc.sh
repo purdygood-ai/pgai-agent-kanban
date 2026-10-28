@@ -130,12 +130,21 @@ KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH}"
 # --- Source optional config files (BEFORE strict mode) ---
 [[ -f "$KANBAN_ROOT/bashrc" ]] && source "$KANBAN_ROOT/bashrc"
 [[ -f "$KANBAN_ROOT/env" ]] && source "$KANBAN_ROOT/env"
-[[ -f "$HOME/.config/pgai-kanban.cfg" ]] && source "$HOME/.config/pgai-kanban.cfg"
+# Operator user config, then [chain] pm_mode (config_loader.sh).
+# shellcheck source=../lib/config_loader.sh
+source "$(dirname "${BASH_SOURCE[0]}")/../lib/config_loader.sh"
+config_startup_prelude "$KANBAN_ROOT"
 
 # --- Source temp.sh for resolver helpers (include guard in temp.sh prevents double-load) ---
 _OPEN_DOC_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=../lib/temp.sh
 source "${_OPEN_DOC_SCRIPT_DIR}/../lib/temp.sh"
+# PROJECTS_CFG_NAME_RE, the project-name rule the name check below applies,
+# defined once in lib/projects_cfg.sh. Sourced before strict mode: the rule
+# is set ahead of that library's palette load, so a missing palette file
+# leaves it in place.
+# shellcheck source=../lib/projects_cfg.sh
+source "${_OPEN_DOC_SCRIPT_DIR}/../lib/projects_cfg.sh"
 unset _OPEN_DOC_SCRIPT_DIR
 
 # --- Enable strict mode ---
@@ -152,10 +161,9 @@ trap cleanup_on_exit EXIT
 source "$(dirname "${BASH_SOURCE[0]}")/../lib/cm/common.sh"
 
 # --- Validate project name ---
-PROJECT_NAME_RE='^[a-z0-9][a-z0-9-]*$'
-if [[ ! "$PROJECT_NAME" =~ $PROJECT_NAME_RE ]]; then
+if [[ ! "$PROJECT_NAME" =~ $PROJECTS_CFG_NAME_RE ]]; then
   echo "ERROR: invalid project name: '$PROJECT_NAME'" >&2
-  echo "Project names must match ^[a-z0-9][a-z0-9-]*$ (lowercase letters, digits, hyphens only)" >&2
+  echo "Project names must match ${PROJECTS_CFG_NAME_RE} (lowercase letters, digits, hyphens only)" >&2
   exit 1
 fi
 

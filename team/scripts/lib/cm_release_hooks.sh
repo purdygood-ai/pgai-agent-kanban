@@ -39,6 +39,24 @@
 # callers), tiers (a)-relative and (c) fall back to the original
 # filesystem-based resolution against the dev tree's current checkout.
 #
+# Symlinked hooks on the RC branch
+# --------------------------------
+# A tier (a)-relative or tier (c) hook committed as a symlink (git mode
+# 120000) is resolved to its target on the same ref: the link text is read
+# from the blob, taken relative to the link's own directory, and followed
+# (up to 8 links) to a committed regular file.  That target's mode is checked
+# exactly as a regular hook's is, and the materialized file holds the
+# target's content, never the link text.  When the target is 100644 the
+# refusal names `git update-index --chmod=+x <target>`; when the link cannot
+# be followed to a committed regular file (target missing on the ref, outside
+# the repository, a directory or submodule, or the chain is too long) the
+# refusal's remedy removes the link with `git rm`.  Any other non-file entry
+# at the hook path (a directory or a submodule) gets the same `git rm`
+# remedy.  `git update-index --chmod=+x` is printed only for a 100644 blob,
+# the one mode it can fix.  The no-rc_branch filesystem path uses
+# [[ -f ]] / [[ -x ]], which already follow symlinks, so `chmod +x` on the
+# link fixes its target there.
+#
 # Public API
 # ----------
 #   cm_resolve_and_enforce_hook <project_name> <phase> <project_hooks_dir> <dev_tree_path> [rc_branch]
@@ -68,7 +86,9 @@
 #
 #       Non-executable in-repo hook: when tier (c) (or tier (a)-relative with
 #       rc_branch set) resolves a path and the file exists (or its RC-branch
-#       git blob exists) but is not executable, prints a full three-part
+#       git entry exists) but is not executable — or, on the RC branch, is a
+#       symlink that does not reach a committed 100755 regular file, or is
+#       not a file at all — prints a full three-part
 #       remedy block (docs/coding-standards.md "Gates prescribe, not just
 #       diagnose": Cause(s), a numbered To-fix command block, and the Rule
 #       line) to stderr, then returns 1.  The caller must handle the non-zero
@@ -82,8 +102,13 @@
 #                                    from an RC branch's git tree rather than
 #                                    the working-tree filesystem).
 #         CM_HOOK_NONEXEC_FIX_CMD  — the verbatim-runnable fix command
-#                                    (chmod +x ... or git update-index
-#                                    --chmod=+x ... && git commit ...).
+#                                    (chmod +x ..., git update-index
+#                                    --chmod=+x ... && git commit ..., or
+#                                    git rm -r --quiet -- ... && git commit
+#                                    ... for an unresolvable symlink or a
+#                                    non-file entry).  RC-branch commands
+#                                    run from the dev tree root with the
+#                                    RC branch checked out.
 #       Both are reset to "" at the top of every call, including successful
 #       ones, so a caller reading them after a return-0 call sees the empty
 #       defaults rather than a stale value from a prior invocation.
@@ -123,21 +148,84 @@ if ! command -v pgai_mktemp >/dev/null 2>&1; then
     source "$(dirname "${BASH_SOURCE[0]}")/temp.sh"
 fi
 
+# Most symlinks followed when resolving one RC-branch hook path; a longer
+# chain (or a cycle) is refused as unresolvable rather than looped on.
+_CREH_SYMLINK_MAX_HOPS=8
+
+# ---------------------------------------------------------------------------
+# _creh_git_entry_mode <dev_tree_path> <ref> <relative_path>
+#
+# Prints the git mode of *relative_path* in *ref*'s tree (100644, 100755,
+# 120000, 160000, 040000), or nothing and returns 1 when the path is absent.
+# ---------------------------------------------------------------------------
+_creh_git_entry_mode() {
+    local _em_ls_tree
+    _em_ls_tree="$(git -C "$1" ls-tree "$2" -- "$3" 2>/dev/null)"
+    [[ -n "$_em_ls_tree" ]] || return 1
+    # ls-tree line shape: "<mode> <type> <sha>\t<path>" — mode is the first field.
+    awk '{print $1; exit}' <<< "$_em_ls_tree"
+}
+
+# ---------------------------------------------------------------------------
+# _creh_link_target_relpath <link_relpath> <link_text>
+#
+# Prints the repo-relative path a symlink at *link_relpath* whose content is
+# *link_text* points to, with "." and ".." segments folded.  Returns 1 (and
+# prints nothing) when the target is absolute or climbs above the repository
+# root — neither can name a blob on the same ref.
+# ---------------------------------------------------------------------------
+_creh_link_target_relpath() {
+    local _lt_link="$1"
+    local _lt_text="$2"
+    [[ -n "$_lt_text" && "$_lt_text" != /* ]] || return 1
+
+    local _lt_joined="$_lt_text"
+    [[ "$_lt_link" == */* ]] && _lt_joined="${_lt_link%/*}/${_lt_text}"
+
+    local -a _lt_parts=()
+    local -a _lt_out=()
+    local _lt_seg
+    IFS='/' read -r -a _lt_parts <<< "$_lt_joined"
+    for _lt_seg in "${_lt_parts[@]}"; do
+        case "$_lt_seg" in
+            ""|.) ;;
+            ..)
+                (( ${#_lt_out[@]} > 0 )) || return 1
+                unset '_lt_out[-1]'
+                ;;
+            *) _lt_out+=("$_lt_seg") ;;
+        esac
+    done
+    (( ${#_lt_out[@]} > 0 )) || return 1
+
+    local IFS='/'
+    printf '%s\n' "${_lt_out[*]}"
+}
+
 # ---------------------------------------------------------------------------
 # _creh_git_resolve_from_ref <dev_tree_path> <ref> <relative_path>
 #
 # Resolves *relative_path* from the git tree at *ref* (typically the RC
 # branch being released) instead of from the dev tree's current checkout.
+# A symlink (git mode 120000) is followed to its target on the same ref (see
+# "Symlinked hooks on the RC branch" above).
 #
-# On success: materializes the blob's content into a framework temp file
-# (pgai_mktemp), marks it executable on disk, and sets:
-#   _CREH_GIT_RESOLVED_FILE  — path to the materialized temp file
-#   _CREH_GIT_RESOLVED_MODE  — the blob's git mode ("100755" or "100644")
-# Returns 0.
-#
-# When *relative_path* does not exist in *ref*'s tree, sets both globals to
-# empty and returns 1 — the caller treats this identically to "not found at
-# this tier" and falls through to the next tier.
+# Returns 1, with every global empty, when *relative_path* does not exist in
+# *ref*'s tree — the caller treats this identically to "not found at this
+# tier" and falls through to the next tier.  Otherwise returns 0 and sets:
+#   _CREH_GIT_ENTRY_MODE         — git mode of *relative_path* itself.
+#   _CREH_GIT_RESOLVED_TARGET    — repo-relative path of the regular file
+#                                  that supplies the content (*relative_path*
+#                                  itself unless it is a symlink); empty when
+#                                  a symlink cannot be followed to one.
+#   _CREH_GIT_RESOLVED_MODE      — git mode of that target; "100755" means
+#                                  usable.  A symlink that cannot be followed
+#                                  reports "120000".
+#   _CREH_GIT_UNRESOLVED_REASON  — plain-language reason a symlink did not
+#                                  reach a committed regular file, else empty.
+#   _CREH_GIT_RESOLVED_FILE      — only when the mode is 100755: a framework
+#                                  temp file (pgai_mktemp), marked executable,
+#                                  holding the target blob's content.
 # ---------------------------------------------------------------------------
 _creh_git_resolve_from_ref() {
     local _gr_dev_tree="$1"
@@ -146,27 +234,148 @@ _creh_git_resolve_from_ref() {
 
     _CREH_GIT_RESOLVED_FILE=""
     _CREH_GIT_RESOLVED_MODE=""
+    _CREH_GIT_ENTRY_MODE=""
+    _CREH_GIT_RESOLVED_TARGET=""
+    _CREH_GIT_UNRESOLVED_REASON=""
 
-    local _gr_ls_tree
-    _gr_ls_tree="$(git -C "$_gr_dev_tree" ls-tree "$_gr_ref" -- "$_gr_relpath" 2>/dev/null)"
-    if [[ -z "$_gr_ls_tree" ]]; then
-        return 1
+    local _gr_mode
+    _gr_mode="$(_creh_git_entry_mode "$_gr_dev_tree" "$_gr_ref" "$_gr_relpath")" || return 1
+    _CREH_GIT_ENTRY_MODE="$_gr_mode"
+
+    local _gr_path="$_gr_relpath"
+    local _gr_hops=0
+    local _gr_text _gr_next
+    while [[ "$_gr_mode" == "120000" ]]; do
+        if (( _gr_hops >= _CREH_SYMLINK_MAX_HOPS )); then
+            _CREH_GIT_UNRESOLVED_REASON="symlink chain is longer than ${_CREH_SYMLINK_MAX_HOPS} links"
+            _CREH_GIT_RESOLVED_MODE="120000"
+            return 0
+        fi
+        _gr_hops=$(( _gr_hops + 1 ))
+        _gr_text="$(git -C "$_gr_dev_tree" cat-file blob "${_gr_ref}:${_gr_path}" 2>/dev/null)"
+        if ! _gr_next="$(_creh_link_target_relpath "$_gr_path" "$_gr_text")"; then
+            _CREH_GIT_UNRESOLVED_REASON="symlink ${_gr_path} points to '${_gr_text}', which is outside the repository"
+            _CREH_GIT_RESOLVED_MODE="120000"
+            return 0
+        fi
+        if ! _gr_mode="$(_creh_git_entry_mode "$_gr_dev_tree" "$_gr_ref" "$_gr_next")"; then
+            _CREH_GIT_UNRESOLVED_REASON="symlink ${_gr_path} points to ${_gr_next}, which is not committed on ${_gr_ref}"
+            _CREH_GIT_RESOLVED_MODE="120000"
+            return 0
+        fi
+        _gr_path="$_gr_next"
+    done
+
+    if [[ "$_CREH_GIT_ENTRY_MODE" == "120000" && "$_gr_mode" != "100755" && "$_gr_mode" != "100644" ]]; then
+        _CREH_GIT_UNRESOLVED_REASON="symlink target ${_gr_path} is not a regular file (git mode ${_gr_mode})"
+        _CREH_GIT_RESOLVED_MODE="120000"
+        return 0
     fi
 
-    # ls-tree line shape: "<mode> blob <sha>\t<path>" — mode is the first field.
-    local _gr_mode
-    _gr_mode="$(awk '{print $1}' <<< "$_gr_ls_tree")"
+    _CREH_GIT_RESOLVED_TARGET="$_gr_path"
+    _CREH_GIT_RESOLVED_MODE="$_gr_mode"
+    # Only a usable (100755) hook is materialized; the caller refuses any
+    # other mode before it would read the file.
+    [[ "$_gr_mode" == "100755" ]] || return 0
 
     local _gr_tmp
     _gr_tmp="$(pgai_mktemp "cm-release-hook")"
-    if ! git -C "$_gr_dev_tree" show "${_gr_ref}:${_gr_relpath}" > "$_gr_tmp" 2>/dev/null; then
+    if ! git -C "$_gr_dev_tree" show "${_gr_ref}:${_gr_path}" > "$_gr_tmp" 2>/dev/null; then
         rm -f "$_gr_tmp"
+        _CREH_GIT_RESOLVED_TARGET=""
+        _CREH_GIT_RESOLVED_MODE=""
+        _CREH_GIT_ENTRY_MODE=""
         return 1
     fi
     chmod +x "$_gr_tmp"
-
     _CREH_GIT_RESOLVED_FILE="$_gr_tmp"
-    _CREH_GIT_RESOLVED_MODE="$_gr_mode"
+    return 0
+}
+
+# ---------------------------------------------------------------------------
+# _creh_report_unusable_ref_hook <tier_label> <relative_path> <rc_branch> <phase>
+#
+# The refusal for an RC-branch hook that _creh_git_resolve_from_ref found but
+# could not make usable (its resolved mode is not 100755).  Shared by tier
+# (a)-relative and tier (c) so both refuse the same way.  Sets
+# CM_HOOK_NONEXEC_PATH and CM_HOOK_NONEXEC_FIX_CMD and prints the
+# Cause(s) / To fix / Rule block to stderr; the caller returns 1.
+#
+# The remedy depends on what the entry is:
+#   100644 blob                  — git update-index --chmod=+x on the hook.
+#   symlink to a 100644 blob     — git update-index --chmod=+x on the target.
+#   anything else (unresolvable  — git rm -r on the hook path, which clears
+#   symlink, directory, submodule)  the refusal; the tier then reads as empty.
+# Each numbered git step runs as printed from the dev tree root with the RC
+# branch checked out.
+# ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# _creh_quote_message <text>
+#
+# Prints <text> as one single-quoted shell word, each embedded single quote
+# written as '\'' so the word survives any character a path can hold.  Used
+# for the commit message inside a printed remedy; paths go through
+# printf '%q', which leaves an already-safe path byte-identical.
+# ---------------------------------------------------------------------------
+_creh_quote_message() {
+    local _qm_text="$1"
+    printf "'%s'" "${_qm_text//\'/\'\\\'\'}"
+}
+
+_creh_report_unusable_ref_hook() {
+    local _ru_label="$1"
+    local _ru_relpath="$2"
+    local _ru_rc="$3"
+    local _ru_phase="$4"
+    local _ru_entry_mode="$_CREH_GIT_ENTRY_MODE"
+    local _ru_target="$_CREH_GIT_RESOLVED_TARGET"
+    local _ru_mode="$_CREH_GIT_RESOLVED_MODE"
+
+    local _ru_headline _ru_cause _ru_step1 _ru_commit_msg _ru_note=""
+    if [[ "$_ru_mode" == "100644" && "$_ru_entry_mode" == "100644" ]]; then
+        CM_HOOK_NONEXEC_PATH="${_ru_relpath} (on ${_ru_rc})"
+        _ru_headline="hook blob exists on ${_ru_rc} but is not executable (git mode ${_ru_mode})"
+        _ru_cause="${_ru_relpath} on ${_ru_rc} — git mode ${_ru_mode}, expected 100755"
+        _ru_step1="git update-index --chmod=+x $(printf '%q' "$_ru_relpath")"
+        _ru_commit_msg="chmod +x ${_ru_relpath}"
+    elif [[ "$_ru_mode" == "100644" ]]; then
+        CM_HOOK_NONEXEC_PATH="${_ru_relpath} (symlink to ${_ru_target}, on ${_ru_rc})"
+        _ru_headline="hook on ${_ru_rc} is a symlink to ${_ru_target}, which is not executable (git mode ${_ru_mode})"
+        _ru_cause="${_ru_relpath} on ${_ru_rc} — symlink to ${_ru_target}, git mode ${_ru_mode}, expected 100755"
+        _ru_step1="git update-index --chmod=+x $(printf '%q' "$_ru_target")"
+        _ru_commit_msg="chmod +x ${_ru_target}"
+    else
+        if [[ "$_ru_entry_mode" == "120000" ]]; then
+            CM_HOOK_NONEXEC_PATH="${_ru_relpath} (symlink, on ${_ru_rc})"
+            _ru_headline="hook on ${_ru_rc} is a symlink that does not reach a committed regular file"
+            _ru_cause="${_ru_relpath} on ${_ru_rc} — ${_CREH_GIT_UNRESOLVED_REASON}"
+        else
+            CM_HOOK_NONEXEC_PATH="${_ru_relpath} (on ${_ru_rc})"
+            _ru_headline="hook path on ${_ru_rc} is not a regular file (git mode ${_ru_entry_mode})"
+            _ru_cause="${_ru_relpath} on ${_ru_rc} — git mode ${_ru_entry_mode}, expected a 100755 regular file"
+        fi
+        _ru_step1="git rm -r --quiet -- $(printf '%q' "$_ru_relpath")"
+        _ru_commit_msg="Remove unusable release hook ${_ru_relpath}"
+        _ru_note="To keep a ${_ru_phase} hook, commit an executable regular file (git mode 100755) at ${_ru_relpath} in place of the removed entry."
+    fi
+    # Every interpolated path is shell-quoted so the remedy runs as printed
+    # whatever characters the hook or target path holds.
+    local _ru_commit_word
+    _ru_commit_word="$(_creh_quote_message "$_ru_commit_msg")"
+    CM_HOOK_NONEXEC_FIX_CMD="${_ru_step1} && git commit -m ${_ru_commit_word}  # run on ${_ru_rc}"
+
+    echo "[cm-release] ERROR: ${_ru_label}: FAIL — ${_ru_headline}" >&2
+    echo "[cm-release] ERROR:" >&2
+    echo "[cm-release] ERROR: Cause(s):" >&2
+    echo "[cm-release] ERROR:   - ${_ru_cause}" >&2
+    echo "[cm-release] ERROR:" >&2
+    echo "[cm-release] ERROR: To fix:" >&2
+    echo "[cm-release] ERROR:   1. ${_ru_step1}" >&2
+    echo "[cm-release] ERROR:   2. git commit -m ${_ru_commit_word}   # run on ${_ru_rc}" >&2
+    echo "[cm-release] ERROR:   3. Re-run scripts/cm/release.sh to re-resolve the ${_ru_phase} hook." >&2
+    [[ -n "$_ru_note" ]] && echo "[cm-release] ERROR:   ${_ru_note}" >&2
+    echo "[cm-release] ERROR:" >&2
+    echo "[cm-release] ERROR: Rule: a hook committed to the RC branch must carry the executable git mode (100755), or the release cannot invoke it deterministically." >&2
     return 0
 }
 
@@ -257,19 +466,7 @@ cm_resolve_and_enforce_hook() {
             # checkout (see "RC-branch-aware resolution" above).
             if _creh_git_resolve_from_ref "$_creh_dev_tree_path" "$_creh_rc_branch" "$_creh_cfg_raw"; then
                 if [[ "$_CREH_GIT_RESOLVED_MODE" != "100755" ]]; then
-                    CM_HOOK_NONEXEC_PATH="${_creh_cfg_raw} (on ${_creh_rc_branch})"
-                    CM_HOOK_NONEXEC_FIX_CMD="git update-index --chmod=+x ${_creh_cfg_raw} && git commit -m 'chmod +x ${_creh_cfg_raw}'  # run on ${_creh_rc_branch}"
-                    echo "[cm-release] ERROR: cfg-declared hook: FAIL — hook blob exists on ${_creh_rc_branch} but is not executable (git mode ${_CREH_GIT_RESOLVED_MODE})" >&2
-                    echo "[cm-release] ERROR:" >&2
-                    echo "[cm-release] ERROR: Cause(s):" >&2
-                    echo "[cm-release] ERROR:   - ${_creh_cfg_raw} on ${_creh_rc_branch} — git mode ${_CREH_GIT_RESOLVED_MODE}, expected 100755" >&2
-                    echo "[cm-release] ERROR:" >&2
-                    echo "[cm-release] ERROR: To fix:" >&2
-                    echo "[cm-release] ERROR:   1. git update-index --chmod=+x ${_creh_cfg_raw}" >&2
-                    echo "[cm-release] ERROR:   2. git commit -m \"chmod +x ${_creh_cfg_raw}\"   # run on ${_creh_rc_branch}" >&2
-                    echo "[cm-release] ERROR:   3. Re-run scripts/cm/release.sh to re-resolve the ${_creh_phase} hook." >&2
-                    echo "[cm-release] ERROR:" >&2
-                    echo "[cm-release] ERROR: Rule: a hook committed to the RC branch must carry the executable git mode (100755), or the release cannot invoke it deterministically." >&2
+                    _creh_report_unusable_ref_hook "cfg-declared hook" "${_creh_cfg_raw}" "${_creh_rc_branch}" "${_creh_phase}"
                     CM_RESOLVED_HOOK_PATH=""
                     return 1
                 fi
@@ -312,19 +509,7 @@ cm_resolve_and_enforce_hook() {
             # parking the dev tree on the RC before every release.
             if _creh_git_resolve_from_ref "$_creh_dev_tree_path" "$_creh_rc_branch" "$_creh_in_repo_relpath"; then
                 if [[ "$_CREH_GIT_RESOLVED_MODE" != "100755" ]]; then
-                    CM_HOOK_NONEXEC_PATH="${_creh_in_repo_relpath} (on ${_creh_rc_branch})"
-                    CM_HOOK_NONEXEC_FIX_CMD="git update-index --chmod=+x ${_creh_in_repo_relpath} && git commit -m 'chmod +x ${_creh_in_repo_relpath}'  # run on ${_creh_rc_branch}"
-                    echo "[cm-release] ERROR: in-repo hook: FAIL — hook blob exists on ${_creh_rc_branch} but is not executable (git mode ${_CREH_GIT_RESOLVED_MODE})" >&2
-                    echo "[cm-release] ERROR:" >&2
-                    echo "[cm-release] ERROR: Cause(s):" >&2
-                    echo "[cm-release] ERROR:   - ${_creh_in_repo_relpath} on ${_creh_rc_branch} — git mode ${_CREH_GIT_RESOLVED_MODE}, expected 100755" >&2
-                    echo "[cm-release] ERROR:" >&2
-                    echo "[cm-release] ERROR: To fix:" >&2
-                    echo "[cm-release] ERROR:   1. git update-index --chmod=+x ${_creh_in_repo_relpath}" >&2
-                    echo "[cm-release] ERROR:   2. git commit -m \"chmod +x ${_creh_in_repo_relpath}\"   # run on ${_creh_rc_branch}" >&2
-                    echo "[cm-release] ERROR:   3. Re-run scripts/cm/release.sh to re-resolve the ${_creh_phase} hook." >&2
-                    echo "[cm-release] ERROR:" >&2
-                    echo "[cm-release] ERROR: Rule: a hook committed to the RC branch must carry the executable git mode (100755), or the release cannot invoke it deterministically." >&2
+                    _creh_report_unusable_ref_hook "in-repo hook" "${_creh_in_repo_relpath}" "${_creh_rc_branch}" "${_creh_phase}"
                     CM_RESOLVED_HOOK_PATH=""
                     return 1
                 fi
@@ -338,14 +523,14 @@ cm_resolve_and_enforce_hook() {
                 # Non-executable in-repo hook is an ERROR (fail-loud), not a silent skip.
                 if [[ ! -x "$_creh_in_repo" ]]; then
                     CM_HOOK_NONEXEC_PATH="${_creh_in_repo}"
-                    CM_HOOK_NONEXEC_FIX_CMD="chmod +x ${_creh_in_repo}"
+                    CM_HOOK_NONEXEC_FIX_CMD="chmod +x $(printf '%q' "$_creh_in_repo")"
                     echo "[cm-release] ERROR: in-repo hook: FAIL — hook file exists but is not executable" >&2
                     echo "[cm-release] ERROR:" >&2
                     echo "[cm-release] ERROR: Cause(s):" >&2
                     echo "[cm-release] ERROR:   - ${_creh_in_repo} — file mode denies execute permission" >&2
                     echo "[cm-release] ERROR:" >&2
                     echo "[cm-release] ERROR: To fix:" >&2
-                    echo "[cm-release] ERROR:   1. chmod +x ${_creh_in_repo}" >&2
+                    echo "[cm-release] ERROR:   1. ${CM_HOOK_NONEXEC_FIX_CMD}" >&2
                     echo "[cm-release] ERROR:   2. Re-run scripts/cm/release.sh to re-resolve the ${_creh_phase} hook." >&2
                     echo "[cm-release] ERROR:" >&2
                     echo "[cm-release] ERROR: Rule: a hook file that exists at a resolved tier must be executable, or the release cannot invoke it deterministically." >&2

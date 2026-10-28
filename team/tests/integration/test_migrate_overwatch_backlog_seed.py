@@ -1,27 +1,27 @@
 """
 test_migrate_overwatch_backlog_seed.py
 =======================================
-Integration tests for team/scripts/migrations/migrate_v2.24.7_to_v2.24.8.sh.
+Integration tests for team/scripts/migrations/migrate_v2.24.7_to_v2.24.8.sh,
+a narrated no-op: OVERWATCH keeps no queue file, so the step writes nothing
+and says so, while still validating its arguments.
 
-These tests exercise the real migration script end-to-end against synthetic
-project fixtures shaped like pre-v2.24.8 installs (no
-tasks/queues/overwatch_backlog.md at all). No seam is mocked -- each test
-stands up a real temp kanban root with a registered project, runs the real
-script, and asserts on the resulting on-disk state.
+These tests run the real migration script end-to-end against synthetic
+project fixtures. No seam is mocked -- each test stands up a real temp
+kanban root with a registered project, runs the real script, and asserts on
+its output and the resulting on-disk state.
 
 Coverage:
-  - Creates the queue file for a project that lacks it (single-project mode)
-  - Running the migration twice is idempotent (byte-identical second run)
+  - A project with no tasks/queues/overwatch_backlog.md gets none (and no
+    tasks/queues/ directory); the run narrates the no-op and exits 0
   - An existing overwatch_backlog.md -- empty or carrying real entries -- is
-    left untouched
-  - No --project fans out over every registered project
-  - The queue file's own tasks/queues/ directory is created when missing
+    left byte-for-byte unchanged
+  - --dry-run behaves the same and writes nothing
+  - No --project narrates the no-op for every registered project
+  - --help still names every flag
 
 Design notes:
   - All tests use tmp_path for scratch. No bare /tmp paths appear in this file.
-  - Test names describe the behavior under test; no bug IDs, version numbers,
-    or gate tokens appear in function names (roles/TESTER.md Anti-pattern 6).
-    The migration script's own filename is version-suffixed by the project's
+  - The migration script's own filename is version-suffixed by the project's
     naming convention (team/scripts/migrations/README.md); naming the artifact
     under test is not the same as naming a test after its own provenance.
 """
@@ -56,8 +56,7 @@ def _build_kanban_root_with_project(
         seed_backlog_content: If given, pre-create
             tasks/queues/overwatch_backlog.md with this content before running
             the migration (simulates an already-seeded or hand-authored file).
-            If None, the project starts with no queue file at all -- the
-            common pre-v2.24.8 shape this migration targets.
+            If None, the project starts with no queue file at all.
         extra_projects: Optional {name: seed_backlog_content} for additional
             registered projects, used by the fan-out tests.
 
@@ -140,64 +139,37 @@ def _run_migration(
 # ---------------------------------------------------------------------------
 
 
-class TestMigrationSeedsMissingBacklog:
-    """The migration creates overwatch_backlog.md for a project that lacks it."""
-
-    def test_creates_the_queue_file_when_absent(self, tmp_path: pathlib.Path) -> None:
+class TestMigrationIsANarratedNoOp:
+    def test_project_without_a_queue_file_gets_none(self, tmp_path: pathlib.Path) -> None:
         root = _build_kanban_root_with_project(tmp_path, "legacy-proj")
-        backlog = _backlog_path(root, "legacy-proj")
-        assert not backlog.exists(), "Fixture must not already carry the queue file."
+        queues_dir = root / "projects" / "legacy-proj" / "tasks" / "queues"
 
         result = _run_migration(root, project="legacy-proj")
+
         assert result.returncode == 0, (
             f"migration failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
         )
-
-        assert backlog.is_file(), (
-            f"Expected overwatch_backlog.md to be created at {backlog}.\n"
-            f"stdout: {result.stdout}"
+        assert not queues_dir.exists(), (
+            f"The no-op migration must create nothing under {queues_dir}.\nstdout: {result.stdout}"
         )
-        content = backlog.read_text(encoding="utf-8")
-        assert "Overwatch Backlog" in content, f"Expected a title line.\n{content}"
+        assert "[no-op]  legacy-proj:" in result.stdout, result.stdout
 
-    def test_creates_the_queues_directory_when_missing(self, tmp_path: pathlib.Path) -> None:
-        """A project whose tasks/queues/ directory does not exist at all still
-        gets it created -- not just the file inside it."""
-        root = _build_kanban_root_with_project(tmp_path, "no-queues-dir-proj")
-        queues_dir = root / "projects" / "no-queues-dir-proj" / "tasks" / "queues"
-        assert not queues_dir.exists()
-
-        result = _run_migration(root, project="no-queues-dir-proj")
-        assert result.returncode == 0, (
-            f"migration failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
-        )
-        assert _backlog_path(root, "no-queues-dir-proj").is_file()
-
-    def test_running_twice_is_a_byte_identical_no_op(self, tmp_path: pathlib.Path) -> None:
+    def test_running_twice_changes_nothing(self, tmp_path: pathlib.Path) -> None:
         root = _build_kanban_root_with_project(tmp_path, "legacy-proj-2")
-        backlog = _backlog_path(root, "legacy-proj-2")
+        before = sorted(str(p.relative_to(root)) for p in root.rglob("*"))
 
-        first = _run_migration(root, project="legacy-proj-2")
-        assert first.returncode == 0, (
-            f"first migration run failed.\nstdout: {first.stdout}\nstderr: {first.stderr}"
-        )
-        after_first = backlog.read_text(encoding="utf-8")
+        for _ in range(2):
+            result = _run_migration(root, project="legacy-proj-2")
+            assert result.returncode == 0, (
+                f"migration failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
+            )
 
-        second = _run_migration(root, project="legacy-proj-2")
-        assert second.returncode == 0, (
-            f"second migration run failed.\nstdout: {second.stdout}\nstderr: {second.stderr}"
-        )
-        after_second = backlog.read_text(encoding="utf-8")
-
-        assert after_first == after_second, (
-            "Running the migration a second time must be a byte-identical no-op.\n"
-            f"after first run:\n{after_first}\nafter second run:\n{after_second}"
-        )
+        assert sorted(str(p.relative_to(root)) for p in root.rglob("*")) == before
 
 
 class TestMigrationPreservesExistingBacklog:
-    """An already-present overwatch_backlog.md -- empty or with real entries
-    -- is never touched."""
+    """A leftover overwatch_backlog.md -- empty or with real entries -- is
+    never touched."""
 
     def test_existing_empty_backlog_is_left_byte_for_byte_unchanged(
         self, tmp_path: pathlib.Path
@@ -232,14 +204,12 @@ class TestMigrationPreservesExistingBacklog:
         )
 
         assert backlog.read_text(encoding="utf-8") == entries_text, (
-            "The migration must never overwrite an operator-populated queue file."
+            "The migration must never touch an existing queue file."
         )
 
 
 class TestMigrationDryRun:
-    """--dry-run previews without writing."""
-
-    def test_dry_run_makes_no_change(self, tmp_path: pathlib.Path) -> None:
+    def test_dry_run_is_accepted_and_writes_nothing(self, tmp_path: pathlib.Path) -> None:
         root = _build_kanban_root_with_project(tmp_path, "dry-run-proj")
         backlog = _backlog_path(root, "dry-run-proj")
 
@@ -248,22 +218,21 @@ class TestMigrationDryRun:
             f"dry-run failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
         )
 
-        assert not backlog.exists(), (
-            f"--dry-run must not create overwatch_backlog.md.\nstdout: {result.stdout}"
-        )
+        assert not backlog.exists(), f"--dry-run wrote {backlog}.\nstdout: {result.stdout}"
+        assert "[no-op]  dry-run-proj:" in result.stdout, result.stdout
 
 
 class TestMigrationFanOutOverAllProjects:
-    """With no --project, the migration seeds every registered project."""
-
-    def test_seeds_every_registered_project_when_no_project_given(
+    def test_narrates_every_registered_project_and_writes_nothing(
         self, tmp_path: pathlib.Path
     ) -> None:
         root = _build_kanban_root_with_project(
             tmp_path,
             "fanout-proj-a",
-            extra_projects={"fanout-proj-b": None},
+            extra_projects={"fanout-proj-b": "# Overwatch Backlog\n\n"},
         )
+        kept = _backlog_path(root, "fanout-proj-b")
+        kept_text = kept.read_text(encoding="utf-8")
 
         result = _run_migration(root)
         assert result.returncode == 0, (
@@ -271,25 +240,20 @@ class TestMigrationFanOutOverAllProjects:
         )
 
         for name in ("fanout-proj-a", "fanout-proj-b"):
-            assert _backlog_path(root, name).is_file(), (
-                f"Expected {name}'s overwatch_backlog.md to be seeded by the fan-out run."
-            )
+            assert f"[no-op]  {name}:" in result.stdout, result.stdout
+        assert not _backlog_path(root, "fanout-proj-a").exists()
+        assert kept.read_text(encoding="utf-8") == kept_text
 
-    def test_fan_out_leaves_an_already_seeded_project_untouched(
-        self, tmp_path: pathlib.Path
-    ) -> None:
-        root = _build_kanban_root_with_project(
-            tmp_path,
-            "fanout-fresh-proj",
-            extra_projects={"fanout-seeded-proj": "# Overwatch Backlog\n\n"},
+
+class TestMigrationHelp:
+    def test_help_names_every_flag(self, tmp_path: pathlib.Path) -> None:
+        root = _build_kanban_root_with_project(tmp_path, "help-proj")
+        env = dict(os.environ)
+        env["PGAI_AGENT_KANBAN_ROOT_PATH"] = str(root)
+        result = subprocess.run(
+            ["bash", str(_MIGRATION_SCRIPT), "--help"],
+            capture_output=True, text=True, env=env, cwd=str(root), timeout=30,
         )
-        seeded_backlog = _backlog_path(root, "fanout-seeded-proj")
-        original_text = seeded_backlog.read_text(encoding="utf-8")
-
-        result = _run_migration(root)
-        assert result.returncode == 0
-
-        assert _backlog_path(root, "fanout-fresh-proj").is_file()
-        assert seeded_backlog.read_text(encoding="utf-8") == original_text, (
-            "The fan-out run must not touch a project that already has the queue file."
-        )
+        assert result.returncode == 0, result.stderr
+        for flag in ("--project", "--dry-run", "--help"):
+            assert flag in result.stderr, result.stderr

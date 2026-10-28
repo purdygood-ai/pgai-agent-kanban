@@ -20,25 +20,30 @@
 # Every narration line the stages print goes to stderr; stdout carries only
 # the decision:
 #
-#   ship-policy: decision=<SHIP-…|HALT> posture=<matrix|always> trigger=<n|none> notes_status=<…>
+#   ship-policy: decision=<SHIP-…|REQUEUE-VERIFICATION|VERIFICATION-PENDING|HALT> posture=<matrix|always> trigger=<n|none> notes_status=<…>
 #
 # decision      the ship decision the full run would reach (SHIP-FUNCTIONAL,
-#               SHIP-KNOWN-BUGS, SHIP-NON-FUNCTIONAL, SHIP-KNOWN-ISSUE) or HALT.
+#               SHIP-KNOWN-BUGS, SHIP-NON-FUNCTIONAL, SHIP-KNOWN-ISSUE),
+#               REQUEUE-VERIFICATION (verification did not run and the RC's
+#               one requeue is available), VERIFICATION-PENDING (that
+#               requeue is spent and the requeued TESTER task is still
+#               BACKLOG, WORKING or WAITING), or HALT.
 # posture       the resolved ship posture (pp_ship_posture).
-# trigger       on HALT, the trigger number of the stop ("none" for the
-#               unrecognized-TESTER-state and no-row-matched stops). On a
+# trigger       on HALT, the trigger number of the stop (2, 3 or 8); "none" on
+#               REQUEUE-VERIFICATION and VERIFICATION-PENDING. On a
 #               ship, each trigger the always posture shipped through, in
 #               the order they fired, comma-separated when more than one
 #               ("8,2"); "none" when nothing would have stopped.
 # notes_status  the release-notes ## Status value the ship would stamp;
-#               "none" on HALT.
+#               "none" on HALT, REQUEUE-VERIFICATION and VERIFICATION-PENDING.
 #
 # On HALT the line is followed by the would-be HALT's dual-channel contract
 # (error/message/remedy, team/scripts/lib/error_contract.sh), whose
 # "error:" line is the HALT error key the full run writes to the project's
 # HALT file.
 #
-# Exit status: 0 for every SHIP-* decision, 3 for HALT. A run that cannot
+# Exit status: 0 for every SHIP-* decision, 3 for HALT, 4 for
+# REQUEUE-VERIFICATION and VERIFICATION-PENDING. A run that cannot
 # reach a decision (no project context, no RC branch, a release-state.md
 # that disagrees with the branch) exits 1 from the preflight exactly as a
 # full run does, with nothing on stdout.
@@ -67,6 +72,10 @@
 #   cm_release_decide_only_halt <error_key> <message> <remedy>
 #       Called by cm_halt (release_preflight.sh) before it writes anything.
 #       Prints the HALT decision line and the contract, then exits 3.
+#   cm_release_decide_only_requeue
+#       Called by cm_release_apply_ship_policy on REQUEUE-VERIFICATION or
+#       VERIFICATION-PENDING. Prints the decision line and exits 4; nothing
+#       is requeued.
 #   cm_release_decide_only_report
 #       Called by release.sh once cm_release_apply_ship_policy returns with
 #       a ship decision. Prints the decision line and exits 0.
@@ -157,6 +166,25 @@ cm_release_decide_only_halt() {
   # reports it (status 3) and writes nothing.
   # CENSUS-ANCHOR: release-decide-only-halt-01
   exit 3
+}
+
+# Helper: report a REQUEUE-VERIFICATION or VERIFICATION-PENDING decision,
+# and stop: a full run returns the TESTER task to BACKLOG once (or, once
+# that requeue is spent, waits on the unfinished task) and exits 4 without
+# shipping.
+cm_release_decide_only_requeue() {
+  if [[ "${_SHIP_DECISION:-}" == "VERIFICATION-PENDING" ]]; then
+    echo "[cm-release] decide-only: a full run waits on TESTER task ${_TESTER_TASK_ID:-none} (${_TESTER_STATUS:-unknown}; the RC's one requeue is spent, verification is still pending); nothing is written." >&2
+    _cm_release_decide_only_line "VERIFICATION-PENDING" "none" "none"
+  else
+    echo "[cm-release] decide-only: a full run returns TESTER task ${_TESTER_TASK_ID:-none} to BACKLOG once (verification did not run); nothing is written." >&2
+    _cm_release_decide_only_line "REQUEUE-VERIFICATION" "none" "none"
+  fi
+  # AGENT-RESOLVABLE: the decide-only report of a verification requeue --
+  # the full run's own exit 4 is release-verification-requeued-01; this
+  # exit only reports the decision (status 4) and writes nothing.
+  # CENSUS-ANCHOR: release-decide-only-requeue-01
+  exit 4
 }
 
 # Helper: report a ship decision, and stop.

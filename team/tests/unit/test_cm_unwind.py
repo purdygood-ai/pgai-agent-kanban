@@ -7,14 +7,17 @@ Coverage:
 
   1. Confirmation and force are separate parameters of ``unwind_rc``. With
      no confirmation and no prompt a live call refuses dual-channel before
-     reading anything; ``force`` alone is no confirmation unless the caller
+     reading anything, its remedy naming ``<root>/scripts/unwind-rc.sh`` as
+     installed; ``force`` alone is no confirmation unless the caller
      opts into the CLI contract (``force_answers_prompt``); a dry run needs
      none. A declined or unanswered prompt changes nothing.
   2. ``force`` bypasses the Active-RC mismatch check and nothing else: the
      HALT, shipped-tag, project-directory and Active-RC-none checks still
      refuse.
   3. Each refusal names its machine key and the CLI's exit code; a step that
-     fails after the backup stops with exit 2.
+     fails after the backup stops with exit 2. The no-HALT refusal names the
+     halt and unhalt scripts an installed kanban carries under its root,
+     shell-quoted when the root contains a space.
   4. The writes: a status.md gets WONT-DO and one Cancellation Note and is
      left alone on a re-run; queue lines move to ``[x]`` and intake lines
      back to ``[ ]``; an intake file's ``## Status`` value line becomes
@@ -41,6 +44,7 @@ directory under tmp_path.
 from __future__ import annotations
 
 import pathlib
+import shlex
 import subprocess
 import sys
 from typing import Optional
@@ -190,7 +194,12 @@ def test_a_live_call_without_confirmation_refuses_before_reading_anything(
     assert unwind.unwind_exit_code(result) == 1
     fields = parse_error_contract(result.text)
     assert fields is not None and fields["error"] == "unwind_rc.confirmation_required"
-    assert fields["remedy"] == f"team/scripts/unwind-rc.sh --project {_PROJECT} --key {_VERSION} --confirm"
+    # The remedy names the script as installed under the context's root.
+    assert shlex.split(fields["remedy"]) == [
+        str(tmp_path / "absent-root" / "scripts" / "unwind-rc.sh"),
+        "--project", _PROJECT, "--key", _VERSION, "--confirm",
+    ], fields["remedy"]
+    assert "team/scripts/" not in result.text, result.text
     assert (out, err, fake_git.calls) == ("", "", [])
 
 
@@ -314,6 +323,37 @@ def test_a_missing_project_directory_refuses(tmp_path: pathlib.Path, fake_git: F
     result, _, _ = _run(OpsContext(kanban_root=root), tmp_path, confirm=True, repo_root=str(tmp_path))
     assert isinstance(result, unwind.UnwindRcError)
     assert result.text.startswith(f"ERROR: project directory not found: {root.resolve()}/projects/{_PROJECT}\n")
+
+
+@pytest.mark.parametrize("parent", ["plain", "with space"])
+def test_the_no_halt_refusal_names_the_installed_halt_and_unhalt_scripts(
+    tmp_path: pathlib.Path, fake_git: FakeGit, parent: str
+) -> None:
+    ctx = _seed(tmp_path / parent, halt=False)
+    result, _, _ = _run(ctx, tmp_path, confirm=True)
+    assert isinstance(result, unwind.UnwindRcError)
+    assert result.error == "unwind_rc.refused"
+    scripts = f"{ctx.kanban_root}/scripts"
+    assert "team/scripts" not in result.text
+
+    lines = result.text.splitlines()
+
+    def command_after(prefix: str) -> list:
+        line = next(line for line in lines if line.startswith(prefix))
+        return shlex.split(line[len(prefix):])
+
+    def command_before(suffix: str) -> list:
+        line = next(line for line in lines if line.endswith(suffix))
+        return shlex.split(line[: -len(suffix)])
+
+    assert command_after("  To halt the entire kanban, run: ") == [f"{scripts}/halt-global.sh"]
+    assert command_after("  To halt only this project, run: ") == [f"{scripts}/halt.sh", "--project", _PROJECT]
+    assert command_before(" (if you halted globally), or") == [f"{scripts}/unhalt-global.sh"]
+    assert command_before(" (if you halted this project only).") == [
+        f"{scripts}/unhalt.sh", "--project", _PROJECT,
+    ]
+    if " " in parent:
+        assert f"run: '{scripts}/halt-global.sh'" in result.text
 
 
 def test_an_unknown_project_carries_the_resolver_block(tmp_path: pathlib.Path, fake_git: FakeGit) -> None:

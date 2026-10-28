@@ -58,6 +58,7 @@ from pgai_agent_kanban.lib.error_contract import parse_error_contract  # noqa: E
 from pgai_agent_kanban.ops import locks as ops_locks  # noqa: E402
 from pgai_agent_kanban.ops.context import OpsContext  # noqa: E402
 from pgai_agent_kanban.ops.errors import IoError  # noqa: E402
+from pgai_agent_kanban.overwatch.halt_provenance import installed_script_command  # noqa: E402
 from tests.fixtures.golden_board import build_synthetic_board  # noqa: E402
 from tests.fixtures.route_cli_parity import assert_route_cli_parity, build_api_client  # noqa: E402
 from tests.fixtures.scrubbed_subprocess_env import build_scrubbed_env  # noqa: E402
@@ -394,7 +395,8 @@ def test_live_holder_refused_on_the_cli(tmp_path):
     assert contract is not None, run.stderr
     assert contract["error"] == "release_locks.holder_alive"
     _assert_names_the_holder(contract["message"], "CODER-9")
-    assert "team/scripts/release-locks.sh --release repo-wake-alpha --force" in contract["remedy"]
+    release = installed_script_command(board.resolve(), "release-locks.sh", "--release", "repo-wake-alpha", "--force")
+    assert release in contract["remedy"]
     assert (board / "locks" / "repo-wake-alpha.lock").read_bytes() == before
 
 
@@ -791,6 +793,72 @@ def test_stale_threshold_defaults_and_overrides(monkeypatch, tmp_path):
     assert ops_locks.stale_age_threshold_seconds(ctx) == 360, "the 3-period figure wins over a smaller floor"
 
 
+_LOCKS_KEY = "stale_lock_reap_after_wake_periods"
+
+# (files relative to the kanban root, expected wake periods). The project is
+# "demo"; 200 periods (24000s) clears the default chain-budget floor (19950s)
+# and 10 periods does not, so both derivation wordings are compared.
+_LOCKS_PARITY_ROWS = {
+    "project_cfg_outranks_kanban_cfg": (
+        {"projects/demo/project.cfg": f"[locks]\n{_LOCKS_KEY} = 200\n", "kanban.cfg": f"[locks]\n{_LOCKS_KEY} = 3\n"},
+        200,
+    ),
+    "project_cfg_below_the_floor": (
+        {"projects/demo/project.cfg": f"[locks]\n{_LOCKS_KEY} = 10\n", "kanban.cfg": f"[locks]\n{_LOCKS_KEY} = 250\n"},
+        10,
+    ),
+    "kanban_cfg_answers_when_project_cfg_is_silent": (
+        {"projects/demo/project.cfg": "[project]\nproject_name = demo\n", "kanban.cfg": f"[locks]\n{_LOCKS_KEY} = 250\n"},
+        250,
+    ),
+    "blank_project_value_falls_through": (
+        {"projects/demo/project.cfg": f"[locks]\n{_LOCKS_KEY} =\n", "kanban.cfg": f"[locks]\n{_LOCKS_KEY} = 300 ; note\n"},
+        300,
+    ),
+    "legacy_project_cfg_outranks_kanban_cfg": (
+        {"projects/demo/PROJECT.cfg": f"{_LOCKS_KEY}=220\n", "kanban.cfg": f"[locks]\n{_LOCKS_KEY} = 3\n"},
+        220,
+    ),
+    "invalid_project_value_reads_as_the_default": (
+        {"projects/demo/project.cfg": f"[locks]\n{_LOCKS_KEY} = 0\n", "kanban.cfg": f"[locks]\n{_LOCKS_KEY} = 250\n"},
+        3,
+    ),
+}
+
+
+@pytest.mark.parametrize("files, periods", _LOCKS_PARITY_ROWS.values(), ids=_LOCKS_PARITY_ROWS.keys())
+def test_locks_key_resolves_the_same_in_ops_locks_and_lock_provenance(monkeypatch, tmp_path, files, periods):
+    """[locks] stale_lock_reap_after_wake_periods with values in project.cfg
+    and kanban.cfg: ops/locks.py and lock_provenance.sh reach the same
+    period count, threshold and derivation text."""
+    for name in ("MAX_RUNTIME_SECONDS", "MAX_TASK_SECONDS", "KILL_GRACE_SECONDS"):
+        monkeypatch.delenv(name, raising=False)
+    root = tmp_path / "root"
+    (root / "projects" / "demo").mkdir(parents=True)
+    (root / "tmp").mkdir()
+    for rel, text in files.items():
+        (root / rel).write_text(text, encoding="utf-8")
+
+    assert ops_locks.stale_lock_reap_periods(_ctx(root), "demo") == periods
+    expected = ops_locks.project_stale_age_threshold(_ctx(root), "demo")
+    assert f"configured {periods} wake period(s)" in expected.derivation
+
+    script = (
+        "set -euo pipefail\n"
+        'source "$1/project_paths.sh"\n'
+        'source "$1/lock_provenance.sh"\n'
+        "pgai_lock_stale_age_threshold_seconds demo\n"
+        "pgai_lock_stale_age_threshold_derivation demo\n"
+    )
+    proc = subprocess.run(
+        ["bash", "-c", script, "parity", str(_TEAM_DIR / "scripts" / "lib")],
+        capture_output=True, text=True, env=_env(tmp_path, root), cwd=str(root),
+        stdin=subprocess.DEVNULL, timeout=60,
+    )
+    assert proc.returncode == 0, f"rc={proc.returncode}\nstdout={proc.stdout!r}\nstderr={proc.stderr}"
+    assert proc.stdout.splitlines() == [str(expected.seconds), expected.derivation]
+
+
 def test_resolve_lock_name():
     names = ["a", "a-b", "repo-wake-alpha", "repo-wake-alphabet", "repo-wake-beta"]
     assert ops_locks.resolve_lock_name(names, "a") == ["a"]
@@ -839,3 +907,72 @@ def test_a_swap_that_cannot_be_written_is_an_io_error(tmp_path):
 def test_cli_main_refuses_an_unknown_verb(capsys):
     assert ops_locks._cli_main(["nope"]) == 1
     assert "VERB must be one of: list_locks, release_lock" in capsys.readouterr().err
+
+
+# ---------------------------------------------------------------------------
+# project_lock_files: a project whose name ends another's (beta, alpha-beta)
+# ---------------------------------------------------------------------------
+
+
+def _hyphenated_board(tmp_path: pathlib.Path, locks: dict) -> pathlib.Path:
+    """A root registering ``beta`` and ``alpha-beta`` (registry and directories) with *locks* under locks/."""
+    root = tmp_path / "root"
+    for name in ("beta", "alpha-beta"):
+        (root / "projects" / name).mkdir(parents=True)
+    (root / "projects.cfg").write_text("[project:beta]\npriority=1\n\n[project:alpha-beta]\npriority=2\n", encoding="utf-8")
+    (root / "locks").mkdir()
+    for name, text in locks.items():
+        (root / "locks" / name).write_text(text, encoding="utf-8")
+    return root
+
+
+def _attributed(root: pathlib.Path, project: str) -> list[str]:
+    return [pathlib.Path(p).name for p in ops_locks.project_lock_files(str(root / "locks"), project)]
+
+
+def test_a_wake_batch_lock_of_alpha_beta_is_not_attributed_to_beta(tmp_path):
+    root = _hyphenated_board(tmp_path, {"wake-batch-coder-alpha-beta.lock": ""})
+    assert _attributed(root, "alpha-beta") == ["wake-batch-coder-alpha-beta.lock"]
+    assert _attributed(root, "beta") == []
+
+
+def test_every_lock_family_of_a_hyphenated_project_stays_with_it(tmp_path):
+    names = ("repo-wake-{p}.lock", "overwatch-{p}.lock", "overwatch-runaway-{p}.lock",
+             "operator-inbox-{p}.lock", "wake-batch-coder-{p}.lock", "wake-batch-pm-{p}.lock")
+    locks = {n.format(p=p): "" for n in names for p in ("beta", "alpha-beta")}
+    root = _hyphenated_board(tmp_path, locks)
+    assert _attributed(root, "alpha-beta") == sorted(n.format(p="alpha-beta") for n in names)
+    assert _attributed(root, "beta") == sorted(n.format(p="beta") for n in names)
+
+
+def test_a_wake_batch_record_names_the_project_where_the_file_name_cannot(tmp_path):
+    # Projects "x" and "coder-x": wake-batch-coder-x.lock is x's coder guard
+    # or coder-x's guard of an agent with an empty name -- the record says x.
+    root = tmp_path / "root"
+    for name in ("x", "coder-x"):
+        (root / "projects" / name).mkdir(parents=True)
+    locks = root / "locks"
+    locks.mkdir()
+    (locks / "wake-batch-coder-x.lock").write_text("", encoding="utf-8")
+    (locks / "wake-batch-coder-x.record").write_text(
+        f"holder=wake-batch\npid={_DEAD}\nop=wake-batch:coder:x\ntask=none\n", encoding="utf-8"
+    )
+    assert _attributed(root, "x") == ["wake-batch-coder-x.lock"]
+    assert _attributed(root, "coder-x") == []
+
+
+def test_the_step_lock_record_names_the_project_when_the_record_file_is_absent(tmp_path):
+    root = _hyphenated_board(tmp_path, {
+        "wake-batch-coder-alpha-beta.lock": f"holder=wake-batch\npid={_DEAD}\nop=wake-batch-guard:coder:alpha-beta\ntask=none\n",
+    })
+    (root / "projects" / "alpha-beta").rmdir()
+    assert _attributed(root, "beta") == []
+    assert _attributed(root, "alpha-beta") == ["wake-batch-coder-alpha-beta.lock"]
+
+
+def test_a_record_that_does_not_spell_the_lock_name_is_not_believed(tmp_path):
+    root = _hyphenated_board(tmp_path, {
+        "wake-batch-coder-alpha-beta.lock": f"holder=wake-batch\npid={_DEAD}\nop=wake-batch-guard:pm:beta\ntask=none\n",
+    })
+    assert _attributed(root, "beta") == []
+    assert _attributed(root, "alpha-beta") == ["wake-batch-coder-alpha-beta.lock"]

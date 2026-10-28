@@ -267,7 +267,7 @@ if argparse_has details; then
     pgai_emit_error_contract \
         "why.details_requires_project" \
         "why.sh: --details has no project named -- the deferral posture is always per-project." \
-        "Set \$PGAI_PROJECT_NAME to a project registered in projects.cfg, or pass --project directly, e.g. team/scripts/why.sh --project pgai-agent-kanban --details."
+        "Set \$PGAI_PROJECT_NAME to a project registered in projects.cfg, or pass --project directly, e.g. $(printf '%q' "${KANBAN_ROOT}/scripts/why.sh") --project pgai-agent-kanban --details."
     # CENSUS-ANCHOR: why-details-requires-project-01
     exit 1
 fi

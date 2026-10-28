@@ -81,6 +81,12 @@ source "$(dirname "${BASH_SOURCE[0]}")/lib/operator_args.sh"
 # shellcheck source=lib/error_contract.sh
 source "$(dirname "${BASH_SOURCE[0]}")/lib/error_contract.sh"
 
+# This script as installed under the kanban root, shell-quoted, so the
+# argument-shape remedies below run as printed from any directory. Those
+# refusals fire before env_bootstrap.sh resolves the root, so the script
+# names itself by its own location (<root>/scripts/verify-rc-state.sh).
+_vrs_cmd="$(printf '%q' "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/verify-rc-state.sh")"
+
 # ---------------------------------------------------------------------------
 # Declared flag vocabulary for this script.
 # verify-rc-state accepts: --verbose --help, plus the positional PROJECT.
@@ -171,7 +177,7 @@ case "${#ARGPARSE_POSITIONAL[@]}" in
         pgai_emit_error_contract \
             "verify_rc_state.project_required" \
             "verify-rc-state.sh: a project name is required." \
-            "Run team/scripts/verify-rc-state.sh PROJECT, e.g. team/scripts/verify-rc-state.sh pgai-agent-kanban."
+            "Run ${_vrs_cmd} PROJECT, e.g. ${_vrs_cmd} pgai-agent-kanban."
         # CENSUS-ANCHOR: verify-rc-state-project-required-01
         echo "" >&2
         print_usage_and_exit 2 "$_USAGE_TEXT"
@@ -187,7 +193,7 @@ case "${#ARGPARSE_POSITIONAL[@]}" in
         pgai_emit_error_contract \
             "verify_rc_state.unexpected_positional_argument" \
             "verify-rc-state.sh: unexpected positional argument: ${ARGPARSE_POSITIONAL[1]}." \
-            "Run team/scripts/verify-rc-state.sh PROJECT with exactly one project name."
+            "Run ${_vrs_cmd} PROJECT with exactly one project name, e.g. ${_vrs_cmd} pgai-agent-kanban."
         # CENSUS-ANCHOR: verify-rc-state-unexpected-positional-01
         echo "" >&2
         print_usage_and_exit 2 "$_USAGE_TEXT"
@@ -215,7 +221,10 @@ KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH}"
 # Source optional env / config files (they may use unset vars — pre-strict)
 [[ -f "$KANBAN_ROOT/bashrc" ]]               && source "$KANBAN_ROOT/bashrc"
 [[ -f "$KANBAN_ROOT/env" ]]                  && source "$KANBAN_ROOT/env"
-[[ -f "$HOME/.config/pgai-kanban.cfg" ]]     && source "$HOME/.config/pgai-kanban.cfg"
+# Operator user config, then [chain] pm_mode (config_loader.sh).
+# shellcheck source=lib/config_loader.sh
+source "${SCRIPT_DIR}/lib/config_loader.sh"
+config_startup_prelude "$KANBAN_ROOT"
 
 # shellcheck source=lib/pp_run_ops.sh
 source "${SCRIPT_DIR}/lib/pp_run_ops.sh"

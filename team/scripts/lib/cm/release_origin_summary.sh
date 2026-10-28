@@ -72,6 +72,8 @@ _cm_release_print_origin_summary_lines() {
           echo "  - $RC_BRANCH deleted from ${_remote}; ${_local_part}" ;;
         already-absent)
           echo "  - $RC_BRANCH already absent on ${_remote}; ${_local_part}" ;;
+        FAILED)
+          echo "  - $RC_BRANCH still on ${_remote} (its deletion was refused; see the Push Lag Event); ${_local_part}" ;;
         skipped)
           echo "  - $RC_BRANCH ${_local_part}; ${_remote} not touched (local only, push_to_remote=false)" ;;
         *)

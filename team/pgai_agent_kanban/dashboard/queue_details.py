@@ -69,7 +69,7 @@ if not __package__:
     if _OWN_PACKAGE_ROOT not in sys.path:
         sys.path.insert(0, _OWN_PACKAGE_ROOT)
 
-from pgai_agent_kanban.task_status import section_value  # noqa: E402
+from pgai_agent_kanban.task_status import section_value as _read_field  # noqa: E402
 
 __all__ = [
     "AGENT_ORDER",
@@ -129,11 +129,6 @@ _QUEUE_LINE_RE = re.compile(
     r"-(?:\d{8}-\d+-\S+|v\d+[.\d]*-\d+))"
     r"\s*$"
 )
-
-
-def _read_field(text: str, heading: str) -> str:
-    """Return the value of the '## heading' section (task_status.section_value)."""
-    return section_value(text, heading)
 
 
 def _normalize_role(role_raw: str) -> str:

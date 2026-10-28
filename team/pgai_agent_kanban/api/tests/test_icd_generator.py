@@ -34,6 +34,7 @@ import importlib.resources
 import json
 import os
 import pathlib
+import re
 import subprocess
 import sys
 
@@ -54,6 +55,24 @@ _ICD_ARTIFACT = _DEV_TREE_ROOT / "docs" / "api" / "icd.json"
 # Package-data copy — lives alongside app.py in the api/ package directory.
 _PACKAGE_API_DIR = _THIS_FILE.parent.parent             # team/pgai_agent_kanban/api/
 _PACKAGE_DATA_VERSION_FILE = _PACKAGE_API_DIR / "ICD_VERSION"
+
+
+def _expected_icd_version() -> str:
+    """Return the current ICD contract version, read from the package-data ICD_VERSION.
+
+    Tests that check where the version is published compare against this value
+    rather than a literal, so a legitimate ICD bump never breaks them.
+    """
+    assert _PACKAGE_DATA_VERSION_FILE.exists(), (
+        f"Package-data ICD_VERSION not found at {_PACKAGE_DATA_VERSION_FILE}.\n"
+        "It holds the ICD contract version; restore it from git."
+    )
+    version = _PACKAGE_DATA_VERSION_FILE.read_text(encoding="utf-8").strip()
+    assert re.fullmatch(r"\d+\.\d+\.\d+", version), (
+        f"Package-data ICD_VERSION at {_PACKAGE_DATA_VERSION_FILE} holds {version!r}; "
+        "expected one MAJOR.MINOR.PATCH version."
+    )
+    return version
 
 
 # ---------------------------------------------------------------------------
@@ -241,22 +260,22 @@ class TestIcdVersionSource:
         )
 
     def test_icd_version_file_contains_expected_version(self) -> None:
-        """ICD_VERSION file exists and contains exactly '1.18.5' followed by a newline.
+        """docs/api/ICD_VERSION exists and holds exactly the current contract version
+        followed by a single newline.
 
-        This test encodes the acceptance criterion directly: the file must exist
-        with the current contract version for this RC.
-
-        Note: When the ICD version is bumped in a future RC, update this assertion
-        to the new version.
+        The current version is read from the package-data ICD_VERSION, so the
+        test follows a legitimate ICD bump without edits.
         """
+        expected = _expected_icd_version()
         assert _ICD_VERSION_FILE.exists(), (
             f"ICD_VERSION file not found at {_ICD_VERSION_FILE}.\n"
-            "The file must be created at docs/api/ICD_VERSION with content '1.18.5\\n'."
+            f"The file must be created at docs/api/ICD_VERSION with content '{expected}\\n'."
         )
         raw = _ICD_VERSION_FILE.read_bytes()
-        assert raw == b"1.18.5\n", (
-            f"ICD_VERSION file content is {raw!r}; expected b'1.18.5\\n'.\n"
-            "The file must contain exactly '1.18.5' followed by a single newline."
+        assert raw == f"{expected}\n".encode("utf-8"), (
+            f"ICD_VERSION file content is {raw!r}; expected {expected!r} followed by a newline.\n"
+            f"The file must contain exactly '{expected}' (the package-data ICD_VERSION) "
+            "followed by a single newline."
         )
 
 
@@ -304,6 +323,7 @@ class TestIcdArtifactContent:
             "/operations/archive",
             "/logs/{kind}",
             "/traces",
+            "/projects/{name}/reliability",
         ]
         missing = [p for p in required_paths if p not in paths]
         assert not missing, (
@@ -311,23 +331,22 @@ class TestIcdArtifactContent:
             "Run 'bash team/scripts/generate-icd.sh' to regenerate."
         )
 
-    def test_committed_artifact_info_version_is_1_18_5(self) -> None:
-        """The committed icd.json has info.version == '1.18.5'.
+    def test_committed_artifact_info_version_matches_icd_version(self) -> None:
+        """The committed icd.json info.version equals the current ICD contract version.
 
-        Verifies the artifact reflects the current ICD contract version
-        (description-only patch bump: 1.18.4 → 1.18.5): GET /verify-rc-state
-        documents the in-process call to ops.rc_state.verify_rc_state and
-        GET /board names both quarantine locations. No route or field
-        changed.
+        The current version is read from the package-data ICD_VERSION, so the
+        test follows a legitimate ICD bump without edits.
         """
+        expected = _expected_icd_version()
         assert _ICD_ARTIFACT.exists(), (
             f"ICD artifact not found at {_ICD_ARTIFACT}.\n"
             "Run 'bash team/scripts/generate-icd.sh' and commit docs/api/icd.json."
         )
         artifact = json.loads(_ICD_ARTIFACT.read_text(encoding="utf-8"))
         version = artifact.get("info", {}).get("version")
-        assert version == "1.18.5", (
-            f"docs/api/icd.json info.version is {version!r}; expected '1.18.5'.\n"
+        assert version == expected, (
+            f"docs/api/icd.json info.version is {version!r}; expected {expected!r} "
+            f"(from {_PACKAGE_DATA_VERSION_FILE}).\n"
             "Regenerate with 'bash team/scripts/generate-icd.sh'."
         )
 

@@ -77,6 +77,7 @@ _WAKE_RECONCILE_SWEEPS_LIB = pathlib.Path("scripts/lib/wake_reconcile_sweeps.sh"
 _WORKTREE_LIB = pathlib.Path("scripts/lib/worktree.sh")
 _TEMP_LIB = pathlib.Path("scripts/lib/temp.sh")
 _LOCK_PROVENANCE_LIB = pathlib.Path("scripts/lib/lock_provenance.sh")
+_MD_FIELD_LIB = pathlib.Path("scripts/lib/md_field.sh")
 
 # A pid this high is virtually guaranteed not to exist -- the same
 # dead-pid-simulation convention test_lock_provenance.py's own staleness
@@ -213,6 +214,7 @@ def _script_header(
         source {_TEMP_LIB}
         source {_WORKTREE_LIB}
         source {_LOCK_PROVENANCE_LIB}
+        source {_MD_FIELD_LIB}
         TASKS_ROOT="{tasks_root}"
         PP_dev_tree_path="{dev_tree}"
 

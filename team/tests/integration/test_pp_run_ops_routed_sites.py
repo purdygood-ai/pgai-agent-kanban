@@ -246,8 +246,8 @@ def test_api_server_port_refusal_remedy_reruns_the_resolver(tmp_path: pathlib.Pa
 @pytest.mark.parametrize(
     ("token", "rendered"),
     [
-        ("rc:v2.9.15", "HALT-AFTER:project_a until v2.9.15"),
-        ("coder", "HALT-AFTER:project_a coder"),
+        ("rc:v2.9.15", "HALT-AFTER:project-a until v2.9.15"),
+        ("coder", "HALT-AFTER:project-a coder"),
     ],
 )
 def test_status_right_describes_halt_after_from_the_kanban_root_package(
@@ -259,7 +259,7 @@ def test_status_right_describes_halt_after_from_the_kanban_root_package(
     unchanged, and a decoy package on PYTHONPATH never answers.
     """
     root = _build_installed_root(tmp_path)
-    (root / "projects" / "project_a" / "HALT-AFTER").write_text(f"{token}\n", encoding="utf-8")
+    (root / "projects" / "project-a" / "HALT-AFTER").write_text(f"{token}\n", encoding="utf-8")
     decoy = _build_decoy_package(tmp_path)
 
     result = _run(

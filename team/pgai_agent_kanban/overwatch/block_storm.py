@@ -106,6 +106,7 @@ if not __package__:
 
 from pgai_agent_kanban import task_status  # noqa: E402
 from pgai_agent_kanban.lib.error_contract import emit_error_contract  # noqa: E402
+from pgai_agent_kanban.lib.text import join_lines  # noqa: E402
 from pgai_agent_kanban.lib.timeutil import format_iso, try_parse_iso  # noqa: E402
 from pgai_agent_kanban.ops.errors import IoError  # noqa: E402
 from pgai_agent_kanban.ops.write import parse_scan_rule, scan_queue  # noqa: E402
@@ -193,15 +194,10 @@ class GateDecision:
             f"verdict={self.verdict}",
             f"count={self.count}",
             f"reason_code={self.reason_code or NONE_VALUE}",
-            f"why={_one_line(self.why)}",
-            f"remedy={_one_line(self.remedy)}",
+            f"why={join_lines(self.why)}",
+            f"remedy={join_lines(self.remedy)}",
             f"lifts_at={format_iso(self.lifts_at) if self.lifts_at else NONE_VALUE}",
         ]
-
-
-def _one_line(text: str) -> str:
-    """Collapse any line break in *text* so a value stays on its own line."""
-    return re.sub(r"\s*[\r\n]+\s*", " ", text).strip()
 
 
 # ---------------------------------------------------------------------------

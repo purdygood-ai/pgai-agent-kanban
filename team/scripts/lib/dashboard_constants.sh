@@ -202,6 +202,9 @@ PGAI_ROSTER_BAND_SEPARATOR=" $(printf '\xc2\xb7') "
 #
 # <cron_parser_lib>  path to team/pm-agent/lib/cron_parser.py.
 #
+# The crontab is read with "${PGAI_CRONTAB_CMD:-crontab} -l": PGAI_CRONTAB_CMD
+# names a substitute crontab command; unset or empty means 'crontab'.
+#
 # Echoes 0 — never a guess, never the pre-OVERWATCH literal five — when the
 # crontab is empty/unreadable, the parser file is missing, or python3 is
 # unavailable: callers combine this count with their own reserved-row
@@ -215,7 +218,7 @@ fi
 dashboard_schedule_roster_count() {
   local cron_parser_lib="$1"
   local crontab_text=""
-  crontab_text="$(crontab -l 2>/dev/null)" || crontab_text=""
+  crontab_text="$("${PGAI_CRONTAB_CMD:-crontab}" -l 2>/dev/null)" || crontab_text=""
 
   if [[ -z "$crontab_text" ]] || [[ ! -f "$cron_parser_lib" ]] || ! command -v python3 >/dev/null 2>&1; then
     printf '0\n'

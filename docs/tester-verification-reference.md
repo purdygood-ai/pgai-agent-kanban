@@ -36,14 +36,14 @@ Named from Step 5a ("Run the gated suites") and Step 5b ("Record coverage") of `
 **Start both suites with one command.** `team/scripts/run-gated-suites.sh` runs `run-unit-tests.sh` and `run-integration-tests.sh` as two ordinary certification runs, inside one worker budget. Run it from the dev tree root:
 
 ```bash
-bash team/scripts/run-gated-suites.sh --coverage --out-dir "$PGAI_AGENT_KANBAN_TEMP_DIR/tester"
+bash team/scripts/run-gated-suites.sh --out-dir "$PGAI_AGENT_KANBAN_TEMP_DIR/tester"
 UNIT_EXIT="$(cat "$PGAI_AGENT_KANBAN_TEMP_DIR/tester/unit.exit")"
 INTEGRATION_EXIT="$(cat "$PGAI_AGENT_KANBAN_TEMP_DIR/tester/integration.exit")"
 ```
 
 The run leaves three things per suite:
 
-- **What the runner leaves anyway.** Each suite writes the same evidence it writes when run on its own: `lint/findings-<suite>.json` under the temp root, its green-ledger record, and its durations record.
+- **What the runner leaves anyway.** Each suite writes the same evidence it writes when run on its own: `lint/findings-<suite>.json` under the temp root (per-lint files `lint/*_<suite>.json` beside it), its coverage report at `coverage/<suite>.json` when coverage is collected, its green-ledger record, and its durations record. Each runner removes the findings, per-lint, durations and coverage files an earlier run of its suite left before it starts, so every such file present after the run is this run's; the green ledger is appended to, never cleared.
 - **`<suite>.log`** in the `--out-dir` directory: that runner's stdout and stderr.
 - **`<suite>.exit`** in the `--out-dir` directory: one line, that runner's exit code. It is removed when the run starts, so a stale file is never read.
 
@@ -97,18 +97,18 @@ What earns a test the `serial` marker, and the one-line reason it carries, is in
 
 ### Coverage is collected only when the operator turns it on
 
-Step 5a passes `--coverage`, and the runners accept it. Whether coverage is actually collected is the runners' decision. It is honoured in exactly two cases:
+Step 5a does not pass `--coverage`, so its certification runs collect no coverage. Inside a TESTER wake, coverage is collected only when `[testing] coverage = true`, and only by a run given `--coverage`; such a run is optional and separate from Step 5a. The runners honour `--coverage` in exactly two cases:
 
 - **`[testing] coverage = true` in `kanban.cfg`.** This is kanban-wide, with no per-project override. The default is `false`.
 - **`PGAI_TESTING_COVERAGE=1`** set in the operator's own shell for a one-off run. This is an operator's switch and never an agent's. The wake bootstrap unsets it, and the runners ignore it while `PGAI_AGENT_WAKE_ACTIVE=1`. Inside a TESTER wake, only the config key can turn coverage on.
 
-Otherwise each runner prints `coverage disabled by config ([testing] coverage)` and runs the suite without coverage. The exit code is unaffected.
+A run without `--coverage` collects none and prints no coverage line. A `--coverage` run in neither case prints `coverage disabled by config ([testing] coverage)` and runs the suite without coverage. Neither changes the exit code.
 
-That line is Step 5b's `not collected`. Write it in the report's `## Code Coverage` section and move on; it is not a finding.
+Either way there is no coverage JSON and no `^TOTAL` line, so the result is Step 5b's `coverage unavailable`. Write it in the report's `## Code Coverage` section and move on; it is not a finding.
 
 A `--coverage` request the config turned down does not count as coverage for `--reuse-if-green` either. A green-ledger reuse still applies.
 
-**Report coverage only from a run that collected it.** The runners write their coverage JSON under `$PGAI_AGENT_KANBAN_TEMP_DIR/coverage/`. A file already there may have been left by an earlier run, including the operator's weekly run below, against a different checkout. If this verification's runners printed the disabled line, the RC has no coverage figure. Do not lift one from a file you did not produce.
+**Report coverage only from a run that collected it.** The runners write their coverage JSON under `$PGAI_AGENT_KANBAN_TEMP_DIR/coverage/`. A file already there may have been left by an earlier run, including the operator's weekly run below, against a different checkout. If no run in this verification collected coverage, the RC has no coverage figure. Do not lift one from a file you did not produce.
 
 **The operator's weekly coverage run.** Every crontab template under `team/templates/install/` carries this line, commented out:
 
@@ -166,7 +166,7 @@ deep-verify: ledger unreadable — <one sentence naming the path>
 `verdict`, `version`, `commit`, and `timestamp` are copied byte-for-byte. **`age=<N>d`** is whole days between the record's timestamp and now, floored — this morning is `age=0d`. **`freshness`** is the record's *currency*, a separate question from whether it was green: `fresh` requires **both** that `age` is within the window **and** that `version` equals the RC version under verification; otherwise `stale`, with the sentence naming which condition failed, or both. The window is `PGAI_DEEP_VERIFY_FRESHNESS_WINDOW_DAYS`, default 7 days — the same policy the pre-release promotion gate reads. Currency and greenness are orthogonal on purpose: a `failed-to-build` record can be perfectly fresh and a `built` record badly stale, and collapsing them is how a reader believes an old pass is a current one. The sentence carries what the tokens cannot — for a red record, the bug that run already filed; for a `built` record whose `detail` names failing non-build cold tests, the bug that run filed for them; for `could-not-attempt`, the missing resource, plus the bug that run filed when its `detail` also names failing non-build cold tests; for Form B, that nothing is known about whether the images build; for Form C, the ledger path. A worked Form A, the common stale-green case:
 
 ```
-deep-verify: found=true verdict=built version=v2.9.7 commit=8b41c02 timestamp=2026-08-23T04:00:09+00:00 age=11d freshness=stale — last built clean at v2.9.7; stale on both counts (11d exceeds the 7-day window, and v2.9.7 is not the v2.9.12 under verification), so the images have not been built cold against this tree.
+deep-verify: found=true verdict=built version=vX.Y.Z commit=<sha> timestamp=<iso> age=11d freshness=stale — last built clean at vX.Y.Z; stale on both counts (11d exceeds the 7-day window, and vX.Y.Z is not the RC version under verification), so the images have not been built cold against this tree.
 ```
 
 **Never imply a green lane that did not run.** The absence of a failure is not a pass, and the rule has one named failure mode:
@@ -181,9 +181,9 @@ Silence reads to every downstream human and to CM as "nothing to report," which 
 
 **Read the verdict; do not re-derive it.** The red-versus-environment-gap discrimination is made mechanically by the run and is already in the `verdict` field: **a `could-not-attempt` names a resource that was unavailable; a `failed-to-build` names a Dockerfile step, or an image-build test, that did not work with everything it needed available.** The consequence most often got wrong is that **`could-not-attempt` is not a weak red** — no image build was exercised, so no bug describing the build is owed, and "the deep-verify host had no podman" describes the host, which no agent in the loop can close. A failing engine-free test named in its `detail` is a separate finding the run already filed; cite it, as above.
 
-**Two faults do earn a Step-7 `gap` finding**, both filed via Path C, neither `BLOCKED`: an **unreadable ledger** (kanban state an agent can repair, and one nobody can read silently disables the pre-release promotion gate too — write Form C, then file the gap), and a tree that **ships Dockerfiles but has no `team/scripts/deep-verify.sh`** (images shipping with no cold-build gate in front of them anywhere).
+**Two faults do earn a Step-7 `gap` finding**, both filed via Path C, neither `BLOCKED`: an **unreadable ledger** (kanban state an agent can repair, and one nobody can read silently disables the pre-release promotion gate too — write Form C, then file the gap), and a tree that **ships Dockerfiles while the kanban that builds it has no deep-verify lane** (`$PGAI_AGENT_KANBAN_ROOT_PATH/scripts/deep-verify.sh` missing: images shipping with no cold-build gate in front of them anywhere).
 
-**Projects that ship no images.** Most projects here ship none, and for those trees this step is a **clean no-op** — not a skip, not a gap, not a finding. Do not read the ledger, do not write the section, do not record a shortfall. If `ls docker/*/Dockerfile` finds nothing, the entire content of this step is at most one neutral line under `## Caveats` reading `deep-verify: not applicable — tree ships no Dockerfiles`. **An absent subject is not a skipped step**, and the two rules do not contradict: the line is owed by every tree that ships Dockerfiles, and a tree that ships none has no lane to be fresh or stale about. Contrast Step 5a, where a missing `run-unit-tests.sh` blocks because the authoritative command for a verdict TESTER is *required* to produce has gone missing. Absent tooling for work that exists blocks; work that does not exist needs no tooling.
+**Projects that ship no images.** Most projects here ship none, and for those trees this step is a **clean no-op** — not a skip, not a gap, not a finding. Do not read the ledger, do not write the section, do not record a shortfall. If neither a `Dockerfile` at the repository root nor any `docker/*/Dockerfile` exists, the entire content of this step is at most one neutral line under `## Caveats` reading `deep-verify: not applicable — tree ships no Dockerfiles`. **An absent subject is not a skipped step**, and the two rules do not contradict: the line is owed by every tree that ships Dockerfiles, and a tree that ships none has no lane to be fresh or stale about. Contrast Step 5a, where a missing `run-unit-tests.sh` blocks because the authoritative command for a verdict TESTER is *required* to produce has gone missing. Absent tooling for work that exists blocks; work that does not exist needs no tooling.
 
 ---
 
@@ -334,8 +334,9 @@ Nothing at report level is derived from the findings.
 
 Named from Step 10 of `team/roles/TESTER.md`, which carries the filing
 decision — which path, which filename, how the ID is claimed. This
-section carries the two document shapes: the header block every filing
-opens with, and the section list each type must contain.
+section carries the two document shapes (the header block every filing
+opens with, and the section list each type must contain), how a bug is
+deposited, and what to do when the deposit is refused.
 
 **Required headers, in this order, at the top of the file.** A bug carries the block below.
 
@@ -358,6 +359,17 @@ open
 Apply the same shape to every `Filed By` line you write — bugs and any `Filed By` line inside `report.md`.
 
 **Required sections, after the headers, in this order.** A **bug**: `## Symptom` (what was observed), `## Expected` (what should have happened), `## Reproduction` (numbered steps including environment), `## Fix` or `## Files Involved` (the concrete files and, if known, the change — speculation is welcome, this is hand-off context for CODER), `## Acceptance` (testable assertions proving the fix), `## Severity` (exactly one of `critical`, `high`, `medium`, `low`). Copy the structure of `bugs/templates/BUG-TEMPLATE.md`; those sections are the minimum.
+
+**File through the deposit path.** Write the draft under your temp root, named `BUG-NNNN-<slug>.md` with the next number you see free, and deposit it with `intake.sh`. It claims the number atomically. If the number was taken, it renumbers the bug and prints the new path. Cite the number it printed.
+
+```bash
+"$PGAI_AGENT_KANBAN_ROOT_PATH/scripts/intake.sh" --project "$PGAI_PROJECT_NAME" \
+    "$PGAI_AGENT_KANBAN_TEMP_DIR/BUG-NNNN-some-slug.md"
+```
+
+**A same-defect refusal means cite, not file.** Exit 5 means the draft reports the same defect as a live bug. The message names that bug's ID, and nothing was written. Cite the named ID in the report as you would any existing bug, and file nothing. Put new evidence in that bug's record, not in a second one. If the draft really reports a different defect, reword it so it does not cite the live bug as its defect, then deposit again. `intake.sh --help` states the same-defect rule.
+
+**Live means `open`, `running` or `needs-operator`.** When you grep `bugs/` for a bug to cite, a `needs-operator` bug counts: it is waiting on an operator answer, not closed. Only `done`, `wont-do` and `duplicate` are closed.
 
 **Where the current template lives.** The current bug template is the installed `$KANBAN_ROOT/templates/project/<workflow_type>/BUG-TEMPLATE.md` (`release/` for a release project), with the priority and requirements templates beside it. The project's `bugs/templates/BUG-TEMPLATE.md` is a copy that install and upgrade refresh from that set, together with the project's `priority/templates/PRIORITY-TEMPLATE.md` and `requirements/templates/REQUIREMENTS-TEMPLATE.md`, so filing from the project copy gives you the current structure. A project copy that differed from the installed template, whether an older release's template or an operator's edit, is kept beside it as `<file>.<UTC timestamp>.bak` and then overwritten. Copy from the `.md` file, never from a `.bak`: the backup is the previous copy, not the current template. `docs/OPERATIONS.md` ("Seeded intake templates on install and upgrade") covers the refresh in full.
 
@@ -444,7 +456,7 @@ These are mistakes that ship bad RCs:
 
 6. **Verifying only the new normal case after a bug fix.** Always synthesize the original failure mode AND the new normal case, then verify both.
 
-7. **Reporting suite PASS from direct pytest output.** `python3 -m pytest tests/unit/` and `python3 -m pytest tests/integration/` bypass the anti-pattern lint pre-flight that `run-unit-tests.sh` and `run-integration-tests.sh` enforce before pytest. A green pytest line does not establish a suite PASS — the lint can be red while pytest is green, and the gated runner (the command an operator or CM would actually run) would still exit non-zero. PASS evidence must be `bash team/scripts/run-unit-tests.sh` exit 0 AND `bash team/scripts/run-integration-tests.sh` exit 0. Reporting a PASS from direct pytest while the gated runner is failing the lint ships an RC that does not actually pass.
+7. **Reporting suite PASS from direct pytest output.** `python3 -m pytest tests/unit/` and `python3 -m pytest tests/integration/` bypass the lint pre-flight that `run-unit-tests.sh` and `run-integration-tests.sh` run before pytest. A green pytest line does not establish a suite PASS — the pre-flight's breakage class (a syntax error, a compile failure, an unresolved first-party import) can be red while pytest is green, and it makes the gated runner (the command an operator or CM would actually run) exit non-zero. The anti-pattern and skip-gate lints are quality-class: on a certification run their findings land in the runner's findings file (`lint/findings-<suite>.json`) and the run goes on to pytest; they fail only a targeted `--files` run. PASS evidence must be `bash team/scripts/run-unit-tests.sh` exit 0 AND `bash team/scripts/run-integration-tests.sh` exit 0. Reporting a PASS from direct pytest while the gated runner fails its breakage-class pre-flight ships an RC that does not actually pass.
 
 ---
 

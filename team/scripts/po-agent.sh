@@ -59,17 +59,16 @@ fi
 # for our own code.
 [[ -f "$TEAM_ROOT/bashrc" ]] && source "$TEAM_ROOT/bashrc"
 [[ -f "$TEAM_ROOT/env" ]] && source "$TEAM_ROOT/env"
-# $HOME/.config/pgai-kanban.cfg is operator-local bash config; sourced as-is.
-[[ -f "$HOME/.config/pgai-kanban.cfg" ]] && source "$HOME/.config/pgai-kanban.cfg"
-# Source: kanban.cfg [chain/paths] — INI format replaces legacy config.cfg
+# Operator user config, then [chain] pm_mode (config_loader.sh).
+# shellcheck source=lib/config_loader.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/config_loader.sh"
+config_startup_prelude "$TEAM_ROOT"
+# Source: kanban.cfg [paths] — INI format replaces legacy config.cfg
 # Source ini_parser.sh directly since project_paths.sh has not been sourced yet.
 _PO_SCRIPT_DIR_TMP="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 [[ -f "${_PO_SCRIPT_DIR_TMP}/lib/ini_parser.sh" ]] && source "${_PO_SCRIPT_DIR_TMP}/lib/ini_parser.sh"
 # shellcheck source=lib/dev_tree.sh
 source "${_PO_SCRIPT_DIR_TMP}/lib/dev_tree.sh"
-if [[ -f "$TEAM_ROOT/kanban.cfg" ]]; then
-    export PGAI_KANBAN_PM_MODE="${PGAI_KANBAN_PM_MODE:-$(read_ini "$TEAM_ROOT/kanban.cfg" chain pm_mode automatic)}"
-fi
 unset _PO_SCRIPT_DIR_TMP
 export PGAI_DEV_TREE_PATH="${PGAI_DEV_TREE_PATH:-$(resolve_global_dev_tree)}"
 # Classification (a): po-agent validates and queues a brief in $KANBAN_ROOT;
@@ -95,6 +94,10 @@ fi
 # shellcheck source=lib/script_common.sh
 source "$_SCRIPT_DIR/lib/script_common.sh"
 trap cleanup_on_exit EXIT
+
+# --- Source the section reader (read_md_field, used for ## Target Version) ---
+# shellcheck source=lib/md_field.sh
+source "$_SCRIPT_DIR/lib/md_field.sh"
 
 # --- Defaults ---
 DRY_RUN=false
@@ -178,8 +181,12 @@ fi
 BRIEF_FILE="$(cd "$(dirname "$BRIEF_FILE")" && pwd)/$(basename "$BRIEF_FILE")"
 
 # --- Extract Target Version from brief file ---
-# Looks for a line starting with v<digits>.<digits>.<digits> under ## Target Version
-TARGET_VERSION="$(awk '/^## Target Version/{flag=1; next} /^##/{flag=0} flag && /^v[0-9]/{print; exit}' "$BRIEF_FILE" | tr -d '[:space:]')"
+# The first line starting with v<digit> in the ## Target Version body, read by
+# read_md_field (any "##" line, "###" included, ends the section). An absent
+# heading reads as an empty body and fails the validation below.
+_TV_BODY="$(read_md_field --end-at-subheading "$BRIEF_FILE" "Target Version" 2>/dev/null)" || _TV_BODY=""
+TARGET_VERSION="$(awk '/^v[0-9]/{print; exit}' <<< "$_TV_BODY" | tr -d '[:space:]')"
+unset _TV_BODY
 
 # --- Validate Target Version ---
 VERSION_REGEX='^v[0-9]+\.[0-9]+\.[0-9]+$'

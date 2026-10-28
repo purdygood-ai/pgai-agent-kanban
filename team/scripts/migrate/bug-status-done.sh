@@ -13,7 +13,10 @@
 # What this script does:
 #   1. Discovers all requirements bundle files under
 #      $KANBAN_ROOT/projects/<name>/requirements/*.md that have a ## Target Version
-#      whose corresponding semver tag exists in the dev tree (i.e., the RC shipped).
+#      whose release tag exists in the project's dev tree (i.e., the RC shipped).
+#      The release tag is the project's branch_prefix (project.cfg) followed by
+#      the version: ai_vX.Y.Z with branch_prefix = ai_, bare vX.Y.Z with none.
+#      A tag in the other form belongs to another lane and does not count.
 #   2. For each shipped bundle, parses its ## Bundled Items section to extract
 #      the absolute paths of referenced bug/priority files.
 #   3. For each referenced file that exists AND whose ## Status is "running",
@@ -21,6 +24,14 @@
 #   4. Items whose ## Status is "open", "done", or anything other than "running"
 #      are left untouched.
 #   5. Items that do NOT appear in any shipped bundle are left untouched.
+#
+# Which bundles count as shipped, per project:
+#   - Dev tree readable: only those whose release tag exists. A dev tree with
+#     no release tag yet promotes nothing, and says so.
+#   - Dev tree is not a git repository, or branch_prefix is invalid: nothing is
+#     promoted, with a WARNING on stderr naming what to fix.
+#   - No project.cfg, no dev_tree_path, or a path that does not exist: a
+#     WARNING on stderr, and every bundle is treated as shipped.
 #
 # This script is IDEMPOTENT — safe to run multiple times.
 #
@@ -36,10 +47,13 @@
 #   1 — unknown argument, kanban root not found, or a missing helper library
 #
 # Dependencies:
-#   - python3 (stdlib only)
+#   - python3: each project's requirements directory is processed by
+#     pgai_agent_kanban.cm.shipped_bundle_items, run through pp_run_ops from
+#     this script's own tree
 #   - git (for tag existence checks)
 #   - PGAI_AGENT_KANBAN_ROOT_PATH (or defaults to ~/pgai_agent_kanban)
-#   - The project's project.cfg must contain a valid dev_tree_path entry
+#   - The project's project.cfg must contain a valid dev_tree_path entry;
+#     its branch_prefix (optional) is read by pp_branch_prefix
 
 set -euo pipefail
 
@@ -75,6 +89,14 @@ fi
 export KANBAN_ROOT
 # shellcheck source=lib/project_paths.sh
 source "$_SCRIPT_DIR/../lib/project_paths.sh"
+# pp_run_ops: runs the bundle-processing module from this script's own tree.
+# shellcheck source=lib/pp_run_ops.sh
+source "$_SCRIPT_DIR/../lib/pp_run_ops.sh"
+
+_dry_run_args=()
+if [[ "$DRY_RUN" == "true" ]]; then
+  _dry_run_args=(--dry-run)
+fi
 
 echo "=== scripts/migrate/bug-status-done.sh ==="
 echo "Kanban root: $KANBAN_ROOT"
@@ -117,155 +139,49 @@ for project_dir in "$KANBAN_ROOT/projects"/*/; do
   if [[ -z "$dev_tree" || ! -d "$dev_tree" ]]; then
     echo "  WARNING: dev_tree_path not found in project.cfg — cannot check shipped tags." >&2
     echo "  All 'running' items in any bundle will be treated as shipped." >&2
-    dev_tree=""
+    pp_run_ops pgai_agent_kanban.cm.shipped_bundle_items "${_dry_run_args[@]}" \
+      --treat-all-shipped -- "$requirements_dir"
+    echo ""
+    continue
   fi
 
-  # Build set of shipped version tags from the dev tree (tags on any branch,
-  # not just origin/main, since we want local tags too for freshly-released RCs).
+  # Shipped versions: the project's release tags in the dev tree (tags on any
+  # branch, local ones included, so a freshly released RC counts), each with
+  # the branch_prefix stripped to the bare vX.Y.Z a bundle's Target Version
+  # carries. With branch_prefix = ai_ only ai_vX.Y.Z counts; with none, only
+  # vX.Y.Z. Anything that stops the tags being read leaves the set empty, and
+  # an empty set promotes nothing.
   declare -A shipped_tags=()
-  if [[ -n "$dev_tree" ]] && git -C "$dev_tree" rev-parse --git-dir &>/dev/null 2>&1; then
+  tag_prefix=""
+  if ! tag_prefix="$(pp_branch_prefix "$project_name")"; then
+    echo "  WARNING: invalid branch_prefix in $cfg_file — cannot name this project's release tags; nothing is promoted." >&2
+    echo "  Set [project] branch_prefix to letters, digits, _ and - only (e.g. branch_prefix = ai_), or leave it empty." >&2
+  elif ! git -C "$dev_tree" rev-parse --git-dir &>/dev/null; then
+    echo "  WARNING: dev tree $dev_tree is not a git repository — cannot check shipped tags; nothing is promoted." >&2
+    echo "  Point [project] dev_tree_path in $cfg_file at the project's git repository." >&2
+  else
     while IFS= read -r tag; do
-      [[ -n "$tag" ]] && shipped_tags["$tag"]=1
-    done < <(git -C "$dev_tree" tag --list 'v*' 2>/dev/null \
-              | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' || true)
+      [[ -n "$tag" ]] && shipped_tags["${tag#"$tag_prefix"}"]=1
+    done < <(git -C "$dev_tree" tag --list "${tag_prefix}v*" 2>/dev/null \
+              | grep -E "^${tag_prefix}v[0-9]+\.[0-9]+\.[0-9]+\$" || true)
+    if [[ ${#shipped_tags[@]} -eq 0 ]]; then
+      echo "  no release tag matching ${tag_prefix}vX.Y.Z in dev tree $dev_tree"
+    fi
   fi
 
-  # Delegate the actual file processing to Python for robust markdown parsing.
-  python3 - "$requirements_dir" "$DRY_RUN" "${!shipped_tags[@]}" <<'PYEOF'
-import sys, re, pathlib
-
-requirements_dir = pathlib.Path(sys.argv[1])
-dry_run = sys.argv[2].lower() == "true"
-shipped_tags = set(sys.argv[3:])  # may be empty if dev_tree unavailable
-
-# Regex: parse ## Target Version field
-_TARGET_VERSION_RE = re.compile(
-    r'^##\s+Target Version\s*\n\s*(v[\d.]+)',
-    re.MULTILINE | re.IGNORECASE,
-)
-
-# Regex: find ## Bundled Items section
-_BUNDLED_ITEMS_HDR_RE = re.compile(
-    r'^##\s+Bundled Items\s*$',
-    re.MULTILINE | re.IGNORECASE,
-)
-
-# Regex: extract absolute path from backtick-paren notation on a line
-_ITEM_PATH_RE = re.compile(r'\(\`([^`]+)\`\)')
-
-# Regex: ## Status heading + value on the next line (for "running")
-_STATUS_RUNNING_RE = re.compile(
-    r'^(##\s+Status\s*\n\s*)running(\s*)$',
-    re.MULTILINE | re.IGNORECASE,
-)
-_STATUS_ANY_RE = re.compile(
-    r'^##\s+Status\s*\n\s*(\S+)',
-    re.MULTILINE | re.IGNORECASE,
-)
-
-promoted = 0
-skipped_not_running = 0
-skipped_missing = 0
-bundles_processed = 0
-bundles_shipped = 0
-
-# Iterate all bundle files (any .md matching a bundle pattern).
-for bundle_file in sorted(requirements_dir.glob('*.md')):
-    if bundle_file.name.lower() in ('readme.md',):
-        continue
-    # Only process bundle files (name contains "bundle")
-    if 'bundle' not in bundle_file.name.lower():
-        continue
-
-    try:
-        text = bundle_file.read_text(encoding='utf-8')
-    except OSError as e:
-        print(f"  WARN: cannot read {bundle_file.name}: {e}", flush=True)
-        continue
-
-    bundles_processed += 1
-
-    # Extract target version from the bundle file.
-    tv_m = _TARGET_VERSION_RE.search(text)
-    if not tv_m:
-        print(f"  skip (no ## Target Version): {bundle_file.name}", flush=True)
-        continue
-    target_version = tv_m.group(1).strip()
-
-    # Determine if this version shipped.
-    # If no shipped_tags are available (no dev_tree), treat all bundles as shipped.
-    if shipped_tags and target_version not in shipped_tags:
-        # Not yet shipped — skip.
-        continue
-
-    bundles_shipped += 1
-    print(f"  bundle: {bundle_file.name} (version={target_version}, SHIPPED)", flush=True)
-
-    # Parse ## Bundled Items section.
-    lines = text.splitlines()
-    in_section = False
-    item_paths = []
-    for line in lines:
-        if _BUNDLED_ITEMS_HDR_RE.match(line):
-            in_section = True
-            continue
-        if in_section:
-            if re.match(r'^\s*##', line):
-                break
-            m = _ITEM_PATH_RE.search(line)
-            if m:
-                item_paths.append(m.group(1).strip())
-
-    if not item_paths:
-        print(f"    no bundled item paths found", flush=True)
-        continue
-
-    for path_str in item_paths:
-        p = pathlib.Path(path_str)
-        if not p.exists():
-            print(f"    WARN: item not found (skipped): {path_str}", flush=True)
-            skipped_missing += 1
-            continue
-
-        try:
-            content = p.read_text(encoding='utf-8')
-        except OSError as e:
-            print(f"    WARN: cannot read {p.name}: {e}", flush=True)
-            skipped_missing += 1
-            continue
-
-        status_m = _STATUS_RUNNING_RE.search(content)
-        if not status_m:
-            cur_m = _STATUS_ANY_RE.search(content)
-            cur_val = cur_m.group(1) if cur_m else "no-status-field"
-            print(f"    skip (status={cur_val}): {p.name}", flush=True)
-            skipped_not_running += 1
-            continue
-
-        if dry_run:
-            print(f"    [DRY RUN] would promote (running -> done): {p.name}", flush=True)
-        else:
-            new_content = (
-                content[:status_m.start()]
-                + status_m.group(1)
-                + "done"
-                + status_m.group(2)
-                + content[status_m.end():]
-            )
-            p.write_text(new_content, encoding='utf-8')
-            print(f"    promoted (running -> done): {p.name}", flush=True)
-        promoted += 1
-
-print(f"", flush=True)
-print(f"  Bundles processed: {bundles_processed}", flush=True)
-print(f"  Bundles shipped:   {bundles_shipped}", flush=True)
-print(f"  Items promoted:    {promoted}", flush=True)
-print(f"  Items skipped (not running): {skipped_not_running}", flush=True)
-print(f"  Items missing:     {skipped_missing}", flush=True)
-PYEOF
+  # Promote the running items of this project's shipped bundles
+  # (pgai_agent_kanban.cm.shipped_bundle_items.promote_shipped_bundle_items;
+  # every ## section is read by pgai_agent_kanban.task_status.read_section).
+  # An empty set promotes nothing.
+  pp_run_ops pgai_agent_kanban.cm.shipped_bundle_items "${_dry_run_args[@]}" -- \
+    "$requirements_dir" "${!shipped_tags[@]}"
 
   echo ""
 done
 
 echo "=== scripts/migrate/bug-status-done.sh: complete ==="
-[[ "$DRY_RUN" == "true" ]] && echo "(DRY RUN — no files were written)"
+# An if, not `[[ ]] && echo`: a false test as the last command would
+# become the script's exit status and turn a successful real run into 1.
+if [[ "$DRY_RUN" == "true" ]]; then
+  echo "(DRY RUN — no files were written)"
+fi

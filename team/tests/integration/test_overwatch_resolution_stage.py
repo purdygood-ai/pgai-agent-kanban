@@ -16,6 +16,10 @@ Coverage:
     OVERWATCH action log.
   - No HALT present at all is a silent no-op (the common case — most
     OVERWATCH firings are not evaluating a ship-policy block).
+  - A squash conflict (resolve_squash_conflict, no HALT anywhere) runs the
+    same drill -- one ledger entry with trigger squash-conflict, the real
+    cancel-rc.sh, the task/bundle/cargo reverts -- and writes no HALT; an
+    approval gate declines it with nothing touched.
 
 Design:
   - All tests use pytest tmp_path for scratch — no bare /tmp paths.
@@ -48,10 +52,13 @@ from pgai_agent_kanban.overwatch.resolution_stage import (
     DECLINED,
     EXECUTED,
     NO_OP,
+    cancel_landed,
     classify_halt_file,
+    resolve_squash_conflict,
     run_resolution_stage,
 )
 from tests.fixtures.binary_guard import require_binary
+from tests.fixtures.section_reader_modules import copy_section_reader_modules
 
 
 @pytest.fixture(autouse=True)
@@ -135,6 +142,7 @@ def _build_kanban_root(
     cm_py_dir.mkdir(parents=True, exist_ok=True)
     for py_file in _KANBAN_PY_CM_DIR.glob("*.py"):
         (cm_py_dir / py_file.name).write_text(py_file.read_text(encoding="utf-8"), encoding="utf-8")
+    copy_section_reader_modules(cm_py_dir.parent)
 
     # Live-install-style layout: resolution_stage.py resolves cm-cancel-rc.sh
     # at <kanban_root>/scripts/cm/cancel-rc.sh (mirrors install.sh's real
@@ -338,6 +346,56 @@ class TestGoldenPathExecutesTheDrill:
 
         entry_count_after_second = ledger_path.read_text(encoding="utf-8").count("## Entry:")
         assert entry_count_after_second == entry_count_after_first
+
+
+# ---------------------------------------------------------------------------
+# A squash conflict: the same drill, before any HALT exists
+# ---------------------------------------------------------------------------
+
+
+class TestSquashConflictRunsTheDrillWithoutAHalt:
+    def test_squash_conflict_cancels_and_rebundles_and_writes_no_halt(self, tmp_path: pathlib.Path) -> None:
+        (
+            kanban_root, proj, repo_path, version, halt_path, task_id, cm_task_id, bug_id,
+        ) = _build_golden_fixture(tmp_path)
+        halt_path.unlink()
+
+        outcome = resolve_squash_conflict("golden_project", str(kanban_root), version, repo_root=str(repo_path))
+
+        assert outcome.status == EXECUTED, outcome.reason
+        assert cancel_landed(outcome, "golden_project", version), outcome.actions_taken
+        assert not outcome.action_errors, outcome.action_errors
+        assert not halt_path.exists(), "no HALT is written or needed"
+        assert not any("HALT" in step for step in outcome.actions_taken), outcome.actions_taken
+
+        ledger_text = (proj / "auto-resolutions.md").read_text(encoding="utf-8")
+        assert ledger_text.count("## Entry:") == 1
+        assert "squash-conflict" in ledger_text and "CANCEL-AND-REBUNDLE" in ledger_text
+        release_state_text = (proj / "release-state.md").read_text(encoding="utf-8")
+        assert "## Active RC\nnone" in release_state_text
+        assert "## OVERWATCH Decision" in release_state_text
+        for tid in (task_id, cm_task_id):
+            assert "## State\nWONT-DO" in (proj / "tasks" / tid / "status.md").read_text(encoding="utf-8")
+        assert "## Status\nopen" in (proj / "bugs" / f"{bug_id}.md").read_text(encoding="utf-8")
+
+    def test_squash_conflict_with_an_approval_gate_declines_and_touches_nothing(
+        self, tmp_path: pathlib.Path
+    ) -> None:
+        (
+            kanban_root, proj, repo_path, version, halt_path, task_id, cm_task_id, bug_id,
+        ) = _build_golden_fixture(tmp_path)
+        halt_path.unlink()
+        (proj / "tasks" / f"HUMAN-APPROVE-{version}-001").mkdir()
+
+        outcome = resolve_squash_conflict("golden_project", str(kanban_root), version, repo_root=str(repo_path))
+
+        assert outcome.status == DECLINED
+        assert "approval_gate_present=True" in outcome.reason
+        assert not cancel_landed(outcome, "golden_project", version)
+        assert not (proj / "auto-resolutions.md").exists()
+        assert f"## Active RC\n{version}" in (proj / "release-state.md").read_text(encoding="utf-8")
+        assert "## State\nWORKING" in (proj / "tasks" / task_id / "status.md").read_text(encoding="utf-8")
+        assert not halt_path.exists()
 
 
 # ---------------------------------------------------------------------------
@@ -693,9 +751,16 @@ class TestSubCeilingRemainsEligible:
 # ---------------------------------------------------------------------------
 
 
+def _project_halt_path(tmp_path: pathlib.Path) -> pathlib.Path:
+    """A project-scoped HALT path; the kanban root's own HALT is always the operator's."""
+    project_dir = tmp_path / "projects" / "demo"
+    project_dir.mkdir(parents=True, exist_ok=True)
+    return project_dir / "HALT"
+
+
 class TestClassifyHaltFile:
     def test_absent_file(self, tmp_path: pathlib.Path) -> None:
-        assert classify_halt_file(str(tmp_path / "HALT")) == "absent"
+        assert classify_halt_file(str(_project_halt_path(tmp_path))) == "absent"
 
     @pytest.mark.parametrize(
         "writer, expected",
@@ -707,11 +772,16 @@ class TestClassifyHaltFile:
     def test_classify_by_content(
         self, tmp_path: pathlib.Path, writer, expected: str
     ) -> None:
-        path = tmp_path / "HALT"
+        path = _project_halt_path(tmp_path)
         writer(path)
         assert classify_halt_file(str(path)) == expected
 
     def test_empty_file_is_operator(self, tmp_path: pathlib.Path) -> None:
-        path = tmp_path / "HALT"
+        path = _project_halt_path(tmp_path)
         path.write_text("", encoding="utf-8")
+        assert classify_halt_file(str(path)) == "operator"
+
+    def test_kanban_root_halt_with_a_cm_header_is_operator(self, tmp_path: pathlib.Path) -> None:
+        path = tmp_path / "HALT"
+        _write_ship_policy_halt(path)
         assert classify_halt_file(str(path)) == "operator"

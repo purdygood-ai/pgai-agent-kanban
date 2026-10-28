@@ -21,16 +21,20 @@ Raises ArtifactsError with a descriptive message on any validation failure.
 import fcntl
 import os
 import re
+import sys
 from pathlib import Path
+
+# The pgai_agent_kanban package sits beside pm-agent/ in the same tree
+# (team/pm-agent/lib -> team/); each tree finds its own copy.
+_TEAM_ROOT = str(Path(__file__).resolve().parents[2])
+if _TEAM_ROOT not in sys.path:
+    sys.path.insert(0, _TEAM_ROOT)
+from pgai_agent_kanban.lib import ini  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
-
-# Project names must start with a lowercase letter or digit and may contain
-# lowercase letters, digits, and hyphens.
-_PROJECT_NAME_RE = re.compile(r'^[a-z0-9][a-z0-9-]*$')
 
 # Matches the "## Next Version" heading and the integer value that follows it.
 # Liberal: allows any amount of whitespace between heading and value.
@@ -71,12 +75,22 @@ def _resolve_kanban_root(kanban_root=None) -> Path:
 
 
 def _validate_project_name(project_name: str) -> None:
-    """Raise ArtifactsError if project_name does not match the required pattern."""
-    if not isinstance(project_name, str) or not _PROJECT_NAME_RE.match(project_name):
+    """Raise ArtifactsError unless project_name satisfies the project-name rule.
+
+    The rule is ``ini.project_name_rule`` (``PROJECTS_CFG_NAME_RE`` in
+    ``scripts/lib/projects_cfg.sh``), read when first needed rather than at
+    import.
+
+    Raises:
+        ArtifactsError: The name does not satisfy the rule.
+        ini.ProjectNameRuleError: The rule's definition cannot be read.
+    """
+    if not isinstance(project_name, str) or not ini.is_project_name(project_name):
         raise ArtifactsError(
             f"Invalid project name '{project_name}'. "
-            "Project names must match ^[a-z0-9][a-z0-9-]*$ "
-            "(lowercase letters, digits, hyphens only; must not start with a hyphen)."
+            "Project names must satisfy the project-name rule "
+            "(PROJECTS_CFG_NAME_RE in scripts/lib/projects_cfg.sh): lowercase "
+            "letters, digits and hyphens, starting with a letter or digit."
         )
 
 
@@ -117,7 +131,8 @@ def get_project_path(project_name: str, kanban_root=None) -> Path:
     Parameters
     ----------
     project_name:
-        The project identifier. Must match ^[a-z0-9][a-z0-9-]*$.
+        The project identifier. Must satisfy the project-name rule
+        (``ini.project_name_rule``).
     kanban_root:
         Override for the kanban root directory. Defaults to
         PGAI_AGENT_KANBAN_ROOT_PATH (canonical) /
@@ -146,7 +161,8 @@ def get_version_path(project_name: str, version: int, kanban_root=None) -> Path:
     Parameters
     ----------
     project_name:
-        The project identifier. Must match ^[a-z0-9][a-z0-9-]*$.
+        The project identifier. Must satisfy the project-name rule
+        (``ini.project_name_rule``).
     version:
         The version number (positive integer).
     kanban_root:
@@ -191,7 +207,8 @@ def get_next_version(project_name: str, kanban_root=None) -> Path:
     Parameters
     ----------
     project_name:
-        The project identifier. Must match ^[a-z0-9][a-z0-9-]*$.
+        The project identifier. Must satisfy the project-name rule
+        (``ini.project_name_rule``).
     kanban_root:
         Override for the kanban root directory.
 
@@ -248,7 +265,8 @@ def get_input_path(project_name: str, version: int, kanban_root=None) -> Path:
     Parameters
     ----------
     project_name:
-        The project identifier. Must match ^[a-z0-9][a-z0-9-]*$.
+        The project identifier. Must satisfy the project-name rule
+        (``ini.project_name_rule``).
     version:
         The version number (positive integer).
     kanban_root:
@@ -277,7 +295,8 @@ def get_working_path(project_name: str, version: int, kanban_root=None) -> Path:
     Parameters
     ----------
     project_name:
-        The project identifier. Must match ^[a-z0-9][a-z0-9-]*$.
+        The project identifier. Must satisfy the project-name rule
+        (``ini.project_name_rule``).
     version:
         The version number (positive integer).
     kanban_root:
@@ -306,7 +325,8 @@ def get_output_path(project_name: str, version: int, kanban_root=None) -> Path:
     Parameters
     ----------
     project_name:
-        The project identifier. Must match ^[a-z0-9][a-z0-9-]*$.
+        The project identifier. Must satisfy the project-name rule
+        (``ini.project_name_rule``).
     version:
         The version number (positive integer).
     kanban_root:

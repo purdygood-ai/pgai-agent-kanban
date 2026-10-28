@@ -99,11 +99,12 @@
 #     through the full wake/discovery pipeline or on its own, as unit
 #     tests do. Used by _disc_write_bundle's no-valid-items guard.
 #
-#   team/scripts/lib/pp_run_ops.sh and atomic_write.sh — self-sourced
-#     below. Every status, field and cache read or rewrite is a module call
-#     through pp_run_ops: pgai_agent_kanban.lib.md_fields read /
-#     render-status / render-value, and pgai_agent_kanban.ops
-#     render_ensure_marker. The render calls print the whole new file and
+#   team/scripts/lib/pp_run_ops.sh, md_field.sh and atomic_write.sh —
+#     self-sourced below. A bundle field is read through read_md_field
+#     (md_field.sh); every status and cache rewrite is a module call
+#     through pp_run_ops: pgai_agent_kanban.lib.md_fields render-status /
+#     render-value, and pgai_agent_kanban.ops render_ensure_marker. The
+#     render calls print the whole new file and
 #     write nothing; pgai_atomic_write commits it (same-directory scratch
 #     file plus rename, file mode kept), so a concurrent reader never sees a
 #     half-written intake, bundle or cache file and a failed call leaves the
@@ -128,6 +129,15 @@ fi
 # A caller's own pp_run_ops (wake_bootstrap.sh's, or a test stub) wins.
 # shellcheck source=pp_run_ops.sh
 declare -F pp_run_ops >/dev/null || source "${_DISC_STATE_LIB_DIR}/pp_run_ops.sh"
+# md_field.sh leaves a defined pp_run_ops in place; the definition active
+# before it is also saved and restored around the load.
+if ! declare -F read_md_field >/dev/null; then
+    _disc_state_runner="$(declare -f pp_run_ops)"
+    # shellcheck source=md_field.sh
+    source "${_DISC_STATE_LIB_DIR}/md_field.sh"
+    eval "$_disc_state_runner"
+    unset _disc_state_runner
+fi
 # shellcheck source=atomic_write.sh
 source "${_DISC_STATE_LIB_DIR}/atomic_write.sh"
 
@@ -159,14 +169,25 @@ _disc_set_status_field() {
 # _disc_read_bundle_field <bundle_file> <field_name>
 # Read a named ## field value from a requirements bundle file.
 # Echoes the trimmed value of the first non-blank line after the heading
-# (md_fields.field_value: an empty section reads empty, a bold value reads
-# as the text inside). Exits 1 and echoes nothing if the field is absent or
-# the file does not exist.
+# (an empty section reads empty, a whole-line **bold** or __bold__ value
+# reads as the text inside). The section is read by read_md_field with
+# --end-at-subheading: it ends at the next "##" line, "###" included.
+# Exits 1 and echoes nothing if the field is absent or the file does not
+# exist or cannot be read.
 _disc_read_bundle_field() {
     local bundle_file="$1"
     local field_name="$2"
+    local value
     [[ -f "$bundle_file" ]] || return 1
-    pp_run_ops pgai_agent_kanban.lib.md_fields read "$bundle_file" "$field_name" || return 1
+    value="$(read_md_field --end-at-subheading "$bundle_file" "$field_name" 2>/dev/null)" || return 1
+    value="${value%%$'\n'*}"
+    value="${value%"${value##*[![:space:]]}"}"
+    if [[ "$value" =~ ^\*\*(.+)\*\*$ || "$value" =~ ^__(.+)__$ ]]; then
+        value="${BASH_REMATCH[1]}"
+        value="${value#"${value%%[![:space:]]*}"}"
+        value="${value%"${value##*[![:space:]]}"}"
+    fi
+    printf '%s\n' "$value"
 }
 
 # _disc_update_bundle_pm_queued <bundle_file> <pm_task_id>

@@ -1,0 +1,77 @@
+# team/config/section-parser-allowlist.txt
+#
+# Sites that detect a markdown "## " heading outside the section reader
+# (task_status.read_section, read_md_field) and read no value, read by
+# team/scripts/lint_section_parsers.py (quality class, never fatal).
+# Format: one "<path>\t<class>\t<reason>\t<code>" line per site, path
+# relative to the repository root, <code> the site's line with its
+# whitespace runs read as one space. <class> is one of: section-writer,
+# ledger-heading, heading-counter, structure-lint, presence-check,
+# remedy-text, header-exempt. A site that reads a value is never listed
+# here: it moves to the reader.
+#
+# Ratchet rule: an entry is removed when its site is, and the lint reports
+# an entry that names no site so it is removed in the same change. A new
+# entry is added only for a new site of one of the classes above;
+# --list-sites prints every site the lint finds.
+team/pgai_agent_kanban/cm/auto_ship_notes.py	section-writer	place_auto_ship_lines finds the ## Known Issues section it writes auto-ship lines into	_KNOWN_ISSUES_RE = re.compile(r"^##[ \t]+Known[ \t]+Issues[ \t]*$", re.IGNORECASE | re.MULTILINE)
+team/pgai_agent_kanban/cm/auto_ship_notes.py	section-writer	place_auto_ship_lines finds where the ## Known Issues section it writes ends	_NEXT_HEADING_RE = re.compile(r"^##[ \t]+\S", re.MULTILINE)
+team/pgai_agent_kanban/cm/changelog_writer.py	ledger-heading	the per-release ## vX.Y.Z entry heading of the published CHANGELOG.md	_ENTRY_HEADING_RE = re.compile(r"^##\s+(v\d+\.\d+\.\d+)(?:\s|$)")
+team/pgai_agent_kanban/cm/changelog_writer.py	ledger-heading	the ### subsection heading inside a published CHANGELOG.md entry	_SECTION_HEADING_RE = re.compile(r"^###\s+(.+?)\s*$")
+team/pgai_agent_kanban/cm/changelog_writer.py	section-writer	_text_with_public_id fills the ## Public ID section of a bug file	r"(^##\s+Public ID\s*$)([\s\S]*?)(?=^##\s+|\Z)",
+team/pgai_agent_kanban/cm/changelog_writer.py	section-writer	_text_without_public_id clears the ## Public ID value of a bug file	r"(^##\s+Public ID\s*\n)([\s\S]*?)(?=^##\s+|\Z)",
+team/pgai_agent_kanban/cm/fixed_in_restamp.py	remedy-text	a grep command printed in a refusal remedy	remedy = f"grep -A2 '^## Fixed In' {' '.join(str(p) for p in bug_files)}"
+team/pgai_agent_kanban/cm/fixed_in_writeback.py	section-writer	write_fixed_in and replace_fixed_in rewrite the ## Fixed In section in place	r"(^##\s+Fixed\s+In\s*$)([\s\S]*?)(?=^##\s+|\Z)",
+team/pgai_agent_kanban/cm/notes_status_section.py	section-writer	status_sections finds the Status lines stamp_status_placeholder rewrites; the presence and placeholder checks that gate the stamp share it, and status_value reads through read_section	_STATUS_HEADING_RE = re.compile(r"^##[ \t]+Status[ \t]*$")
+team/pgai_agent_kanban/cm/notes_status_section.py	section-writer	status_sections finds where each Status section stamp_status_placeholder rewrites ends	_SECTION_END_RE = re.compile(r"^#{1,2}[ \t]+\S")
+team/pgai_agent_kanban/cm/release_notes_blocks.py	section-writer	stamp_carry_forward writes the ## Known Issue Carry Forward marker into a bug file	_CARRY_FORWARD_RE = re.compile(r"(^##\s+Known Issue Carry Forward\s*$)([\s\S]*?)(?=^##\s+|\Z)", re.MULTILINE)
+team/pgai_agent_kanban/cm/release_notes_blocks.py	section-writer	_replace_or_append replaces or appends a release-notes section	pattern = re.compile(rf"(^##\s+{re.escape(heading)}\s*$)([\s\S]*?)(?=^##\s+|\Z)", re.MULTILINE)
+team/pgai_agent_kanban/cm/release_notes_generator.py	heading-counter	ends a summary paragraph at a heading line inside a body task_status.read_section returned	_SUBHEADING_RE = re.compile(r"^\s*#{1,6}\s")
+team/pgai_agent_kanban/cm/shipped_bundle_items.py	section-writer	promote_shipped_bundle_items rewrites a shipped item's ## Status value from running to done	r'^(##\s+Status\s*\n\s*)running(\s*)$',
+team/pgai_agent_kanban/cm/unwind.py	section-writer	guards the timestamped ## Cancellation Note append against a second write	_CANCELLATION_NOTE_RE = re.compile(r"^## Cancellation Note", re.M)
+team/pgai_agent_kanban/cm/write_rc_state.py	section-writer	render_release_state rewrites release-state.md field lines in place	_LEVEL2_HEADING_RE = re.compile(r'^##\s+(.*?)\s*$')
+team/pgai_agent_kanban/cm/write_rc_state.py	section-writer	render_release_state finds where each release-state.md field it rewrites ends	_SECTION_BOUNDARY_RE = re.compile(r'^\s*##')
+team/pgai_agent_kanban/deep_verify/ledger.py	ledger-heading	the ## Deep-Verify Run: entry heading of the deep-verify ledger	r"^##\s+Deep-Verify Run:\s*(?P<timestamp>\S+)\s+—\s+(?P<project>\S+)\s+—\s+"
+team/pgai_agent_kanban/lib/md_fields.py	section-writer	set_value_line rewrites one value line of a section	r"(^##\s+" + re.escape(header) + r"(?:[^\S\n]*:[^\n]*)?[^\S\n]*)((?:\n(?!##)[^\n]*)*?)(\n+##|\n*\Z)",
+team/pgai_agent_kanban/lib/md_fields.py	section-writer	set_value_line splits an inline value off the heading it rewrites	name_end = re.match(r"##\s+" + re.escape(heading), heading_line, re.IGNORECASE)
+team/pgai_agent_kanban/lib/md_fields.py	section-writer	set_value_line finds where to insert a section that is absent	other = re.search(r"^##\s+(?!Status\b)", text, re.M | re.IGNORECASE)
+team/pgai_agent_kanban/lib/md_fields.py	section-writer	set_value_line drops the inline value from the heading it rewrites	name_end = re.match(r"##\s+" + re.escape(heading), heading_line, re.IGNORECASE)
+team/pgai_agent_kanban/lib/refusal_ledger.py	ledger-heading	the ## Refusal: entry heading of the refusal ledger	r"^##\s+Refusal:\s*(?P<timestamp>\S+)\s+—\s+(?P<project>\S+)\s+—\s+"
+team/pgai_agent_kanban/ops/locks.py	remedy-text	a grep command printed in a refusal remedy	"grep -n -A4 '^## Lock Provenance' \"$PGAI_AGENT_KANBAN_ROOT_PATH/SOP-core.md\"",
+team/pgai_agent_kanban/overwatch/block_stage_deferral.py	heading-counter	counts the ## OVERWATCH Decision events in release-state.md	_DECISION_EVENT_RE = re.compile(r"^##[ \t]+OVERWATCH[ \t]+Decision[ \t]*$", re.MULTILINE)
+team/pgai_agent_kanban/overwatch/block_storm.py	remedy-text	builds the grep command printed as a block-storm remedy	patterns = " ".join(f"-e {shlex.quote('^## ' + name)}" for name in _REMEDY_SECTIONS)
+team/pgai_agent_kanban/overwatch/ledger.py	ledger-heading	the ## Entry: heading of the OVERWATCH resolution ledger	r"^##\s+Entry:\s*(?P<timestamp>\S+)\s+—\s+(?P<rc>\S+)\s+—\s+attempt\s+"
+team/pgai_agent_kanban/overwatch/pm_task_wont_do.py	section-writer	replace_block rewrites status.md sections when OVERWATCH closes the task	return rf'(^## {re.escape(heading)}[^\S\n]*)((?:\n(?!##)[^\n]*)*?)(\n+##|\n*\Z)'
+team/pgai_agent_kanban/overwatch/pm_task_wont_do.py	section-writer	decides whether the Blocked Reason section it writes replaces an existing one	if re.search(r'^## Blocked Reason\s*$', new_text, flags=re.M):
+team/pgai_agent_kanban/overwatch/pm_task_wont_do.py	section-writer	decides whether the Blocked Reason section it writes goes after ## Blockers	elif re.search(r'^## Blockers\s*$', new_text, flags=re.M):
+team/pgai_agent_kanban/reports/tester_report.py	ledger-heading	classifies a TESTER report's headings to find its per-entry Finding headings	_HEADING_RE = re.compile(r"^ {0,3}(#{1,6})(?:[ \t]+(.*?))?[ \t]*$")
+team/pgai_agent_kanban/reports/tester_report.py	ledger-heading	the per-entry Finding heading of a TESTER report written with no space after its hashes	_NOSPACE_FINDING_HEADING_RE = re.compile(r"^ {0,3}(#{2,6})((?i:finding)(?![A-Za-z0-9_]).*?)[ \t]*$")
+team/pm-agent/pm_materialize.py	section-writer	_apply_rename_map_to_prerequisites rewrites task IDs inside prerequisite sections	if stripped.startswith("##"):
+team/pm-agent/pm_status.py	heading-counter	lists a status.md's headings; each body is read by task_status.read_section	headings = [h.strip() for h in re.findall(r'^## (.+)$', text, re.M)]
+team/scripts/cm/promote_bundled_items.py	section-writer	promote_item rewrites a bundled item's ## Status value from running to done	r'^(##\s+Status\s*\n\s*)running(\s*)$',
+team/scripts/harness/lib/doc_step_extract.py	structure-lint	finds a documented step's heading, at any level, and its same-level end to extract fenced commands	heading_re = re.compile(r"^(#+)\s+(.*)$")
+team/scripts/lint_api_route_docs.py	structure-lint	finds the endpoint-table section of the API route reference it lints	_ENDPOINT_SECTION_RE = re.compile(r"^##\s+.*\bEndpoint\s+table\b", re.IGNORECASE)
+team/scripts/lint_api_route_docs.py	structure-lint	finds the curl-examples section of the API route reference it lints	_CURL_SECTION_RE = re.compile(r"^##\s+.*\bcurl\s+examples\b", re.IGNORECASE)
+team/scripts/lint_api_route_docs.py	structure-lint	level-2 heading boundary of the API route reference it lints	_H2_RE = re.compile(r"^##\s")
+team/scripts/lint_api_route_docs.py	structure-lint	level-3 heading boundary of the API route reference it lints	_H3_RE = re.compile(r"^###\s")
+team/scripts/lint_changelog_freshness.py	structure-lint	release entry heading of the CHANGELOG.md it compares	_RELEASE_HEADING_RE = re.compile(r"^## (v\d+\.\d+\.\d+)(?:\s|$)")
+team/scripts/lint_changelog_freshness.py	structure-lint	release entry headings of the CHANGELOG.md it compares	_HEADING_LINE_RE = re.compile(r"^## (v\d+\.\d+\.\d+).*$", re.MULTILINE)
+team/scripts/lint_changelog_freshness.py	structure-lint	a tolerated ## Fixed drift line in the CHANGELOG.md diff	_DRIFT_FIXED_HEADER_RE = re.compile(r"^## Fixed\s*$")
+team/scripts/lint_changelog_freshness.py	structure-lint	the ### Known Issues heading a tolerated CHANGELOG.md drift sits under	_KNOWN_ISSUES_HEADING_RE = re.compile(r"^###\s+Known\s+Issues\s*$")
+team/scripts/lint_changelog_freshness.py	structure-lint	lists the release entries of the CHANGELOG.md it compares	return set(re.findall(r"^## (v\d+\.\d+\.\d+)(?:\s|$)", text, re.MULTILINE))
+team/scripts/lib/cm/release_known_issue.sh	presence-check	a ## Status line the section reader did not read decides whether the placeholder stamp searches the whole file	if ! grep -qE '^##[[:blank:]]+Status[[:space:]]*$' "$notes_file" 2>/dev/null; then
+team/scripts/lib/cm/release_ship_policy.sh	presence-check	a release-notes file with no ## Status heading stops the release at Trigger 9	if grep -qE "^## Status" "$_STAMP_NOTES_FILE" 2>/dev/null; then
+team/scripts/lib/cm/release_ship_policy.sh	presence-check	stamped release notes with no ## Status heading stop the release at Trigger 9	if ! grep -qE "^## Status" "$_STAMP_NOTES_FILE" 2>/dev/null; then
+team/scripts/lib/overwatch-checks/check-tester-orphan-files.sh	presence-check	a ## Symptom heading marks a bug-shaped orphan file before it is moved	if grep -qiE '^##[[:space:]]+Symptom[[:space:]]*$' "${file}" 2>/dev/null; then
+team/scripts/lib/overwatch-checks/check-tester-orphan-files.sh	presence-check	a ## Root Cause heading marks a bug-shaped orphan file before it is moved	if grep -qiE '^##[[:space:]]+Root Cause[[:space:]]*$' "${file}" 2>/dev/null; then
+team/scripts/lib/overwatch-checks/run-e2e.sh	presence-check	the end-to-end harness asserts the OVERWATCH Diagnosis section was written	"^## OVERWATCH Diagnosis"
+team/scripts/lib/wake_autonomous_scan.sh	presence-check	appends a ## Queue heading when the bug backlog lacks one	elif ! grep -q '^## Queue' "$bug_backlog"; then
+team/scripts/lib/wake_task_id_gate.sh	remedy-text	a grep command printed in a refusal remedy	"grep -n -A 3 -- '^## Prerequisites' '${readme}'"
+team/scripts/lib/wake_task_transition.sh	presence-check	a ## Block Record heading gates block_record_remove on a terminal transition	&& grep -qiE '^##[[:space:]]+Block[[:space:]]+Record[[:space:]]*$' "$status_file" 2>/dev/null; then
+team/scripts/lint_api_route_docs.py	structure-lint	any-level heading boundary of the API route reference it lints	_HEADING_RE = re.compile(r"^#{1,6}\s")
+team/scripts/lint_doc_command_truth.py	structure-lint	any-level heading boundary of the config example it checks keys in	_KEY_HEADING_RE = re.compile(r"^#{1,6}\s")
+team/scripts/lint_doc_command_truth.py	structure-lint	any-level heading boundary of the dashboard pane reference it checks	_PANE_HEADING_RE = re.compile(r"^#{1,6}\s")
+team/scripts/lint_doc_command_truth.py	structure-lint	finds the Internal checks heading, at any level, of the script reference it checks	_INTERNAL_CHECKS_HEADING_RE = re.compile(r"^(#{1,6})\s+Internal\s+checks\s*$", re.IGNORECASE)
+team/scripts/lint_doc_command_truth.py	structure-lint	any-level heading that ends the Internal checks section it checks	_ANY_HEADING_RE = re.compile(r"^(#{1,6})\s")
+team/scripts/lint_icd_compat.py	structure-lint	finds the Support table heading, at any level, of the operator API reference it mirrors	_SUPPORT_TABLE_HEADING_RE = re.compile(r"^\s*#{1,6}\s+Support\s+table\s*$", re.IGNORECASE)
+team/scripts/lint_icd_compat.py	structure-lint	any-level heading that ends the Support table section it mirrors	_ANY_HEADING_RE = re.compile(r"^\s*#{1,6}\s+\S")

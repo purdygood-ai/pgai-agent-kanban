@@ -50,7 +50,9 @@ warning to stderr naming the offending file and no Public ID is assigned.
 Internal bugs should omit the ## Affects section entirely rather than using
 a prose placeholder.
 
-Internal BUG-NNNN identifiers never appear in generated CHANGELOG output.
+Internal BUG-NNNN identifiers never appear in generated CHANGELOG output,
+and git commit ids, RC branch names and task ids are scrubbed from bug
+titles and Fixed lines the way the release notes scrub them.
 
 Entry point:
     regenerate(repo_root, released_versions, published_manifest, bugs_dir,
@@ -155,6 +157,13 @@ from pgai_agent_kanban.lib.semver import version_sort_key as _parse_version  # n
 from pgai_agent_kanban.task_status import read_section  # noqa: E402
 # The notes-file date rule, shared with the operator's full CHANGELOG rebuild.
 from pgai_agent_kanban.cm.release_notes_date import read_release_date  # noqa: E402
+# The first-sentence split and the commit-id / RC-branch / task-id scrub are
+# the release-notes generator's, so a CHANGELOG line and a release-notes
+# bullet cut and clean the same Symptom the same way.
+from pgai_agent_kanban.cm.release_notes_generator import (  # noqa: E402
+    _first_sentence as _notes_first_sentence,
+    _strip_provenance_refs,
+)
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -186,6 +195,11 @@ _SECTION_HEADING_RE = re.compile(r"^###\s+(.+?)\s*$")
 _IMPLEMENTED_HEADINGS = frozenset(
     {"features", "what shipped", "implemented"}
 )
+
+# The release-notes section a requirement bundle's own name can sit under
+# when the notes generator did not place it under Features (see
+# _requirement_bullets).
+_OTHER_CHANGES_HEADING = "other changes"
 
 # Sections in release notes that contain fixed (bug) content.
 _FIXED_HEADINGS = frozenset(
@@ -343,18 +357,12 @@ def _first_sentence(text: str) -> str:
     Newlines within the text are collapsed to spaces before scanning so that
     sentences that span multiple lines in the source file are returned as a
     single flat string.  This prevents multi-line symptom descriptions from
-    producing rendered CHANGELOG lines with embedded newlines.
+    producing rendered CHANGELOG lines with embedded newlines.  A period,
+    exclamation or question mark inside a backtick code span does not end
+    the sentence.  The split is the release-notes generator's own, so the
+    two renderers always cut a Symptom at the same place.
     """
-    # Collapse all whitespace sequences (including newlines) to a single space
-    text = " ".join(text.split())
-    if not text:
-        return ""
-    # Split on period, exclamation, or question mark followed by space or end
-    match = re.search(r"[.!?](?:\s|$)", text)
-    if match:
-        return text[: match.start() + 1].strip()
-    # No sentence-ending punctuation — return the whole (now single-line) text
-    return text
+    return _notes_first_sentence(text)
 
 
 def _sanitize_symptom_for_title(raw: str) -> str:
@@ -473,6 +481,9 @@ def parse_bug_file(path: pathlib.Path) -> BugRecord:
             if stripped:
                 symptom = stripped
                 break
+    # Commit ids, RC branch names and task ids are internal provenance a
+    # TESTER-written Symptom often carries; the title never publishes them.
+    symptom = _strip_provenance_refs(symptom)
 
     affects = _parse_section_value(text, "Affects").strip()
     # Strip inline comments from affects
@@ -568,34 +579,17 @@ def load_bugs(bugs_dir: pathlib.Path, include_archive: bool = False) -> list[Bug
 # ---------------------------------------------------------------------------
 
 
-def _parse_markdown_sections(text: str) -> dict[str, list[str]]:
-    """Parse a markdown file into a dict of {heading_lower: [content_lines]}.
+def _section_lines(text: str, heading: str) -> list[str] | None:
+    """Return the content lines of the ``## <heading>`` section, or None.
 
-    Headings are matched at H2 (##) level; content is everything between
-    consecutive H2 headings (or end of file). The H1 title line is skipped.
+    The section is read by task_status.read_section: any letter case, a
+    ``###`` subheading stays in the body, and a repeated heading reads its
+    last section. H1 (``# Title``) lines are left out of the content.
     """
-    sections: dict[str, list[str]] = {}
-    current_heading = None
-    current_lines: list[str] = []
-
-    for line in text.splitlines():
-        # H1 title — skip
-        if re.match(r"^#[^#]", line):
-            continue
-        # H2 heading
-        h2_match = re.match(r"^##\s+(.+)$", line)
-        if h2_match:
-            if current_heading is not None:
-                sections[current_heading] = current_lines
-            current_heading = h2_match.group(1).strip().lower()
-            current_lines = []
-        elif current_heading is not None:
-            current_lines.append(line)
-
-    if current_heading is not None:
-        sections[current_heading] = current_lines
-
-    return sections
+    body = read_section(text, heading, last=True)
+    if body is None:
+        return None
+    return [line for line in body.split("\n") if not re.match(r"^#[^#]", line)]
 
 
 def _clean_content_lines(lines: list[str]) -> list[str]:
@@ -661,6 +655,23 @@ def _join_bullet_continuations(lines: list[str]) -> list[str]:
     return bullets
 
 
+def _requirement_bullets(version: str, other_changes: "list[str] | None") -> list[str]:
+    """The Other Changes bullets of *version*'s notes that name its requirement.
+
+    A release built from a requirements document is named, in its own
+    notes, by that document's name: ``<version>-<slug>`` (``v1.2.0-new-pane``),
+    one bullet. The notes generator placed such a bullet under Other Changes
+    when the requirement's Category was not one it mapped, so a bullet that
+    is exactly the release's own version followed by a slug is the
+    requirement this release implemented, and belongs under Implemented.
+    """
+    if not other_changes:
+        return []
+    bare = version[1:] if version.startswith(("v", "V")) else version
+    name_re = re.compile(rf"^-\s+v?{re.escape(bare)}-[A-Za-z0-9][A-Za-z0-9._-]*\s*$")
+    return [line.strip() for line in _clean_content_lines(other_changes) if name_re.match(line.strip())]
+
+
 def parse_release_notes(version: str, notes_path: pathlib.Path) -> ReleaseEntry:
     """Parse a release-notes/vX.Y.Z.md file into a ReleaseEntry.
 
@@ -669,7 +680,9 @@ def parse_release_notes(version: str, notes_path: pathlib.Path) -> ReleaseEntry:
       is none; with neither, the date is "" (rendered as "unknown") and one
       warning naming notes_path goes to stderr
     - summary from ## Summary (first sentence)
-    - implemented_lines from ## Features / ## What Shipped / ## Implemented
+    - implemented_lines from ## Features / ## What Shipped / ## Implemented,
+      plus the release's requirement when ## Other Changes names it
+      (``_requirement_bullets``)
     - fixed_bug_ids from ## Bug Fixes / ## Bugs Resolved (BUG-NNNN references)
     - fixed_other_lines from the same sections (non-BUG-NNNN items)
     """
@@ -678,13 +691,12 @@ def parse_release_notes(version: str, notes_path: pathlib.Path) -> ReleaseEntry:
     # Extract release date (the rule lives in cm/release_notes_date.py)
     date = read_release_date(text, notes_path)
 
-    sections = _parse_markdown_sections(text)
-
     # Summary
     summary = ""
     for heading in _SUMMARY_HEADINGS:
-        if heading in sections:
-            raw = "\n".join(sections[heading]).strip()
+        content = _section_lines(text, heading)
+        if content is not None:
+            raw = "\n".join(content).strip()
             summary = _first_sentence(raw)
             break
 
@@ -696,10 +708,17 @@ def parse_release_notes(version: str, notes_path: pathlib.Path) -> ReleaseEntry:
     # file contains content under more than one matching heading.
     implemented_lines: list[str] = []
     for heading in sorted(_IMPLEMENTED_HEADINGS):
-        if heading in sections:
-            lines = _clean_content_lines(list(sections[heading]))
+        content = _section_lines(text, heading)
+        if content is not None:
+            lines = _clean_content_lines(content)
             if lines:
                 implemented_lines.extend(lines)
+
+    # A requirement release whose notes name the requirement under Other
+    # Changes still implemented it.
+    for line in _requirement_bullets(version, _section_lines(text, _OTHER_CHANGES_HEADING)):
+        if line not in implemented_lines:
+            implemented_lines.append(line)
 
     # Fixed — collect from all fixed headings, split into BUG ids and other.
     # Multi-line bullets (where continuation lines are indented or plain prose
@@ -713,8 +732,9 @@ def parse_release_notes(version: str, notes_path: pathlib.Path) -> ReleaseEntry:
     seen_bug_ids: set[str] = set()
 
     for heading in sorted(_FIXED_HEADINGS):
-        if heading in sections:
-            lines = _clean_content_lines(list(sections[heading]))
+        content = _section_lines(text, heading)
+        if content is not None:
+            lines = _clean_content_lines(content)
             bullets = _join_bullet_continuations(lines)
             for bullet in bullets:
                 if not bullet.strip():
@@ -1033,10 +1053,14 @@ def _render_section(title: str, items: list[str], none_text: str = "None") -> st
 
 
 def _strip_internal_ids(text: str) -> str:
-    """Remove any BUG-NNNN references from text.
+    """Remove any BUG-NNNN references, git commit ids and RC branch names
+    from text, and replace task ids with a neutral noun phrase.
 
     Internal bug IDs must never appear in generated CHANGELOG output.
-    This is applied as a final safety pass to each section.
+    This is applied as a final safety pass to each section.  The commit,
+    branch and task scrub is the shared release-notes one
+    (``_strip_provenance_refs``); a line holding none of those is returned
+    exactly as the BUG-NNNN removal left it.
     """
     # Replace "BUG-NNNN — " or "**BUG-NNNN**" etc. with just the remainder
     # Pattern: BUG-digits optionally followed by colon/dash/space markers
@@ -1045,7 +1069,7 @@ def _strip_internal_ids(text: str) -> str:
         "",
         text,
     )
-    return cleaned
+    return _strip_provenance_refs(cleaned)
 
 
 def _extract_ki_id_from_line(line: str) -> str:
@@ -1078,7 +1102,8 @@ def _render_fixed_items(
     - Non-BUG items that carry a bare KI identifier (e.g. from a Bugs-Resolved
       section listing "KI-1.0.0.1 — resolved"): joined against the bug ledger
       to produce "KI-A.B.C.n — <sanitized title>; affects vA · <status>".
-    - Other non-BUG items: render as-is (stripped of any accidental BUG-NNNN refs)
+    - Other non-BUG items: render as-is (stripped of any accidental BUG-NNNN
+      refs, commit ids, RC branch names and task ids)
     """
     lines = []
     reverse_index = public_id_to_bug or {}
@@ -1200,8 +1225,11 @@ def _holds_spent_id(bug: BugRecord, published: PublishedChangelog) -> bool:
     writer would render for this bug.  A status clause that moved from open
     to fixed is the same entry; a different title is not.
     """
+    # The published title is scrubbed the way the bug's own title was, so a
+    # line published before the scrub covered commit ids or branch names
+    # still reads as the same entry.
     return any(
-        not same_ki_title(title, bug.symptom)
+        not same_ki_title(_strip_provenance_refs(title), bug.symptom)
         for title in published.titles.get(bug.public_id, [])
     )
 

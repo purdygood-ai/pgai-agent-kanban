@@ -112,6 +112,7 @@ if not __package__:
 from pgai_agent_kanban.lib.atomic_write import atomic_write  # noqa: E402
 
 from pgai_agent_kanban.overwatch.resolution_stage import log_action  # noqa: E402
+from pgai_agent_kanban.task_status import read_section  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Exceptions
@@ -290,10 +291,13 @@ def _build_rewrite_block(
 
 
 def _has_fix_section(text: str) -> bool:
-    for line in text.splitlines():
-        if line.strip() == "## Fix":
-            return True
-    return False
+    """Return True when *text* has a line reading exactly ``## Fix``.
+
+    Read by ``task_status.read_section`` with ``exact_heading``: surrounding
+    whitespace is ignored, letter case counts, and a longer heading such as
+    ``## Fix (OVERWATCH rewrite)`` is not the original Fix section.
+    """
+    return read_section(text, "Fix", exact_heading=True) is not None
 
 
 # ---------------------------------------------------------------------------

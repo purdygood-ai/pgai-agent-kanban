@@ -38,11 +38,10 @@ representative per family"):
      with NO call site in either gated runner (verified by grep across the
      tree before this task; see docs/blocking-site-census.md row 39 and
      this task's status.md).  This task wires it into both runners' quality
-     lint fleets using the exact same wrapper mechanism as family 1, so the
-     representative fixture for family 1 already proves this family's
-     behavior; this suite additionally proves the specific wiring shape
-     (python3 scripts/lint_dashboard_network_git_gate.py invoked through
-     the wrapper) against a synthetic violation.
+     lint fleets. The lint now exits 0 on a finding and writes it per
+     instance with --findings-file, which the runners merge with
+     gated_runner_merge_findings_file (the wrapper still catches a crash);
+     this suite proves that wiring shape against a synthetic violation.
      -> test_dashboard_network_gate_violation_warns_files_and_continues
 
   3. Post-suite cleanliness assertions (rows 52-53) -- previously a hard
@@ -190,12 +189,16 @@ def test_dashboard_network_gate_violation_warns_files_and_continues(
         encoding="utf-8",
     )
 
+    findings_file = tmp_path / "dashboard_network_git_gate.json"
     script = _source(
         f"""
 gated_runner_run_quality_lint "dashboard_network_git_gate" -- \\
-  python3 scripts/lint_dashboard_network_git_gate.py --team-dir {team_dir}
+  python3 scripts/lint_dashboard_network_git_gate.py --team-dir {team_dir} \\
+  --findings-file {findings_file}
 echo "WRAPPER_RETURNED=$?"
+gated_runner_merge_findings_file {findings_file}
 echo "FINDINGS_COUNT=${{#GATED_RUNNER_FINDINGS[@]}}"
+printf '%s\\n' "${{GATED_RUNNER_FINDINGS[@]}}"
 """
     )
     result = run_bash(tmp_path, script)
@@ -204,7 +207,12 @@ echo "FINDINGS_COUNT=${{#GATED_RUNNER_FINDINGS[@]}}"
         f"through the wrapper; got exit {result.returncode}"
     )
     assert "WRAPPER_RETURNED=0" in result.stdout
-    assert "FINDINGS_COUNT=1" in result.stdout
+    assert "FINDINGS_COUNT=1" in result.stdout, result.stdout
+    assert '"lint": "dashboard_network_git_gate"' in result.stdout, (
+        "the merged finding must be the lint's own per-instance record, not a "
+        f"coarse exit-code entry:\n{result.stdout}"
+    )
+    assert '"exit_code"' not in result.stdout, result.stdout
     assert "git-status.sh" in result.stdout, (
         "the violation's file name must appear in the printed (user-facing) "
         "output"
@@ -478,3 +486,118 @@ echo "SECOND_ASSERT_RETURNED=$?"
         "re-claiming (the refusal's own remedy) must make the very next "
         "assert against the freshly-claimed token succeed"
     )
+
+
+# ---------------------------------------------------------------------------
+# Per-instance post-suite checks: gated_runner_run_instance_check
+# ---------------------------------------------------------------------------
+
+
+def _findings_from(stdout: str) -> list[dict]:
+    return [
+        json.loads(line.removeprefix("FINDING="))
+        for line in stdout.splitlines()
+        if line.startswith("FINDING=")
+    ]
+
+
+_PRINT_FINDINGS = 'for f in "${GATED_RUNNER_FINDINGS[@]}"; do printf \'FINDING=%s\\n\' "$f"; done\n'
+
+
+def test_instance_check_records_one_finding_per_named_instance(tmp_path: pathlib.Path) -> None:
+    """A check that fills its array with two instances and returns 1 yields
+    two per-instance findings (through the formatter), no coarse exit-code
+    entry, a non-blocking narration, and a caller that keeps running."""
+    script = _source(
+        """
+_synthetic_listener_check() {
+  echo "[pgai-listener] FAIL: two listeners survived." >&2
+  SYNTHETIC_FOUND+=($'101\\tpython3 -m http.server' $'202\\tnc -l 9000')
+  return 1
+}
+SYNTHETIC_FOUND=(left-over-from-an-earlier-call)
+gated_runner_run_instance_check "listener_cleanliness" SYNTHETIC_FOUND \\
+  gated_runner_listener_finding -- _synthetic_listener_check
+echo "RUNNER_STILL_RUNNING=yes"
+"""
+        + _PRINT_FINDINGS
+    )
+    result = run_bash(tmp_path, script)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "RUNNER_STILL_RUNNING=yes" in result.stdout
+    assert "[pgai-listener] FAIL" in result.stdout, "the check's own output prints in full"
+    assert "listener_cleanliness: quality-class finding(s) (2 per-instance)" in result.stderr
+    findings = _findings_from(result.stdout)
+    assert [(f["pid"], f["cmdline"]) for f in findings] == [
+        (101, "python3 -m http.server"),
+        (202, "nc -l 9000"),
+    ], findings
+    for finding in findings:
+        assert finding["lint"] == "listener_cleanliness"
+        assert finding["severity"] == "quality"
+        assert finding["kind"] == "surviving-listener"
+        assert finding["remedy"] == f"ps -o pid,ppid,etime,args -p {finding['pid']}"
+        assert "exit_code" not in finding and "detail" not in finding
+
+
+def test_instance_check_that_names_no_instance_records_one_finding(tmp_path: pathlib.Path) -> None:
+    script = _source(
+        """
+_synthetic_failing_check() { echo "snapshot file missing" >&2; return 1; }
+gated_runner_run_instance_check "bare_tmp_cleanliness" SYNTHETIC_FOUND \\
+  gated_runner_tmp_residue_finding -- _synthetic_failing_check
+"""
+        + _PRINT_FINDINGS
+    )
+    result = run_bash(tmp_path, script)
+    assert result.returncode == 0, result.stdout + result.stderr
+    findings = _findings_from(result.stdout)
+    assert len(findings) == 1, findings
+    assert findings[0]["lint"] == "bare_tmp_cleanliness"
+    assert "without naming an instance" in findings[0]["summary"]
+    assert "no instance named" in result.stderr
+
+
+def test_instance_check_passing_records_nothing(tmp_path: pathlib.Path) -> None:
+    script = _source(
+        """
+gated_runner_run_instance_check "sentinel_leak" SYNTHETIC_FOUND \\
+  gated_runner_sentinel_finding -- true
+echo "FINDINGS_COUNT=${#GATED_RUNNER_FINDINGS[@]}"
+"""
+    )
+    result = run_bash(tmp_path, script)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "[gated-runner] sentinel_leak: OK" in result.stdout
+    assert "FINDINGS_COUNT=0" in result.stdout
+
+
+def test_residue_and_sentinel_formatters_name_the_path_and_an_inspection(
+    tmp_path: pathlib.Path,
+) -> None:
+    """The formatters for the residue and sentinel checks: each finding names
+    its path, and its remedy inspects -- never repairs -- that path."""
+    residue = "/" + "tmp/pgai_tmp.SEED01"  # never created; a name the check would report
+    halt = tmp_path / "live" / "HALT"
+    script = _source(
+        f"""
+REPO_ROOT={tmp_path}
+gated_runner_tmp_residue_finding bare_tmp_cleanliness '{residue}'
+gated_runner_sentinel_finding sentinel_leak $'removed\\t{halt}\\t'
+gated_runner_sentinel_finding sentinel_leak $'added\\t{halt}\\tWritten by halt under test t::x.'
+"""
+        + _PRINT_FINDINGS
+    )
+    result = run_bash(tmp_path, script)
+    assert result.returncode == 0, result.stdout + result.stderr
+    tmp_finding, removed, added = _findings_from(result.stdout)
+    assert (tmp_finding["kind"], tmp_finding["path"]) == ("bare-tmp-residue", residue)
+    assert tmp_finding["remedy"] == (
+        f"ls -ld -- {residue} && grep -rnF -- pgai_tmp {tmp_path}/team/tests"
+    ), tmp_finding
+    assert (removed["kind"], removed["path"]) == ("sentinel-removed", str(halt))
+    assert removed["remedy"] == f"ls -la -- {halt.parent}"
+    assert (added["kind"], added["remedy"]) == ("sentinel-added", f"cat -- {halt}")
+    assert added["cause"].endswith("Written by halt under test t::x."), added
+    for finding in (removed, added):
+        assert "not repaired" in finding["cause"], finding

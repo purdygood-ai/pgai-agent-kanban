@@ -12,7 +12,7 @@ built-in line for that flag only:
     flag keeps its built-in line;
   - an indexed (non-associative) array of that name is ignored;
   - close.sh's rendered --help uses the override: --state reads
-    done|wont-do, never the task-state list.
+    done|wont-do|duplicate, never the task-state list.
 
 Each accepted option is listed once, with a description:
 
@@ -134,7 +134,7 @@ def test_close_help_state_line_names_the_closed_states(tmp_path: pathlib.Path) -
 
     assert result.returncode == 0, result.stderr
     options = _options(result.stdout.splitlines())
-    assert "  --state STATE      Closed state: done|wont-do (default: done)" in options
+    assert "  --state STATE      Closed state: done|wont-do|duplicate (default: done)" in options
     assert _BUILTIN_STATE not in options
 
 

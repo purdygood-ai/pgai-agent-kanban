@@ -5,10 +5,7 @@
 # (cm_ship_policy), the last-3-RCs-NON-FUNCTIONAL guard, the TESTER
 # prerequisite lookup that feeds the decision, the release-notes
 # ## Status placeholder stamp, and the squash pollution guard. Sourced by
-# team/scripts/cm/release.sh; extracted from that script's former inline
-# Steps 4c-4f so release.sh's own body stays a thin driver over sourced lib
-# stages. Behavior-preserving (no stdout/stderr, exit code, HALT-file, or
-# release-state.md changes) — one stage of a driver split for focused units.
+# team/scripts/cm/release.sh, which stays a thin driver over sourced lib stages.
 #
 # Public entry point
 # -------------------
@@ -17,10 +14,15 @@
 #       cm_release_preflight's Step 4a), the original Steps 4c through 4f in
 #       their original order:
 #         4c. last-3-RCs-NON-FUNCTIONAL pattern check (HALT if triggered)
-#         4d. TESTER prerequisite lookup + ship-policy decision (HALT if required)
-#         Both apply the project's ship posture, read once at the top
-#         (release_ship_posture.sh): under "always", triggers 2, 3 and 8
-#         ship and record an Auto-Ship Event instead of halting.
+#         4d. TESTER prerequisite lookup + ship-policy decision (HALT only
+#             on trigger 2 or 3). Both apply the project's ship posture
+#             (release_ship_posture.sh): under "always", triggers 2, 3 and 8
+#             ship and record an Auto-Ship Event instead of halting. A
+#             TESTER report problem never HALTs under either posture
+#             (release_verification_retry.sh): verification that did not
+#             run is requeued once (REQUEUE-VERIFICATION, exit 4; then
+#             VERIFICATION-PENDING, exit 4, until it finishes), then ships
+#             NON-FUNCTIONAL; an unrecognised state ships KNOWN-BUGS + a bug.
 #         4b. the pre-squash hook (invoked via the caller-supplied callback —
 #             see "Why a callback" below; NOT a lib function in this file)
 #         4e. stamp release-notes ## Status placeholder with the ship decision
@@ -42,61 +44,42 @@
 #         cm_release_generate_notes (release_notes.sh).
 #         _SKIPPED_BUG_PAIRS, _BUGS_SKIPPED_NOTES_BLOCK — "## Bugs Skipped" render.
 #         _SHIP_POSTURE, _SHIP_HALT_KEY, _AUTO_SHIP_TRIGGER — release_ship_posture.sh.
+#         _VERIFICATION_* — release_verification_retry.sh.
 #
-# Operator --force override scope: trigger-1/2/3 only (release_operator_override.sh's header doc has the rationale).
+# Operator --force override scope: trigger-2/3, the only matrix rows left that HALT.
 #
 # Why a callback (pre_squash_hook_step_fn)
 # -----------------------------------------
-# Step 4b (the pre-squash hook) sits, in the original file, physically
-# between Step 4d and Step 4e — but its body is one of the three
-# `cm_resolve_and_enforce_hook` call sites that
-# team/tests/unit/test_ship_rc_hooks.py counts directly in release.sh's own
-# file text (release.sh must contain exactly three non-comment
-# `cm_resolve_and_enforce_hook` calls: pre-squash, pre-tag, post-tag). Moving
-# that call site's text into this lib file would drop release.sh's count to
-# two and fail that pre-existing structural test. Step 4b's body therefore
-# stays defined in release.sh (as a small named function) and is threaded
-# through here by name so cm_release_apply_ship_policy can invoke it at
-# exactly the right point — preserving the original step order (and thus
-# identical stdout and HALT-precedence) without duplicating the hook body.
+# Step 4b (the pre-squash hook) runs between Steps 4d and 4e, but its body
+# stays in release.sh: team/tests/unit/test_ship_rc_hooks.py counts exactly
+# three non-comment `cm_resolve_and_enforce_hook` calls in release.sh's own
+# text (pre-squash, pre-tag, post-tag). It is threaded through here by name,
+# keeping the original step order (and HALT precedence) without duplicating it.
 #
 # Other functions in this file (cm_ship_policy, cm_ship_policy_notes_status,
-# _cm_ship_policy_file_input_bug)
-# are internal helpers used by
-# cm_release_apply_ship_policy; they are ordinary functions (not
-# `local`-scoped closures) only because bash has no nested lexical scoping,
-# not because they are meant to be called independently. The readers Step 4d
+# _cm_ship_policy_file_input_bug) are internal helpers of
+# cm_release_apply_ship_policy. The readers Step 4d
 # calls — read_ship_policy_tester_lookup, read_ship_policy_report_values and
 # read_ship_policy_finding_dimensions — and Step 4c's
 # check_last_three_non_functional are defined in the sibling stage
 # release_ship_policy_report.sh, which this file sources itself (below the
 # double-sourcing guard) so that sourcing this file alone still resolves
-# every one of them alongside cm_ship_policy and cm_release_apply_ship_policy.
+# every one of them; it sources release_verification_retry.sh the same way.
 #
 # Input normalization and the unparseable-value outcome
 # ------------------------------------------------------
-# The matrix never reads a raw report field. Step 4d reads the report's
-# Recommendation and Systemic Risk through read_ship_policy_report_values,
-# which takes them from the one TESTER-report parser
-# (pgai_agent_kanban.reports.tester_report): bold markers, backticks, a
-# "Label:" prefix and any annotation after the token are ignored, the report
-# template's HTML comments are skipped, and each field reduces to one token
-# the matrix has a row for — so a bold, label-prefixed
-# SHIP-WITH-SERIOUS-CONCERNS reaches the SHIP-WITH-SERIOUS-CONCERNS row and
-# `High — <annotation>` reaches the systemic_risk=high row. A value that
-# still cannot be parsed (a typo, an unedited template placeholder, a
-# missing section on a DONE task) never HALTs and never selects the permissive SHIP-FUNCTIONAL row:
-# cm_ship_policy floors it to the SHIP-WITH-CONCERNS row (SHIP-KNOWN-BUGS,
-# release-notes Status KNOWN-BUGS), and Step 4d files a bug through
-# _cm_ship_policy_file_input_bug quoting the raw field text and the report
-# path so the next iteration heals the document. The TESTER-task lookup
-# matches ## Role / ## Release Version by normalized token too: a task
-# whose fields match only after normalization is still used (the RC is never treated as
-# untested because of formatting), the mismatch is narrated on stderr, and a
-# bug is filed quoting the raw field and the README path. The
-# has_large_fix_effort input is read from each finding's own Fix Effort
-# field, as the parser reads it, only — never from a whole-report grep,
-# which matched negations, "larger", the template legend and prose.
+# The matrix never reads a raw report field: read_ship_policy_report_values
+# reduces Recommendation and Systemic Risk to matrix tokens through the one
+# TESTER-report parser (pgai_agent_kanban.reports.tester_report; its
+# docstring has the rules), so `**SHIP-WITH-SERIOUS-CONCERNS**` and
+# `High — <annotation>` reach their own rows. A value that still cannot be
+# parsed never HALTs and never selects SHIP-FUNCTIONAL: cm_ship_policy floors
+# it to the SHIP-WITH-CONCERNS row (KNOWN-BUGS) and Step 4d files a bug
+# through _cm_ship_policy_file_input_bug quoting the raw text and the report
+# path. The TESTER-task lookup matches ## Role / ## Release Version by
+# normalized token too: a task matched only after normalization is still
+# used, and the mismatch is narrated and filed the same way. The
+# has_large_fix_effort input is read from each finding's own Fix Effort field.
 #
 # Dependencies (must already be sourced by the caller before this file)
 # -----------------------------------------------------------------------
@@ -112,6 +95,7 @@
 #     pgai_agent_kanban.cm.ship_policy_bug_filer from Step 4d below)
 #   team/scripts/lib/cm/release_decide_only.sh — under _CM_DECIDE_ONLY=true:
 #     the Step 4c notes copy, the bug-filer stand-in, and the stop after 4d
+#   team/scripts/lib/error_contract.sh — pgai_emit_error_contract
 # Sourced by this file itself (no caller action needed):
 #   team/scripts/lib/cm/release_ship_policy_report.sh —
 #     read_ship_policy_tester_lookup, read_ship_policy_report_values and
@@ -136,10 +120,23 @@ if ! declare -F read_ship_policy_finding_dimensions >/dev/null 2>&1; then
     # shellcheck source=release_ship_policy_report.sh
     source "$(dirname "${BASH_SOURCE[0]}")/release_ship_policy_report.sh"
 fi
+# The verification-retry stage (Step 4d's verification-did-not-run and
+# unrecognised-state rows), sourced the same way for the same reason.
+if ! declare -F cm_verification_retry_apply_decision >/dev/null 2>&1; then
+    # shellcheck source=release_verification_retry.sh
+    source "$(dirname "${BASH_SOURCE[0]}")/release_verification_retry.sh"
+fi
 
 # Helper: apply the ship-policy decision matrix.
-# Usage: cm_ship_policy <tester_state> <systemic_risk> <recommendation> <has_large_fix_effort> <task_found> <is_regression> <integrity_damage>
-# Outputs one of: SHIP-FUNCTIONAL  SHIP-KNOWN-BUGS  SHIP-NON-FUNCTIONAL  SHIP-KNOWN-ISSUE  HALT
+# Usage: cm_ship_policy <tester_state> <systemic_risk> <recommendation> <has_large_fix_effort> <task_found> <is_regression> <integrity_damage> [<report_found> [<verification_retry>]]
+# Outputs one of: SHIP-FUNCTIONAL  SHIP-KNOWN-BUGS  SHIP-NON-FUNCTIONAL  SHIP-KNOWN-ISSUE
+#   REQUEUE-VERIFICATION  VERIFICATION-PENDING  HALT (HALT only on trigger 2 or 3)
+# report_found: "no" when the found TESTER task wrote no artifacts/report.md
+#   (default "yes"). verification_retry: "spent" once the RC's one
+#   verification requeue was used (release_verification_retry.sh), else
+#   "available" (the default). Verification that did not run (BLOCKED, or
+#   DONE with no report) decides REQUEUE-VERIFICATION while the retry is
+#   available, SHIP-NON-FUNCTIONAL once it is spent; never HALT (row 8 below).
 # systemic_risk / recommendation: the NORMALIZED tokens
 #   read_ship_policy_report_values prints (see release_ship_policy_report.sh)
 #   — never a raw report line. Recognized systemic_risk tokens: high, low,
@@ -158,8 +155,8 @@ fi
 #   of its state); "no" if no TESTER task exists at all. This is passed explicitly
 #   (rather than inferred from tester_state=="none") so a TESTER task that was FOUND
 #   but has an empty/malformed State field is never confused with the "no TESTER task
-#   exists" case — see CM.md "(no report, Test Required: false) -> Ship" vs
-#   "(unrecognized values) -> HALT" rows, which are distinct.
+#   exists" case — see CM.md's "no TESTER task for this version" and
+#   "TESTER task found, state neither DONE nor BLOCKED" rows, which are distinct.
 # is_regression / integrity_damage: split the DONE-plus-systemic_risk=high row
 #   between HALT and a ship outcome. Read from the TESTER report by
 #   read_ship_policy_finding_dimensions (release_ship_policy_report.sh; see
@@ -179,6 +176,8 @@ cm_ship_policy() {
   local task_found="${5:-no}"
   local is_regression="${6:-unknown}"
   local integrity_damage="${7:-unknown}"
+  local report_found="${8:-yes}"
+  local verification_retry="${9:-available}"
 
   # Normalize to lowercase for comparison robustness.
   tester_state="$(echo "$tester_state" | tr '[:upper:]' '[:lower:]')"
@@ -189,9 +188,15 @@ cm_ship_policy() {
   is_regression="$(echo "$is_regression" | tr '[:upper:]' '[:lower:]')"
   integrity_damage="$(echo "$integrity_damage" | tr '[:upper:]' '[:lower:]')"
 
-  # Row 1: TESTER state is BLOCKED → HALT regardless of other fields.
-  if [[ "$tester_state" == "blocked" ]]; then
-    echo "HALT"
+  # Row 1: verification did not run -- TESTER state BLOCKED, or a found
+  # task that reads DONE with no report -- regardless of other fields:
+  # requeue it once, then ship NON-FUNCTIONAL as unverified.
+  if [[ "$tester_state" == "blocked" || ( "$tester_state" == "done" && "$task_found" == "yes" && "$report_found" == "no" ) ]]; then
+    if [[ "$verification_retry" == "spent" ]]; then
+      echo "SHIP-NON-FUNCTIONAL"
+    else
+      echo "REQUEUE-VERIFICATION"
+    fi
     return 0
   fi
 
@@ -247,29 +252,33 @@ cm_ship_policy() {
     return 0
   fi
 
-  # Row 7 (no report found): no TESTER task exists for this Release Version at all.
-  # This is the documented "(no report, Test Required: false) -> Ship" row — the
-  # only case that legitimately defaults to SHIP-FUNCTIONAL when tester_state is
-  # not "blocked" or "done".
+  # Row 7 (no report found): no TESTER task exists for this Release Version at
+  # all -- the "(no report, Test Required: false) -> Ship" row.
   if [[ "$task_found" != "yes" ]]; then
     echo "SHIP-FUNCTIONAL"
     return 0
   fi
 
-  # Row 8 (unrecognized values): a TESTER task WAS found (task_found=yes) but its
-  # state is neither "blocked" nor "done" (e.g. WONT-DO, WORKING, a typo). Per
-  # CM.md's "(unrecognized values) -> HALT -- quote the unrecognized field and
-  # value verbatim" row, this must HALT rather than silently default-ship — a
-  # high-risk report attached to a non-DONE task must never be treated as
-  # equivalent to "no report at all".
-  echo "HALT"
+  # Row 8: a TESTER task WAS found but its state is neither "blocked" nor
+  # "done" (WONT-DO, WORKING, a typo): the SHIP-WITH-CONCERNS row (Step 4d
+  # files a bug quoting the state). Once the RC's requeue is spent, a task not
+  # finished yet (cm_verification_state_pending: BACKLOG, WORKING, WAITING) is
+  # verification still pending; any other state did not run (NON-FUNCTIONAL).
+  if [[ "$verification_retry" == "spent" ]] && cm_verification_state_pending "$tester_state"; then
+    echo "VERIFICATION-PENDING"
+  elif [[ "$verification_retry" == "spent" ]]; then
+    echo "SHIP-NON-FUNCTIONAL"
+  else
+    echo "SHIP-KNOWN-BUGS"
+  fi
 }
 
 # Helper: the release-notes ## Status value a ship decision stamps.
 # Usage: cm_ship_policy_notes_status <ship_decision>
-# Prints "" for HALT (no release notes are written on HALT).
+# Prints "" for HALT, REQUEUE-VERIFICATION and VERIFICATION-PENDING (no notes).
 cm_ship_policy_notes_status() {
   case "${1:-}" in
+    REQUEUE-VERIFICATION|VERIFICATION-PENDING) echo "" ;;
     SHIP-FUNCTIONAL)     echo "FUNCTIONAL" ;;
     SHIP-KNOWN-BUGS)     echo "KNOWN-BUGS" ;;
     SHIP-NON-FUNCTIONAL) echo "NON-FUNCTIONAL" ;;
@@ -283,9 +292,9 @@ cm_ship_policy_notes_status() {
 # input. Usage: _cm_ship_policy_file_input_bug <kind> <field> <raw_value> <source_path>
 #   kind: report-value (a TESTER report field the matrix could not parse),
 #         lookup-field (a TESTER task README field matched only after
-#         normalization) or release-pattern (the last three releases all
-#         NON-FUNCTIONAL) — pgai_agent_kanban.cm.ship_policy_bug_filer's own
-#         vocabulary; that module owns the dedup rule and the filed shape.
+#         normalization), tester-state (a TESTER state with no matrix row) or
+#         release-pattern (the last three releases all NON-FUNCTIONAL) — the
+#         filer's own vocabulary; it owns the dedup rule and the filed shape.
 # Writes only into ${_CM_PROJECT_ROOT}/bugs. Never fails the release: a
 # filer error is narrated on stderr and the decision proceeds — a bug filer
 # that could stop a release would be a gate no requirement authorized.
@@ -326,8 +335,7 @@ cm_release_apply_ship_policy() {
   local pre_squash_hook_step_fn="$1"
 
   # --- Step 4c: Last-3-RCs-NON-FUNCTIONAL pattern check ---
-  # Scan the dev tree's release-notes/ for the last three shipped releases; all three
-  # NON-FUNCTIONAL means degraded work ships repeatedly — HALT for operator review. A window
+  # All of the last three shipped releases NON-FUNCTIONAL: HALT for operator review. A window
   # already halted on was acknowledged by the unhalt and passes; a newer release forms a new one.
   echo "[Step 4c] Checking last-3-RCs-NON-FUNCTIONAL pattern..."
   cm_ship_posture_read
@@ -360,13 +368,12 @@ cm_release_apply_ship_policy() {
     cm_halt \
       "cm-release.trigger-8.last-3-rcs-non-functional" \
       "Trigger 8: the last three consecutive releases for ${PROJECT_NAME} (${_PATTERN_WINDOW}) were all marked NON-FUNCTIONAL — the autonomous chain is shipping degraded work repeatedly without self-correcting." \
-      "Review the NON-FUNCTIONAL releases under release-notes/ in the dev tree, confirm a bug was filed naming the pattern (CM.md Trigger 8 procedure), fix the root cause, then run: team/scripts/unhalt.sh --project ${PROJECT_NAME} (the next release passes this same window and halts again only on a new one)"
+      "Review the NON-FUNCTIONAL releases under release-notes/ in the dev tree, confirm a bug was filed naming the pattern (CM.md Trigger 8 procedure), fix the root cause, then run: $(printf '%q' "${KANBAN_ROOT}/scripts/unhalt.sh") --project $(printf '%q' "${PROJECT_NAME}") (the next release passes this same window and halts again only on a new one)"
   fi
 
   # --- Step 4d: TESTER prerequisite check + ship-policy decision ---
-  # Read the TESTER report for this RC from the project's task tree.
-  # Policy: TESTER state must be DONE AND systemic_risk must not be high to proceed.
-  # See CM.md "Ship-Policy Decision Matrix" for the full table.
+  # Read the TESTER report for this RC from the project's task tree; the
+  # decision is cm_ship_policy above (CM.md "Ship policy").
   echo "[Step 4d] Checking TESTER prerequisite and applying ship-policy decision matrix..."
 
   # Locate the TESTER task's status.md and report.md for this RC in one pass
@@ -443,10 +450,11 @@ cm_release_apply_ship_policy() {
 
   # File the bug for every input the matrix could not read. A lookup field
   # that matched only after normalization is filed whatever the state; a
-  # report value is filed only on a DONE task, the one state whose rows
-  # read those values (BLOCKED and unrecognized states HALT on the state
-  # alone). "none" on a DONE task's Recommendation is a report that never
-  # named a value — or no report at all — and is filed as such; "none" on
+  # report value is filed only on a DONE task whose report exists, the one
+  # case whose rows read those values (a missing report is verification
+  # that did not run: release_verification_retry.sh requeues it). "none" on
+  # a DONE task's Recommendation is a report that never
+  # named a value and is filed as such; "none" on
   # Systemic Risk reads as not-high (the template's own default is low) and
   # is not a defect. Each filing narrates on stderr and prints the bug it
   # filed or cited; none can stop the release.
@@ -455,8 +463,8 @@ cm_release_apply_ship_policy() {
     echo "  TESTER lookup:        ${_lookup_mismatches[_mismatch_idx]} matched only after normalization in ${_lookup_mismatches[_mismatch_idx+2]}: raw value '${_lookup_mismatches[_mismatch_idx+1]}'" >&2
     _cm_ship_policy_file_input_bug "lookup-field" "${_lookup_mismatches[_mismatch_idx]}" "${_lookup_mismatches[_mismatch_idx+1]}" "${_lookup_mismatches[_mismatch_idx+2]}"
   done
-  if [[ "$(echo "$_TESTER_STATUS" | tr '[:upper:]' '[:lower:]')" == "done" ]]; then
-    local _report_for_bug="${_TESTER_REPORT_PATH:-${_CM_TASKS_DIR}/${_TESTER_TASK_ID}/artifacts/report.md}"
+  if [[ "$(echo "$_TESTER_STATUS" | tr '[:upper:]' '[:lower:]')" == "done" && -n "$_TESTER_REPORT_PATH" ]]; then
+    local _report_for_bug="$_TESTER_REPORT_PATH"
     if [[ "$_TESTER_RECOMMENDATION" == "unparseable" || "$_TESTER_RECOMMENDATION" == "none" ]]; then
       echo "  Recommendation:       cannot be read from ${_report_for_bug} (raw value '${_TESTER_RECOMMENDATION_RAW}'); the matrix floors the release to SHIP-WITH-CONCERNS and a bug is filed" >&2
       _cm_ship_policy_file_input_bug "report-value" "Recommendation" "${_TESTER_RECOMMENDATION_RAW}" "${_report_for_bug}"
@@ -494,9 +502,21 @@ cm_release_apply_ship_policy() {
   echo "  Integrity damage:     ${_TESTER_INTEGRITY_DAMAGE}"
 
   # Apply the ship-policy decision matrix (table-driven, single function, no scattered if-else).
-  _SHIP_DECISION="$(cm_ship_policy "$_TESTER_STATUS" "$_TESTER_SYSTEMIC_RISK" "$_TESTER_RECOMMENDATION" "$_HAS_LARGE_FIX_EFFORT" "$_TESTER_TASK_FOUND" "$_TESTER_IS_REGRESSION" "$_TESTER_INTEGRITY_DAMAGE")"
+  cm_verification_retry_read  # the RC's one verification requeue: available or spent
+  local _report_found="yes"
+  [[ "$_TESTER_TASK_FOUND" == "yes" && -z "$_TESTER_REPORT_PATH" ]] && _report_found="no"
+  _SHIP_DECISION="$(cm_ship_policy "$_TESTER_STATUS" "$_TESTER_SYSTEMIC_RISK" "$_TESTER_RECOMMENDATION" "$_HAS_LARGE_FIX_EFFORT" "$_TESTER_TASK_FOUND" "$_TESTER_IS_REGRESSION" "$_TESTER_INTEGRITY_DAMAGE" "$_report_found" "$_VERIFICATION_RETRY")"
   echo "  Ship decision:       $_SHIP_DECISION"
+  # Verification that did not run (requeue once, then NON-FUNCTIONAL) and an
+  # unrecognised TESTER state (KNOWN-BUGS plus a bug): release_verification_retry.sh.
+  cm_verification_retry_apply_decision
+  if [[ "$_SHIP_DECISION" == "REQUEUE-VERIFICATION" || "$_SHIP_DECISION" == "VERIFICATION-PENDING" ]]; then
+    [[ "${_CM_DECIDE_ONLY:-false}" == "true" ]] && cm_release_decide_only_requeue
+    _RELEASE_NOTES_STATUS=""
+    return 0  # release.sh exits 4: nothing ships until the requeued TESTER task finishes
+  fi
   cm_ship_posture_apply_decision  # sets _SHIP_HALT_KEY; may ship trigger 2/3 NON-FUNCTIONAL
+  cm_verification_floor_unreadable_halt  # a HALT on any row but trigger 2/3 floors to KNOWN-BUGS
 
   # Determine release-notes Status field value from ship decision (set before any HALT check).
   # Exported so Step 11a can use it when generating release notes.
@@ -515,49 +535,28 @@ cm_release_apply_ship_policy() {
     [[ "${#_KNOWN_ISSUE_BUG_FILES[@]}" -gt 0 ]] && _KNOWN_ISSUE_NOTES_BLOCK="$(build_known_issue_notes_block "${_KNOWN_ISSUE_BUG_FILES[@]}")"
   fi
   cm_ship_posture_resolve_known_issues
+  cm_verification_retry_resolve_known_issues
 
   cm_build_bugs_skipped_ship_block "${_TESTER_REPORT_PATH}" "${_CM_PROJECT_ROOT}/bugs" "${_KNOWN_ISSUE_BUG_FILES[@]}"
   echo "  Skipped-bug pair(s) resolved: $(( ${#_SKIPPED_BUG_PAIRS[@]} / 2 ))"
   # Apply HALT decisions from the policy matrix, via _cm_apply_matrix_trigger
-  # (release_operator_override.sh): trigger-1/2/3 pass under --force ("yes"),
-  # every other row here is a hard stop ("no"). Messages/remedies unchanged.
-  # The row is the one cm_ship_policy_halt_key named (release_ship_posture.sh).
+  # (release_operator_override.sh): only triggers 2 and 3 still reach here
+  # (cm_verification_floor_unreadable_halt floored every other row), and
+  # both pass under --force. The row is the one cm_ship_policy_halt_key named.
   if [[ "$_SHIP_DECISION" == "HALT" ]]; then
     case "$_SHIP_HALT_KEY" in
-    cm-release.trigger-1.tester-blocked)
-      _cm_apply_matrix_trigger \
-        "cm-release.trigger-1.tester-blocked" \
-        "Trigger 1: TESTER task ${_TESTER_TASK_ID} is BLOCKED for ${ACTIVE_RC} — verification could not complete, so the release of an unverified RC is refused." \
-        "Read task ${_TESTER_TASK_ID}'s status.md Blockers field at ${_CM_TASKS_DIR}, resolve the underlying issue, re-run TESTER so it reaches DONE, then re-invoke scripts/cm/release.sh." \
-        "yes" ;;
-    cm-release.ship-policy.tester-state-unrecognized)
-      # Found but State is neither BLOCKED nor DONE (WONT-DO, WORKING, a typo).
-      # Per CM.md's "(unrecognized values) -> HALT" row. Out of --force's
-      # scope: a bad input, not a judgement call.
-      _cm_apply_matrix_trigger \
-        "cm-release.ship-policy.tester-state-unrecognized" \
-        "TESTER task ${_TESTER_TASK_ID} for ${ACTIVE_RC} has State='${_TESTER_STATUS}' — the ship-policy decision matrix only defines rows for State=BLOCKED and State=DONE, so an unrecognized state is refused rather than default-shipped." \
-        "Inspect task ${_TESTER_TASK_ID} at ${_CM_TASKS_DIR}, confirm the correct TESTER outcome (re-run TESTER if its State should be DONE or BLOCKED instead), then re-invoke scripts/cm/release.sh." \
-        "no" ;;
     cm-release.trigger-2.systemic-risk-high)
       _cm_apply_matrix_trigger \
         "cm-release.trigger-2.systemic-risk-high" \
         "Trigger 2: TESTER report systemic_risk=high for ${ACTIVE_RC} (task ${_TESTER_TASK_ID}) and the finding is not clear to ship: regression=${_TESTER_IS_REGRESSION} integrity=${_TESTER_INTEGRITY_DAMAGE} has_large_fix_effort=${_HAS_LARGE_FIX_EFFORT} — a regression, integrity damage, or a large fix effort each independently refuse the release; only regression=no plus integrity=none plus has_large_fix_effort=no ships as a known issue instead." \
         "Read ${_TESTER_REPORT_PATH:-the TESTER report for this RC} for the high-risk findings, fix or triage them, re-run TESTER, then re-invoke scripts/cm/release.sh." \
         "yes" ;;
-    cm-release.trigger-3.serious-concerns-large-fix)
+    *)
       _cm_apply_matrix_trigger \
         "cm-release.trigger-3.serious-concerns-large-fix" \
         "Trigger 3: TESTER recommendation=SHIP-WITH-SERIOUS-CONCERNS and at least one finding has Fix Effort=large for ${ACTIVE_RC} — the scope is too large to auto-ship." \
         "Review the large-effort finding(s) in ${_TESTER_REPORT_PATH:-the TESTER report for this RC}, scope the fix work (or an explicit operator decision to proceed anyway), then re-invoke scripts/cm/release.sh." \
         "yes" ;;
-    *)
-      # Out of --force's scope: an unrecognized-input catch-all.
-      _cm_apply_matrix_trigger \
-        "cm-release.ship-policy.halt" \
-        "Ship-policy matrix returned HALT for ${ACTIVE_RC}: TESTER state=${_TESTER_STATUS} systemic_risk=${_TESTER_SYSTEMIC_RISK} recommendation=${_TESTER_RECOMMENDATION} — none of the known auto-ship rows matched." \
-        "Cross-reference team/roles/CM.md's ship-policy decision matrix against these TESTER field values, decide the correct disposition, then re-invoke scripts/cm/release.sh." \
-        "no" ;;
     esac
   fi
   # A decide-only run ends at the decision; Steps 4b, 4e and 4f do not run.
@@ -789,10 +788,11 @@ cm_release_apply_ship_policy() {
     echo "[cm-release] POLLUTION-GUARD: Set CM_SQUASH_STRICT_POLLUTION_GUARD=true to halt instead of warn." >&2
     echo ""
     if [[ "${CM_SQUASH_STRICT_POLLUTION_GUARD:-false}" == "true" ]]; then
+      # BLOCK-WORTHY (trigger 10): stray paths stay out of release history; --inbox writes the inbox too.
       cm_halt \
         "cm-release.trigger-10.pollution-guard-strict" \
         "Trigger 10: the squash pollution guard (strict mode) found ${#_guard_flagged[@]} stray path(s) that would be absorbed into release history by squashing ${ACTIVE_RC}." \
-        "Remove or unstage the stray path(s) listed above from ${RC_BRANCH}, commit the cleanup, then re-run scripts/cm/release.sh (or set CM_SQUASH_STRICT_POLLUTION_GUARD=false to warn instead of halt)."
+        "Remove or unstage the stray path(s) listed above from ${RC_BRANCH}, commit the cleanup, then re-run scripts/cm/release.sh (or set CM_SQUASH_STRICT_POLLUTION_GUARD=false to warn instead of halt)." --inbox
     fi
   else
     echo "[Step 4f] Squash pollution guard: no stray paths detected — proceeding."

@@ -15,11 +15,22 @@ way pm-agent.sh --auto calls it, on a two-project fixture root:
     first write, and its lock is left to the caller;
   - a write phase that cannot take the lock, or finds the chain busy under
     it, writes nothing and stops the iteration -- no later category writes
-    ahead of the deferred one.
+    ahead of the deferred one;
+  - a carried bug (``running``, listed only by a closed bundle) is parked on
+    an operator question only inside the write phase: a refused lock leaves
+    the bug file and the operator inbox as they were, and a granted one
+    converts it while the repo lock is held;
+  - with no hook, discovery's own write lock waits up to lock_wait_seconds
+    for another holder: a holder that lets go within the budget is waited
+    out and the write lands; one that keeps the lock past it defers the
+    write with the deferral line. The wait runs on a controlled clock
+    (pgai_lock_wait_now / pgai_lock_wait_pause redefined), so no real
+    seconds pass.
 
 Every write is observed through a recording wrapper around the three
-discovery writers: each call records whether this shell's pid is the
-holder named in the repo lock's provenance record at that moment.
+discovery writers and the carried-item conversion: each call records
+whether this shell's pid is the holder named in the repo lock's provenance
+record at that moment.
 """
 
 from __future__ import annotations
@@ -27,9 +38,10 @@ from __future__ import annotations
 import pathlib
 
 from tests.fixtures.scrubbed_subprocess_env import build_scrubbed_env
+from tests.fixtures.two_project import add_registered_project
 from tests.unit.shell_harness import run_bash
 
-_PROJECT = "project_a"
+_PROJECT = "project-a"
 _CHAIN_BUSY_EXIT = f"discovery_run_pipeline [{_PROJECT}]: chain busy, idle exit before any scan"
 
 # Recording wrappers: rename each writer and record the repo lock's holder
@@ -46,6 +58,13 @@ for _t_fn in _disc_write_bundle _disc_set_status_field _disc_mark_cache_bundled;
     eval "$(declare -f "$_t_fn" | sed "1s/^${_t_fn}/_t_real${_t_fn}/")"
     eval "${_t_fn}() { _t_record ${_t_fn}; _t_real${_t_fn} \"\$@\"; }"
 done
+eval "$(declare -f pp_run_ops | sed "1s/^pp_run_ops/_t_real_pp_run_ops/")"
+pp_run_ops() {
+    if [[ "${1:-}" == "pgai_agent_kanban.discovery.carried" && "${2:-}" == "convert" ]]; then
+        _t_record carried_convert
+    fi
+    _t_real_pp_run_ops "$@"
+}
 """
 
 
@@ -97,9 +116,16 @@ def _lock_file(root: pathlib.Path) -> pathlib.Path:
     return root / "locks" / f"repo-wake-{_PROJECT}.lock"
 
 
-def _run(root: pathlib.Path, tmp_path: pathlib.Path, body: str):
+def _run(
+    root: pathlib.Path,
+    tmp_path: pathlib.Path,
+    body: str,
+    extra_env: dict[str, str] | None = None,
+    project: str = _PROJECT,
+):
     """Source the discovery libs against *root*, install the recording
-    wrappers, then run *body*. The record file is returned alongside."""
+    wrappers, then run *body*. LOCK names *project*'s repo lock. The record
+    file is returned alongside."""
     record = tmp_path / "writes.rec"
     script = (
         "set -euo pipefail\n"
@@ -108,7 +134,7 @@ def _run(root: pathlib.Path, tmp_path: pathlib.Path, body: str):
         "source scripts/lib/semver.sh\n"
         "source scripts/lib/project_paths.sh\n"
         "source scripts/lib/discovery.sh\n"
-        f'LOCK="$(pp_repo_lock_path {_PROJECT})"\n'
+        f'LOCK="$(pp_repo_lock_path {project})"\n'
         f'REC="{record}"\n'
         + _RECORDING_WRAPPERS
         + body
@@ -121,7 +147,8 @@ def _run(root: pathlib.Path, tmp_path: pathlib.Path, body: str):
             "TEAM_ROOT": str(root),
             "PGAI_AGENT_KANBAN_ROOT_PATH": str(root),
             "PGAI_AGENT_KANBAN_TEMP_DIR": str(tmp_path / "scratch"),
-            "PGAI_PROJECT_NAME": _PROJECT,
+            "PGAI_PROJECT_NAME": project,
+            **(extra_env or {}),
         },
     )
     result = run_bash(tmp_path, script, base_env=env, timeout=120)
@@ -250,6 +277,67 @@ def test_unavailable_lock_defers_the_write_and_no_later_category_runs(two_projec
     assert "## Status\nopen" in priority.read_text(encoding="utf-8")
 
 
+# The operator inbox refuses project-a's underscore, so the carried-bug
+# cases run in a project whose name it accepts.
+_CARRIED_PROJECT = "carried-lock"
+
+
+def _add_carried_bug(root: pathlib.Path) -> tuple[pathlib.Path, pathlib.Path]:
+    """``(bug, project_root)``: one ``running`` bug that only a ``done``
+    bundle lists -- carried -- in a fresh registered project."""
+    project_root = add_registered_project(root, _CARRIED_PROJECT)
+    for sub in ("bugs", "requirements"):
+        (project_root / sub).mkdir(exist_ok=True)
+    bug = project_root / "bugs" / "BUG-9801-carried-lock-probe.md"
+    bug.write_text(
+        "# BUG-9801-carried-lock-probe\n\n**Severity:** medium\n\n## Status\nrunning\n\n## Symptom\nsynthetic\n",
+        encoding="utf-8",
+    )
+    (project_root / "requirements" / "v0.0.1-bugfix-bundle-20990101.md").write_text(
+        "# v0.0.1-bugfix-bundle-20990101\n\n## Status\ndone\n\n## Target Version\nv0.0.1\n\n"
+        "## Workflow Type\nrelease\n\n## PM Task\nnone\n\n"
+        f"## Bundled Items\n\n- {bug.name} (`{bug}`)\n",
+        encoding="utf-8",
+    )
+    return bug, project_root
+
+
+def test_unavailable_lock_leaves_a_carried_bug_and_the_operator_inbox_untouched(two_project_root, tmp_path):
+    root = two_project_root
+    bug, project_root = _add_carried_bug(root)
+    inbox = project_root / "operator-inbox.md"
+    bug_before = bug.read_bytes()
+    inbox_before = inbox.read_bytes() if inbox.exists() else None
+    body = (
+        "t_hook_refuses() { return 1; }\n"
+        "DISCOVERY_WRITE_LOCK_HOOK=t_hook_refuses\n"
+        f'discovery_run_pipeline "{_CARRIED_PROJECT}"\n'
+    )
+
+    result, recorded = _run(root, tmp_path, body, project=_CARRIED_PROJECT)
+
+    assert result.returncode == 0, result.stderr
+    assert "DISCOVERY_STATUS=idle" in result.stdout
+    assert "discovery_step_bugs: repo lock not available for the discovery write; deferring to the next wake" in result.stderr
+    assert "converted " not in result.stderr, result.stderr
+    assert recorded == []
+    assert bug.read_bytes() == bug_before
+    assert (inbox.read_bytes() if inbox.exists() else None) == inbox_before
+
+
+def test_carried_bug_is_converted_only_while_the_repo_lock_is_held(two_project_root, tmp_path):
+    root = two_project_root
+    bug, project_root = _add_carried_bug(root)
+
+    result, recorded = _run(root, tmp_path, f'discovery_run_pipeline "{_CARRIED_PROJECT}"', project=_CARRIED_PROJECT)
+
+    assert result.returncode == 0, result.stderr
+    assert recorded == ["carried_convert HELD"], recorded
+    assert f"converted {bug.name} to needs-operator" in result.stderr, result.stderr
+    assert "## Status\nneeds-operator" in bug.read_text(encoding="utf-8")
+    assert (project_root / "operator-inbox.md").is_file()
+
+
 def test_chain_turning_busy_during_the_scan_is_not_written_into(two_project_root, tmp_path):
     root = two_project_root
     bug = _add_bug(root)
@@ -278,3 +366,113 @@ def test_chain_turning_busy_during_the_scan_is_not_written_into(two_project_root
     assert _bundles(root) == []
     assert recorded == []
     assert "## Status\nopen" in bug.read_text(encoding="utf-8")
+
+
+# ---------------------------------------------------------------------------
+# No hook (pm-agent.sh --auto): the write lock waits up to lock_wait_seconds
+# ---------------------------------------------------------------------------
+
+# Another process holds the repo lock until the test tells it to let go.
+# The wait runs on a controlled clock: pgai_lock_wait_now reads T_NOW, and
+# pgai_lock_wait_pause advances it by the requested seconds and records
+# each pause. T_RELEASE_ON_PAUSE=1 makes the first pause tell the holder
+# to release and wait for it to exit, so the next attempt finds the lock
+# free; T_RELEASE_ON_PAUSE=0 keeps the holder in place until the end.
+_HOLDER_AND_CLOCK = r"""
+source scripts/lib/lock_provenance.sh
+T_READY="$(dirname "$REC")/holder.ready"
+T_GO="$(dirname "$REC")/holder.go"
+mkfifo "$T_READY" "$T_GO"
+bash -c 'source scripts/lib/lock_provenance.sh
+         fd=""
+         pgai_lock_acquire "$1" coder "$$" "wake-chain:$4" none fd
+         echo ready > "$2"
+         read -r _ < "$3"
+         pgai_lock_release "$1" "$fd"' _ "$LOCK" "$T_READY" "$T_GO" "$PGAI_PROJECT_NAME" &
+T_HOLDER_PID=$!
+read -r _ < "$T_READY"
+T_NOW=1000
+T_PAUSES=()
+T_RELEASED=0
+pgai_lock_wait_now() { echo "$T_NOW"; }
+pgai_lock_wait_pause() {
+    T_PAUSES+=("$1")
+    T_NOW=$(( T_NOW + $1 ))
+    if [[ "$T_RELEASE_ON_PAUSE" == "1" && "$T_RELEASED" == "0" ]]; then
+        T_RELEASED=1
+        echo go > "$T_GO"
+        wait "$T_HOLDER_PID"
+    fi
+}
+discovery_run_pipeline "$PGAI_PROJECT_NAME"
+_t_total=0
+for _t_p in "${T_PAUSES[@]}"; do _t_total=$(( _t_total + _t_p )); done
+echo "PAUSES=${#T_PAUSES[@]} PAUSED_SECONDS=${_t_total}"
+if [[ "$T_RELEASED" == "0" ]]; then
+    echo go > "$T_GO"
+    wait "$T_HOLDER_PID"
+fi
+"""
+
+
+def _paused_seconds(stdout: str) -> int:
+    marker = "PAUSED_SECONDS="
+    assert marker in stdout, stdout
+    return int(stdout.split(marker, 1)[1].split()[0])
+
+
+def test_auto_write_lock_waits_for_a_holder_that_lets_go_within_the_budget(two_project_root, tmp_path):
+    root = two_project_root
+    bug = _add_bug(root)
+
+    result, recorded = _run(
+        root, tmp_path, _HOLDER_AND_CLOCK,
+        extra_env={"LOCK_WAIT_SECONDS": "30", "T_RELEASE_ON_PAUSE": "1"},
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "DISCOVERY_STATUS=produced_work" in result.stdout, result.stderr
+    assert "discovery write: waiting up to 30s (lock_wait_seconds) for the repo lock held by holder=coder" in result.stderr
+    assert "discovery write: repo lock acquired after waiting" in result.stderr
+    assert "repo lock not available for the discovery write" not in result.stderr
+    assert 0 < _paused_seconds(result.stdout) <= 30
+    assert len(_bundles(root)) == 1
+    assert "## Status\nrunning" in bug.read_text(encoding="utf-8")
+    assert recorded and all(line.endswith(" HELD") for line in recorded), recorded
+    assert not _lock_file(root).exists(), "discovery must release the lock it took itself"
+
+
+def test_auto_write_lock_defers_when_the_holder_keeps_it_past_the_budget(two_project_root, tmp_path):
+    root = two_project_root
+    bug = _add_bug(root)
+
+    result, recorded = _run(
+        root, tmp_path, _HOLDER_AND_CLOCK,
+        extra_env={"LOCK_WAIT_SECONDS": "5", "T_RELEASE_ON_PAUSE": "0"},
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "DISCOVERY_STATUS=idle" in result.stdout
+    assert "discovery write: waiting up to 5s (lock_wait_seconds)" in result.stderr
+    assert "discovery write: repo lock still held after waiting up to 5s (lock_wait_seconds)" in result.stderr
+    assert "discovery_step_bugs: repo lock not available for the discovery write; deferring to the next wake" in result.stderr
+    assert _paused_seconds(result.stdout) == 5, "the wait must use the whole budget and no more"
+    assert _bundles(root) == []
+    assert recorded == []
+    assert "## Status\nopen" in bug.read_text(encoding="utf-8")
+
+
+def test_auto_write_lock_budget_comes_from_kanban_cfg_when_not_exported(two_project_root, tmp_path):
+    root = two_project_root
+    _add_bug(root)
+    cfg = root / "kanban.cfg"
+    text = cfg.read_text(encoding="utf-8")
+    assert "[wake]\n" in text, "the fixture kanban.cfg is expected to carry a [wake] section"
+    cfg.write_text(text.replace("[wake]\n", "[wake]\nlock_wait_seconds = 7\n", 1), encoding="utf-8")
+
+    result, _ = _run(root, tmp_path, _HOLDER_AND_CLOCK, extra_env={"T_RELEASE_ON_PAUSE": "0"})
+
+    assert result.returncode == 0, result.stderr
+    assert "DISCOVERY_STATUS=idle" in result.stdout
+    assert "discovery write: waiting up to 7s (lock_wait_seconds)" in result.stderr
+    assert _paused_seconds(result.stdout) == 7

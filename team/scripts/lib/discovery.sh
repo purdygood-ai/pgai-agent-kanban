@@ -28,25 +28,33 @@
 #
 # Repo-lock scope
 # ---------------
-# The guards and the Step 1-3 scans are read-only and run WITHOUT the
-# project's repo lock, so a long scan never keeps another role's wake out.
-# A step takes the lock once it has found something to write, through
-# _disc_enter_write_phase, before its first write (minting a bundle into
-# requirements/, flipping an intake item's ## Status and cache marker,
-# queuing a PM ticket through pm-agent.sh). Under the lock the chain-busy
-# test runs again: a chain that turned busy during the unlocked scan is not
-# written into. Once taken, the lock is held for the rest of the iteration.
-# Who takes it:
+# The guards and the Step 1-3 scans are read-only and take no lock of their
+# own. A step enters its write phase through _disc_enter_write_phase once
+# it has found something to write, before its first write (closing a
+# re-filed duplicate bug; converting a carried intake item to
+# needs-operator, which writes its ## Status and an operator-inbox entry;
+# minting a bundle into requirements/; flipping an intake item's ## Status
+# and cache marker; queuing a PM ticket through pm-agent.sh); the write
+# phase makes sure the repo lock is held and then runs the chain-busy test
+# again under it, so a chain that turned busy since the guard is not
+# written into. Once entered,
+# the lock is held for the rest of the iteration. Who holds it:
 #   - DISCOVERY_WRITE_LOCK_HOOK names a caller function (called with the
-#     project name; 0 = the caller now holds the repo lock). The caller
-#     owns that lock afterwards and releases it -- the PM wake does this
-#     so its post-discovery dispatch runs under the same hold.
-#   - With no hook set, discovery takes the repo lock itself
-#     (pgai_lock_acquire, op discovery-write:<project>) and releases it
-#     before discovery_run_pipeline returns.
-# The acquisition never waits: a lock held by another role defers the write
-# to the next wake (logged, DISCOVERY_LAST_STATUS=idle), and no later step
-# runs in that iteration, so category-first order holds across the deferral.
+#     project name; 0 = the caller holds the repo lock). The caller owns
+#     that lock and releases it. The PM wake already holds the chain's
+#     lock through the whole iteration, scans included, and its hook only
+#     confirms that hold, so the write never waits on another role and
+#     the post-discovery dispatch runs under the same hold.
+#   - With no hook set (pm-agent.sh --auto, which holds no lock), the scans
+#     run unlocked and discovery takes the repo lock itself at the first
+#     write (op discovery-write:<project>), waiting with backoff for up to
+#     [wake] lock_wait_seconds (LOCK_WAIT_SECONDS, default 120) for a
+#     holder to let go, and releases it before discovery_run_pipeline
+#     returns.
+# A write phase that cannot get the lock (the hook refused, or the wait ran
+# out) defers the write to the next run (logged, DISCOVERY_LAST_STATUS=
+# idle), and no later step runs in that iteration, so category-first order
+# holds across the deferral.
 # The intake scan's own bookkeeping (the malformed-name rejection counter,
 # quarantine of a malformed file name, settle markers) runs inside the
 # scan, unlocked.
@@ -58,8 +66,9 @@
 #                          git-tag guard primitives the steps call
 #   discovery_items.sh  — intake-item eligibility scanning + quarantine
 #   discovery_defer.sh  — bug-step deferral gate: severity-vs-posture
-#                          decision and the hygiene-sweep queue-emptiness
-#                          check discovery_step_bugs applies
+#                          decision, the deferral bounds and the
+#                          hygiene-sweep queue-emptiness check
+#                          discovery_step_bugs applies
 #   discovery_state.sh  — status-field mutation and bundle writer
 #   discovery_eligibility.sh — requirements-directory eligibility enumeration
 #   discovery_step_requirements.sh — Step 3 (queue the lowest-version
@@ -173,30 +182,61 @@ DISCOVERY_LAST_STATUS="idle"
 #   _DISC_OWN_LOCK_FILE / _DISC_OWN_LOCK_FD
 #                       the repo lock discovery took itself (no hook set);
 #                       released by discovery_run_pipeline on return
+#   _DISC_WRITE_WAIT_BUDGET / _DISC_WRITE_WAIT_STARTED
+#                       the seconds _disc_take_own_write_lock may wait for
+#                       that lock, and whether it has had to wait yet
 # ---------------------------------------------------------------------------
 _DISC_WRITE_PHASE=""
 _DISC_OWN_LOCK_FILE=""
 _DISC_OWN_LOCK_FD=""
+_DISC_WRITE_WAIT_BUDGET=0
+_DISC_WRITE_WAIT_STARTED=false
 
 # _disc_take_own_write_lock <project_name>
-# Default write lock when the caller set no DISCOVERY_WRITE_LOCK_HOOK: one
-# non-blocking pgai_lock_acquire on the project's repo lock. Returns 0 with
-# _DISC_OWN_LOCK_FILE/_DISC_OWN_LOCK_FD set, 1 when the lock is held
-# elsewhere or the path cannot be resolved (pgai_lock_acquire narrates the
-# holder on contention).
+# Default write lock when the caller set no DISCOVERY_WRITE_LOCK_HOOK: take
+# the project's repo lock with pgai_lock_acquire_waiting, retrying with
+# backoff for up to [wake] lock_wait_seconds (LOCK_WAIT_SECONDS when
+# exported, else kanban.cfg, else 120; 0 = one attempt). Returns 0 with
+# _DISC_OWN_LOCK_FILE/_DISC_OWN_LOCK_FD set, 1 when the lock is still held
+# elsewhere at the end of the wait, refused, or the path cannot be
+# resolved (pgai_lock_acquire narrates the holder on contention).
 _disc_take_own_write_lock() {
     local project_name="$1"
-    local _disc_lock_file _disc_own_fd_out=""
+    local _disc_lock_file _disc_own_fd_out="" _disc_wait_rc=0
     _disc_lock_file="$(pp_repo_lock_path "$project_name" 2>/dev/null)" || return 1
     [[ -n "$_disc_lock_file" ]] || return 1
-    if ! declare -F pgai_lock_acquire >/dev/null 2>&1; then
+    if ! declare -F pgai_lock_acquire_waiting >/dev/null 2>&1; then
         # shellcheck source=lock_provenance.sh
         source "${_DISC_SELF_DIR}/lock_provenance.sh" || return 1
     fi
-    pgai_lock_acquire "$_disc_lock_file" "${AGENT:-pm}" "$$" \
-        "discovery-write:${project_name}" "none" _disc_own_fd_out || return 1
+    _DISC_WRITE_WAIT_BUDGET="$(_pgai_lock_wake_cfg_seconds LOCK_WAIT_SECONDS lock_wait_seconds 120)"
+    _DISC_WRITE_WAIT_STARTED=false
+    local PGAI_LOCK_WAIT_WHILE="_disc_note_write_lock_wait"
+    pgai_lock_acquire_waiting "$_DISC_WRITE_WAIT_BUDGET" "$_disc_lock_file" "${AGENT:-pm}" "$$" \
+        "discovery-write:${project_name}" "none" _disc_own_fd_out || _disc_wait_rc=$?
+    if [[ "$_disc_wait_rc" -ne 0 ]]; then
+        if [[ "$_DISC_WRITE_WAIT_STARTED" == "true" && "$_disc_wait_rc" -eq 1 ]]; then
+            log "discovery write: repo lock still held after waiting up to ${_DISC_WRITE_WAIT_BUDGET}s (lock_wait_seconds)"
+        fi
+        return 1
+    fi
+    if [[ "$_DISC_WRITE_WAIT_STARTED" == "true" ]]; then
+        log "discovery write: repo lock acquired after waiting"
+    fi
     _DISC_OWN_LOCK_FILE="$_disc_lock_file"
     _DISC_OWN_LOCK_FD="$_disc_own_fd_out"
+    return 0
+}
+
+# _disc_note_write_lock_wait <lock_file>
+# PGAI_LOCK_WAIT_WHILE hook for _disc_take_own_write_lock: narrates the
+# holder once, on the first contended attempt, and always keeps waiting
+# (the wait is bounded by the lock_wait_seconds budget alone).
+_disc_note_write_lock_wait() {
+    if [[ "${_DISC_WRITE_WAIT_STARTED:-}" != "true" ]]; then
+        _DISC_WRITE_WAIT_STARTED=true
+        log "discovery write: waiting up to ${_DISC_WRITE_WAIT_BUDGET}s (lock_wait_seconds) for the repo lock held by $(pgai_lock_describe_provenance "$(pgai_lock_read_provenance "$1")")"
+    fi
     return 0
 }
 
@@ -219,9 +259,9 @@ _disc_release_own_write_lock() {
 # then re-runs the chain-busy test under the lock. Returns 0 when this
 # iteration holds the lock and the chain is still idle -- immediately, with
 # no second acquisition, once an earlier step already entered. Returns 1
-# when the lock is held elsewhere or the chain turned busy during the
-# unlocked scan; the iteration is then deferred and the caller must not
-# write.
+# when the lock could not be had (the hook refused, or the default taker's
+# lock_wait_seconds wait ran out) or the chain turned busy since the
+# guard; the iteration is then deferred and the caller must not write.
 _disc_enter_write_phase() {
     local project_name="$1"
     local step_name="${2:-discovery}"
@@ -317,7 +357,7 @@ _disc_run_pipeline_once() {
         pgai_emit_error_contract \
             "discovery.per-project-halt" \
             "discovery skipped project '${project_name}' because its project-scoped HALT flag is present" \
-            "Once the underlying issue is resolved, run: team/scripts/unhalt.sh --project ${project_name}" \
+            "Once the underlying issue is resolved, run: $(printf '%q' "${TEAM_ROOT}/scripts/unhalt.sh") --project $(printf '%q' "${project_name}")" \
             "${project_name}"
         # BLOCK-WORTHY: approval-by-design — the per-project HALT is the
         # operator's (or CM's) scoped stop signal for this project's lane
@@ -334,7 +374,7 @@ _disc_run_pipeline_once() {
         pgai_emit_error_contract \
             "discovery.global-halt" \
             "discovery skipped project '${project_name}' because the fleet-wide HALT flag at ${TEAM_ROOT}/HALT is present" \
-            "Once the underlying issue is resolved, run: team/scripts/unhalt-global.sh" \
+            "Once the underlying issue is resolved, run: $(printf '%q' "${TEAM_ROOT}/scripts/unhalt-global.sh")" \
             "${project_name}"
         # BLOCK-WORTHY: approval-by-design — the global HALT file is the
         # operator's/CM's explicit fleet-wide stop signal (docs/blocking-site-census.md
@@ -392,7 +432,7 @@ _disc_run_pipeline_once() {
         pgai_emit_error_contract \
             "discovery.ceiling-unreadable" \
             "discovery will not queue work for project '${project_name}' this run because a version ceiling in its project config is unreadable (one line printed above names the file, key and value)." \
-            "Inspect and correct the ceilings: team/scripts/set-version-ceiling.sh --project ${project_name} --show" \
+            "Inspect and correct the ceilings: $(printf '%q' "${TEAM_ROOT}/scripts/set-version-ceiling.sh") --project $(printf '%q' "${project_name}") --show" \
             "${project_name}"
         # CENSUS-ANCHOR: discovery-ceiling-unreadable-01
         DISCOVERY_LAST_STATUS="blocked"

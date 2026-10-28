@@ -348,14 +348,17 @@ _POSTURE_PROJECTS: dict[str, tuple[str, str]] = {
     # project -> (project.cfg text, the posture it resolves to)
     "posture-always": (
         "[project]\npush_to_remote = false\n\n[release]\nship_posture = always\n", "always"),
-    "posture-absent": ("[project]\npush_to_remote = false\n", "matrix"),
+    # An absent key takes the default, always, on a local-only lane; on a
+    # remote lane that default is unconfirmed and reads matrix, silently.
+    "posture-absent": ("[project]\npush_to_remote = false\n", "always"),
+    "posture-absent-remote": ("[project]\npush_to_remote = true\n", "matrix"),
     "posture-remote-unconfirmed": (
         "[project]\npush_to_remote = true\n\n[release]\nship_posture = always\n", "matrix"),
 }
 
 
 def _add_posture_projects(root: pathlib.Path) -> None:
-    """Register the three posture projects on *root*, each with its project.cfg."""
+    """Register every posture project on *root*, each with its project.cfg."""
     registry = root / "projects.cfg"
     entries = "".join(
         f"[project:{name}]\npriority = {index}\n" for index, name in enumerate(_POSTURE_PROJECTS, start=2)

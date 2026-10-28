@@ -35,12 +35,13 @@ This module is the only implementation of that precedence.  The server
 this same function which port to probe for status and stop, so the two
 can never disagree.
 
-Temp root (``kanban_temp_root``): the one resolver every route uses for the
-files it writes or reads under the framework temp root -- the same answer
-``pgai_temp_dir`` in team/scripts/lib/temp.sh gives: PGAI_AGENT_KANBAN_TEMP_DIR
-when set (team/scripts/api-server.sh exports the value it resolved), else
-kanban.cfg ``[paths] tmp_root`` / ``tmp_subdir`` under the kanban root, else
-the documented last resort.
+Temp root (``kanban_temp_root``): what every route uses for the files it
+writes or reads under the framework temp root. It is
+:func:`pgai_agent_kanban.lib.temp_root.resolve_temp_root` for the route's
+kanban root -- the same answer ``pgai_temp_dir`` in team/scripts/lib/temp.sh
+gives: PGAI_AGENT_KANBAN_TEMP_DIR when set (team/scripts/api-server.sh exports
+the value it resolved), else kanban.cfg ``[paths] tmp_root`` / ``tmp_subdir``
+under the kanban root, else the resolver's last resort.
 
 Usage:
     from pgai_agent_kanban.api.config import load_api_config, ApiConfig
@@ -73,6 +74,7 @@ if not __package__:
 
 from pgai_agent_kanban.env import resolve_kanban_root  # noqa: E402
 from pgai_agent_kanban.lib import ini  # noqa: E402
+from pgai_agent_kanban.lib import temp_root  # noqa: E402
 
 _DEFAULT_HOST = "127.0.0.1"
 _DEFAULT_PORT = 8300
@@ -80,9 +82,8 @@ _CFG_FILENAME = "kanban.cfg"
 _SECTION = "api"
 _PORT_ENV_VAR = "PGAI_API_PORT"
 _DEFAULT_SHELL_OUT_TIMEOUT_SECONDS = 300
-_TEMP_DIR_ENV_VAR = "PGAI_AGENT_KANBAN_TEMP_DIR"
-# anti-pattern-allowlist: 2 (justification: the literal is the resolver's documented last-resort temp root, the same one temp.sh's pgai_temp_dir falls back to)
-_FALLBACK_TEMP_ROOT = "/tmp/pgai_kanban_tmp"
+# The resolver's last-resort temp root, bound here for readers of this module.
+_FALLBACK_TEMP_ROOT = temp_root.FALLBACK_TEMP_ROOT
 
 
 @dataclass
@@ -98,22 +99,13 @@ class ApiConfig:
 def kanban_temp_root(kanban_root: "pathlib.Path | str") -> pathlib.Path:
     """Return the framework temp root for *kanban_root*, as ``pgai_temp_dir`` resolves it.
 
-    PGAI_AGENT_KANBAN_TEMP_DIR when set and non-blank; else ``<kanban_root>/
-    kanban.cfg [paths] tmp_root`` joined with ``tmp_subdir`` when both are
-    set; else the documented last-resort root. A value naming the
-    filesystem root reads as the last resort. The directory is not created.
+    Delegates to :func:`pgai_agent_kanban.lib.temp_root.resolve_temp_root`
+    with *kanban_root* as the explicit root, so its kanban.cfg is the one
+    read: PGAI_AGENT_KANBAN_TEMP_DIR when set and non-blank, else
+    ``[paths] tmp_root`` joined with ``tmp_subdir``, else the last resort.
+    The directory is not created.
     """
-    value = os.environ.get(_TEMP_DIR_ENV_VAR, "").strip()
-    if not value:
-        cfg = pathlib.Path(kanban_root) / _CFG_FILENAME
-        tmp_root = tmp_subdir = ""
-        if cfg.is_file():
-            tmp_root = (ini.read_line_value(cfg, "paths", "tmp_root") or "").strip()
-            tmp_subdir = (ini.read_line_value(cfg, "paths", "tmp_subdir") or "").strip()
-        value = f"{tmp_root}/{tmp_subdir}" if tmp_root and tmp_subdir else _FALLBACK_TEMP_ROOT
-    if os.path.realpath(value) == os.sep:
-        value = _FALLBACK_TEMP_ROOT
-    return pathlib.Path(value)
+    return pathlib.Path(temp_root.resolve_temp_root(kanban_root))
 
 
 def _positive_int(raw: str, default: int) -> int:

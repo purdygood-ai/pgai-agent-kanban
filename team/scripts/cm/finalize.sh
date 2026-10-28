@@ -117,12 +117,21 @@ KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH}"
 # --- Source optional config files (BEFORE strict mode) ---
 [[ -f "$KANBAN_ROOT/bashrc" ]] && source "$KANBAN_ROOT/bashrc"
 [[ -f "$KANBAN_ROOT/env" ]] && source "$KANBAN_ROOT/env"
-[[ -f "$HOME/.config/pgai-kanban.cfg" ]] && source "$HOME/.config/pgai-kanban.cfg"
+# Operator user config, then [chain] pm_mode (config_loader.sh).
+# shellcheck source=../lib/config_loader.sh
+source "$(dirname "${BASH_SOURCE[0]}")/../lib/config_loader.sh"
+config_startup_prelude "$KANBAN_ROOT"
 
 # --- Source temp.sh for resolver helpers (include guard in temp.sh prevents double-load) ---
 _FINALIZE_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=../lib/temp.sh
 source "${_FINALIZE_SCRIPT_DIR}/../lib/temp.sh"
+# PROJECTS_CFG_NAME_RE, the project-name rule the name check below applies,
+# defined once in lib/projects_cfg.sh. Sourced before strict mode: the rule
+# is set ahead of that library's palette load, so a missing palette file
+# leaves it in place.
+# shellcheck source=../lib/projects_cfg.sh
+source "${_FINALIZE_SCRIPT_DIR}/../lib/projects_cfg.sh"
 unset _FINALIZE_SCRIPT_DIR
 
 # --- Enable strict mode ---
@@ -131,16 +140,17 @@ set -euo pipefail
 # --- Clean exit handling ---
 # shellcheck source=../lib/script_common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/../lib/script_common.sh"
-# pp_run_ops reaches cm/write_rc_state.py, the release-state.md writer.
+# lib/cm/common.sh brings pp_run_ops, which reaches cm/write_rc_state.py
+# (the release-state.md writer), and read_md_field (lib/md_field.sh), which
+# reads the requirement doc's sections.
 # shellcheck source=../lib/cm/common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/../lib/cm/common.sh"
 trap cleanup_on_exit EXIT
 
 # --- Validate project name ---
-PROJECT_NAME_RE='^[a-z0-9][a-z0-9-]*$'
-if [[ ! "$PROJECT_NAME" =~ $PROJECT_NAME_RE ]]; then
+if [[ ! "$PROJECT_NAME" =~ $PROJECTS_CFG_NAME_RE ]]; then
   echo "ERROR: invalid project name: '$PROJECT_NAME'" >&2
-  echo "Project names must match ^[a-z0-9][a-z0-9-]*$ (lowercase letters, digits, hyphens only)" >&2
+  echo "Project names must match ${PROJECTS_CFG_NAME_RE} (lowercase letters, digits, hyphens only)" >&2
   exit 1
 fi
 
@@ -196,36 +206,55 @@ fi
 #   for the file whose ## Target Version matches TARGET_VERSION.  If PGAI_PROJECT_NAME
 #   is not set, or no matching requirement file is found, fallbacks apply.
 
-# Helper: read a markdown section body from a file.
-# Args: <file_path> <section_pattern_regex>
-read_md_field() {
-  local file_path="$1"
-  local field_pattern="$2"
-  python3 - "$file_path" "$field_pattern" <<'PY'
-import re, sys, pathlib
+# A requirement doc's section is read with read_md_field (lib/md_field.sh,
+# sourced by lib/cm/common.sh): the heading matches in any letter case with
+# any blanks, or none, after "##" and between its words; the body ends at
+# the next "##" line ("###" included) or at end of file.
 
-text = pathlib.Path(sys.argv[1]).read_text(encoding="utf-8")
-pattern = sys.argv[2]
+# _requirement_field <file> <heading> [<heading>...]
+#   Print the body of the first named heading <file> carries, stopping also
+#   at a "---" rule, so an empty section reads as empty and a rule never
+#   leaks into the value. Prints nothing, status 0, when none is present;
+#   returns the reader's status when <file> cannot be read.
+_requirement_field() {
+  local file="$1" heading rc
+  shift
+  for heading in "$@"; do
+    rc=0
+    read_md_field --free-spacing --end-at-subheading --end-at-rule "$file" "$heading" || rc=$?
+    [[ $rc -eq 3 ]] || return "$rc"
+  done
+  return 0
+}
 
-# Find the section matching the pattern and return its body (group 2).
-# Body lines never start with "##" and are never a horizontal rule (three or
-# more dashes alone on a line), so the body stops at the next ## heading, at
-# a '---' rule, or at end-of-file.  An empty section therefore reads as
-# empty rather than as the heading and text of the section after it, and a
-# '---' rule never leaks into the captured body.
-section_re = re.compile(
-    r'(^##[^\S\n]*' + pattern + r'[^\S\n]*)'
-    r'((?:\n(?!##|-{3,}[^\S\n]*$)[^\n]*)*?)'
-    r'(\n+##|\n+-{3,}[^\S\n]*$|\n*\Z)',
-    re.IGNORECASE | re.MULTILINE,
-)
-m = section_re.search(text)
-if m:
-    body = m.group(2).strip()
-    print(body)
-else:
-    print("")
-PY
+# _requirement_for_version <requirements-dir> <version>
+#   Print the path of the first requirement doc, in byte order of file
+#   name, whose ## Target Version body holds <version> alone on a line;
+#   skips REQUIREMENTS-TEMPLATE* and files that cannot be read. Prints
+#   nothing when no doc matches. Always returns 0.
+#   The match is exact per line, ignores surrounding blanks, and ignores
+#   letter case, as find_requirement_by_version (promote_bundled_items.py)
+#   does: <version> gets a "v" prefix unless it already starts with "v" or
+#   "V", so a body line V1.2.4 matches v1.2.4, V1.2.4 and 1.2.4.
+_requirement_for_version() {
+  local req_dir="$1" target="$2" md_file body line
+  target="${target#"${target%%[![:space:]]*}"}"
+  target="${target%"${target##*[![:space:]]}"}"
+  [[ "$target" == [vV]* ]] || target="v${target}"
+  target="${target,,}"
+  while IFS= read -r -d '' md_file; do
+    [[ "${md_file##*/}" == REQUIREMENTS-TEMPLATE* ]] && continue
+    body="$(read_md_field --free-spacing --end-at-subheading "$md_file" 'Target Version' 2>/dev/null)" || continue
+    while IFS= read -r line; do
+      line="${line#"${line%%[![:space:]]*}"}"
+      line="${line%"${line##*[![:space:]]}"}"
+      if [[ "${line,,}" == "$target" ]]; then
+        printf '%s\n' "$md_file"
+        return 0
+      fi
+    done <<< "$body"
+  done < <(find "$req_dir" -mindepth 1 -maxdepth 1 -name '*.md' -print0 2>/dev/null | LC_ALL=C sort -z)
+  return 0
 }
 
 _meta_kanban_project="${PGAI_PROJECT_NAME:-}"
@@ -235,39 +264,7 @@ if [[ -n "$_meta_kanban_project" ]]; then
   _meta_req_dir="${KANBAN_ROOT}/projects/${_meta_kanban_project}/requirements"
   if [[ -d "$_meta_req_dir" ]]; then
     # Locate the requirement file whose ## Target Version matches TARGET_VERSION.
-    _meta_req_file="$(python3 - "$_meta_req_dir" "$TARGET_VERSION" 2>/dev/null <<'PY' || true
-import re, sys, pathlib
-
-req_dir = pathlib.Path(sys.argv[1])
-target = sys.argv[2].strip()
-if not target.startswith("v"):
-    target = "v" + target
-
-version_pattern = re.compile(
-    r'^\s*' + re.escape(target) + r'\s*$',
-    re.MULTILINE,
-)
-# Body stops at the next "##" line, so an empty Target Version reads empty.
-target_ver_re = re.compile(
-    r'(^##[^\S\n]*Target[^\S\n]*Version[^\S\n]*)((?:\n(?!##)[^\n]*)*?)(\n+##|\n*\Z)',
-    re.IGNORECASE | re.MULTILINE,
-)
-
-for md_file in sorted(req_dir.glob("*.md")):
-    if md_file.name.startswith("REQUIREMENTS-TEMPLATE"):
-        continue
-    try:
-        text = md_file.read_text(encoding="utf-8")
-    except OSError:
-        continue
-    m = target_ver_re.search(text)
-    if not m:
-        continue
-    if version_pattern.search(m.group(2)):
-        print(str(md_file))
-        break
-PY
-)"
+    _meta_req_file="$(_requirement_for_version "$_meta_req_dir" "$TARGET_VERSION")"
   fi
 fi
 
@@ -275,14 +272,14 @@ if [[ -n "$_meta_req_file" ]]; then
   # Read ## Artifact Name from requirement doc.
   # Reduce to the first non-empty trimmed line so a trailing '---' rule or
   # blank lines in the requirement doc cannot corrupt the published filename.
-  OUTPUT_NAME="$(read_md_field "$_meta_req_file" 'Artifact\s*Name' \
+  OUTPUT_NAME="$(_requirement_field "$_meta_req_file" 'Artifact Name' \
     | sed -n '/[^[:space:]]/{s/[[:space:]]*$//;p;q}')"
   if [[ -z "$OUTPUT_NAME" ]]; then
     OUTPUT_NAME="$PROJECT_NAME"
     echo "WARNING: ## Artifact Name not found in requirement doc; using project name as fallback: $OUTPUT_NAME"
   fi
   # Read ## Output Formats from requirement doc (optional field).
-  OUTPUT_FORMATS_RAW="$(read_md_field "$_meta_req_file" 'Output\s*Formats?')"
+  OUTPUT_FORMATS_RAW="$(_requirement_field "$_meta_req_file" 'Output Formats' 'Output Format')"
 else
   # No requirement file found (PGAI_PROJECT_NAME not set or no version match).
   # Fall back gracefully — warn and use project name.

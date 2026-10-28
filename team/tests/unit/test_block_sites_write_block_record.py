@@ -210,6 +210,7 @@ def _prelude(sb: Sandbox) -> str:
         source '{_LIB}/atomic_write.sh'
         source '{_LIB}/error_contract.sh'
         source '{_LIB}/block_record.sh'
+        source '{_LIB}/md_field.sh'
         """) + _extract(
         ["ensure_status_file", "_read_status_section", "get_state", "normalize_status_file",
          "set_state", "set_block", "set_state_or_insert", "set_block_or_append",

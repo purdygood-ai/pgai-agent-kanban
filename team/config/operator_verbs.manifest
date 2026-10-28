@@ -371,3 +371,11 @@ V	deep-verify-status	active	scripts/deep-verify-status.sh	project|help	no	read-o
 # --reconcile-queues (reconcile_queues, with or without dry_run). A second
 # run moves nothing, so the row is "idempotent".
 V	archive	active	scripts/archive.sh	project|dry-run|count|restore|reconcile-queues|help	yes	idempotent	POST	/operations/archive	ArchiveBody	action	DualChannelShellEnvelope	module:pgai_agent_kanban.archive.run.run_archive
+# inbox's row names its action twin, POST /operations/inbox-answer, which
+# calls answer_entry in process -- the function inbox.sh answer reaches
+# through pp_run_ops. The verb's read, inbox.sh list, has its own route,
+# GET /projects/{name}/inbox (read_inbox in process), entered in
+# team/config/operator_verb_census_exempt.txt as the verb's second route;
+# inbox.sh close has no REST twin. A second close of the same entry
+# refuses, so the row is "non-idempotent".
+V	inbox	active	scripts/inbox.sh	project|id|answer|help	yes	non-idempotent	POST	/operations/inbox-answer	InboxAnswerBody	action	DualChannelShellEnvelope	module:pgai_agent_kanban.overwatch.inbox.answer_entry

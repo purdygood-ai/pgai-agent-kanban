@@ -102,11 +102,13 @@ _REAL_LIBS = [
     _TEAM_DIR / "scripts" / "lib" / "env_bootstrap.sh",
     _TEAM_DIR / "scripts" / "lib" / "ini_parser.sh",
     _TEAM_DIR / "scripts" / "lib" / "project_paths.sh",
+    _TEAM_DIR / "scripts" / "lib" / "git_remote_default.sh",
     _TEAM_DIR / "scripts" / "lib" / "error_contract.sh",
     _TEAM_DIR / "scripts" / "lib" / "temp.sh",
     _TEAM_DIR / "scripts" / "lib" / "version_stamp.sh",
     _TEAM_DIR / "scripts" / "lib" / "subagent_deploy.sh",
     _TEAM_DIR / "scripts" / "lib" / "script_common.sh",
+    _TEAM_DIR / "scripts" / "lib" / "config_loader.sh",
 ]
 
 _TIMEOUT = 120

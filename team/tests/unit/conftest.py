@@ -23,7 +23,7 @@ hierarchy.  This file adds only what is specific to the unit scope:
                         test-fidelity gap where tests ran in the dev tree where
                         the Python shim package is always importable.
 
-  - two_project_root  — kanban root with project_a + project_b registered; from
+  - two_project_root  — kanban root with project-a + project-b registered; from
                         tests/fixtures/two_project.py.  Closes the gap where
                         single-project fixtures cannot exercise cross-project
                         isolation guarantees.

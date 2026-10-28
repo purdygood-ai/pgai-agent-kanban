@@ -77,6 +77,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/lib/operator_args.sh"
 # shellcheck source=lib/project_paths.sh
 source "${SCRIPT_DIR}/lib/project_paths.sh"
+# projects_cfg_has / projects_cfg_list / projects_cfg_registration (registry reads)
+# shellcheck source=lib/projects.sh
+source "${SCRIPT_DIR}/lib/projects.sh"
 # shellcheck source=lib/temp.sh
 source "${SCRIPT_DIR}/lib/temp.sh"
 
@@ -143,19 +146,16 @@ if [[ ! -f "$PROJECTS_CFG" ]]; then
     exit 2
 fi
 
-# Check registration: look for [project:NAME] section header in INI format,
-# or a colon-legacy line starting with NAME:.
-if ! grep -qE "^\[project:${NAME}\]$|^${NAME}:" "$PROJECTS_CFG" 2>/dev/null; then
+# Check registration through the registry reader: a [project:NAME] section
+# in an INI projects.cfg, or a NAME:priority line in a colon-legacy one.
+if ! projects_cfg_has "$NAME"; then
     echo "ERROR: project '${NAME}' is not registered in projects.cfg" >&2
     echo "  Registered projects:" >&2
-    # Extract project names from INI [project:NAME] sections
-    grep -oE '^\[project:[a-zA-Z0-9_-]+\]' "$PROJECTS_CFG" 2>/dev/null \
-        | sed 's/^\[project://; s/\]$//' \
-        | sed 's/^/    /' >&2 || true
-    # Also handle colon-legacy format
-    grep -E '^[a-zA-Z0-9_-]+:' "$PROJECTS_CFG" 2>/dev/null \
-        | cut -d: -f1 \
-        | sed 's/^/    /' >&2 || true
+    # Every registered name, in the order projects.cfg lists them.
+    _registered="$(projects_cfg_list --registration-order 2>/dev/null)" || _registered=""
+    if [[ -n "$_registered" ]]; then
+        printf '%s\n' "$_registered" | sed 's/^/    /' >&2
+    fi
     exit 2
 fi
 
@@ -186,27 +186,11 @@ fi
 # ---------------------------------------------------------------------------
 # Extract the registration section from projects.cfg
 # ---------------------------------------------------------------------------
-# Extract the full [project:NAME] INI section (header + all lines until the
-# next section or end of file). For colon-legacy format, extract the single
-# matching line. The result is stored verbatim in the MANIFEST.
-REGISTRATION=""
-
-# Try INI format first (canonical)
-if grep -qE "^\[project:${NAME}\]$" "$PROJECTS_CFG" 2>/dev/null; then
-    # Extract from the section header until the next [section] header or EOF
-    REGISTRATION="$(awk -v name="${NAME}" '
-        /^\[project:/ && $0 == "[project:" name "]" { found=1; print; next }
-        found && /^\[/ { exit }
-        found { print }
-    ' "$PROJECTS_CFG")"
-else
-    # Colon-legacy format: single matching line.
-    # Avoid "grep ... | head -n1" under pipefail: if grep emits multiple lines
-    # head closes the pipe after the first, grep receives SIGPIPE (exit 141),
-    # and pipefail promotes that to a pipeline failure.  Use awk to stop after
-    # the first match so no pipe is involved and SIGPIPE cannot occur.
-    REGISTRATION="$(awk -v name="${NAME}" '$0 ~ ("^" name ":") { print; exit }' "$PROJECTS_CFG" 2>/dev/null || true)"
-fi
+# The full [project:NAME] section of an INI registry (header + all lines
+# until the next section or end of file), or the single NAME line of a
+# colon-legacy one, read through the registry reader and stored verbatim
+# in the MANIFEST.
+REGISTRATION="$(projects_cfg_registration "$NAME")" || REGISTRATION=""
 
 # ---------------------------------------------------------------------------
 # Build the MANIFEST content

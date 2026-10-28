@@ -56,6 +56,44 @@
 #       summarize (a fatal pre-flight gate noting that it aborted the run
 #       before any quality-class lint or pytest could execute).
 #
+#   gated_runner_record_instance_finding <lint-name> <cause> <remedy> [KEY=VALUE ...]
+#       Appends one per-instance finding to GATED_RUNNER_FINDINGS, in the
+#       shape lint_dual_channel_pair.py writes (lint, severity, summary,
+#       cause, remedy) plus one key per KEY=VALUE argument (path, pid,
+#       kind, ...). Built by gated_findings.py instance; never fails the
+#       caller.
+#
+#   gated_runner_write_findings_array <output-path>
+#       Writes every accumulated finding to <output-path> as one bare JSON
+#       array -- the --findings-file shape gated_runner_merge_findings_file
+#       reads back -- for a standalone quality-class tool that records its
+#       own per-instance findings with gated_runner_record_instance_finding.
+#       Always writes the file ("[]" when there are none); a write failure
+#       is narrated on stderr and never fails the caller.
+#
+#   gated_runner_run_instance_check <lint-name> <array-name> <formatter> -- <command...>
+#       Runs a post-suite hygiene check in the CURRENT shell (so the
+#       per-instance array it fills is visible afterwards), printing its
+#       stdout+stderr on stdout, and returns 0 whatever it returned. On a
+#       non-zero return, calls `<formatter> <lint-name> <instance>` once per
+#       element of the global array <array-name> -- each records one
+#       per-instance finding -- or, when the check named no instance,
+#       records one finding saying so. See "Post-suite hygiene checks"
+#       below for the four checks and their formatters.
+#
+#   gated_runner_clear_run_evidence <temp-root> <suite>
+#       Removes every evidence file an earlier run of <suite> (unit or
+#       integration) left at the fixed paths a certification run writes:
+#       <temp-root>/lint/*_<suite>.json (per-lint findings),
+#       <temp-root>/lint/*-<suite>.json and its .runid sidecar (the
+#       aggregate findings file, durations), <temp-root>/coverage/<suite>.json
+#       and the coverage data files in <temp-root>/coverage/<suite>-data/.
+#       Called at certification-run start, ahead of the findings-file
+#       claim, so every file at those paths after the run was written by
+#       that run and nothing an earlier run left is read or merged. The
+#       other suite's files are never touched. Prints one line naming the
+#       locations and the number of files removed; never fails the caller.
+#
 #   gated_runner_claim_findings_file <output-path> <runner-name>
 #       "Claims" <output-path> for THIS invocation, before any fatal gate
 #       runs: writes a fresh, empty findings document (via the unmodified
@@ -167,7 +205,10 @@
 # lint_dual_channel_pair.py, merged via gated_runner_merge_findings_file --
 # instead carries whatever per-instance keys that lint already emits (for
 # example "file", "line", "cause", "remedy"); this library does not alter
-# those keys, it only appends the object as-is.
+# those keys, it only appends the object as-is. A post-suite hygiene
+# check's finding (gated_runner_record_instance_finding) carries "cause",
+# "remedy", "kind" and the instance's own key ("path", or "pid" and
+# "cmdline").
 #
 # Consumers (TESTER's "Lint Findings (non-blocking)" report section, or any
 # other automated reader) should treat "lint" and "severity" as the only
@@ -277,6 +318,217 @@ gated_runner_record_finding() {
   local finding
   finding="$(_gated_runner_findings record "$lint_name" "$summary")"
   GATED_RUNNER_FINDINGS+=("$finding")
+}
+
+# ---------------------------------------------------------------------------
+# gated_runner_record_instance_finding <lint-name> <cause> <remedy> [KEY=VALUE ...]
+# ---------------------------------------------------------------------------
+gated_runner_record_instance_finding() {
+  local finding=""
+  if finding="$(_gated_runner_findings instance "$@")" && [[ -n "$finding" ]]; then
+    GATED_RUNNER_FINDINGS+=("$finding")
+  else
+    echo "[gated-runner] ${1:-?}: could not record a per-instance finding (${2:-no cause given})" >&2
+  fi
+  return 0
+}
+
+# ---------------------------------------------------------------------------
+# gated_runner_write_findings_array <output-path>
+# ---------------------------------------------------------------------------
+gated_runner_write_findings_array() {
+  local out_path="$1"
+  local rc=0
+  if [[ ${#GATED_RUNNER_FINDINGS[@]} -gt 0 ]]; then
+    printf '%s\n' "${GATED_RUNNER_FINDINGS[@]}" | _gated_runner_findings array "$out_path" || rc=$?
+  else
+    _gated_runner_findings array "$out_path" < /dev/null || rc=$?
+  fi
+  if [[ $rc -ne 0 ]]; then
+    echo "[gated-runner] could not write findings file ${out_path} (${#GATED_RUNNER_FINDINGS[@]} finding(s) not recorded)" >&2
+  fi
+  return 0
+}
+
+# ---------------------------------------------------------------------------
+# gated_runner_run_instance_check <lint-name> <array-name> <formatter> -- <command...>
+# ---------------------------------------------------------------------------
+gated_runner_run_instance_check() {
+  local lint_name="$1"
+  local array_name="$2"
+  local formatter="$3"
+  shift 3
+  if [[ "${1:-}" == "--" ]]; then
+    shift
+  fi
+  # The check fills the global array itself; empty it first so an earlier
+  # call's instances are never recorded twice.
+  local -n _grl_instances="$array_name"
+  _grl_instances=()
+
+  local rc=0
+  "$@" 2>&1 || rc=$?
+
+  if [[ $rc -eq 0 ]]; then
+    echo "[gated-runner] ${lint_name}: OK"
+    return 0
+  fi
+  if [[ ${#_grl_instances[@]} -eq 0 ]]; then
+    gated_runner_record_finding "$lint_name" \
+      "${lint_name} returned ${rc} without naming an instance; its own output is printed above"
+    echo "[gated-runner] ${lint_name}: quality-class finding(s) (exit ${rc}, no instance named) — non-blocking, continuing." >&2
+    return 0
+  fi
+  local instance
+  for instance in "${_grl_instances[@]}"; do
+    "$formatter" "$lint_name" "$instance"
+  done
+  echo "[gated-runner] ${lint_name}: quality-class finding(s) (${#_grl_instances[@]} per-instance) — non-blocking, continuing." >&2
+  return 0
+}
+
+# ---------------------------------------------------------------------------
+# Post-suite hygiene checks
+# ---------------------------------------------------------------------------
+# Both runners bracket pytest with four report-only checks, each run through
+# gated_runner_run_instance_check so every thing it found is its own
+# finding. Each check fills a global array (documented at the check itself)
+# and has a formatter here that turns one element into one finding:
+#
+#   lint name             check (library)                     array                        formatter
+#   bare_tmp_cleanliness  pgai_tmp_cleanliness_check (temp.sh) PGAI_TMP_RESIDUE_FOUND       gated_runner_tmp_residue_finding
+#   listener_cleanliness  pgai_listener_cleanliness_check      PGAI_LISTENER_LEAKS_FOUND    gated_runner_listener_finding
+#   sentinel_leak         pgai_sentinel_leak_check             PGAI_SENTINEL_LEAKS_FOUND    gated_runner_sentinel_finding
+#                         (sentinel_leak_check.sh)
+#   scratch_sweep         pgai_temp_cleanup_tests (temp.sh)    PGAI_TEMP_CLEANUP_LEFTOVERS  gated_runner_scratch_sweep_finding
+#
+# Each finding names one path or process and a command that inspects it;
+# none repairs anything (a leaked live-root sentinel in particular is only
+# ever removed by the operator).
+
+# gated_runner_tmp_residue_finding <lint-name> <path>
+#   <path> is one residue entry in bare /tmp, as pgai_tmp_cleanliness_check
+#   names it. The remedy lists it and searches the test tree for the name's
+#   prefix (or for mktemp, for a default tmp.XXXXXX name).
+gated_runner_tmp_residue_finding() {
+  local lint_name="$1" path="$2"
+  local name="${path##*/}"
+  local needle="${name%%.*}"
+  [[ "$needle" == "tmp" || -z "$needle" ]] && needle="mktemp"
+  local tests_dir="${REPO_ROOT:-.}/team/tests"
+  gated_runner_record_instance_finding "$lint_name" \
+    "${path} appeared in bare /tmp during the suite run, outside the configured temp root; a test wrote it directly instead of through pgai_mktemp / pgai_mktemp_d" \
+    "ls -ld -- $(printf '%q' "$path") && grep -rnF -- $(printf '%q' "$needle") $(printf '%q' "$tests_dir")" \
+    "kind=bare-tmp-residue" "path=${path}"
+}
+
+# gated_runner_listener_finding <lint-name> <pid><TAB><cmdline>
+gated_runner_listener_finding() {
+  local lint_name="$1" instance="$2"
+  local pid="${instance%%$'\t'*}"
+  local cmdline=""
+  [[ "$instance" == *$'\t'* ]] && cmdline="${instance#*$'\t'}"
+  gated_runner_record_instance_finding "$lint_name" \
+    "TCP listener pid ${pid} (${cmdline:-cmdline unreadable}) rooted in the project temp subtree survived the suite; the test that started it did not stop it" \
+    "ps -o pid,ppid,etime,args -p $(printf '%q' "$pid")" \
+    "kind=surviving-listener" "pid=${pid}" "cmdline=${cmdline}"
+}
+
+# gated_runner_sentinel_finding <lint-name> <kind><TAB><path><TAB><note>
+#   <kind> is added, changed or removed; <note> names the test that wrote
+#   it when the provenance log recorded one, and is otherwise empty.
+gated_runner_sentinel_finding() {
+  local lint_name="$1" instance="$2"
+  local kind path note rest
+  kind="${instance%%$'\t'*}"
+  rest="${instance#*$'\t'}"
+  path="${rest%%$'\t'*}"
+  note=""
+  [[ "$rest" == *$'\t'* ]] && note="${rest#*$'\t'}"
+  local inspect
+  if [[ "$kind" == "removed" ]]; then
+    inspect="ls -la -- $(printf '%q' "${path%/*}")"
+  else
+    inspect="cat -- $(printf '%q' "$path")"
+  fi
+  gated_runner_record_instance_finding "$lint_name" \
+    "live kanban root sentinel ${path} was ${kind} during the suite run and left as found -- not repaired; restore or remove it by hand and find the fixture that resolved the live root instead of its synthetic board.${note:+ ${note}}" \
+    "$inspect" \
+    "kind=sentinel-${kind}" "path=${path}"
+}
+
+# gated_runner_scratch_sweep_finding <lint-name> <path>
+#   <path> is one entry under the temp root's tests/ subtree the post-suite
+#   sweep could not remove.
+gated_runner_scratch_sweep_finding() {
+  local lint_name="$1" path="$2"
+  local quoted
+  quoted="$(printf '%q' "$path")"
+  gated_runner_record_instance_finding "$lint_name" \
+    "the post-suite scratch sweep could not remove ${path}, even after restoring owner-write on it" \
+    "chmod -R u+w -- ${quoted} && rm -rf -- ${quoted}" \
+    "kind=scratch-leftover" "path=${path}"
+}
+
+# ---------------------------------------------------------------------------
+# gated_runner_clear_run_evidence <temp-root> <suite>
+#
+# Every evidence path a certification run writes is fixed and shared by
+# every run on the host, and gated_runner_merge_findings_file merges any
+# per-lint file it finds -- so a lint that crashed, was skipped, or writes
+# only when it has findings would otherwise hand an earlier run's content
+# to this run's aggregate. Removing the suite's files first means a file
+# present at one of those paths after the run is this run's own.
+#
+# The coverage data directory itself is kept (run-gated-suites.sh creates
+# it before the runners start and points COVERAGE_FILE into it); only the
+# files in it go.
+# ---------------------------------------------------------------------------
+gated_runner_clear_run_evidence() {
+  local temp_root="${1:-}"
+  local suite="${2:-}"
+  if [[ -z "$temp_root" || ! "$suite" =~ ^(unit|integration)$ ]]; then
+    local scripts_dir
+    scripts_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+    # CONVERT: deleting nothing leaves the earlier run's files where they
+    # were -- a stale-evidence risk, never a runtime failure -- so the
+    # caller's run goes on. Fails closed: an unexpected scope removes nothing.
+    # CENSUS-ANCHOR: gated-runner-run-evidence-01
+    pgai_emit_error_contract \
+      "gated_runner.run_evidence_scope" \
+      "gated_runner_clear_run_evidence was given temp root '${temp_root}' and suite '${suite}'; it removes earlier runs' evidence only for a non-empty temp root and the suite unit or integration, so nothing was removed and files an earlier run left may still be read." \
+      "grep -n gated_runner_clear_run_evidence ${scripts_dir}/run-unit-tests.sh ${scripts_dir}/run-integration-tests.sh"
+    return 0
+  fi
+
+  local -a earlier=()
+  local path
+  for path in \
+    "${temp_root}/lint/"*_"${suite}".json \
+    "${temp_root}/lint/"*-"${suite}".json \
+    "${temp_root}/lint/"*-"${suite}".json.runid \
+    "${temp_root}/coverage/${suite}.json" \
+    "${temp_root}/coverage/${suite}-data/".coverage*; do
+    # An unmatched glob stays literal; only an existing file is listed.
+    if [[ -f "$path" || -L "$path" ]]; then
+      earlier+=("$path")
+    fi
+  done
+  local removed=0 kept=0
+  for path in "${earlier[@]}"; do
+    if rm -f -- "$path" 2>/dev/null && [[ ! -e "$path" && ! -L "$path" ]]; then
+      removed=$((removed + 1))
+    else
+      kept=$((kept + 1))
+      echo "[gated-runner] run evidence: could not remove ${path}, left by an earlier run; it may be read as this run's." >&2
+    fi
+  done
+  local not_removed=""
+  if [[ $kept -gt 0 ]]; then
+    not_removed="; ${kept} could not be removed"
+  fi
+  echo "[gated-runner] run evidence: this ${suite} run writes its findings to ${temp_root}/lint/findings-${suite}.json (per-lint files ${temp_root}/lint/*_${suite}.json) and its coverage to ${temp_root}/coverage/${suite}.json; removed ${removed} file(s) an earlier run left there${not_removed}."
+  return 0
 }
 
 # ---------------------------------------------------------------------------
@@ -542,7 +794,8 @@ gated_runner_tmux_socket_sweep() {
 # targeted run, over exactly the named files (gated_runner_targeted_file_lints
 # below), so the author of a test file sees its findings in the same session
 # rather than at certification. Their findings print in full and make the
-# targeted run exit non-zero; nothing about them is recorded anywhere.
+# targeted run exit non-zero; they are read from a scratch findings file
+# that is removed afterwards, and nothing about them is recorded anywhere.
 #
 # gated_runner_argv_requests_targeted_run <arg...>
 #   Returns 0 when any argument is exactly `--files`, 1 otherwise. Each
@@ -579,19 +832,28 @@ gated_runner_tmux_socket_sweep() {
 #
 # gated_runner_targeted_file_lints <anti-pattern-lint> <skip-gate> <file>...
 #   Runs the two per-file test-authoring lints over exactly <file>... --
-#   `python3 <anti-pattern-lint> --files <file>...` and
-#   `bash <skip-gate> --files <file>...` -- streaming each lint's output in
-#   full, then one "[targeted-lint] <name>: OK" or "[targeted-lint] <name>:
-#   finding(s) in the named files (exit N)" line. <file>... are the paths the
-#   runner already validated (absolute paths are clearest in the findings);
-#   neither lint walks a directory or scans runtime scripts in this mode.
+#   `python3 <anti-pattern-lint> --findings-file <scratch> --files <file>...`
+#   and `bash <skip-gate> --findings-file <scratch> --files <file>...` --
+#   streaming each lint's output in full. Both lints exit 0 on findings, so
+#   the verdict is read from each one's findings file: one
+#   "[targeted-lint] <name>: OK", "[targeted-lint] <name>: finding(s) in the
+#   named files (N)", or -- when the lint itself exited non-zero, so the
+#   named files were not checked -- "[targeted-lint] <name>: could not check
+#   the named files (exit N)" line. <file>... are the paths the runner
+#   already validated (absolute paths are clearest in the findings); neither
+#   lint walks a directory or scans runtime scripts in this mode. The
+#   scratch findings files live in one pgai_mktemp_d directory (temp.sh must
+#   be sourced) that is removed before returning.
 #   Sets two parallel arrays for the caller's verdict:
-#     GATED_RUNNER_TARGETED_LINT_FAILURES  names of the lints that exited
-#                                          non-zero (test_anti_patterns,
+#     GATED_RUNNER_TARGETED_LINT_FAILURES  names of the lints that reported
+#                                          a finding or could not check
+#                                          (test_anti_patterns,
 #                                          skip_cites_real_bug); empty when
 #                                          both were clean
 #     GATED_RUNNER_TARGETED_LINT_COMMANDS  the shell-quoted command that
-#                                          reproduces each failing lint
+#                                          reproduces each failing lint's
+#                                          printed findings (no
+#                                          --findings-file)
 #   Always returns 0 and never touches GATED_RUNNER_FINDINGS, the findings
 #   file, or the ledger: the caller decides the exit code after pytest.
 # ---------------------------------------------------------------------------
@@ -639,7 +901,7 @@ gated_runner_argv_requests_help() {
 # Both gated runners accept `--pre-merge [--base REF]`: the cheap whole-tree
 # checks a change should pass before it merges, run by the pre-merge engine
 # (team/pgai_agent_kanban/testing/pre_merge.py, called as a module). The unit
-# runner's run covers the by-path module test, the five ratchet lints and the
+# runner's run covers the by-path module test, the six ratchet lints and the
 # tracked-files lint (lint_tracked_ignored.py), the four always-run whole-tree
 # guards (env-bootstrap, operator-verb-docs,
 # dashboard-window-docs, docs-citations -- lint_env_bootstrap.py,
@@ -715,27 +977,46 @@ gated_runner_targeted_file_lints() {
   GATED_RUNNER_TARGETED_LINT_COMMANDS=()
   local -a names=("test_anti_patterns" "skip_cites_real_bug")
   local -a labels=("test anti-pattern lint" "skip-cites-real-bug gate")
-  local -a cmd
-  local i rc
+  local -a cmd shown
+  local i rc count scratch="" findings
+  if declare -F pgai_mktemp_d >/dev/null 2>&1; then
+    scratch="$(pgai_mktemp_d targeted_lint_findings 2>/dev/null)" || scratch=""
+  fi
+  if [[ -z "$scratch" ]]; then
+    echo "gated_runner_lint.sh: gated_runner_targeted_file_lints needs a scratch directory from pgai_mktemp_d; source team/scripts/lib/temp.sh before calling it" >&2
+  fi
   for i in 0 1; do
     if [[ $i -eq 0 ]]; then
-      cmd=(python3 "$ap_lint" --files "$@")
+      shown=(python3 "$ap_lint" --files "$@")
     else
-      cmd=(bash "$skip_gate" --files "$@")
+      shown=(bash "$skip_gate" --files "$@")
     fi
+    findings="${scratch:+${scratch}/${names[$i]}.json}"
+    cmd=("${shown[@]:0:2}")
+    [[ -n "$findings" ]] && cmd+=(--findings-file "$findings")
+    cmd+=("${shown[@]:2}")
     echo "Running ${labels[$i]} over the named files..."
-    set +e
-    "${cmd[@]}"
-    rc=$?
-    set -e
-    if [[ $rc -ne 0 ]]; then
-      echo "[targeted-lint] ${names[$i]}: finding(s) in the named files (exit ${rc})"
-      GATED_RUNNER_TARGETED_LINT_FAILURES+=("${names[$i]}")
-      GATED_RUNNER_TARGETED_LINT_COMMANDS+=("$(gated_runner_quote_argv "${cmd[@]}")")
+    rc=0
+    "${cmd[@]}" || rc=$?
+    count=0
+    if [[ -n "$findings" ]]; then
+      count="$(_gated_runner_findings count "$findings" 2>/dev/null)" || count=0
+      [[ "$count" =~ ^[0-9]+$ ]] || count=0
+    fi
+    if [[ $rc -ne 0 || -z "$findings" ]]; then
+      echo "[targeted-lint] ${names[$i]}: could not check the named files (exit ${rc})"
+    elif [[ $count -gt 0 ]]; then
+      echo "[targeted-lint] ${names[$i]}: finding(s) in the named files (${count})"
     else
       echo "[targeted-lint] ${names[$i]}: OK"
+      continue
     fi
+    GATED_RUNNER_TARGETED_LINT_FAILURES+=("${names[$i]}")
+    GATED_RUNNER_TARGETED_LINT_COMMANDS+=("$(gated_runner_quote_argv "${shown[@]}")")
   done
+  if [[ -n "$scratch" ]] && declare -F pgai_temp_cleanup >/dev/null 2>&1; then
+    pgai_temp_cleanup "$scratch" || true
+  fi
   return 0
 }
 

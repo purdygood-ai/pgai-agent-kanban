@@ -12,11 +12,31 @@
 # touching unrelated /tmp content.
 #
 # Temp root resolution (three-tier + fallback, highest precedence first):
-#   1. PGAI_AGENT_KANBAN_TEMP_DIR env var — if already set, used as-is.
-#   2a. ${tmp_root}/${tmp_subdir} from kanban.cfg [paths] via PGAI_AGENT_KANBAN_ROOT_PATH.
+#   1. PGAI_AGENT_KANBAN_TEMP_DIR env var — when set and not blank, used with
+#      surrounding whitespace dropped (a whitespace-only value reads as unset).
+#   2a. ${tmp_root}/${tmp_subdir} from kanban.cfg [paths] via PGAI_AGENT_KANBAN_ROOT_PATH,
+#       each key taking its own default when absent or blank: tmp_root
+#       defaults to /tmp and tmp_subdir to pgai_kanban_tmp (the defaults
+#       kanban.cfg_example and the config_loader.sh key registry document),
+#       so a cfg setting only tmp_root = /data gives /data/pgai_kanban_tmp.
 #   2b. Self-locate: derive install root from _PGAI_TEMP_SH_DIR (two dirs up) and
-#       try that kanban.cfg when PGAI_AGENT_KANBAN_ROOT_PATH is unset/empty.
-#   3. Last-resort fallback /tmp/pgai_kanban_tmp — when config is unreadable.
+#       try that kanban.cfg when PGAI_AGENT_KANBAN_ROOT_PATH is unset/empty, or
+#       its kanban.cfg is unreadable or leaves tmp_root blank.
+#   3. Last-resort fallback _PGAI_TEMP_FALLBACK_ROOT (/tmp joined with
+#      pgai_kanban_tmp) — when config is unreadable (the same root both
+#      per-key defaults give).
+# Explicit-config form: pgai_temp_dir and pgai_configured_temp_root take an
+# optional kanban.cfg path. Given one, tier 2 reads that file's [paths] and
+# nothing else (no ROOT_PATH lookup, no self-locate) -- load_config in
+# config_loader.sh resolves the cfg it was handed this way.
+#
+# This is the bash twin of the Python resolver
+# pgai_agent_kanban.lib.temp_root.resolve_temp_root, kept in bash (not a
+# python3 call) because pgai_temp_dir runs on hot paths: every pgai_mktemp*,
+# the wake bracket, the git boundary guard. The two answer to one case table,
+# team/tests/fixtures/temp_root_cases.json; tests/unit/test_temp_root_parity.py
+# runs every row through both and fails on any difference. A rule change made
+# here is made there too, and the reverse.
 # The resolver NEVER returns empty or a value naming the filesystem root:
 # a resolved value that canonicalises to '/' (the bare string, '///', a
 # '/x/..' shape, or any other spelling of the top of the filesystem) is
@@ -44,8 +64,9 @@
 #
 # Install-wide (no project context) functions
 # -------------------------------------------
-#   pgai_temp_dir              — echo the resolved root dir, creating it if needed
-#   pgai_configured_temp_root  — echo the root kanban.cfg (or its fallback)
+#   pgai_temp_dir [kanban_cfg] — echo the resolved root dir, creating it if needed
+#   pgai_configured_temp_root [kanban_cfg]
+#                              — echo the root kanban.cfg (or its fallback)
 #                                 configures, ignoring any per-invocation
 #                                 PGAI_AGENT_KANBAN_TEMP_DIR override; read-only,
 #                                 does not create the directory
@@ -71,6 +92,13 @@ _PGAI_TEMP_SH_LOADED=1
 # Capture the directory of this file at source time so pgai_temp_dir() can
 # locate ini_parser.sh without relying on BASH_SOURCE inside a function call.
 _PGAI_TEMP_SH_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# The per-key defaults of kanban.cfg [paths] tmp_root / tmp_subdir, and the
+# tier-3 last-resort root they join to. Stated once here; every resolver
+# branch below names the root through these, never as a literal.
+_PGAI_TEMP_DEFAULT_PARENT="/tmp"
+_PGAI_TEMP_DEFAULT_SUBDIR="pgai_kanban_tmp"
+_PGAI_TEMP_FALLBACK_ROOT="${_PGAI_TEMP_DEFAULT_PARENT}/${_PGAI_TEMP_DEFAULT_SUBDIR}"
 
 # ---------------------------------------------------------------------------
 # _pgai_temp_root_names_filesystem_root <path>
@@ -128,73 +156,115 @@ _pgai_temp_root_names_filesystem_root() {
 # install root) when available.
 # Sub-tier 2b (self-locate): when PGAI_AGENT_KANBAN_ROOT_PATH is unset/empty,
 # derive the install root from _PGAI_TEMP_SH_DIR (captured at source time as
-# <install>/team/scripts/lib). The install root is two directories up. Try
+# <install>/scripts/lib). The install root is two directories up. Try
 # that path's kanban.cfg before falling to Tier 3. This protects callers such
 # as dashboard pane scripts that may not inherit the full framework env.
 # Must NOT use BASH_SOURCE inside the function — _PGAI_TEMP_SH_DIR is the
 # correct reference (captured at source time with BASH_SOURCE, safe there).
+#
+# Explicit-config form: given a kanban.cfg path as $1, tier 2 reads that
+# file's [paths] pair and nothing else -- sub-tiers 2a and 2b are skipped, so
+# a missing file goes straight to tier 3. This is
+# resolve_temp_root(kanban_root)'s rule in the Python resolver.
+#
+# Per-key defaults: whichever pair is read, a key left absent or blank takes
+# its own default -- tmp_root /tmp, tmp_subdir pgai_kanban_tmp -- so a lone
+# tmp_root = /data resolves to /data/pgai_kanban_tmp. With both keys unset
+# the defaults join to the tier-3 root itself.
 # ---------------------------------------------------------------------------
 _pgai_temp_dir_from_config() {
-    local _cfg_dir="${PGAI_AGENT_KANBAN_ROOT_PATH:-}"
     local _tmp_root="" _tmp_subdir=""
 
-    # Sub-tier 2a: env-var points to a readable kanban.cfg.
-    if [[ -n "$_cfg_dir" && -r "${_cfg_dir}/kanban.cfg" ]]; then
-        # Source ini_parser.sh only if read_ini is not already available.
-        if ! command -v read_ini >/dev/null 2>&1; then
-            # shellcheck source=ini_parser.sh
-            source "${_PGAI_TEMP_SH_DIR}/ini_parser.sh"
-        fi
-        _tmp_root="$(read_ini "${_cfg_dir}/kanban.cfg" paths tmp_root "")"
-        _tmp_subdir="$(read_ini "${_cfg_dir}/kanban.cfg" paths tmp_subdir "")"
+    # Source ini_parser.sh only if read_ini is not already available.
+    if ! command -v read_ini >/dev/null 2>&1; then
+        # shellcheck source=ini_parser.sh
+        source "${_PGAI_TEMP_SH_DIR}/ini_parser.sh"
     fi
 
-    # Sub-tier 2b: self-locate fallback when env var was unset/empty or its
-    # kanban.cfg was unreadable (i.e. _tmp_root still empty).
-    if [[ -z "$_tmp_root" ]]; then
-        local _self_root
-        # _PGAI_TEMP_SH_DIR is <install>/team/scripts/lib; install root is two up.
-        _self_root="$(cd "${_PGAI_TEMP_SH_DIR}/../.." && pwd)"
-        if [[ -r "${_self_root}/kanban.cfg" ]]; then
-            if ! command -v read_ini >/dev/null 2>&1; then
-                # shellcheck source=ini_parser.sh
-                source "${_PGAI_TEMP_SH_DIR}/ini_parser.sh"
-            fi
-            _tmp_root="$(read_ini "${_self_root}/kanban.cfg" paths tmp_root "")"
-            _tmp_subdir="$(read_ini "${_self_root}/kanban.cfg" paths tmp_subdir "")"
+    if [[ $# -ge 1 ]]; then
+        # Explicit-config form: this file alone.
+        if [[ -n "$1" && -r "$1" ]]; then
+            _tmp_root="$(read_ini "$1" paths tmp_root "")"
+            _tmp_subdir="$(read_ini "$1" paths tmp_subdir "")"
         fi
-    fi
-
-    local dir
-    if [[ -n "$_tmp_root" && -n "$_tmp_subdir" ]]; then
-        dir="${_tmp_root}/${_tmp_subdir}"
     else
-        # Tier 3: last-resort fallback — config absent or unreadable.
-        # anti-pattern-allowlist: 2 (justification: this IS the resolver's documented fallback; the literal is intentional and must remain here as the hard-coded safety net)
-        dir="/tmp/pgai_kanban_tmp"
+        local _cfg_dir
+        _cfg_dir="$(_pgai_temp_trim "${PGAI_AGENT_KANBAN_ROOT_PATH:-}")"
+
+        # Sub-tier 2a: env-var points to a readable kanban.cfg.
+        if [[ -n "$_cfg_dir" && -r "${_cfg_dir}/kanban.cfg" ]]; then
+            _tmp_root="$(read_ini "${_cfg_dir}/kanban.cfg" paths tmp_root "")"
+            _tmp_subdir="$(read_ini "${_cfg_dir}/kanban.cfg" paths tmp_subdir "")"
+        fi
+
+        # Sub-tier 2b: self-locate fallback when env var was unset/empty or its
+        # kanban.cfg was unreadable or left tmp_root blank.
+        if [[ -z "$_tmp_root" ]]; then
+            _pgai_temp_self_located_pair
+        fi
     fi
+
+    # Per-key defaults (the kanban.cfg_example / key-registry defaults); with
+    # neither key set -- config absent or unreadable -- they join to the
+    # tier-3 last resort, _PGAI_TEMP_FALLBACK_ROOT.
+    local dir
+    dir="${_tmp_root:-$_PGAI_TEMP_DEFAULT_PARENT}/${_tmp_subdir:-$_PGAI_TEMP_DEFAULT_SUBDIR}"
 
     # Safety invariant: this resolver must never return empty or a value that
     # canonicalises to the filesystem root (a configured tmp_root of '/' with
     # a tmp_subdir of '/' would otherwise pass a raw-string test as '///').
     if _pgai_temp_root_names_filesystem_root "$dir"; then
-        # anti-pattern-allowlist: 2 (justification: safety invariant fallback in the resolver itself; intentional hard-coded sentinel, not a caller site)
-        dir="/tmp/pgai_kanban_tmp"
+        dir="$_PGAI_TEMP_FALLBACK_ROOT"
     fi
 
     printf '%s' "$dir"
 }
 
 # ---------------------------------------------------------------------------
-# pgai_temp_dir
+# _pgai_temp_trim <value>
+# Internal: echo <value> with leading and trailing whitespace removed, using
+# parameter expansion only (no subprocess -- this runs on every pgai_temp_dir
+# call). Matches the Python resolver's str.strip() for ASCII whitespace.
+# ---------------------------------------------------------------------------
+_pgai_temp_trim() {
+    local _v="${1:-}"
+    _v="${_v#"${_v%%[![:space:]]*}"}"
+    _v="${_v%"${_v##*[![:space:]]}"}"
+    printf '%s' "$_v"
+}
+
+# ---------------------------------------------------------------------------
+# _pgai_temp_self_located_pair
+# Internal, sub-tier 2b of _pgai_temp_dir_from_config: set the caller's
+# _tmp_root / _tmp_subdir locals (bash dynamic scope) from the kanban.cfg of
+# the install this temp.sh sits in, when that file is readable; leaves them
+# untouched otherwise.
+# ---------------------------------------------------------------------------
+_pgai_temp_self_located_pair() {
+    local _self_root
+    # _PGAI_TEMP_SH_DIR is <install>/scripts/lib; install root is two up.
+    _self_root="$(cd "${_PGAI_TEMP_SH_DIR}/../.." && pwd)"
+    if [[ -r "${_self_root}/kanban.cfg" ]]; then
+        _tmp_root="$(read_ini "${_self_root}/kanban.cfg" paths tmp_root "")"
+        _tmp_subdir="$(read_ini "${_self_root}/kanban.cfg" paths tmp_subdir "")"
+    fi
+}
+
+# ---------------------------------------------------------------------------
+# pgai_temp_dir [kanban_cfg]
 # Echo the resolved framework temp root directory and ensure it exists.
-# Returns the path (always ends without a trailing slash).
+# The path is spelled as the winning tier gives it (a configured trailing
+# slash is kept).
 #
 # Resolution order:
-#   1. PGAI_AGENT_KANBAN_TEMP_DIR — env-var override.
-#   2a. ${tmp_root}/${tmp_subdir} from kanban.cfg via PGAI_AGENT_KANBAN_ROOT_PATH.
+#   1. PGAI_AGENT_KANBAN_TEMP_DIR — env-var override, whitespace-trimmed;
+#      blank reads as unset.
+#   2a. ${tmp_root}/${tmp_subdir} from kanban.cfg via PGAI_AGENT_KANBAN_ROOT_PATH,
+#       a key absent or blank taking its default (/tmp, pgai_kanban_tmp).
 #   2b. Self-locate: install root derived from _PGAI_TEMP_SH_DIR/../..
-#   3. Hard fallback /tmp/pgai_kanban_tmp (config unreadable / absent).
+#   3. Hard fallback _PGAI_TEMP_FALLBACK_ROOT (config unreadable / absent).
+# With a kanban_cfg argument, tier 2 reads that file alone (see
+# _pgai_temp_dir_from_config's explicit-config form); tier 1 still wins.
 # Never returns empty or a value that canonicalises to '/' -- the tier-1
 # override is held to the same invariant as the configured tiers.
 # ---------------------------------------------------------------------------
@@ -202,17 +272,15 @@ pgai_temp_dir() {
     local dir
 
     # Tier 1: env-var override (set by wake_common.sh or the operator).
-    if [[ -n "${PGAI_AGENT_KANBAN_TEMP_DIR:-}" ]]; then
-        dir="${PGAI_AGENT_KANBAN_TEMP_DIR}"
-    else
-        dir="$(_pgai_temp_dir_from_config)"
+    dir="$(_pgai_temp_trim "${PGAI_AGENT_KANBAN_TEMP_DIR:-}")"
+    if [[ -z "$dir" ]]; then
+        dir="$(_pgai_temp_dir_from_config "$@")"
     fi
 
     # Safety invariant: resolver must never return empty or a value that
     # canonicalises to the filesystem root.
     if _pgai_temp_root_names_filesystem_root "$dir"; then
-        # anti-pattern-allowlist: 2 (justification: safety invariant fallback in the resolver itself; intentional hard-coded sentinel, not a caller site)
-        dir="/tmp/pgai_kanban_tmp"
+        dir="$_PGAI_TEMP_FALLBACK_ROOT"
     fi
 
     mkdir -p "$dir"
@@ -220,10 +288,11 @@ pgai_temp_dir() {
 }
 
 # ---------------------------------------------------------------------------
-# pgai_configured_temp_root
+# pgai_configured_temp_root [kanban_cfg]
 # Echo the framework temp root exactly as kanban.cfg (or its self-locate /
 # hard-coded fallback) configures it — deliberately IGNORING any
 # PGAI_AGENT_KANBAN_TEMP_DIR override present in the current environment.
+# With a kanban_cfg argument, only that file's [paths] is read.
 #
 # Use this, never pgai_temp_dir, when the question is "did the framework
 # itself produce this root" rather than "what root should THIS invocation
@@ -243,7 +312,7 @@ pgai_temp_dir() {
 # bring a root into existence just to ask whether it is the framework's own.
 # ---------------------------------------------------------------------------
 pgai_configured_temp_root() {
-    _pgai_temp_dir_from_config
+    _pgai_temp_dir_from_config "$@"
 }
 
 # ---------------------------------------------------------------------------
@@ -318,7 +387,7 @@ pgai_temp_cleanup() {
     real_target="$(readlink -m "$target")"
 
     # Require that real_target starts with real_root/ (note the trailing
-    # slash guard prevents /tmp/pgai_kanban_tmp_extra from matching).
+    # slash guard prevents a sibling such as <root>_extra from matching).
     if [[ "$real_target" != "${real_root}/"* && "$real_target" != "$real_root" ]]; then
         echo "temp.sh: pgai_temp_cleanup: refusing to remove '${target}' — path is not under the configured temp root '${real_root}'" >&2
         return 1
@@ -357,7 +426,12 @@ pgai_temp_cleanup() {
 # chmod itself cannot fix, e.g. a directory this process does not own), the
 # function narrates the exact path to stderr and returns non-zero rather
 # than deleting nothing silently; it is the caller's job to treat that as a
-# non-fatal warning rather than a runner-wide failure.
+# non-fatal warning rather than a runner-wide failure. It then also sets the
+# global array PGAI_TEMP_CLEANUP_LEFTOVERS to each entry still left
+# directly under the tests/ subtree (the subtree itself when it is empty),
+# so a caller running it in its own shell can report each leftover as its
+# own finding (gated_runner_run_instance_check); the array is empty after a
+# clean sweep and after a refusal.
 #
 # The tests/ directory itself is removed entirely (rm -rf), mirroring the
 # behaviour of pgai_temp_cleanup on a subdirectory.
@@ -365,6 +439,7 @@ pgai_temp_cleanup() {
 # Usage: pgai_temp_cleanup_tests
 # ---------------------------------------------------------------------------
 pgai_temp_cleanup_tests() {
+    PGAI_TEMP_CLEANUP_LEFTOVERS=()
     local root
     root="$(pgai_temp_dir)"
 
@@ -407,6 +482,11 @@ pgai_temp_cleanup_tests() {
         # summary below.
         if ! rm -rf "$tests_path"; then
             echo "temp.sh: pgai_temp_cleanup_tests: could not fully remove '${tests_path}' even after restoring write permission — leaving it in place for manual inspection" >&2
+            local leftover
+            while IFS= read -r -d '' leftover; do
+                PGAI_TEMP_CLEANUP_LEFTOVERS+=("$leftover")
+            done < <(find "$tests_path" -mindepth 1 -maxdepth 1 -print0 2>/dev/null | sort -z)
+            [[ ${#PGAI_TEMP_CLEANUP_LEFTOVERS[@]} -gt 0 ]] || PGAI_TEMP_CLEANUP_LEFTOVERS=("$tests_path")
             return 1
         fi
     fi
@@ -589,6 +669,38 @@ pgai_mktemp_d_p() {
 }
 
 # ---------------------------------------------------------------------------
+# _pgai_tmp_is_managed_project_temp_root <basename>
+# Return 0 (true) if <basename> has the shape of a managed project's own
+# fixed-name temp root -- pgai_<name>_tmp, such as pgai_my-app_tmp -- rather than
+# the shape of a file or directory the kanban created in bare /tmp.
+#
+# Several managed projects can run on one host, and a sibling project may keep
+# its scratch root directly in /tmp under the same pgai_ prefix the kanban
+# uses. When that project's agent creates its root while a kanban suite runs,
+# the root appears in the suite's before/after diff although nothing in the
+# kanban wrote it. The name alone cannot prove which project made it, so the
+# cleanliness check reports such an entry as of unproven origin instead of as
+# kanban residue.
+#
+# The kanban's own default temp-root name (pgai_kanban_tmp) is never a
+# sibling's: it is the kanban's by name, so it stays kanban residue whenever
+# it appears in /tmp without being the configured root. mktemp-shaped names
+# (pgai_tmp.XXXXXX) do not end in "_tmp" and so are never matched here.
+# ---------------------------------------------------------------------------
+_pgai_tmp_is_managed_project_temp_root() {
+    local name="$1"
+    case "$name" in
+        pgai_kanban_tmp)
+            return 1  # the kanban's own default root name
+            ;;
+        pgai_?*_tmp)
+            return 0  # pgai_<name>_tmp: a managed project's fixed-name root
+            ;;
+    esac
+    return 1
+}
+
+# ---------------------------------------------------------------------------
 # _pgai_tmp_is_kanban_residue <basename>
 # Return 0 (true) if <basename> looks like a kanban-authored artifact that
 # incorrectly landed in bare /tmp rather than under the configured temp root.
@@ -612,6 +724,11 @@ pgai_mktemp_d_p() {
 #                  pgai_kanban_tmp.XXXXXX, pgai_test.XXXXXX)
 #   tmp.*        — default bash mktemp output (no template: mktemp → tmp.XXXXXX)
 #
+# Exception: a pgai_<name>_tmp name shaped like another managed project's
+# temp root (_pgai_tmp_is_managed_project_temp_root) is NOT kanban residue --
+# a sibling project on the same host may create it, so its origin is unproven.
+# pgai_tmp_cleanliness_check reports those entries separately.
+#
 # Names produced by foreign runtime tools (runc-process*, systemd-*, snap.*,
 # etc.) do not start with "pgai_" or "tmp." and are therefore not kanban
 # residue. This is a positive-match design: entries are flagged ONLY when
@@ -625,6 +742,9 @@ _pgai_tmp_is_kanban_residue() {
     local name="$1"
     case "$name" in
         pgai_*)
+            # A sibling project's fixed-name temp root shares the prefix but
+            # is not provably the kanban's -- see the exception above.
+            _pgai_tmp_is_managed_project_temp_root "$name" && return 1
             # pgai_-prefixed names: written by kanban code using pgai_mktemp or
             # similar, accidentally routed to bare /tmp instead of pgai_temp_dir.
             return 0
@@ -666,7 +786,8 @@ pgai_tmp_snapshot() {
 # and report any NEW entries that are NOT under the configured pgai temp root.
 #
 # The check enforces the kanban's own footprint contract: everything the
-# kanban writes must land under pgai_temp_dir (default /tmp/pgai_kanban_tmp).
+# kanban writes must land under pgai_temp_dir (default
+# _PGAI_TEMP_FALLBACK_ROOT).
 # Anything else that appears in bare /tmp during a suite run is unexpected
 # kanban residue.
 #
@@ -674,23 +795,36 @@ pgai_tmp_snapshot() {
 # NOT attempt to police other tools' temp dirs (pytest, node, tmux, claude
 # CLI, etc.).  The mechanism — comparing before/after snapshots — naturally
 # limits scope: only entries that were absent before the suite started are
-# candidates for reporting.  If those entries happen to belong to another
-# tool that started concurrently, that is a false positive; the operator can
-# add a suite-specific opt-out if needed.  In practice, CI runs are isolated
-# enough that concurrent /tmp activity is negligible.
+# candidates for reporting, and of those only kanban-shaped names
+# (_pgai_tmp_is_kanban_residue) count as residue.
+#
+# Attribution rule: a new entry is blamed on the kanban suite only when its
+# name is one the kanban produces.  A pgai_<name>_tmp entry shaped like
+# another managed project's own temp root (_pgai_tmp_is_managed_project_temp_root,
+# e.g. pgai_my-app_tmp) may have been created by a sibling project's agent running
+# on the same host during the suite, so it is listed on separate NOTE lines
+# marked "origin not proven kanban-authored" and does not count toward the
+# non-zero return.  The configured kanban temp-root basename is never listed.
 #
 # Arguments:
 #   $1  Path to a file containing the pre-run snapshot (one basename per line,
 #       as produced by pgai_tmp_snapshot).
 #
 # Returns:
-#   0  — clean (no new kanban residue in bare /tmp)
-#   1  — residue found (names printed to stderr)
+#   0  — clean (no new kanban residue in bare /tmp; entries of unproven
+#        origin, if any, are printed to stderr as NOTE lines)
+#   1  — residue found (names printed to stderr), or no snapshot file
+#
+# Sets the global array PGAI_TMP_RESIDUE_FOUND to the full path of each
+# residue entry (empty when clean or when the snapshot file is missing), so
+# a caller running the check in its own shell can report each entry as its
+# own finding (gated_runner_run_instance_check).
 #
 # Usage:
 #   pgai_tmp_cleanliness_check "$_PRE_TMP_SNAPSHOT_FILE"
 # ---------------------------------------------------------------------------
 pgai_tmp_cleanliness_check() {
+    PGAI_TMP_RESIDUE_FOUND=()
     local snapshot_file="${1:-}"
     if [[ -z "$snapshot_file" || ! -f "$snapshot_file" ]]; then
         echo "temp.sh: pgai_tmp_cleanliness_check: snapshot file argument is required and must exist; got: ${snapshot_file:-<empty>}" >&2
@@ -721,24 +855,35 @@ pgai_tmp_cleanliness_check() {
     local new_entries
     new_entries="$(comm -23 <(echo "$current_snapshot") "$snapshot_file" 2>/dev/null || true)"
 
-    # Filter: keep only entries that are kanban-authored residue.
-    # Two-step filter:
+    # Classify each new entry:
     #   1. Skip the configured kanban temp root basename (expected framework home).
-    #   2. Skip foreign transient artifacts — entries not produced by kanban code.
-    #      Uses _pgai_tmp_is_kanban_residue (positive match on kanban naming) so
-    #      that tools like runc, systemd, snap, etc. do not trigger false positives.
-    #      Only names the kanban framework itself would create (pgai_* or tmp.*)
-    #      are treated as residue; everything else is silently ignored.
+    #   2. Kanban residue — a name the kanban produces (_pgai_tmp_is_kanban_residue:
+    #      pgai_* or tmp.*, minus sibling temp-root shapes).  Counts as a failure.
+    #   3. Unproven origin — a pgai_<name>_tmp sibling temp-root shape.  Listed
+    #      as a NOTE, never counted as kanban residue.
+    #   4. Everything else (runc, systemd, snap, ...) is silently ignored.
     local residue=()
+    local unproven=()
     local entry
     while IFS= read -r entry; do
         [[ -z "$entry" ]] && continue
         # Skip the configured kanban temp root (e.g. pgai_kanban_tmp).
         [[ "$entry" == "$root_basename" ]] && continue
-        # Skip foreign tool artifacts — only flag kanban-authored names.
-        _pgai_tmp_is_kanban_residue "$entry" || continue
-        residue+=("$entry")
+        if _pgai_tmp_is_kanban_residue "$entry"; then
+            residue+=("$entry")
+        elif _pgai_tmp_is_managed_project_temp_root "$entry"; then
+            unproven+=("$entry")
+        fi
     done <<< "$new_entries"
+
+    if [[ "${#unproven[@]}" -gt 0 ]]; then
+        echo "[pgai-cleanliness] NOTE: entries named like another managed project's temp root" >&2
+        echo "[pgai-cleanliness] (pgai_<name>_tmp) appeared in /tmp during the suite run; a sibling" >&2
+        echo "[pgai-cleanliness] project on this host may have created them, so they are not counted as kanban residue:" >&2
+        for entry in "${unproven[@]}"; do
+            echo "[pgai-cleanliness]   /tmp/${entry} (origin not proven kanban-authored)" >&2
+        done
+    fi
 
     if [[ "${#residue[@]}" -eq 0 ]]; then
         return 0
@@ -750,6 +895,7 @@ pgai_tmp_cleanliness_check() {
     echo "[pgai-cleanliness] and are NOT under the configured kanban temp dir (${root}):" >&2
     for entry in "${residue[@]}"; do
         echo "[pgai-cleanliness]   /tmp/${entry}" >&2
+        PGAI_TMP_RESIDUE_FOUND+=("/tmp/${entry}")
     done
     echo "[pgai-cleanliness] Kanban code must write temp files under pgai_temp_dir (${root})." >&2
     echo "[pgai-cleanliness] Use pgai_mktemp_d / pgai_mktemp from temp.sh instead of bare /tmp paths." >&2
@@ -943,8 +1089,8 @@ pgai_listener_snapshot() {
 #   flagging every matching listener currently alive.
 #
 # Scope narrowing:
-#   When multiple projects share the same framework temp root (e.g.
-#   /tmp/pgai_kanban_tmp), a sibling project's leaked listener would be
+#   When multiple projects share the same framework temp root (the
+#   pgai_temp_dir answer), a sibling project's leaked listener would be
 #   falsely attributed to whichever project's runner happens to check next if
 #   only the temp root basename is used.  To prevent cross-project false
 #   positives, callers should supply the per-project subtree path so the check
@@ -977,7 +1123,7 @@ pgai_listener_snapshot() {
 #
 # Arguments:
 #   $1 (optional) — absolute path to the project's temp subtree
-#                   (e.g. /tmp/pgai_kanban_tmp/projects/pgai-agent-kanban).
+#                   (e.g. "$(pgai_temp_dir)/projects/pgai-agent-kanban").
 #                   When provided, only listeners under this prefix are flagged.
 #                   Overrides PGAI_PROJECT_TEMP_SUBTREE when both are set.
 #   $2 (optional) — path to a pre-suite snapshot file produced by
@@ -1000,14 +1146,20 @@ pgai_listener_snapshot() {
 #   1  — at least one scoped listener not present in the pre-suite snapshot
 #        found (details printed to stderr)
 #
+# Sets the global array PGAI_LISTENER_LEAKS_FOUND to one "<pid><TAB><cmdline>"
+# element per flagged listener (empty when none), so a caller running the
+# check in its own shell can report each listener as its own finding
+# (gated_runner_run_instance_check).
+#
 # Usage:
 #   pgai_listener_cleanliness_check
-#   pgai_listener_cleanliness_check "/tmp/pgai_kanban_tmp/projects/my-project"
-#   pgai_listener_cleanliness_check "/tmp/pgai_kanban_tmp/projects/my-project" "$_snap"
-#   PGAI_PROJECT_TEMP_SUBTREE="/tmp/pgai_kanban_tmp/projects/my-project" \
+#   pgai_listener_cleanliness_check "$(pgai_temp_dir)/projects/my-project"
+#   pgai_listener_cleanliness_check "$(pgai_temp_dir)/projects/my-project" "$_snap"
+#   PGAI_PROJECT_TEMP_SUBTREE="$(pgai_temp_dir)/projects/my-project" \
 #       pgai_listener_cleanliness_check
 # ---------------------------------------------------------------------------
 pgai_listener_cleanliness_check() {
+    PGAI_LISTENER_LEAKS_FOUND=()
     local root
     root="$(pgai_temp_dir)"
 
@@ -1075,6 +1227,7 @@ pgai_listener_cleanliness_check() {
     local i
     for i in "${!flagged_pids[@]}"; do
         echo "[pgai-listener]   pid=${flagged_pids[$i]}  cmdline=${flagged_cmdlines[$i]}" >&2
+        PGAI_LISTENER_LEAKS_FOUND+=("${flagged_pids[$i]}"$'\t'"${flagged_cmdlines[$i]}")
     done
     echo "[pgai-listener] Tests must stop any server they start; use a teardown-guaranteed fixture." >&2
     return 1
@@ -1226,7 +1379,7 @@ wake_tmp_litter_check_and_report() {
 
     # Resolve the framework temp root so we can exclude it and its descendants.
     local fw_root
-    fw_root="$(pgai_temp_dir 2>/dev/null || echo "/tmp/pgai_kanban_tmp")"
+    fw_root="$(pgai_temp_dir)"
     local fw_root_basename
     fw_root_basename="$(basename "$fw_root")"
 

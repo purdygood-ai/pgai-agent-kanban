@@ -4,12 +4,14 @@
 # visibility window (unified 8-column layout).
 #
 # Output shape:
-#   PROJECT: <tag> <name>  <tag> <name>  ...   |   STATUS: open  running  done  blocked
+#   PROJECT: <tag> <name>  ...   |   STATUS: open  running  done  wont-do  blocked  needs-operator  ↻ carried
 #
 # Each project tag is rendered in its display_color (truecolor ANSI when the
 # terminal supports it; "[abbr]" fallback in NO_COLOR / TERM=dumb mode). The
 # status keywords are rendered in their mapped status colors so the operator can
 # read the convention directly from the legend without needing external reference.
+# "carried" is shown as the marker carried rows carry ("↻" in colour,
+# "[carried]" in NO_COLOR / TERM=dumb mode).
 #
 # Usage:
 #   legend-render.sh [--kanban-root <path>]
@@ -43,6 +45,11 @@ source "${SCRIPT_DIR}/../lib/dashboard_legend.sh"
 # shellcheck source=lib/dev_tree.sh
 source "${SCRIPT_DIR}/../lib/dev_tree.sh"
 
+# pp_run_ops: the legend renderer runs from this tree's own pgai_agent_kanban
+# package.
+# shellcheck source=../lib/pp_run_ops.sh
+source "${SCRIPT_DIR}/../lib/pp_run_ops.sh"
+
 # ---------------------------------------------------------------------------
 # Parse arguments
 # ---------------------------------------------------------------------------
@@ -67,12 +74,15 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+# Operator user config, then [chain] pm_mode (config_loader.sh).
+# shellcheck source=../lib/config_loader.sh
+source "${SCRIPT_DIR}/../lib/config_loader.sh"
+config_startup_prelude "$KANBAN_ROOT"
 # ---------------------------------------------------------------------------
 # Source config (INI format via kanban.cfg; replaces legacy config.cfg)
 # read_ini available via project_paths.sh (sourced above).
 # ---------------------------------------------------------------------------
 if [[ -f "${KANBAN_ROOT}/kanban.cfg" ]]; then
-    export PGAI_KANBAN_PM_MODE="${PGAI_KANBAN_PM_MODE:-$(read_ini "${KANBAN_ROOT}/kanban.cfg" chain pm_mode automatic)}"
     DASHBOARD_ROWS_PER_COLUMN="${DASHBOARD_ROWS_PER_COLUMN:-$(read_ini "${KANBAN_ROOT}/kanban.cfg" dashboard rows_per_column 21)}"
     export DASHBOARD_ROWS_PER_COLUMN
 fi
@@ -87,12 +97,11 @@ if [[ "${TERM:-}" == "dumb" ]] || [[ -n "${NO_COLOR:-}" ]]; then
 fi
 
 # ---------------------------------------------------------------------------
-# Build the legend line using a Python helper for consistent ANSI handling.
-# Python handles truecolor hex-to-rgb conversion and text assembly.
+# Build the legend line: pgai_agent_kanban.dashboard.legend handles the
+# truecolor hex-to-rgb conversion and the text assembly.
 # ---------------------------------------------------------------------------
 
 # Collect project names and their display colors via projects_cfg helpers.
-# Serialize to newline-delimited env vars for the Python subprocess.
 PROJ_NAMES=()
 PROJ_COLORS=()
 
@@ -107,151 +116,19 @@ while IFS= read -r _proj; do
     PROJ_COLORS+=("$_color")
 done < <(KANBAN_ROOT="$KANBAN_ROOT" projects_cfg_list 2>/dev/null || true)
 
-export _LEGEND_PROJ_NAMES_STR
-export _LEGEND_PROJ_COLORS_STR
-export _LEGEND_TEMPLATE
-export _LEGEND_STATUS_KEYWORDS_STR
-_LEGEND_PROJ_NAMES_STR="$(printf '%s\n' "${PROJ_NAMES[@]+"${PROJ_NAMES[@]}"}")"
-_LEGEND_PROJ_COLORS_STR="$(printf '%s\n' "${PROJ_COLORS[@]+"${PROJ_COLORS[@]}"}")"
-
-# Pass the DASHBOARD_LEGEND_TEMPLATE and DASHBOARD_LEGEND_STATUS_KEYWORDS
-# constants (sourced from lib/dashboard_legend.sh above) to the Python
-# subprocess so the assembled legend always matches the canonical template.
-_LEGEND_TEMPLATE="${DASHBOARD_LEGEND_TEMPLATE}"
-_LEGEND_STATUS_KEYWORDS_STR="${DASHBOARD_LEGEND_STATUS_KEYWORDS[*]}"
-
-python3 - "$USE_COLOR" <<'PYEOF'
-import os, re, sys
-
-use_color = sys.argv[1].lower() == "true"
-
-# ---------------------------------------------------------------------------
-# Resolve the pgai_agent_kanban package from the live-install anchor only.
-# The live kanban root (PGAI_AGENT_KANBAN_ROOT_PATH) is the single sys.path
-# candidate -- the dev tree is DATA to the live runtime, never CODE. A
-# missing live package fails the import loudly, naming the import path.
-# ---------------------------------------------------------------------------
-_kanban_root = os.environ.get("PGAI_AGENT_KANBAN_ROOT_PATH", "")
-if _kanban_root and _kanban_root not in sys.path:
-    sys.path.insert(0, _kanban_root)
-
-from pgai_agent_kanban.lib.palette import (  # noqa: E402
-    ansi_code,
-    load_default_palette,
-    PaletteFileError,
-    resolve_semantic_color,
-)
-
-# Canonical gray sentinel: sourced from team/config/default_palette.txt via
-# the shared palette loader (its last entry is the documented "last resort"
-# gray). A missing/malformed definition file must not crash this render-path
-# script -- fall back to the literal gray sentinel so a broken/absent dev
-# tree still degrades to a working legend line instead of an unhandled
-# traceback (graceful-degradation contract: dashboards render, never crash).
-try:
-    _GRAY_FALLBACK = load_default_palette()[-1]
-except PaletteFileError:
-    _GRAY_FALLBACK = "#888780"
-
-# ---------------------------------------------------------------------------
-# ANSI helpers
-# ---------------------------------------------------------------------------
-def truecolor(hex_color):
-    """Return a truecolor ANSI escape for the given #RRGGBB hex color."""
-    if not use_color:
-        return ""
-    h = hex_color.lstrip("#")
-    if len(h) != 6:
-        return ""
-    try:
-        r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
-    except ValueError:
-        return ""
-    return f"\033[38;2;{r};{g};{b}m"
-
-RESET = ansi_code("reset", use_color)
-
-# Status-to-color mapping (same arms as column_render.cells.status_color), resolved
-# from the single-source semantic palette (team/config/default_palette.txt
-# "status_*" keys) rather than a hand-decided ANSI literal per branch.
-# Status colors are independent of the project-tag palette (the ordered
-# hex list in the same file) -- status colors and project-tag colors are
-# two separate color systems that must not be conflated (palette
-# single-sourcing design).
+# Names and colors go to the renderer newline-delimited; the template and
+# the status keywords are the DASHBOARD_LEGEND_TEMPLATE and
+# DASHBOARD_LEGEND_STATUS_KEYWORDS constants (sourced from
+# lib/dashboard_legend.sh above), so the assembled legend always matches the
+# canonical template.
 #
-# "done" and "wont-do" are both terminal-resolved states — green means
-# "settled, no action required". They share the status_done semantic key.
-def status_color(s):
-    if not use_color:
-        return ""
-    if s == "running":
-        return resolve_semantic_color("status_running", use_color)
-    if s in ("done", "wont-do"):
-        return resolve_semantic_color("status_done", use_color)
-    if s == "blocked":
-        return resolve_semantic_color("status_blocked", use_color)
-    return resolve_semantic_color("status_open", use_color)
-
-# ---------------------------------------------------------------------------
-# Read project data and template constants from environment
-# ---------------------------------------------------------------------------
-def env_lines(varname):
-    raw = os.environ.get(varname, "")
-    return [ln for ln in raw.splitlines() if ln]
-
-proj_names  = env_lines("_LEGEND_PROJ_NAMES_STR")
-proj_colors = env_lines("_LEGEND_PROJ_COLORS_STR")
-
-# DASHBOARD_LEGEND_TEMPLATE — sourced from lib/dashboard_legend.sh via bash.
-# Fall back to the canonical format if for any reason the env var is empty.
-legend_template = os.environ.get("_LEGEND_TEMPLATE", "").strip()
-if not legend_template:
-    legend_template = "PROJECT: {PROJECTS_BLOCK}   |   STATUS: {STATUS_BLOCK}"
-
-# DASHBOARD_LEGEND_STATUS_KEYWORDS — space-separated list from bash array.
-# Fall back to the canonical four keywords when the env var is empty.
-raw_keywords = os.environ.get("_LEGEND_STATUS_KEYWORDS_STR", "").strip()
-status_keywords = raw_keywords.split() if raw_keywords else ["open", "running", "done", "blocked"]
-
-# Pad colors list to match names length
-while len(proj_colors) < len(proj_names):
-    proj_colors.append(_GRAY_FALLBACK)
-
-# ---------------------------------------------------------------------------
-# Build the PROJECT block
-# ---------------------------------------------------------------------------
-tag_glyph = "■"  # ■  (filled square)
-
-project_parts = []
-for name, color in zip(proj_names, proj_colors):
-    if use_color:
-        tag = f"{truecolor(color)}{tag_glyph}{RESET}"
-    else:
-        short = name[:4] if name else "????"
-        tag = f"[{short}]"
-    project_parts.append(f"{tag} {name}")
-
-projects_block = "  ".join(project_parts) if project_parts else "(no projects)"
-
-# ---------------------------------------------------------------------------
-# Build the STATUS block
-# ---------------------------------------------------------------------------
-status_parts = []
-for kw in status_keywords:
-    if use_color:
-        sc = status_color(kw)
-        status_parts.append(f"{sc}{kw}{RESET}")
-    else:
-        status_parts.append(kw)
-
-status_block = "  ".join(status_parts)
-
-# ---------------------------------------------------------------------------
-# Assemble final legend line by substituting {PROJECTS_BLOCK} and
-# {STATUS_BLOCK} into DASHBOARD_LEGEND_TEMPLATE.
-# ---------------------------------------------------------------------------
-legend = legend_template.replace("{PROJECTS_BLOCK}", projects_block).replace(
-    "{STATUS_BLOCK}", status_block
-)
-print(legend)
-PYEOF
+# pp_run_ops resolves pgai_agent_kanban from its own tree's root, which in
+# the live install is the install root: the dev tree is DATA to the live
+# runtime, never CODE, and no dev-tree path is added. A missing package
+# fails the import loudly.
+pp_run_ops pgai_agent_kanban.dashboard.legend \
+    --use-color="$USE_COLOR" \
+    --template="${DASHBOARD_LEGEND_TEMPLATE}" \
+    --status-keywords="${DASHBOARD_LEGEND_STATUS_KEYWORDS[*]}" \
+    --names="$(printf '%s\n' "${PROJ_NAMES[@]+"${PROJ_NAMES[@]}"}")" \
+    --colors="$(printf '%s\n' "${PROJ_COLORS[@]+"${PROJ_COLORS[@]}"}")"

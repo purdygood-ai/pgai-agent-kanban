@@ -4,18 +4,18 @@ test_lint_engine_size_dupe.py
 Tests for team/scripts/lint_engine_size_dupe.py.
 
 ENFORCEMENT CLASS THIS MODULE IMPLEMENTS (docs/blocking-site-census.md row
-53: CONVERT for the lint site as a whole; see main()'s docstring in the
-lint module for the exit-code split this module relies on):
+53: CONVERT for the lint site as a whole -- main() exits 0 whatever it
+finds and records each finding with a ``kind`` of ``engine-size``,
+``duplicate-function`` or ``duplicate-python-def`` in its --findings-file):
 
   - The **size** reading (CHECK 1) is advisory only. A real engine file
     drifting over the line ceiling is a quality finding, never a pytest
     failure -- this module narrates it, it does not assert on it.
-  - The **duplicate-function** reading (CHECK 2) stays a hard assertion,
-    here and in main()'s own exit code (1), because two files defining the
-    same shell function name in one reachability set is real damage
-    (bash's last-sourced-wins semantics silently shadow an implementation),
-    not a heuristic -- SOP-core.md "Blocking Severity: only real damage
-    blocks".
+  - The **duplicate-function** reading (CHECK 2) on the real tree stays a
+    hard assertion in this suite, because two files defining the same
+    shell function name in one reachability set is a latent shadowing
+    hazard (bash's last-sourced-wins semantics silently shadow an
+    implementation), not a heuristic. The lint itself only records it.
 
 Tests cover:
 
@@ -28,11 +28,13 @@ Tests cover:
   2. **Engine-size behavioral negative**: the seeded 900-line fixture under
      team/tests/fixtures/engine_size_dupe/oversized_engine/lib/discovery.sh
      is reported as exceeding the ceiling, naming the file, and main()
-     returns the advisory code (3), not the hard one.
+     records it as one ``engine-size`` finding and returns 0.
   3. **Duplicate-function behavioral negative**: the seeded fixture under
      team/tests/fixtures/engine_size_dupe/duplicate_function/ (a driver that
      sources two stage files defining the same function) is reported,
-     naming both files, and main() returns the hard code (1).
+     naming both files, and main() records it as one ``duplicate-function``
+     finding and returns 0; a direct command-line run prints it, writes it
+     and exits 0.
   4. **Reachability model rejects false positives**: two files that define
      the same function name but are never reachable from a common ancestor
      (never sourced together) are NOT reported -- the generalization from
@@ -42,10 +44,19 @@ Tests cover:
   5. **Allow-list exempts the provider interface and the test-harness
      stub**: the default duplication allow-list covers provider_claude.sh /
      provider_codex.sh / harness.sh.
-  6. **main() exit codes**: 0 clean, 1 duplicate-function violation (hard),
-     2 missing --scripts-dir (usage), 3 size-only violation (advisory) --
-     and the dupe class wins when both fire in the same run.
+  6. **main() exit codes**: 0 whatever it finds, 2 missing --scripts-dir
+     (usage) -- and when both classes fire in one run, both are recorded,
+     so a size finding never masks a collision.
   7. **--help works** (Directive 6 / help-presence lint).
+  8. **Python def duplication** (CHECK 3): the seeded fixture under
+     team/tests/fixtures/engine_size_dupe/duplicate_python_def/ (the same
+     module-level def in two modules) is reported, naming both modules, and
+     main() records it as one ``duplicate-python-def`` finding and returns
+     0; a different body under the same name, a ``pass`` stub, a method and
+     a copy under ``tests/`` are not reported; the package beside
+     --scripts-dir is scanned by default; a missing --python-dir is a usage
+     error; and the real package carries no copy of the helpers this lint
+     was extended to keep single.
 
 All synthetic fixtures use pytest's ``tmp_path`` for isolation; the two
 acceptance-criteria fixtures (oversized file, duplicate function) are
@@ -55,11 +66,14 @@ committed as seeded files under team/tests/fixtures/engine_size_dupe/.
 from __future__ import annotations
 
 import importlib.util
+import json
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
+
+from tests.fixtures.lint_findings import run_main
 
 
 # ---------------------------------------------------------------------------
@@ -74,6 +88,8 @@ _REAL_SCRIPTS_DIR = _SCRIPTS_DIR
 _FIXTURES_DIR = _TEAM_DIR / "tests" / "fixtures" / "engine_size_dupe"
 _OVERSIZED_FIXTURE_DIR = _FIXTURES_DIR / "oversized_engine"
 _DUPLICATE_FIXTURE_DIR = _FIXTURES_DIR / "duplicate_function"
+_PYTHON_DEF_FIXTURE_DIR = _FIXTURES_DIR / "duplicate_python_def"
+_REAL_PACKAGE_DIR = _TEAM_DIR / "pgai_agent_kanban"
 
 
 def _import_lint_module():
@@ -160,12 +176,20 @@ def test_seeded_oversized_fixture_triggers_violation() -> None:
     assert violations["lib/discovery.sh"] == line_count
 
 
-def test_seeded_oversized_fixture_main_exits_advisory_code() -> None:
-    """main() returns the advisory size-only code (3), not the hard
-    duplicate-function code (1), for a fixture with only a size
-    violation."""
-    exit_code = _lint.main(["--scripts-dir", str(_OVERSIZED_FIXTURE_DIR)])
-    assert exit_code == 3, f"Expected exit code 3 (size-only, advisory), got {exit_code}."
+def test_seeded_oversized_fixture_main_records_size_finding_and_exits_zero(
+    tmp_path: Path,
+) -> None:
+    """main() records a size-only reading as one ``engine-size`` finding and
+    returns 0 -- the advisory class never exits non-zero."""
+    exit_code, findings = run_main(
+        _lint.main, ["--scripts-dir", str(_OVERSIZED_FIXTURE_DIR)], tmp_path / "findings.json"
+    )
+    assert exit_code == 0, f"Expected exit code 0 (size-only, advisory), got {exit_code}."
+    assert [f["kind"] for f in findings] == ["engine-size"], findings
+    finding = findings[0]
+    assert finding["lint"] == "engine_size_dupe" and finding["severity"] == "quality"
+    assert finding["file"].endswith("oversized_engine/lib/discovery.sh"), finding
+    assert finding["lines"] > finding["ceiling"] == 800, finding
 
 
 def test_size_allow_file_suppresses_violation() -> None:
@@ -214,12 +238,12 @@ def test_clean_real_tree_has_no_duplicate_violations() -> None:
     )
 
 
-def test_clean_real_tree_main_never_returns_the_dupe_class() -> None:
-    """main() against the real team/scripts/ tree must never return the
-    hard duplicate-function code (1) or the usage code (2). 0 (fully
-    clean) and 3 (size-only, advisory) are both acceptable:
-    the duplication half stays a hard assertion here, the size half does
-    not, matching docs/blocking-site-census.md row 53's CONVERT class.
+def test_clean_real_tree_main_never_records_the_dupe_class(tmp_path: Path) -> None:
+    """main() against the real team/scripts/ tree returns 0 and records no
+    ``duplicate-function`` finding; ``engine-size`` findings (advisory) are
+    acceptable: the duplication half stays a hard assertion here, the size
+    half does not, matching docs/blocking-site-census.md row 53's CONVERT
+    class.
     """
     if not _REAL_SCRIPTS_DIR.is_dir():
         pytest.skip(f"Real scripts dir not found at {_REAL_SCRIPTS_DIR}; skipping.")
@@ -227,12 +251,15 @@ def test_clean_real_tree_main_never_returns_the_dupe_class() -> None:
     # Deliberately exercises the real team/scripts/ tree (not a fixture):
     # this is a live regression guard, not an isolated behavior a fixture
     # could stand in for.
-    exit_code = _lint.main(["--scripts-dir", str(_REAL_SCRIPTS_DIR)])
+    exit_code, findings = run_main(
+        _lint.main, ["--scripts-dir", str(_REAL_SCRIPTS_DIR)], tmp_path / "findings.json"
+    )
 
-    assert exit_code in (0, 3), (
-        f"Expected exit code 0 (clean) or 3 (size-only, advisory), got "
-        f"{exit_code} -- a duplicate-function collision (1) is real damage "
-        "and must be fixed, not waived by this assertion."
+    assert exit_code == 0, f"Expected exit code 0, got {exit_code}."
+    collisions = [f for f in findings if f["kind"] == "duplicate-function"]
+    assert collisions == [], (
+        "a duplicate-function collision is a real shadowing hazard and must be "
+        f"fixed, not waived by this assertion: {collisions}"
     )
 
 
@@ -252,20 +279,46 @@ def test_seeded_duplicate_fixture_triggers_violation() -> None:
     ], violations["seeded_shared_helper"]
 
 
-def test_seeded_duplicate_fixture_main_exits_nonzero_and_names_both_files() -> None:
-    """main() returns 1 and stdout names both colliding files."""
-    exit_code = _lint.main([
+def test_seeded_duplicate_fixture_main_records_finding_and_names_both_files(
+    tmp_path: Path,
+) -> None:
+    """main() returns 0 and records one ``duplicate-function`` finding
+    naming both colliding files."""
+    exit_code, findings = run_main(_lint.main, [
         "--scripts-dir", str(_DUPLICATE_FIXTURE_DIR),
         "--allow-file", "__no_file_allowed__",
-    ])
-    assert exit_code == 1, f"Expected exit code 1, got {exit_code}."
+    ], tmp_path / "findings.json")
+    assert exit_code == 0, f"Expected exit code 0, got {exit_code}."
+    assert [f["kind"] for f in findings] == ["duplicate-function"], findings
+    finding = findings[0]
+    assert finding["function"] == "seeded_shared_helper", finding
+    assert [Path(f).name for f in finding["files"]] == ["stage_a.sh", "stage_b.sh"], finding
 
 
-def test_size_and_dupe_violations_together_return_the_hard_code(tmp_path: Path) -> None:
-    """When both classes fire in the same run, main() returns the hard
-    duplicate-function code (1), not the advisory size code (3) -- the
-    duplication half must never be masked by a size finding riding
-    alongside it."""
+def test_direct_run_on_the_seeded_collision(tmp_path: Path) -> None:
+    """A command-line run over the seeded collision prints it, writes it to
+    --findings-file and exits 0."""
+    findings_path = tmp_path / "out" / "findings.json"
+    proc = subprocess.run(
+        [sys.executable, str(_LINT_SCRIPT), "--scripts-dir", str(_DUPLICATE_FIXTURE_DIR),
+         "--allow-file", "__no_file_allowed__", "--findings-file", str(findings_path)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "seeded_shared_helper() -- defined in: lib/stage_a.sh, lib/stage_b.sh" in proc.stdout, (
+        proc.stdout
+    )
+    assert "error:   lint.engine-size-dupe" in proc.stderr, proc.stderr
+    findings = json.loads(findings_path.read_text(encoding="utf-8"))
+    assert [f["function"] for f in findings] == ["seeded_shared_helper"], findings
+
+
+def test_size_and_dupe_violations_together_are_both_recorded(tmp_path: Path) -> None:
+    """When both classes fire in the same run, main() returns 0 and records
+    one finding of each kind -- the duplication half must never be masked by
+    a size finding riding alongside it."""
     scripts_dir = tmp_path / "scripts"
     lib_dir = scripts_dir / "lib"
     lib_dir.mkdir(parents=True)
@@ -290,11 +343,15 @@ def test_size_and_dupe_violations_together_return_the_hard_code(tmp_path: Path) 
     assert "lib/discovery.sh" in size_violations, size_violations
     assert "combined_case_helper" in dupe_violations, dupe_violations
 
-    exit_code = _lint.main(["--scripts-dir", str(scripts_dir), "--allow-file", "__no_file_allowed__"])
+    exit_code, findings = run_main(
+        _lint.main,
+        ["--scripts-dir", str(scripts_dir), "--allow-file", "__no_file_allowed__"],
+        tmp_path / "findings.json",
+    )
 
-    assert exit_code == 1, (
-        f"Expected the hard duplicate-function code (1) to win over the "
-        f"advisory size code (3) when both fire, got {exit_code}."
+    assert exit_code == 0, f"Expected exit code 0 when both classes fire, got {exit_code}."
+    assert sorted(f["kind"] for f in findings) == ["duplicate-function", "engine-size"], (
+        f"Expected one finding of each kind when both fire, got {findings}"
     )
 
 
@@ -401,6 +458,92 @@ def test_allow_listed_file_removed_does_not_blind_remaining_pair(tmp_path: Path)
 
 
 # ---------------------------------------------------------------------------
+# CHECK 3: Python def duplication
+# ---------------------------------------------------------------------------
+
+
+def test_seeded_python_def_copy_is_reported_naming_both_modules() -> None:
+    """The same module-level def in two modules is one copied definition;
+    a different body under the same name, a stub, a method and a copy under
+    tests/ are not."""
+    copies = _lint.find_duplicate_python_defs(_PYTHON_DEF_FIXTURE_DIR)
+
+    assert copies == [("flatten_text", ["alpha.py", "beta.py"])], copies
+
+
+def test_seeded_python_def_copy_main_records_one_finding_and_exits_zero(tmp_path: Path) -> None:
+    scripts_dir = tmp_path / "scripts"
+    scripts_dir.mkdir()
+
+    exit_code, findings = run_main(
+        _lint.main,
+        ["--scripts-dir", str(scripts_dir), "--python-dir", str(_PYTHON_DEF_FIXTURE_DIR)],
+        tmp_path / "findings.json",
+    )
+
+    assert exit_code == 0, f"Expected exit code 0, got {exit_code}."
+    assert [f["kind"] for f in findings] == ["duplicate-python-def"], findings
+    finding = findings[0]
+    assert finding["function"] == "flatten_text", finding
+    assert [Path(f).name for f in finding["files"]] == ["alpha.py", "beta.py"], finding
+    assert "beta.py" in finding["remedy"] and "--python-dir" in finding["remedy"], finding
+
+
+def test_package_beside_the_scripts_dir_is_scanned_by_default(tmp_path: Path) -> None:
+    scripts_dir = tmp_path / "scripts"
+    scripts_dir.mkdir()
+    package = tmp_path / _lint.DEFAULT_PYTHON_PACKAGE
+    for name in ("first.py", "second.py"):
+        (package / "lib").mkdir(parents=True, exist_ok=True)
+        (package / "lib" / name).write_text(
+            "def shared_helper(value):\n    return str(value).strip().lower()\n", encoding="utf-8"
+        )
+
+    exit_code, findings = run_main(
+        _lint.main, ["--scripts-dir", str(scripts_dir)], tmp_path / "findings.json"
+    )
+
+    assert exit_code == 0
+    assert [(f["kind"], f["function"]) for f in findings] == [("duplicate-python-def", "shared_helper")], findings
+
+
+def test_no_package_beside_the_scripts_dir_scans_no_python(tmp_path: Path) -> None:
+    scripts_dir = tmp_path / "scripts"
+    _write_sh(scripts_dir / "solo.sh", ["solo_func"])
+
+    exit_code, findings = run_main(
+        _lint.main, ["--scripts-dir", str(scripts_dir)], tmp_path / "findings.json"
+    )
+
+    assert exit_code == 0 and findings == [], findings
+
+
+def test_main_returns_two_for_missing_python_dir(tmp_path: Path) -> None:
+    scripts_dir = tmp_path / "scripts"
+    scripts_dir.mkdir()
+
+    exit_code = _lint.main(["--scripts-dir", str(scripts_dir), "--python-dir", str(tmp_path / "missing")])
+
+    assert exit_code == 2
+
+
+def test_real_package_has_no_copy_of_the_consolidated_helpers() -> None:
+    """IDENTIFIER-BY-NECESSITY: the invariant is about two names -- the
+    one-line text helper and the release-version checker each live in one
+    lib/ module and are imported, so no module may define its own copy
+    under the old private name. The seeded fixture above is the negative
+    proof that the scan fires."""
+    if not _REAL_PACKAGE_DIR.is_dir():
+        pytest.skip(f"Real package dir not found at {_REAL_PACKAGE_DIR}; skipping.")
+
+    # Deliberately exercises the real package (not a fixture): a live
+    # regression guard for helpers this change made single.
+    copies = _lint.find_duplicate_python_defs(_REAL_PACKAGE_DIR)
+
+    assert [c for c in copies if c[0] in {"_one_line", "_checked_version"}] == [], copies
+
+
+# ---------------------------------------------------------------------------
 # find_functions_in_file / graph primitives
 # ---------------------------------------------------------------------------
 
@@ -485,9 +628,11 @@ def test_main_returns_zero_for_clean_synthetic_tree(tmp_path: Path) -> None:
     scripts_dir = tmp_path / "scripts"
     _write_sh(scripts_dir / "solo.sh", ["solo_func"])
 
-    exit_code = _lint.main(["--scripts-dir", str(scripts_dir)])
+    exit_code, findings = run_main(
+        _lint.main, ["--scripts-dir", str(scripts_dir)], tmp_path / "findings.json"
+    )
 
-    assert exit_code == 0
+    assert exit_code == 0 and findings == [], findings
 
 
 def test_help_flag_exits_zero() -> None:
@@ -500,6 +645,7 @@ def test_help_flag_exits_zero() -> None:
     )
     assert result.returncode == 0, result.stderr
     assert "--scripts-dir" in result.stdout
+    assert "--python-dir" in result.stdout
     assert "--allow-file" in result.stdout
 
 

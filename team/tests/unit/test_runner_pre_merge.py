@@ -13,7 +13,7 @@ WHAT A PRE-MERGE RUN PROMISES
   ``[testing] workers`` budget (lowered, never raised, by ``--workers``) as
   ``--workers``; ``--base REF`` is passed through, and omitted when not
   given so the engine picks its default base;
-- the unit runner's run covers the by-path module test, the five ratchet
+- the unit runner's run covers the by-path module test, the six ratchet
   lints, the four always-run whole-tree guards (whatever the diff; a
   failing guard fails the run) and the affected unit tests; the integration
   runner's covers the affected integration tests only; each prints the
@@ -89,7 +89,7 @@ _RUNNER_NAMES = list(_RUNNER_CONFIG)
 
 # Every gate and lint script either runner (or the engine) invokes, relative
 # to team/scripts/. On a pre-merge run the runner itself starts none of them;
-# only the engine's five ratchet lints, its tracked-files lint and four
+# only the engine's six ratchet lints, its tracked-files lint and four
 # always-run guards run, and only on the unit suite.
 _STUBBED_SCRIPTS = [
     "check_breakage_class.py",
@@ -126,17 +126,19 @@ _STUBBED_SCRIPTS = [
     "lint_api_route_impl.py",
     "lint_api_route_docs.py",
     "lint_echo_pipe_grep_q.py",
+    "lint_section_parsers.py",
     "lint_tracked_ignored.py",
     "lint_rc_empty_commits.py",
     "dashboard/generate_window_docs.py",
     "dashboard/lint_tmux_format_jobs.py",
     "generate_operator_verb_docs.py",
+    "generate_measured_pace_docs.py",
     "check_docs_citations.py",
     "lint_skip_bug_gate.sh",
     "lint_governance_byte_budgets.sh",
 ]
 
-# The engine's five ratchet lints and its tracked-files lint, in the order
+# The engine's six ratchet lints and its tracked-files lint, in the order
 # it runs them.
 _RATCHET_LINTS = [
     "lint_inline_python.py",
@@ -144,6 +146,7 @@ _RATCHET_LINTS = [
     "lint_engine_size_dupe.py",
     "lint_api_route_impl.py",
     "lint_echo_pipe_grep_q.py",
+    "lint_section_parsers.py",
     "lint_tracked_ignored.py",
 ]
 
@@ -175,9 +178,12 @@ sys.exit(1)
 # The real engine and what it imports, relative to team/.
 _ENGINE_MODULES = [
     "pgai_agent_kanban/__init__.py",
+    "pgai_agent_kanban/env.py",
     "pgai_agent_kanban/lib/__init__.py",
     "pgai_agent_kanban/lib/semver.py",
     "pgai_agent_kanban/lib/error_contract.py",
+    "pgai_agent_kanban/lib/ini.py",
+    "pgai_agent_kanban/lib/temp_root.py",
     "pgai_agent_kanban/testing/__init__.py",
     "pgai_agent_kanban/testing/affected.py",
     "pgai_agent_kanban/testing/pre_merge.py",
@@ -648,19 +654,19 @@ def test_unit_pre_merge_runs_by_path_ratchet_lints_guards_and_affected_tests(tmp
     assert rows == [
         ("by-path", "PASS"), ("lint: inline-python", "PASS"), ("lint: python-duplicates", "PASS"),
         ("lint: engine-size", "PASS"), ("lint: api-route-impl", "PASS"),
-        ("lint: echo-pipe-grep-q", "PASS"),
+        ("lint: echo-pipe-grep-q", "PASS"), ("lint: section-parsers", "PASS"),
         ("lint: tracked-ignored", "PASS"),
         *((row, "PASS") for row in _GUARD_ROWS), ("affected tests", "PASS"),
     ], "the summary block must list each unit pre-merge check, passing\n" + _describe(result)
     assert re.search(
         r"^guards:  4 always-run guard\(s\) added \d+\.\ds of the 5\.0s budget$", out, re.M,
     ), "the summary must report the guards' added time against the budget\n" + _describe(result)
-    assert "pre-merge: PASS -- all 12 check(s) passed" in out, _describe(result)
+    assert "pre-merge: PASS -- all 13 check(s) passed" in out, _describe(result)
     assert f"base:    {_RC_BRANCH}" in out, "the summary must name the default base\n" + _describe(result)
     assert "cap 7" in out, "the summary must name the cap from [testing] pre_merge_affected_cap\n" + _describe(result)
     assert "  tests/unit/test_greet.py" in out, _describe(result)
     assert sandbox.gates_run() == ["by-path", *_RATCHET_LINTS, *_GUARD_SCRIPTS], (
-        "a unit pre-merge run runs the by-path test, the five ratchet lints and the four "
+        "a unit pre-merge run runs the by-path test, the six ratchet lints and the four "
         f"always-run guards, and no fatal gate or other lint; ran {sandbox.gates_run()}"
     )
     assert sandbox.exit_file("run-unit-tests.sh").read_text(encoding="utf-8") == "0\n"
@@ -699,7 +705,7 @@ def test_unit_pre_merge_fails_when_an_always_run_guard_finds_something(tmp_path:
     assert "    DRIFT -- verb='halt' block in docs/operator-commands.md" in result.stdout, _describe(result)
     assert "    fix: regenerate, then commit docs/operator-commands.md and docs/operator-api.md: " \
         "python3 team/scripts/generate_operator_verb_docs.py" in result.stdout, _describe(result)
-    assert "pre-merge: FAIL -- 1 of 12 check(s) failed (guard: operator-verb-docs)" in result.stdout, (
+    assert "pre-merge: FAIL -- 1 of 13 check(s) failed (guard: operator-verb-docs)" in result.stdout, (
         _describe(result)
     )
     assert "error:   pre_merge.checks_failed" in result.stderr.splitlines(), _describe(result)

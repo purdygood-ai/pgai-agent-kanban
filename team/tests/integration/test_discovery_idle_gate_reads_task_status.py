@@ -56,8 +56,8 @@ def _run_guard(
     """Source the discovery library against a temp kanban tree and run *function_call*.
 
     *function_call* is a bash expression such as
-    ``'_disc_chain_idle "project_a"'`` or
-    ``'_disc_pm_ticket_in_flight "project_a"'``. The wrapper prints
+    ``'_disc_chain_idle "project-a"'`` or
+    ``'_disc_pm_ticket_in_flight "project-a"'``. The wrapper prints
     ``GUARD_EXIT=<n>`` on stdout after the call so tests can assert on the
     guard's return code without relying on ``set -e`` semantics.
     """
@@ -139,17 +139,17 @@ class TestChainIdleReadsTaskStatus:
         the gate once the task it names has reached a terminal status.md state.
         """
         root = two_project_root
-        _write_task_status(root, "project_a", "CODER-1", "DONE")
-        _write_task_status(root, "project_a", "CODER-2", "WONT-DO")
+        _write_task_status(root, "project-a", "CODER-1", "DONE")
+        _write_task_status(root, "project-a", "CODER-2", "WONT-DO")
         _write_backlog(
-            root, "project_a", "coder",
+            root, "project-a", "coder",
             [
                 "- [ ] CODER-1 -- stale marker, task actually done",
                 "- [B] CODER-2 -- stale marker, task actually wont-do",
             ],
         )
 
-        result = _run_guard(root, "project_a", '_disc_chain_idle "project_a"')
+        result = _run_guard(root, "project-a", '_disc_chain_idle "project-a"')
 
         assert result.returncode == 0, f"stderr: {result.stderr}"
         assert "GUARD_EXIT=0" in result.stdout, (
@@ -167,13 +167,13 @@ class TestChainIdleReadsTaskStatus:
         reading a wake log can see why nothing was queued.
         """
         root = two_project_root
-        _write_task_status(root, "project_a", "CODER-3", "WORKING")
+        _write_task_status(root, "project-a", "CODER-3", "WORKING")
         _write_backlog(
-            root, "project_a", "coder",
+            root, "project-a", "coder",
             ["- [x] CODER-3 -- marker says done, task is not"],
         )
 
-        result = _run_guard(root, "project_a", '_disc_chain_idle "project_a"')
+        result = _run_guard(root, "project-a", '_disc_chain_idle "project-a"')
 
         assert result.returncode == 0, f"stderr: {result.stderr}"
         assert "GUARD_EXIT=1" in result.stdout, (
@@ -198,11 +198,11 @@ class TestChainIdleReadsTaskStatus:
         """
         root = two_project_root
         _write_backlog(
-            root, "project_a", "coder",
+            root, "project-a", "coder",
             ["- [x] CODER-9999-ghost -- no task folder exists for this id"],
         )
 
-        result = _run_guard(root, "project_a", '_disc_chain_idle "project_a"')
+        result = _run_guard(root, "project-a", '_disc_chain_idle "project-a"')
 
         assert result.returncode == 0, f"stderr: {result.stderr}"
         assert "GUARD_EXIT=0" in result.stdout, (
@@ -222,13 +222,13 @@ class TestChainIdleReadsTaskStatus:
         than falling through to whatever the marker happened to say.
         """
         root = two_project_root
-        _write_task_status(root, "project_a", "CODER-4", None, parseable=False)
+        _write_task_status(root, "project-a", "CODER-4", None, parseable=False)
         _write_backlog(
-            root, "project_a", "coder",
+            root, "project-a", "coder",
             ["- [x] CODER-4 -- status.md has no ## State block"],
         )
 
-        result = _run_guard(root, "project_a", '_disc_chain_idle "project_a"')
+        result = _run_guard(root, "project-a", '_disc_chain_idle "project-a"')
 
         assert result.returncode == 0, f"stderr: {result.stderr}"
         assert "GUARD_EXIT=1" in result.stdout, (
@@ -252,7 +252,7 @@ class TestChainIdleReadsTaskStatus:
         root = two_project_root
         # two_project_root already ships every backlog empty (comments only).
 
-        result = _run_guard(root, "project_a", '_disc_chain_idle "project_a"')
+        result = _run_guard(root, "project-a", '_disc_chain_idle "project-a"')
 
         assert result.returncode == 0, f"stderr: {result.stderr}"
         assert "GUARD_EXIT=0" in result.stdout, (
@@ -270,17 +270,17 @@ class TestChainIdleReadsTaskStatus:
         have missed this case entirely.
         """
         root = two_project_root
-        _write_task_status(root, "project_a", "CODER-5", "WORKING")
-        _write_task_status(root, "project_a", "CODER-6", "DONE")
+        _write_task_status(root, "project-a", "CODER-5", "WORKING")
+        _write_task_status(root, "project-a", "CODER-6", "DONE")
         _write_backlog(
-            root, "project_a", "coder",
+            root, "project-a", "coder",
             [
                 "- [x] CODER-5 -- still working despite stale [x] marker",
                 "- [x] CODER-6 -- correctly done, appended after CODER-5",
             ],
         )
 
-        result = _run_guard(root, "project_a", '_disc_chain_idle "project_a"')
+        result = _run_guard(root, "project-a", '_disc_chain_idle "project-a"')
 
         assert result.returncode == 0, f"stderr: {result.stderr}"
         assert "GUARD_EXIT=1" in result.stdout, (
@@ -305,13 +305,13 @@ class TestPmTicketInFlightReadsTaskStatus:
         """
         root = two_project_root
         task_id = "PM-20260601-001-decompose-v0-0-2-test-feature"
-        _write_task_status(root, "project_a", task_id, "DONE")
+        _write_task_status(root, "project-a", task_id, "DONE")
         _write_backlog(
-            root, "project_a", "pm",
+            root, "project-a", "pm",
             [f"- [ ] {task_id} -- stale marker, PM task actually done"],
         )
 
-        result = _run_guard(root, "project_a", '_disc_pm_ticket_in_flight "project_a"')
+        result = _run_guard(root, "project-a", '_disc_pm_ticket_in_flight "project-a"')
 
         assert result.returncode == 0, f"stderr: {result.stderr}"
         assert "GUARD_EXIT=1" in result.stdout, (
@@ -327,13 +327,13 @@ class TestPmTicketInFlightReadsTaskStatus:
         """
         root = two_project_root
         task_id = "PM-20260601-002-decompose-v0-0-3-test-feature"
-        _write_task_status(root, "project_a", task_id, "WORKING")
+        _write_task_status(root, "project-a", task_id, "WORKING")
         _write_backlog(
-            root, "project_a", "pm",
+            root, "project-a", "pm",
             [f"- [x] {task_id} -- marker says done, PM task is not"],
         )
 
-        result = _run_guard(root, "project_a", '_disc_pm_ticket_in_flight "project_a"')
+        result = _run_guard(root, "project-a", '_disc_pm_ticket_in_flight "project-a"')
 
         assert result.returncode == 0, f"stderr: {result.stderr}"
         assert "GUARD_EXIT=0" in result.stdout, (
@@ -357,11 +357,11 @@ class TestPmTicketInFlightReadsTaskStatus:
         root = two_project_root
         task_id = "PM-20260601-003-decompose-v0-0-4-ghost-task"
         _write_backlog(
-            root, "project_a", "pm",
+            root, "project-a", "pm",
             [f"- [x] {task_id} -- no task folder exists for this id"],
         )
 
-        result = _run_guard(root, "project_a", '_disc_pm_ticket_in_flight "project_a"')
+        result = _run_guard(root, "project-a", '_disc_pm_ticket_in_flight "project-a"')
 
         assert result.returncode == 0, f"stderr: {result.stderr}"
         assert "GUARD_EXIT=1" in result.stdout, (
@@ -383,13 +383,13 @@ class TestPmTicketInFlightReadsTaskStatus:
         """
         root = two_project_root
         task_id = "PM-20260601-004-decompose-v0-0-5-corrupt-status"
-        _write_task_status(root, "project_a", task_id, None, parseable=False)
+        _write_task_status(root, "project-a", task_id, None, parseable=False)
         _write_backlog(
-            root, "project_a", "pm",
+            root, "project-a", "pm",
             [f"- [x] {task_id} -- status.md has no ## State block"],
         )
 
-        result = _run_guard(root, "project_a", '_disc_pm_ticket_in_flight "project_a"')
+        result = _run_guard(root, "project-a", '_disc_pm_ticket_in_flight "project-a"')
 
         assert result.returncode == 0, f"stderr: {result.stderr}"
         assert "GUARD_EXIT=0" in result.stdout, (

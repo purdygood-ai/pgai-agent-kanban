@@ -90,7 +90,7 @@ else
     pgai_emit_error_contract \
         "unhalt_global.sentinel_remove_failed" \
         "unhalt-global.sh: failed to remove global HALT sentinel at ${_halt_path}." \
-        "Check that ${KANBAN_ROOT} is writable by the current user, then re-run team/scripts/unhalt-global.sh."
+        "Check that ${KANBAN_ROOT} is writable by the current user, then re-run $(printf '%q' "${KANBAN_ROOT}/scripts/unhalt-global.sh")."
     # CENSUS-ANCHOR: unhalt-global-sentinel-remove-failed-01
     exit 1
 fi

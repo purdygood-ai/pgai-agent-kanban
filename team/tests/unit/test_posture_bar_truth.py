@@ -166,15 +166,15 @@ class TestSimultaneousFlagsAllRenderTogether:
     ) -> None:
         root = two_project_root
         _touch_global_halt(root)
-        _write_project_halt_after(root, "project_a", "rc:v2.9.15")
-        _enable_defer_posture(root, "project_a", level="low")
-        _add_open_bug(root, "project_a", "BUG-0001", severity="low")
+        _write_project_halt_after(root, "project-a", "rc:v2.9.15")
+        _enable_defer_posture(root, "project-a", level="low")
+        _add_open_bug(root, "project-a", "BUG-0001", severity="low")
 
-        stdout = _run_status_bottom(root, "project_a", term="dumb")
+        stdout = _run_status_bottom(root, "project-a", term="dumb")
 
         # NO_COLOR bracket form joins scope with a colon: "HALT-AFTER:<scope> ...".
         assert "HALT GLOBAL" in stdout, stdout
-        assert "HALT-AFTER:project_a until v2.9.15" in stdout, stdout
+        assert "HALT-AFTER:project-a until v2.9.15" in stdout, stdout
         assert "BUGS DEFERRED 1 (<=low)" in stdout, stdout
 
     def test_status_right_renders_all_three_flags_together(
@@ -184,17 +184,17 @@ class TestSimultaneousFlagsAllRenderTogether:
         flags, none suppressed by the others."""
         root = two_project_root
         _touch_global_halt(root)
-        _write_project_halt_after(root, "project_a", "rc:v2.9.15")
+        _write_project_halt_after(root, "project-a", "rc:v2.9.15")
         # status-right.sh is a global bar: a kanban.cfg-tier deferral (every
         # project inherits it) renders once, as the GLOBAL scope. See
         # _enable_defer_posture_global's docstring.
         _enable_defer_posture_global(root, level="low")
-        _add_open_bug(root, "project_a", "BUG-0001", severity="low")
+        _add_open_bug(root, "project-a", "BUG-0001", severity="low")
 
         stdout = _run(_STATUS_RIGHT_SH, [str(root)], root, term="dumb")
 
         assert "HALT GLOBAL" in stdout, stdout
-        assert "HALT-AFTER:project_a until v2.9.15" in stdout, stdout
+        assert "HALT-AFTER:project-a until v2.9.15" in stdout, stdout
         assert "DEFER GLOBAL <=low (1 waiting)" in stdout, stdout
 
     def test_show_header_agrees_with_bottom_bar_on_simultaneous_flags(
@@ -205,17 +205,17 @@ class TestSimultaneousFlagsAllRenderTogether:
         HALT-AFTER both render, neither suppressing the other."""
         root = two_project_root
         _touch_global_halt(root)
-        _write_project_halt_after(root, "project_a", "rc:v2.9.15")
+        _write_project_halt_after(root, "project-a", "rc:v2.9.15")
 
         stdout = _run(
             _SHOW_HEADER_SH,
-            ["--kanban-root", str(root), "--project", "project_a"],
+            ["--kanban-root", str(root), "--project", "project-a"],
             root,
             term="dumb",
         )
 
         assert "HALT GLOBAL" in stdout, stdout
-        assert "HALT-AFTER project_a" in stdout, stdout
+        assert "HALT-AFTER project-a" in stdout, stdout
         assert "until v2.9.15" in stdout, stdout
 
 
@@ -229,25 +229,25 @@ class TestTwoHaltedProjectsBothNamed:
         self, two_project_root: pathlib.Path
     ) -> None:
         root = two_project_root
-        _write_project_halt(root, "project_a")
-        _write_project_halt(root, "project_b")
+        _write_project_halt(root, "project-a")
+        _write_project_halt(root, "project-b")
 
         stdout = _run_status_bottom_global(root, term="dumb")
 
-        assert "HALT project_a" in stdout, stdout
-        assert "HALT project_b" in stdout, stdout
+        assert "HALT project-a" in stdout, stdout
+        assert "HALT project-b" in stdout, stdout
 
     def test_status_right_names_both_halted_projects(
         self, two_project_root: pathlib.Path
     ) -> None:
         root = two_project_root
-        _write_project_halt(root, "project_a")
-        _write_project_halt(root, "project_b")
+        _write_project_halt(root, "project-a")
+        _write_project_halt(root, "project-b")
 
         stdout = _run(_STATUS_RIGHT_SH, [str(root)], root, term="dumb")
 
-        assert "HALT project_a" in stdout, stdout
-        assert "HALT project_b" in stdout, stdout
+        assert "HALT project-a" in stdout, stdout
+        assert "HALT project-b" in stdout, stdout
 
     def test_one_halted_one_draining_project_both_named(
         self, two_project_root: pathlib.Path
@@ -255,13 +255,13 @@ class TestTwoHaltedProjectsBothNamed:
         """Mixed states across two projects -- a HALT and a HALT-AFTER on
         two different projects -- both render, distinctly."""
         root = two_project_root
-        _write_project_halt(root, "project_a")
-        _write_project_halt_after(root, "project_b", "coder")
+        _write_project_halt(root, "project-a")
+        _write_project_halt_after(root, "project-b", "coder")
 
         stdout = _run_status_bottom_global(root, term="dumb")
 
-        assert "HALT project_a" in stdout, stdout
-        assert "HALT-AFTER:project_b coder" in stdout, stdout
+        assert "HALT project-a" in stdout, stdout
+        assert "HALT-AFTER:project-b coder" in stdout, stdout
 
 
 # ---------------------------------------------------------------------------
@@ -288,11 +288,11 @@ class TestScopeWordsMatchSopVocabularyExactly:
         project name -- and forbids the literal word "PROJECT" appearing
         as a stand-in scope token."""
         root = two_project_root
-        _write_project_halt(root, "project_a")
+        _write_project_halt(root, "project-a")
 
         stdout = _run_status_bottom_global(root, term="dumb")
 
-        assert "[HALT project_a]" in stdout, stdout
+        assert "[HALT project-a]" in stdout, stdout
         # The generic placeholder must never appear as a scope word.
         assert "HALT PROJECT]" not in stdout, stdout
         assert "HALT PROJECT " not in stdout, stdout
@@ -309,7 +309,7 @@ class TestVersionPinnedHaltAfterDescriber:
         self, two_project_root: pathlib.Path
     ) -> None:
         root = two_project_root
-        _write_project_halt_after(root, "project_a", "rc:v3.1.4")
+        _write_project_halt_after(root, "project-a", "rc:v3.1.4")
 
         stdout = _run_status_bottom_global(root, term="dumb")
 
@@ -323,11 +323,11 @@ class TestVersionPinnedHaltAfterDescriber:
         """A non-versioned token (e.g. the bare role token "coder") is not
         a release boundary and renders as itself -- no "until " phrase."""
         root = two_project_root
-        _write_project_halt_after(root, "project_a", "coder")
+        _write_project_halt_after(root, "project-a", "coder")
 
         stdout = _run_status_bottom_global(root, term="dumb")
 
-        assert "HALT-AFTER:project_a coder" in stdout, stdout
+        assert "HALT-AFTER:project-a coder" in stdout, stdout
         assert "until" not in stdout, stdout
 
     def test_until_phrase_is_composed_in_exactly_one_place_in_the_tree(self) -> None:
@@ -408,9 +408,9 @@ def _flag_substrings_present(stdout: str) -> set:
     markers = set()
     for pattern in (
         r"HALT GLOBAL",
-        r"HALT project_a",
-        r"HALT project_b",
-        r"HALT-AFTER project_a[^\]|]*",
+        r"HALT project-a",
+        r"HALT project-b",
+        r"HALT-AFTER project-a[^\]|]*",
         r"HALT-AFTER GLOBAL[^\]|]*",
         r"BUGS DEFERRED \d+ \(<=\w+\)",
         r"until v[\d.]+",
@@ -439,17 +439,17 @@ class TestNoColorFormMatchesRichFormSegmentSet:
             _touch_global_halt(root)
         elif setup == "global_halt_and_project_draining":
             _touch_global_halt(root)
-            _write_project_halt_after(root, "project_a", "rc:v1.2.3")
+            _write_project_halt_after(root, "project-a", "rc:v1.2.3")
         elif setup == "two_projects_halted":
-            _write_project_halt(root, "project_a")
-            _write_project_halt(root, "project_b")
+            _write_project_halt(root, "project-a")
+            _write_project_halt(root, "project-b")
         elif setup == "all_three_simultaneous":
             _touch_global_halt(root)
-            _write_project_halt_after(root, "project_a", "rc:v2.9.15")
-            _enable_defer_posture(root, "project_a", level="low")
-            _add_open_bug(root, "project_a", "BUG-0001", severity="low")
+            _write_project_halt_after(root, "project-a", "rc:v2.9.15")
+            _enable_defer_posture(root, "project-a", level="low")
+            _add_open_bug(root, "project-a", "BUG-0001", severity="low")
 
-        project = "project_a" if setup != "two_projects_halted" else None
+        project = "project-a" if setup != "two_projects_halted" else None
         if project:
             dumb_out = _run_status_bottom(root, project, term="dumb")
             rich_out = _run_status_bottom(root, project, term="xterm")
@@ -481,12 +481,12 @@ class TestSegmentOrderDeterministic:
     ) -> None:
         root = two_project_root
         _touch_global_halt(root)
-        _write_project_halt_after(root, "project_a", "rc:v2.9.15")
-        _enable_defer_posture(root, "project_a", level="low")
-        _add_open_bug(root, "project_a", "BUG-0001", severity="low")
+        _write_project_halt_after(root, "project-a", "rc:v2.9.15")
+        _enable_defer_posture(root, "project-a", level="low")
+        _add_open_bug(root, "project-a", "BUG-0001", severity="low")
 
-        first = _run_status_bottom(root, "project_a", term="dumb")
-        second = _run_status_bottom(root, "project_a", term="dumb")
+        first = _run_status_bottom(root, "project-a", term="dumb")
+        second = _run_status_bottom(root, "project-a", term="dumb")
 
         # Compare every segment except the trailing timestamp (which
         # legitimately ticks between the two subprocess invocations).
@@ -505,19 +505,19 @@ class TestSegmentOrderDeterministic:
         the documented deterministic emission order."""
         root = two_project_root
         _touch_global_halt(root)
-        _write_project_halt(root, "project_a")
+        _write_project_halt(root, "project-a")
 
         stdout = _run_status_bottom_global(root, term="dumb")
 
-        assert stdout.index("HALT GLOBAL") < stdout.index("HALT project_a"), stdout
+        assert stdout.index("HALT GLOBAL") < stdout.index("HALT project-a"), stdout
 
     def test_project_scopes_emitted_in_alphabetical_order(
         self, two_project_root: pathlib.Path
     ) -> None:
         root = two_project_root
-        _write_project_halt(root, "project_b")
-        _write_project_halt(root, "project_a")
+        _write_project_halt(root, "project-b")
+        _write_project_halt(root, "project-a")
 
         stdout = _run_status_bottom_global(root, term="dumb")
 
-        assert stdout.index("HALT project_a") < stdout.index("HALT project_b"), stdout
+        assert stdout.index("HALT project-a") < stdout.index("HALT project-b"), stdout

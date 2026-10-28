@@ -34,8 +34,10 @@
 # Both wake provider scripts call all of them directly at their own points
 # in the task lifecycle:
 #   handle_working_after_exit        — provider-neutral WORKING-after-exit
-#                                       classifier; the sole writer of the
-#                                       durable ## Transient Retry record.
+#                                       classifier (and, in agent-block mode,
+#                                       the transient check of an agent's
+#                                       own catch-all block); the sole writer
+#                                       of the durable ## Transient Retry record.
 #   close_intake_on_finalize_report  — closure-parity helper for
 #                                       finalize=report (testing-only)
 #                                       workflows, invoked once a task's
@@ -49,7 +51,8 @@
 # file's functions are called)
 # -----------------------------------------------------------------------
 #   wake_bootstrap.sh    — log(), KANBAN_ROOT, ACTIVE_PROVIDER.
-#   wake_task_state.sh   — set_state, set_block, normalize_status_file.
+#   wake_task_state.sh   — set_state, set_block, normalize_status_file,
+#                          wake_queue_write.
 #   wake_task_transition.sh — transition_task_state (handle_working_after_exit).
 #   Sourced transitively by wake_bootstrap.sh:
 #     overwatch_protocol.sh — transient_retry_limit/_field/_write and
@@ -58,19 +61,34 @@
 #     error_contract.sh  — pgai_format_error_contract.
 #     workflow.sh        — wf_load_plugin, WF_MANIFEST_FINALIZE.
 #     pp_run_ops.sh      — pp_run_ops (intake closure, the signature clip).
+#     provider_signatures.sh — provider_signature_is / _pattern, the transient
+#                          detection (loaded by overwatch_load_module_runner).
 #     block_record.sh    — each BLOCKED write also records ## Block Record
 #                          (transient_api_error, gate_merge_not_found,
 #                          gate_merge_evidence_not_found, gate_dirty_worktree,
 #                          gate_empty_commit); a refused write only logs.
+#   md_field.sh          — read_md_field, every ## section read here (task
+#                          README ## Inputs, sibling status.md ## State,
+#                          requirement ## Status and ## Workflow Type);
+#                          loaded by wake_task_state.sh's task-id gate, and
+#                          self-sourced below when the caller has not.
 #
-# python3 must be on PATH (used throughout this file's Python heredocs).
+# python3 must be on PATH (the section reader and the lints run as Python).
 # Sourced by wake_common.sh immediately after wake_task_state.sh.
 
+# shellcheck source=md_field.sh
+declare -F read_md_field >/dev/null || source "$(dirname "${BASH_SOURCE[0]}")/md_field.sh"
+
 # ---------------------------------------------------------------------------
-# handle_working_after_exit <task_id> <task_status> <log_file> <agent_exit>
+# handle_working_after_exit <task_id> <task_status> <log_file> <agent_exit> [agent-block]
 #
 # Provider-neutral WORKING-after-exit handler.  Called by both claude.sh and
 # codex.sh when a task is still in WORKING state after the agent process exits.
+# With a fifth argument "agent-block" it checks a task its agent left BLOCKED
+# with reason_code agent_unclassified (wake_agent_block_scan.sh): a tail whose
+# provider error lines (that file's header names them) class transient takes
+# step 2 below and also rewrites the Block Record; without one it
+# changes nothing, prints nothing and returns 1 (step 3 never runs).
 #
 # This is the ONE controller that classifies and records transient
 # retry state: it is the sole writer of the durable ## Transient Retry record
@@ -79,10 +97,10 @@
 # record — neither maintains its own counter or ceiling.
 #
 # Behaviour:
-#   1. Grep the tail of <log_file> for known transient provider error signatures
-#      (Anthropic: 5xx/overloaded/rate-limit/429; OpenAI: server_error/Rate limit
-#      reached/The server had an error/500-503/529).  'insufficient_quota' is
-#      intentionally excluded — it is a billing failure, not a retry-worthy hiccup.
+#   1. Class the tail of <log_file> against the provider-error signature table
+#      (config/provider-error-signatures.txt, via provider_signatures.sh). Only
+#      a transient class retries; billing (insufficient_quota and the like) and
+#      refusal signatures never do.
 #   2. If a transient signature is found, read the previous retry_count from the
 #      durable ## Transient Retry record (never from ## Blocked Reason prose —
 #      that section is promotion-erased and human-narrative-only), increment
@@ -103,15 +121,17 @@
 #   4. Normalizes the status file and prints the resulting final_state
 #      (BLOCKED or BACKLOG) to stdout.
 #
-# The detection regex and retry-count logic live here exactly once; the two
-# wake scripts' local log() calls may note the outcome, but neither script
-# re-implements the detection substrate.
+# The retry-count logic lives here exactly once and the signatures live in the
+# table; the two wake scripts' local log() calls may note the outcome, but
+# neither script re-implements the detection substrate.
 # ---------------------------------------------------------------------------
 handle_working_after_exit() {
   local task_id="${1:-}"
   local task_status="${2:-}"
   local log_file="${3:-}"
   local agent_exit="${4:-}"
+  local _origin="${5:-working}" _left="left in WORKING"
+  [[ "$_origin" == "agent-block" ]] && _left="blocked by its agent as agent_unclassified"
 
   local _transient_cap
   _transient_cap="$(transient_retry_limit)"
@@ -123,46 +143,29 @@ handle_working_after_exit() {
   local _result_state="BLOCKED"
 
   # --- Transient API error detection ---
-  # Grep the last 50 lines of the agent log for known transient provider
-  # signatures.  Two regex patterns are used:
-  #   _DETECT_RE  — fast boolean match (grep -q); determines if any signature
-  #                 is present in the tail.
-  #   _EXTRACT_RE — the first matching fragment (a subset of _DETECT_RE) to end of
-  #                 line via `.*`; in ERE `[^\n]` means "not \ or n", not "not newline".
-  # Anthropic signatures: API Error 5xx, overloaded, overloaded_error,
-  #   rate_limit / rate limit / 429, 50[023], 529.
-  # OpenAI/codex signatures: server_error, Rate limit reached,
-  #   The server had an error, HTTP 500/502/503/529 in error context.
-  # EXCLUDED: insufficient_quota (non-transient billing failure).
-  # NOTE: bare numeric alternations (429, 50[023], 529) are digit-bounded via
-  #   (^|[^0-9])N([^0-9]|$) so they cannot match inside task-ID date segments,
-  #   token counts, or elapsed-ms values (e.g. 20260503, 15030, 5029ms).
-  #   Each numeric is a separate alternation to avoid |N| substrings that would
-  #   be caught by the bare-alternation lint check.
-  local _DETECT_RE='API Error: 5[0-9][0-9]|[Oo]verloaded|overloaded_error|rate[_. -]?limit|(^|[^0-9])429([^0-9]|$)|(^|[^0-9])50[023]([^0-9]|$)|(^|[^0-9])529([^0-9]|$)|server_error|[Tt]he server had an error|[Rr]ate limit reached'
-  local _EXTRACT_RE='API Error: 5[0-9][0-9].*|[Oo]verloaded.*|overloaded_error.*|rate[_. -]?limit.*|(^|[^0-9])429([^0-9]|$)|(^|[^0-9])50[023]([^0-9]|$)|(^|[^0-9])529([^0-9]|$)|server_error.*|[Tt]he server had an error.*|[Rr]ate limit reached.*'
-
+  # The last 50 lines of the agent log are classed against the provider-error
+  # signature table through provider_signatures.sh (its header, and the
+  # table's, say what each class means). Only a tail whose class is transient
+  # takes the retry path below: a billing or refusal signature outranks a 5xx
+  # beside it. A table that cannot be read is logged, and the tail is treated
+  # as carrying no transient signature.
   if [[ -f "$log_file" ]]; then
-    local _tail_lines
+    local _tail_lines _class_rc=0
     _tail_lines="$(tail -50 "$log_file" 2>/dev/null || true)"
-    # Here-string (<<<), not a pipe from echo into grep: such a pipe forks a
-    # separate writer process whose write() can race grep's early exit-on-match.
-    # Under host CPU contention, grep -q closing its read end mid-write can
-    # deliver SIGPIPE to the echo side; with `set -o pipefail` (active in every
-    # caller of this function) the pipeline's reported exit status becomes the
-    # echo side's non-zero SIGPIPE code instead of grep's real (successful)
-    # match, so the `if` silently takes the no-match branch even though the
-    # tail content plainly contains the signature. A here-string hands grep its
-    # input via a pre-written temp fd before grep execs, so there is no writer
-    # process and no such race. Measured a nonzero false-negative rate for the
-    # piped form under host CPU contention versus zero failures for the
-    # here-string form across an equivalent number of trials.
-    if grep -qiE "$_DETECT_RE" <<< "$_tail_lines"; then
+    overwatch_load_module_runner || true  # the signature reader; pp_run_ops: clip counts characters, cut -c bytes
+    provider_signature_is transient "$_tail_lines" || _class_rc=$?
+    if [[ "$_origin" == "agent-block" && "$_class_rc" -eq 0 ]]; then  # the provider's own lines only (wake_agent_block_scan.sh)
+      _tail_lines="$(agent_block_provider_lines "$_tail_lines")"
+      provider_signature_is transient "$_tail_lines" || _class_rc=$?
+    fi
+    if [[ "$_class_rc" -eq 0 ]]; then
       _transient_matched=true
-      overwatch_load_module_runner || true  # pp_run_ops: clip counts characters, cut -c bytes
-      _transient_sig="$(grep -iEo "$_EXTRACT_RE" <<< "$_tail_lines" \
+      # Here-string, not echo piped into grep (see provider_signatures.sh).
+      _transient_sig="$(grep -iEo "$(provider_signature_pattern transient --extract)" <<< "$_tail_lines" \
         | tail -1 | pp_run_ops pgai_agent_kanban.task_status clip --chars 80 || true)"
       [[ -z "$_transient_sig" ]] && _transient_sig="transient provider error"
+    elif [[ "$_class_rc" -ne 1 ]]; then
+      log "task ${task_id} WARNING: provider-error signature reader failed (exit ${_class_rc}); transient detection skipped (stderr names the cause)"
     fi
   fi
 
@@ -194,14 +197,14 @@ handle_working_after_exit() {
     # section. The record (not this prose) is now the retry-count source of
     # truth, but the prefix itself remains a stable narrative marker.
     if [[ "$_retry_count" -lt "$_transient_cap" ]]; then
-      log "task ${task_id} left in WORKING after transient API error (${_transient_sig}); marking BLOCKED+TRANSIENT (retry ${_retry_count}/${_transient_cap})"
+      log "task ${task_id} ${_left} after transient API error (${_transient_sig}); marking BLOCKED+TRANSIENT (retry ${_retry_count}/${_transient_cap})"
       transition_task_state "$task_id" "$task_status" "BLOCKED" \
         || log "task ${task_id} WARNING: atomic transition to BLOCKED failed; status.md/marker left as they were (no partial update)"
       set_block "$task_status" "Blocked Reason" "TRANSIENT API ERROR — ${_transient_sig} — safe to retry (retry ${_retry_count}/${_transient_cap}; see ## Transient Retry record); no human action required. See ${log_file}."
       set_block "$task_status" "Blockers" "TRANSIENT API ERROR (retry ${_retry_count}/${_transient_cap}): ${_transient_sig}. See ${log_file}."
       set_block "$task_status" "Needs Human" "no"
     else
-      log "task ${task_id} left in WORKING after transient API error (${_transient_sig}); retry cap reached (${_retry_count}/${_transient_cap}) — escalating to Needs Human=yes"
+      log "task ${task_id} ${_left} after transient API error (${_transient_sig}); retry cap reached (${_retry_count}/${_transient_cap}) — escalating to Needs Human=yes"
       transition_task_state "$task_id" "$task_status" "BLOCKED" \
         || log "task ${task_id} WARNING: atomic transition to BLOCKED failed; status.md/marker left as they were (no partial update)"
       set_block "$task_status" "Blocked Reason" "TRANSIENT API ERROR (retry cap ${_transient_cap} reached) — ${_transient_sig} — repeated transient failures; human investigation required (see ## Transient Retry record). Exit code: ${agent_exit}. See ${log_file}."
@@ -209,6 +212,8 @@ handle_working_after_exit() {
       set_block "$task_status" "Needs Human" "yes"
     fi
     block_record_write "$task_status" transient_api_error "$(block_record_owner_role "$task_status" "${role:-}" "${SUBAGENT:-}")" "$(block_record_evidence --task-dir "$(dirname "$task_status")" --diag-log "$log_file")" || log "task ${task_id}: WARNING: Block Record not written"
+  elif [[ "$_origin" == "agent-block" ]]; then
+    return 1  # no transient tail: the agent's own block stands as written
   else
     # Zero progress: state never left WORKING and no transient signature
     # explains why. Counted in the SAME durable ## Zero Progress record (and
@@ -270,7 +275,7 @@ handle_working_after_exit() {
 #      `lint_rc_empty_commits.py`'s `find_empty_commits` logic (never
 #      reimplemented) over `<source_branch>^..<feature_branch>` — valid
 #      only once the source branch's tip is confirmed, by SHA, to be this
-#      task's own --no-ff merge; otherwise the check is skipped (narrated).
+#      task's own --no-ff merge (else skipped, narrated); reads its error key.
 #
 # All three checks are delivery checks — they confirm the work actually
 # landed on the source branch, that nothing was left uncommitted, and that
@@ -408,12 +413,12 @@ coder_writer_completion_gate() {
   fi
 
   # --- Empty-commit check ---
-  # Attempted only when the feature ref still exists and source_branch's
-  # tip is confirmed, by SHA, to be this task's own --no-ff merge (second
-  # parent == feature branch tip) -- what makes
-  # "<source_branch>^..<feature_branch>" a safe, single-task range. A
-  # failed confirmation skips the check (narrated) rather than risk
-  # scanning another task's commits.
+  # Attempted only when the feature ref still exists and source_branch's tip
+  # is confirmed, by SHA, to be this task's own --no-ff merge (second parent
+  # == feature tip): "<source_branch>^..<feature_branch>" is then a safe,
+  # single-task range; otherwise it is skipped (narrated). The lint exits 0
+  # on findings: a found commit is its "lint.rc-empty-commits" error key, and
+  # a non-zero exit means the check could not run (passes best-effort).
   if [[ "$feature_ref_exists" == "true" ]]; then
     local _empty_check_feat_tip _empty_check_source_parent2
     _empty_check_feat_tip="$(git -C "$worktree_path" rev-parse --verify --quiet "$feature_branch" 2>/dev/null || true)"
@@ -424,7 +429,7 @@ coder_writer_completion_gate() {
       _empty_check_output="$(python3 "${REPO_TEAM_DIR}/lint_rc_empty_commits.py" \
         --repo "$worktree_path" \
         --range "${source_branch}^..${feature_branch}" 2>&1)" || _empty_check_rc=$?
-      if [[ "$_empty_check_rc" -eq 1 ]]; then
+      if [[ "$_empty_check_rc" -eq 0 && "$_empty_check_output" =~ error:[[:space:]]+lint\.rc-empty-commits ]]; then
         log "completion gate: task ${task_id} REFUSED — empty non-merge commit found on ${feature_branch}" >/dev/null
         set_state "$task_status" "BLOCKED"
         set_block "$task_status" "Blockers" "$(pgai_format_error_contract \
@@ -439,7 +444,7 @@ coder_writer_completion_gate() {
         # completion-gate-empty-commit-01 entry): drop the commit, re-merge, re-complete.
         # CENSUS-ANCHOR: completion-gate-empty-commit-01
         return 0
-      elif [[ "$_empty_check_rc" -ge 2 ]]; then
+      elif [[ "$_empty_check_rc" -ne 0 ]]; then
         log "completion gate: task ${task_id} WARNING: empty-commit check could not run (lint_rc_empty_commits.py exit ${_empty_check_rc}: ${_empty_check_output}) -- passing best-effort" >/dev/null
       fi
     else
@@ -454,6 +459,82 @@ coder_writer_completion_gate() {
   fi
   printf 'DONE\n'
   return 0
+}
+
+# ---------------------------------------------------------------------------
+# _intake_requirement_path <task_readme>
+#
+# Prints the first entry of <task_readme>'s ## Inputs that is an absolute
+# .md path (one leading "-" and surrounding blanks dropped) and returns 0;
+# returns 1 printing nothing when there is none, the section is absent, or
+# the README cannot be read. The body ends at the next "##" line, "###"
+# included.
+# ---------------------------------------------------------------------------
+_intake_requirement_path() {
+  local body line
+  body="$(read_md_field --end-at-subheading "$1" Inputs 2>/dev/null)" || return 1
+  while IFS= read -r line; do
+    line="${line#"${line%%[![:space:]]*}"}"
+    line="${line%"${line##*[![:space:]]}"}"
+    if [[ "$line" == -* ]]; then
+      line="${line:1}"
+      line="${line#"${line%%[![:space:]]*}"}"
+    fi
+    if [[ "$line" == /*.md ]]; then
+      printf '%s\n' "$line"
+      return 0
+    fi
+  done <<< "$body"
+  return 1
+}
+
+# ---------------------------------------------------------------------------
+# _intake_sibling_census <tasks_root> <req_path>
+#
+# Counts the task folders under <tasks_root> (queues/ excluded; each needs a
+# README.md and a status.md) whose README ## Inputs body contains
+# <req_path>, and prints "ok:<count>" when every one's ## State is DONE or
+# WONT-DO, else "skip:<count> sibling(s), <n> non-terminal: <id>:<STATE>,
+# ...". Folders are visited in byte order of their names. A status.md that
+# cannot be read, or has no ## State or an empty one, counts as UNKNOWN; a
+# README that cannot be read, or has no ## Inputs, is not a sibling. A
+# README is read only when it names <req_path> somewhere (a plain
+# substring check), so the reader runs for siblings, not every folder.
+# Returns 0.
+# ---------------------------------------------------------------------------
+_intake_sibling_census() {
+  local tasks_root="$1" req_path="$2"
+  local total=0 task_dir inputs state
+  local -a open=()
+  while IFS= read -r task_dir; do
+    [[ -d "$task_dir" && "${task_dir##*/}" != "queues" ]] || continue
+    [[ -f "${task_dir}/README.md" && -f "${task_dir}/status.md" ]] || continue
+    grep -qF -- "$req_path" "${task_dir}/README.md" 2>/dev/null || continue
+    inputs="$(read_md_field --end-at-subheading "${task_dir}/README.md" Inputs 2>/dev/null)" || continue
+    [[ "$inputs" == *"$req_path"* ]] || continue
+    total=$((total + 1))
+    state="$(read_md_field "${task_dir}/status.md" State 2>/dev/null)" || state=""
+    read -r state _ <<< "$state"
+    state="${state^^}"
+    case "${state:-UNKNOWN}" in
+      DONE|WONT-DO) ;;
+      *) open+=("${task_dir##*/}:${state:-UNKNOWN}") ;;
+    esac
+  done < <(printf '%s\n' "$tasks_root"/* | LC_ALL=C sort)
+  if [[ ${#open[@]} -eq 0 ]]; then
+    printf 'ok:%s\n' "$total"
+    return 0
+  fi
+  local summary
+  summary="$(printf '%s, ' "${open[@]}")"
+  printf 'skip:%s sibling(s), %s non-terminal: %s\n' "$total" "${#open[@]}" "${summary%, }"
+}
+
+# _intake_close_item <log_prefix> <project_root> <key>: close_item, logged.
+_intake_close_item() {
+  pp_run_ops pgai_agent_kanban.ops close_item "$2" "$3" done 2>&1 | \
+    while IFS= read -r _line; do log "${1} ${_line}"; done
+  return "${PIPESTATUS[0]}"
 }
 
 # ---------------------------------------------------------------------------
@@ -493,9 +574,8 @@ coder_writer_completion_gate() {
 #      prior implementation is subsumed here — BLOCKED is non-terminal and will
 #      prevent closure via the census, so no separate BLOCKED-only pass is
 #      needed.
-#   4. Closure: invoke the canonical close_item helper via the ops package:
-#        pp_run_ops pgai_agent_kanban.ops close_item <project_root> <key>
-#      where <key> is the requirements file's basename (without .md extension).
+#   4. Closure: ops close_item <project_root> <requirements basename> done,
+#      run through wake_queue_write, which holds the repo lock for the write.
 #
 # Returns 0 on success (closure fired or legitimately skipped).
 # Never fails the caller — all internal error paths return 0.
@@ -535,25 +615,7 @@ close_intake_on_finalize_report() {
   if [[ -n "$_req_path_override" ]]; then
     _req_path="$_req_path_override"
   else
-    _req_path="$(python3 - "$_task_readme" <<'PY'
-import pathlib, re, sys
-try:
-    text = pathlib.Path(sys.argv[1]).read_text(encoding="utf-8")
-except Exception:
-    raise SystemExit(1)
-m = re.search(r'(^##[^\S\n]+Inputs[^\S\n]*)((?:\n(?!##)[^\n]*)*?)(\n+##|\n*\Z)', text, flags=re.M)
-if not m:
-    raise SystemExit(1)
-for line in m.group(2).splitlines():
-    line = line.strip()
-    if line.startswith('-'):
-        line = line[1:].strip()
-    if line.startswith('/') and line.endswith('.md'):
-        print(line)
-        raise SystemExit(0)
-raise SystemExit(1)
-PY
-)" || true
+    _req_path="$(_intake_requirement_path "$_task_readme")" || true
   fi
 
   if [[ -z "$_req_path" ]]; then
@@ -576,52 +638,7 @@ PY
   # terminal and do not prevent closure.
   local _census_result=""
   if [[ -d "$_tasks_root" ]]; then
-    _census_result="$(python3 - "$_tasks_root" "$_req_path" <<'PY'
-import pathlib, re, sys
-
-TERMINAL = {"DONE", "WONT-DO"}
-
-tasks_root = pathlib.Path(sys.argv[1])
-req_path   = sys.argv[2]
-
-total      = 0
-non_terminal = []  # list of "id:state" strings
-
-for task_dir in sorted(tasks_root.iterdir()):
-    if not task_dir.is_dir() or task_dir.name == "queues":
-        continue
-    readme      = task_dir / "README.md"
-    status_file = task_dir / "status.md"
-    if not readme.is_file() or not status_file.is_file():
-        continue
-    try:
-        readme_text = readme.read_text(encoding="utf-8")
-    except OSError:
-        continue
-    # Filter to tasks whose ## Inputs cite the same requirements path
-    m = re.search(r'(^##[^\S\n]+Inputs[^\S\n]*)((?:\n(?!##)[^\n]*)*?)(\n+##|\n*\Z)', readme_text, flags=re.M)
-    if not m or req_path not in m.group(2):
-        continue
-    total += 1
-    # Read sibling state
-    try:
-        status_text = status_file.read_text(encoding="utf-8")
-    except OSError:
-        # Unreadable status — treat as non-terminal to be safe
-        non_terminal.append(f"{task_dir.name}:UNKNOWN")
-        continue
-    state_m = re.search(r'^##\s+State\s*\n\s*(\S+)', status_text, re.M)
-    state = state_m.group(1).strip().upper() if state_m else "UNKNOWN"
-    if state not in TERMINAL:
-        non_terminal.append(f"{task_dir.name}:{state}")
-
-if non_terminal:
-    summary = ", ".join(non_terminal)
-    print(f"skip:{total} sibling(s), {len(non_terminal)} non-terminal: {summary}")
-else:
-    print(f"ok:{total}")
-PY
-)" || true
+    _census_result="$(_intake_sibling_census "$_tasks_root" "$_req_path")" || true
   fi
 
   # Parse census result: "ok:N" means all siblings are terminal; "skip:..." means not.
@@ -631,19 +648,15 @@ PY
     return 0
   fi
 
-  # All siblings are terminal: invoke canonical close_item helper.
-  # Key is the requirements file basename without the .md extension.
+  # All siblings are terminal: close the item, keyed by its basename less .md.
   local _req_key
   _req_key="$(basename "$_req_path" .md)"
 
   log "${_log_pfx} closing intake item '${_req_key}' (finalize=report terminal ticket complete; parity with CM Step 16b)"
-
   local _close_exit=0
-  set +e
-  pp_run_ops pgai_agent_kanban.ops close_item "$_project_root" "$_req_key" done 2>&1 | \
-    while IFS= read -r _line; do log "${_log_pfx} ${_line}"; done
-  _close_exit="${PIPESTATUS[0]}"
-  set -e
+  wake_queue_write none "intake item '${_req_key}' closure" \
+    _intake_close_item "$_log_pfx" "$_project_root" "$_req_key" || _close_exit=$?
+  [[ $_close_exit -ne 75 ]] || return 0  # not written: the repo lock was unavailable
 
   if [[ $_close_exit -eq 0 ]]; then
     log "${_log_pfx} intake item '${_req_key}' closed done"
@@ -721,16 +734,9 @@ sweep_running_intake_census() {
 
     # Read ## Status from the requirements doc.
     local _swc_status=""
-    _swc_status="$(python3 - "$_swc_req_file" <<'PY'
-import pathlib, re, sys
-try:
-    text = pathlib.Path(sys.argv[1]).read_text(encoding="utf-8")
-except Exception:
-    raise SystemExit(1)
-m = re.search(r'^##\s+Status\s*\n\s*(\S+)', text, re.M)
-print(m.group(1).strip().lower() if m else "")
-PY
-    )" || true
+    _swc_status="$(read_md_field --end-at-subheading "$_swc_req_file" Status 2>/dev/null)" || _swc_status=""
+    read -r _swc_status _ <<< "$_swc_status"
+    _swc_status="${_swc_status,,}"
 
     [[ "$_swc_status" == "running" ]] || continue
 
@@ -739,19 +745,10 @@ PY
     # Read ## Workflow Type from the requirements doc (item-level resolution).
     # Defaults to "release" when the field is absent or unreadable.
     local _swc_item_wf_type=""
-    _swc_item_wf_type="$(python3 - "$_swc_req_file" <<'PY'
-import pathlib, re, sys
-try:
-    text = pathlib.Path(sys.argv[1]).read_text(encoding="utf-8")
-except Exception:
-    print("release"); raise SystemExit(0)
-m = re.search(r'^##\s+Workflow\s+Type[^\S\n]*\n(.*?)(\n+##|\Z)', text, flags=re.S|re.M|re.I)
-if not m:
-    print("release"); raise SystemExit(0)
-val = m.group(1).strip().lower()
-print(val if val else "release")
-PY
-    )" || _swc_item_wf_type="release"
+    _swc_item_wf_type="$(read_md_field --free-spacing --end-at-subheading \
+      "$_swc_req_file" "Workflow Type" 2>/dev/null)" || _swc_item_wf_type=""
+    _swc_item_wf_type="${_swc_item_wf_type,,}"
+    [[ -n "$_swc_item_wf_type" ]] || _swc_item_wf_type="release"
 
     # Resolve finalize capability from cache or by loading the plugin.
     local _swc_item_finalize=""

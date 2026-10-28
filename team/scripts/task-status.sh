@@ -37,7 +37,8 @@
 # block_record), with owner_role taken from the task's ## Role (README.md,
 # then status.md):
 #   --reason-code <code>   why the task blocked, from the closed agent list
-#                          (agent_operator_data_action, agent_unclassified;
+#                          (agent_operator_data_action,
+#                          agent_transient_provider_error, agent_unclassified;
 #                          list them with: python3 -m
 #                          pgai_agent_kanban.overwatch.block_record codes --agent).
 #                          Omitted, the record says agent_unclassified -- unless
@@ -52,7 +53,7 @@
 #         --key CODER-20260101-001-example-task --state BLOCKED --needs-human yes \
 #         --reason-code agent_operator_data_action \
 #         --action-args verb=restamp-fixed-in project=pgai-agent-kanban \
-#                       version=v2.28.0 bugs=BUG-0412,BUG-0413   (example values)
+#                       version=v1.2.3 bugs=BUG-0042,BUG-0043   (example values)
 # Either flag on a state other than BLOCKED, an unknown code, or an unknown,
 # repeated, missing or malformed action argument is refused dual-channel and
 # nothing is written. A --state DONE or WONT-DO write removes the record.

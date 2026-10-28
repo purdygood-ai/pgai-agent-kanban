@@ -3,8 +3,10 @@
 # Operator-facing metrics reporting CLI for the pgai-agent-kanban system.
 #
 # Reads per-RC and per-day rollup JSON files produced by
-# team/scripts/lib/metrics_aggregator.py and the cumulative history CSV
-# produced by team/scripts/lib/metrics_csv_writer.py.
+# team/scripts/lib/metrics_aggregator.py, the cumulative history CSV
+# produced by team/scripts/lib/metrics_csv_writer.py, each project's
+# reliability streaks in projects/<project>/metrics/reliability.json, and
+# each project's operator inbox in projects/<project>/operator-inbox.md.
 #
 # USAGE:
 #   metrics-report.sh --rc <version>             Dump per-RC JSON to stdout
@@ -13,6 +15,13 @@
 #   metrics-report.sh --csv --project <name>     Dump history.csv filtered by project
 #   metrics-report.sh --format jsonl             Emit one JSON object per RC line
 #   metrics-report.sh --tail                     Live-tail history.csv (one line per RC close)
+#   metrics-report.sh --reliability              Hands-off and Clean streaks, every project
+#   metrics-report.sh --reliability --project <name>
+#                                                Hands-off and Clean streaks, one project
+#   metrics-report.sh --reliability --format json --project <name>
+#                                                Print the project's reliability.json
+#   metrics-report.sh --inbox                    Open operator-inbox count, every project
+#   metrics-report.sh --inbox --project <name>   Open operator-inbox count, one project
 #   metrics-report.sh [-h|--help]                Show this help and exit
 #
 # FLAGS:
@@ -22,16 +31,47 @@
 #   --day <YYYY-MM-DD>     Report for a specific UTC day.
 #                          Reads projects/<project>/metrics/day/<date>.json.
 #                          On-demand aggregation is invoked when the file is missing.
+#                          The JSON printed carries one key the file does not:
+#                          "inbox_open", the project's open operator-inbox count
+#                          when the report is printed (null when the inbox cannot
+#                          be read). A file that is not a JSON object is printed
+#                          as stored, with a warning on stderr.
 #   --csv                  Emit the full contents of projects/<project>/metrics/history.csv
 #                          to stdout.  Combine with --project to filter to one project.
 #   --format jsonl         Emit one JSON object per line (JSON Lines format).
 #                          Without --rc or --day, streams all RC rollup files found in
 #                          projects/<project>/metrics/rc/ sorted by RC version.
 #                          Can be combined with --project.
+#   --reliability          Print each project's reliability streaks from
+#                          projects/<project>/metrics/reliability.json: the project
+#                          name, then a Hands-off line (since the last block a human
+#                          had to clear) and a Clean line (since the last block of any
+#                          kind), each "<rcs> RCs / <hours>h   since <YYYY-MM-DD HH:MM>
+#                          (<cause>)" in UTC, at most 70 columns -- the lines the
+#                          rc-metrics pane's Reliability block shows. Without
+#                          --project, every project in projects.cfg; a missing or
+#                          unreadable file prints a placeholder line. Exits 0.
+#                          Cannot be combined with --rc, --day, --csv or --tail.
+#   --inbox                Print each project's open operator-inbox count from
+#                          projects/<project>/operator-inbox.md, one line per
+#                          project: "  <project>: <N> open" ("inbox unreadable"
+#                          when the file cannot be read; a missing file is 0 open).
+#                          Without --project, every project in projects.cfg.
+#                          Exits 0. Cannot be combined with --rc, --day, --csv,
+#                          --tail, --reliability or --format.
+#   --format json          With --reliability: print the project's reliability.json
+#                          as stored. Needs --project (or PGAI_PROJECT_NAME); exits 2
+#                          when the file is missing or unreadable.
+#   --now <iso>            With --reliability: count each streak's hours to this
+#                          ISO-8601 time instead of now, e.g.
+#                          --now 2026-10-18T12:00:00+00:00. The hours always run
+#                          from the streak's "since" to the render time, not the
+#                          figure stored at the file's last refresh.
 #   --tail                 Live-tail history.csv using tail -f.  Streams each new row
 #                          as it is appended by cm/release.sh / metrics_csv_writer.py.
 #                          Press Ctrl-C to stop.
-#   --project <name>       Project to operate on (required; or set PGAI_PROJECT_NAME env).
+#   --project <name>       Project to operate on (required, except for --reliability
+#                          and --inbox; or set PGAI_PROJECT_NAME env).
 #   --kanban-root <path>   Override PGAI_AGENT_KANBAN_ROOT_PATH.
 #   -h, --help             Show this help and exit.
 #
@@ -66,11 +106,13 @@ source "${LIB_DIR}/projects.sh"
 source "${LIB_DIR}/script_common.sh"
 # shellcheck source=lib/pp_run_ops.sh
 source "${LIB_DIR}/pp_run_ops.sh"
+# shellcheck source=lib/error_contract.sh
+source "${LIB_DIR}/error_contract.sh"
 
 # ---------------------------------------------------------------------------
 # Defaults
 # ---------------------------------------------------------------------------
-MODE=""                 # rc | day | csv | jsonl | tail
+MODE=""                 # rc | day | csv | jsonl | tail | reliability | inbox
 RC_VERSION=""
 DAY_VALUE=""
 PROJECT_NAME="${PGAI_PROJECT_NAME:-}"
@@ -79,6 +121,9 @@ KANBAN_ROOT_OVERRIDE=""
 _CSV_FLAG=0
 _FORMAT_FLAG=""
 _PROJECT_EXPLICIT=0   # 1 when --project was explicitly passed
+_RELIABILITY_FLAG=0   # 1 when --reliability was passed
+_INBOX_FLAG=0         # 1 when --inbox was passed
+_NOW_FLAG=""          # --now: the render time for --reliability text
 
 # ---------------------------------------------------------------------------
 # Usage
@@ -122,6 +167,19 @@ while [[ $# -gt 0 ]]; do
             MODE="tail"
             shift
             ;;
+        --reliability)
+            _RELIABILITY_FLAG=1
+            shift
+            ;;
+        --inbox)
+            _INBOX_FLAG=1
+            shift
+            ;;
+        --now)
+            [[ -n "${2:-}" ]] || { echo "ERROR: --now requires an ISO-8601 time argument" >&2; exit 1; }
+            _NOW_FLAG="$2"
+            shift 2
+            ;;
         --project)
             [[ -n "${2:-}" ]] || { echo "ERROR: --project requires a name argument" >&2; exit 1; }
             PROJECT_NAME="$2"
@@ -145,9 +203,53 @@ while [[ $# -gt 0 ]]; do
 done
 
 # ---------------------------------------------------------------------------
-# Validate --format value (currently only "jsonl" is supported)
+# --inbox stands alone: no other operation and no --format
 # ---------------------------------------------------------------------------
-if [[ -n "$_FORMAT_FLAG" ]]; then
+# _inbox_refuse <error-key> <message> <remedy>: the one refusal site the
+# --inbox checks share (metrics_report.inbox_combined,
+# metrics_report.inbox_unknown_project).
+_inbox_refuse() {
+    # AGENT-RESOLVABLE (docs/blocking-site-census.md): a usage error refused
+    # before any inbox is read; nothing is written anywhere, and the caller
+    # corrects its own next call.
+    pgai_emit_error_contract "$1" "$2" "$3"
+    # CENSUS-ANCHOR: metrics-report-inbox-01
+    exit 1
+}
+
+if [[ "$_INBOX_FLAG" -eq 1 ]]; then
+    _inbox_others=()
+    [[ -n "$RC_VERSION" ]] && _inbox_others+=(--rc)
+    [[ -n "$DAY_VALUE" ]] && _inbox_others+=(--day)
+    [[ "$_CSV_FLAG" -eq 1 ]] && _inbox_others+=(--csv)
+    [[ "$MODE" == "tail" ]] && _inbox_others+=(--tail)
+    [[ "$_RELIABILITY_FLAG" -eq 1 ]] && _inbox_others+=(--reliability)
+    [[ -n "$_FORMAT_FLAG" ]] && _inbox_others+=(--format)
+    if [[ "${#_inbox_others[@]}" -gt 0 ]]; then
+        _inbox_refuse "metrics_report.inbox_combined" \
+            "--inbox prints open operator-inbox counts on its own and cannot be combined with ${_inbox_others[*]}; nothing was printed." \
+            "$(printf '%q' "${SCRIPT_DIR}/metrics-report.sh")${KANBAN_ROOT_OVERRIDE:+ --kanban-root $(printf '%q' "$KANBAN_ROOT_OVERRIDE")} --inbox${PROJECT_NAME:+ --project $(printf '%q' "$PROJECT_NAME")}"
+    fi
+    MODE="inbox"
+fi
+
+# ---------------------------------------------------------------------------
+# Validate --format value: "json" with --reliability, otherwise "jsonl"
+# ---------------------------------------------------------------------------
+if [[ "$MODE" == "inbox" ]]; then
+    : # validated above
+elif [[ "$_RELIABILITY_FLAG" -eq 1 ]]; then
+    if [[ "$MODE" == "tail" || -n "$RC_VERSION" || -n "$DAY_VALUE" || "$_CSV_FLAG" -eq 1 ]]; then
+        echo "ERROR: --reliability cannot be combined with --rc, --day, --csv or --tail" >&2
+        echo "Run with --help for usage." >&2
+        exit 1
+    fi
+    if [[ -n "$_FORMAT_FLAG" && "$_FORMAT_FLAG" != "json" ]]; then
+        echo "ERROR: unsupported --format value with --reliability: '${_FORMAT_FLAG}' (supported: json)" >&2
+        exit 1
+    fi
+    MODE="reliability"
+elif [[ -n "$_FORMAT_FLAG" ]]; then
     if [[ "$_FORMAT_FLAG" != "jsonl" ]]; then
         echo "ERROR: unsupported --format value: '${_FORMAT_FLAG}' (supported: jsonl)" >&2
         exit 1
@@ -158,7 +260,7 @@ fi
 # ---------------------------------------------------------------------------
 # Resolve mode from flag combinations
 # ---------------------------------------------------------------------------
-if [[ "$MODE" == "tail" ]]; then
+if [[ "$MODE" == "tail" || "$MODE" == "reliability" || "$MODE" == "inbox" ]]; then
     : # already set
 elif [[ -n "$RC_VERSION" ]]; then
     MODE="rc"
@@ -185,6 +287,71 @@ KANBAN_ROOT="${KANBAN_ROOT_OVERRIDE:-${PGAI_AGENT_KANBAN_ROOT_PATH}}"
 if [[ ! -d "$KANBAN_ROOT" ]]; then
     echo "ERROR: kanban root not found: ${KANBAN_ROOT}" >&2
     exit 1
+fi
+
+# ===========================================================================
+# MODE: reliability  --  print reliability streaks (text) or reliability.json
+# ===========================================================================
+# Rendered by pgai_agent_kanban.metrics.reliability_view, the renderer the
+# rc-metrics pane's Reliability block uses, so the two print the same lines.
+if [[ "$MODE" == "reliability" ]]; then
+    if [[ "$_FORMAT_FLAG" == "json" ]]; then
+        if [[ -z "${PROJECT_NAME:-}" ]]; then
+            echo "ERROR: --reliability --format json needs a project. Pass --project <name> or set PGAI_PROJECT_NAME." >&2
+            echo "Run with --help for usage." >&2
+            exit 1
+        fi
+        if [[ ! -d "${KANBAN_ROOT}/projects/${PROJECT_NAME}" ]]; then
+            echo "ERROR: project directory not found: ${KANBAN_ROOT}/projects/${PROJECT_NAME}" >&2
+            exit 1
+        fi
+        pp_run_ops pgai_agent_kanban.metrics.reliability_view json --kanban-root "$KANBAN_ROOT" "$PROJECT_NAME"
+        exit $?
+    fi
+
+    _RELIABILITY_PROJECTS=()
+    if [[ "$_PROJECT_EXPLICIT" -eq 1 ]]; then
+        if [[ ! -d "${KANBAN_ROOT}/projects/${PROJECT_NAME}" ]]; then
+            echo "ERROR: project directory not found: ${KANBAN_ROOT}/projects/${PROJECT_NAME}" >&2
+            exit 1
+        fi
+        _RELIABILITY_PROJECTS=("$PROJECT_NAME")
+    else
+        while IFS= read -r _p; do
+            [[ -n "$_p" ]] && _RELIABILITY_PROJECTS+=("$_p")
+        done < <(KANBAN_ROOT="$KANBAN_ROOT" projects_cfg_list 2>/dev/null || true)
+    fi
+    _RELIABILITY_NOW_ARGS=()
+    [[ -n "$_NOW_FLAG" ]] && _RELIABILITY_NOW_ARGS=(--now "$_NOW_FLAG")
+    pp_run_ops pgai_agent_kanban.metrics.reliability_view text --kanban-root "$KANBAN_ROOT" \
+        ${_RELIABILITY_NOW_ARGS[@]+"${_RELIABILITY_NOW_ARGS[@]}"} \
+        ${_RELIABILITY_PROJECTS[@]+"${_RELIABILITY_PROJECTS[@]}"}
+    exit $?
+fi
+
+# ===========================================================================
+# MODE: inbox  --  print each project's open operator-inbox count
+# ===========================================================================
+# Read through pgai_agent_kanban.metrics.inbox_view, which reads the inbox
+# with the inbox module -- the same reader the attention pane's OPERATOR
+# INBOX block uses.
+if [[ "$MODE" == "inbox" ]]; then
+    _INBOX_PROJECTS=()
+    if [[ "$_PROJECT_EXPLICIT" -eq 1 ]]; then
+        if [[ ! -d "${KANBAN_ROOT}/projects/${PROJECT_NAME}" ]]; then
+            _inbox_refuse "metrics_report.inbox_unknown_project" \
+                "project '${PROJECT_NAME}' has no directory at ${KANBAN_ROOT}/projects/${PROJECT_NAME}, so it has no operator inbox; nothing was printed." \
+                "ls $(printf '%q' "${KANBAN_ROOT}/projects")"
+        fi
+        _INBOX_PROJECTS=("$PROJECT_NAME")
+    else
+        while IFS= read -r _p; do
+            [[ -n "$_p" ]] && _INBOX_PROJECTS+=("$_p")
+        done < <(KANBAN_ROOT="$KANBAN_ROOT" projects_cfg_list 2>/dev/null || true)
+    fi
+    pp_run_ops pgai_agent_kanban.metrics.inbox_view counts --kanban-root "$KANBAN_ROOT" \
+        ${_INBOX_PROJECTS[@]+"${_INBOX_PROJECTS[@]}"}
+    exit $?
 fi
 
 # ---------------------------------------------------------------------------
@@ -312,8 +479,11 @@ if [[ "$MODE" == "day" ]]; then
         exit 2
     fi
 
-    cat "$DAY_FILE"
-    exit 0
+    # The rollup as stored, plus "inbox_open": the project's open
+    # operator-inbox count now (pgai_agent_kanban.metrics.inbox_view).
+    pp_run_ops pgai_agent_kanban.metrics.inbox_view day --kanban-root "$KANBAN_ROOT" \
+        --project "$PROJECT_NAME" "$DAY_FILE"
+    exit $?
 fi
 
 # ===========================================================================

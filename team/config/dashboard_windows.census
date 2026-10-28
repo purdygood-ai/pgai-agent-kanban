@@ -186,7 +186,7 @@ P	6	-	0	single	metadata.sh	metadata.sh --kanban-root $PGAI_AGENT_KANBAN_ROOT_PAT
 C	6	-	0	10	pause
 
 W	7	rc-metrics	-	2
-P	7	-	0	Left (today + current RC)	metrics.sh	metrics.sh --kanban-root $PGAI_AGENT_KANBAN_ROOT_PATH
+P	7	-	0	Left (today + current RC + reliability)	metrics.sh	metrics.sh --kanban-root $PGAI_AGENT_KANBAN_ROOT_PATH
 C	7	-	0	refresh	pause
 P	7	-	1	Right (history.csv)	show-metrics.sh	show-metrics.sh --kanban-root $PGAI_AGENT_KANBAN_ROOT_PATH
 C	7	-	1	refresh	pause

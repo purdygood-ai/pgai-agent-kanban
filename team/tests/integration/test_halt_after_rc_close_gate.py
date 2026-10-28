@@ -329,6 +329,18 @@ def _build_kanban_root(
     # dependency), mirroring what install.sh copies from team/ to a live
     # install's root beside the package.
     shutil.copytree(_TEAM_DIR / "halt_after", root / "halt_after")
+    # The project-name rule the package's registry readers take from the
+    # installed tree's scripts/lib/, as a live install carries it.
+    (root / "scripts" / "lib").mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(_TEAM_DIR / "scripts" / "lib" / "projects_cfg.sh", root / "scripts" / "lib" / "projects_cfg.sh")
+    # The internal-ID scrub the CHANGELOG step's release-notes helpers load
+    # by path from scripts/lib/cm/ beside the package, as a live install
+    # carries it.
+    (root / "scripts" / "lib" / "cm").mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(
+        _TEAM_DIR / "scripts" / "lib" / "cm" / "internal_id_scrub.py",
+        root / "scripts" / "lib" / "cm" / "internal_id_scrub.py",
+    )
     (root / "pm-agent" / "lib").mkdir(parents=True, exist_ok=True)
     (root / "pm-agent" / "lib" / "semver.py").write_text(
         (_TEAM_DIR / "pm-agent" / "lib" / "semver.py").read_text(encoding="utf-8"), encoding="utf-8"
@@ -409,7 +421,7 @@ def test_cm_release_spends_versioned_sentinel_when_shipped_version_matches_targe
     HALT Event in release-state.md names the token verbatim.
     """
     version = "v0.1.0"
-    project_name = "halt_after_exact_match_test"
+    project_name = "halt-after-exact-match-test"
 
     kanban_root, project_root, repo_path, result_release = _ship_one_release(
         tmp_path, project_name, version, halt_after_token=f"rc:{version}"
@@ -450,7 +462,7 @@ def test_cm_release_spends_versioned_sentinel_when_shipped_version_skips_past_ta
     """
     shipped_version = "v0.2.0"
     target_version = "v0.1.0"
-    project_name = "halt_after_skip_ahead_test"
+    project_name = "halt-after-skip-ahead-test"
 
     kanban_root, project_root, repo_path, result_release = _ship_one_release(
         tmp_path, project_name, shipped_version, halt_after_token=f"rc:{target_version}"
@@ -487,7 +499,7 @@ def test_cm_release_leaves_versioned_sentinel_armed_when_target_not_yet_shipped(
     """
     shipped_version = "v0.1.0"
     target_version = "v0.9.0"
-    project_name = "halt_after_not_yet_due_test"
+    project_name = "halt-after-not-yet-due-test"
 
     kanban_root, project_root, repo_path, result_release = _ship_one_release(
         tmp_path, project_name, shipped_version, halt_after_token=f"rc:{target_version}"

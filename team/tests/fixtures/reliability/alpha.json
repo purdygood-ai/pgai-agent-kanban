@@ -1,0 +1,50 @@
+{
+  "clean": {
+    "class": "any",
+    "hours": 16.08,
+    "last_block": {
+      "cause": "chain",
+      "class": "any",
+      "escalated": false,
+      "rc": "v2.48.0",
+      "reason_code": "provider_refusal",
+      "resolution": {
+        "class": "any",
+        "reason_code": "requeue",
+        "time": "2026-10-17T19:55:00+00:00"
+      },
+      "source": "task:CODER-20261017-012-wire-route",
+      "task": "CODER-20261017-012-wire-route",
+      "time": "2026-10-17T18:40:00+00:00"
+    },
+    "rcs": 0,
+    "since": "2026-10-17T19:55:00+00:00",
+    "status": "resolved"
+  },
+  "computed_at": "2026-10-18T12:00:00+00:00",
+  "first_record_at": "2026-10-08T01:10:00+00:00",
+  "hands_off": {
+    "class": "human",
+    "hours": 248.48,
+    "last_block": {
+      "cause": "chain",
+      "class": "human",
+      "escalated": false,
+      "rc": "v2.40.0",
+      "reason_code": "cm-release.ship-policy.halt",
+      "resolution": {
+        "class": "human",
+        "reason_code": "unhalt",
+        "time": "2026-10-08T03:31:00+00:00"
+      },
+      "source": "halt:project",
+      "task": null,
+      "time": "2026-10-08T01:10:00+00:00"
+    },
+    "rcs": 8,
+    "since": "2026-10-08T03:31:00+00:00",
+    "status": "resolved"
+  },
+  "project": "alpha",
+  "schema_version": 1
+}

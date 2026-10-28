@@ -144,15 +144,6 @@ source "${SCRIPT_DIR}/../lib/overwatch_protocol.sh"
 # shellcheck source=scripts/lib/block_record.sh
 source "${SCRIPT_DIR}/../lib/block_record.sh"
 
-# --- Source overwatch_backlog_seed.sh (overwatch_backlog_seed_content) ---
-# Needed by run_project_chain's self-heal path (wake_driver.sh): a missing
-# tasks/queues/overwatch_backlog.md at wake time is recreated
-# rather than treated as a reason to skip the project, so the same seeded
-# content create-project.sh and the upgrade migration write is available
-# here too. Side-effect-free on source (defines one function, runs nothing).
-# shellcheck source=scripts/lib/overwatch_backlog_seed.sh
-source "${SCRIPT_DIR}/../lib/overwatch_backlog_seed.sh"
-
 # --- Source the shared dual-channel error-contract emitter ---
 # coder_writer_completion_gate's refusal narrations speak both channels
 # through this one primitive: see team/scripts/lib/error_contract.sh for the
@@ -289,8 +280,9 @@ export AI_AUTH_MODE="${AI_AUTH_MODE:-$(read_ini "${TEAM_ROOT}/kanban.cfg" provid
 # through some other mechanism (e.g. ~/.claude/credentials from claude login).
 [[ -f "$TEAM_ROOT/secrets" ]] && source "$TEAM_ROOT/secrets"
 
-# --- Source operator's personal INI overrides (optional, rarely used) ---
-[[ -f "$HOME/.config/pgai-kanban.cfg" ]] && source "$HOME/.config/pgai-kanban.cfg"
+# --- Operator user config (optional, rarely used), then [chain] pm_mode ---
+# config_startup_prelude is config_loader.sh's (sourced above).
+config_startup_prelude "$TEAM_ROOT"
 
 # --- Load kanban.cfg into env vars via config_loader.sh ---
 # load_config reads every kanban.cfg key once, validates keys, applies OPTIONAL
@@ -358,7 +350,7 @@ trap cleanup_on_exit SIGTERM SIGINT SIGHUP
 MAX_TASKS_PER_WAKE="${MAX_TASKS_PER_WAKE:-5}"
 MAX_RUNTIME_SECONDS="${MAX_RUNTIME_SECONDS:-14400}"
 PAUSE_BETWEEN_TASKS="${PAUSE_BETWEEN_TASKS:-5}"
-STOP_ON_BLOCKED="${STOP_ON_BLOCKED:-true}"
+STOP_ON_BLOCKED="${STOP_ON_BLOCKED:-false}"
 STOP_FILE="${STOP_FILE:-${PGAI_AGENT_KANBAN_TEMP_DIR}/wakeup/stop}"
 MAX_TASK_SECONDS="${MAX_TASK_SECONDS:-5400}"
 MAX_PROJECT_SECONDS="${MAX_PROJECT_SECONDS:-${MAX_RUNTIME_SECONDS}}"
@@ -386,16 +378,28 @@ else
     QUEUE_DIR=""
     BACKLOG=""
 fi
-# Per-firing batch logs live at $KANBAN_ROOT/logs/agents/.
-# They are cron-firing-scope, not project-scope — a single wake firing may
-# iterate multiple projects, so the artifact belongs at kanban root alongside
-# cron-<agent>.log. Per-task progress logs remain at tasks/<task_id>/logs/.
-# Because the provider CLI's own output for every task in the firing lands
+# The one project this batch works, when wake-batch.sh started it for a
+# single project (PGAI_WAKE_BATCH_PROJECT; wake_common_run reads
+# WAKE_BATCH_PROJECT). Empty means every registered project, as a direct
+# run of a provider wake script does. The variable is unset here so the
+# agent sessions this batch dispatches -- and any wake they run in turn --
+# do not inherit the scope.
+WAKE_BATCH_PROJECT="${PGAI_WAKE_BATCH_PROJECT:-}"
+unset PGAI_WAKE_BATCH_PROJECT
+
+# Per-batch logs live at $KANBAN_ROOT/logs/agents/, alongside
+# cron-<agent>.log. A batch started for one project names it in the file
+# name, so the batches one firing starts together never share a log.
+# Per-task progress logs remain at tasks/<task_id>/logs/.
+# Because the provider CLI's own output for every task in the batch lands
 # here rather than under the task folder, wd_invoke_task records which
 # batch log (and which byte span of it) each dispatch wrote in the task's
 # own logs/dispatch.jsonl — see dispatch_record_* in overwatch_protocol.sh.
 LOG_DIR="${KANBAN_ROOT}/logs/agents"
-LOG_FILE="${LOG_DIR}/${AGENT}-batch-$(date +%Y%m%d-%H%M%S).log"
+_wake_log_project=""
+[[ "$WAKE_BATCH_PROJECT" =~ ^[A-Za-z0-9][A-Za-z0-9_-]*$ ]] && _wake_log_project="-${WAKE_BATCH_PROJECT}"
+LOG_FILE="${LOG_DIR}/${AGENT}-batch-$(date +%Y%m%d-%H%M%S)${_wake_log_project}.log"
+unset _wake_log_project
 
 # --- Lock paths ---
 LOCK_DIR="${TEAM_ROOT}/locks"

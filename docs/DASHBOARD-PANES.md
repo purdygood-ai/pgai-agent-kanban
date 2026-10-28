@@ -87,6 +87,33 @@ Single pane: every BLOCKED task across every project, with its reason and recomm
 | single | `attention.sh` | `attention.sh --kanban-root $PGAI_AGENT_KANBAN_ROOT_PATH` |
 <!-- CENSUS-GENERATED:END window=3 variant=- -->
 
+**The `NEEDS OPERATOR` block** counts each project's bugs and priorities at `needs-operator` and shows the newest open inbox question about one of them: its entry ID, date, the item it names, and the first line of the question (cut at 100 characters). Without color the header's question-mark symbol prints as `?`.
+
+```
+? NEEDS OPERATOR
+--------------------------------------------------------------------
+
+  my-app: 2 needs-operator
+    Newest: INBOX-0002  2026-01-01T10:00:00+00:00  (BUG-NNNN-export-timeout)  Is a ten-minute export limit acceptable?
+    Answer: scripts/inbox.sh --project my-app list
+```
+
+The Newest line reads `(no open inbox question)` when no open entry names one of the items, and `(inbox unreadable)` when the inbox cannot be read. A project with nothing at `needs-operator` shows nothing, and when no project has one the whole block, header included, is left out.
+
+**The `OPERATOR INBOX` block** lists the questions parked for you in each project's operator inbox (`projects/<name>/operator-inbox.md`). Each project with open entries gets one block: the open count, one line per open entry, newest first (ID, date, source, first line of the question cut at 100 characters), and the command that lists them all. Without color the header's tray symbol prints as `?`.
+
+```
+? OPERATOR INBOX
+--------------------------------------------------------------------
+
+  my-app: 2 open
+    INBOX-0002  2026-01-01T10:00:00+00:00  (rc:v1.2.3)  Cancel the RC or keep it open for the late fix?
+    INBOX-0001  2026-01-01T09:00:00+00:00  (my-app)  Will you fix the runaway threshold setting?
+    Answer: scripts/inbox.sh --project my-app list
+```
+
+A project whose inbox file cannot be read shows `my-app: inbox unreadable` instead, so a bad file never hides a question. A project with nothing open shows nothing, and when no project has an open entry the whole block, header included, is left out. `metrics-report.sh --inbox` prints the same open counts. How to answer and close an entry is in [OPERATIONS.md](OPERATIONS.md), "The operator inbox".
+
 ## Window 4 — schedule
 
 The whole cron-driven schedule in one place, as two full-width bands stacked top to bottom — the per-agent list, then the event band. The list answers what each agent last did and when it fires next; the event band answers what has happened so far today. There is no separate roster band: the one-line next-wake summary stays in window 0's header, and here the list's NEXT column carries the same information, one agent per row.
@@ -135,14 +162,25 @@ Single pane: kanban version, PM mode, HALT state, and one block per registered p
 
 ## Window 7 — rc-metrics
 
-Two vertical panes covering RC cost data. The left pane shows today's per-project metrics plus the current-RC block; the right pane is the rolling history view. For column-by-column meaning, sub-views (`--per-agent`), and the wall-time column behavior, see [dashboard.md](dashboard.md).
+Two vertical panes covering RC cost data. The left pane shows today's per-project metrics, the current-RC block, the reliability streaks and the bug split; the right pane is the rolling history view. For column-by-column meaning, sub-views (`--per-agent`), and the wall-time column behavior, see [dashboard.md](dashboard.md).
 
 <!-- CENSUS-GENERATED:BEGIN window=7 variant=- -->
 | Pane position | Populating script | Standalone command |
 |---|---|---|
-| Left (today + current RC) | `metrics.sh` | `metrics.sh --kanban-root $PGAI_AGENT_KANBAN_ROOT_PATH` |
+| Left (today + current RC + reliability) | `metrics.sh` | `metrics.sh --kanban-root $PGAI_AGENT_KANBAN_ROOT_PATH` |
 | Right (history.csv) | `show-metrics.sh` | `show-metrics.sh --kanban-root $PGAI_AGENT_KANBAN_ROOT_PATH` |
 <!-- CENSUS-GENERATED:END window=7 variant=- -->
+
+**The left pane's `Bugs` section** gives one line per project that has a bug to count:
+
+```
+=== Bugs ===
+
+  my-app
+    2 open / 3 deferred / 1 needs-operator
+```
+
+`open` counts the open bugs the project's deferral posture keeps, and `deferred` the open bugs it holds back (0 when deferral is off). `needs-operator` counts bugs waiting on an operator answer. `running` and closed bugs are not counted. When the posture cannot be resolved, nothing counts as deferred and the line ends `(deferral posture unreadable)`. A project with none of the three has no line, and with no line anywhere the section is left out. The deferral keys are in `SOP-core.md`, "Deferral Posture".
 
 ## Window 8 — agent-metrics
 
@@ -342,7 +380,7 @@ The status line surfaces three kinds of conditional indicator that are otherwise
 - **DEFER** — one segment per deferral scope in force, resolved through `team/scripts/lib/defer_posture.sh`:
   - **Kanban-wide.** A deferral set in `kanban.cfg` or a root-scoped campaign file renders first, as `✋ DEFER GLOBAL <=level (n waiting)`. Its count covers every project that inherits it.
   - **Per project.** Each project whose own settings defer its bugs gets `✋ DEFER <project> <=level (n waiting)`, alphabetically after the global one. Its own settings mean its own `DEFER-LOW-BUGS` campaign file, or its `project.cfg`.
-  - **End version.** `until vX.Y.Z` goes before the count when a campaign file names the release it runs until, for example `✋ DEFER project-a <=low until v2.33.0 (2 waiting)`.
+  - **End version.** `until vX.Y.Z` goes before the count when a campaign file names the release it runs until, for example `✋ DEFER project-a <=low until vX.Y.Z (2 waiting)`.
   - **Zero waiting.** A segment shows whenever its deferral is on, `(0 waiting)` included, so a deferral holding nothing back is still on the bar. A project with no deferral of its own gets no segment.
   - **Unreadable posture.** An unparseable campaign file, or a refused `[release]` value, renders `⚠️ DEFER CONFIG UNREADABLE: <path>` instead of falling silent.
 

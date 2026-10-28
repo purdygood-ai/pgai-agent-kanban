@@ -20,8 +20,9 @@ and neither can one that always passes, so this module asserts both:
   4. Pointed at a copy of the decision module that no longer checks the
      State (so it would count any [B]-marked Needs Human: yes task, whatever
      its State), the verifier exits 1 and names its scanner check.
-  5. Pointed at a copy of the driver whose overwatch exemption is removed,
-     the verifier exits 1 and names its overwatch check.
+  5. Pointed at a copy of the driver whose overwatch chain return (above
+     the guard) is removed, the verifier exits 1 and names its overwatch
+     check.
   6. Pointed at a copy of the driver whose WAITING/BLOCKED re-checks are
      back inside the held block, the verifier exits 1 and names its
      re-check check.
@@ -74,8 +75,9 @@ _NEEDS_HUMAN_DISABLED = "return True"
 # The State half: the queue scan's rule, and a rule that accepts any state.
 _STATE_PREDICATE = 'parse_scan_rule("B=BLOCKED")'
 _STATE_DISABLED = 'parse_scan_rule("B=*")'
-# The driver's overwatch exemption, and the always-false test that removes it.
-_OVERWATCH_BRANCH = 'if [[ "$_gate_verdict" == "systemic" && "$AGENT" == "overwatch" ]]; then'
+# The driver's overwatch chain return above the guard, and the always-false
+# test that removes it.
+_OVERWATCH_BRANCH = 'if [[ "$AGENT" == "overwatch" ]]; then'
 _OVERWATCH_REMOVED = 'if false; then'
 # The driver's re-checks after the held block's closing fi.
 _GATE_CLOSE = '  fi  # end: if [[ "$_dispatch_gated" == "false" ]]\n'
@@ -201,7 +203,7 @@ def test_verifier_fails_when_decision_ignores_state(tmp_path):
     assert "PASS: AC-3 (header)" in stdout
 
 
-def test_verifier_fails_when_overwatch_exemption_is_removed(tmp_path):
+def test_verifier_fails_when_overwatch_chain_return_is_removed(tmp_path):
     scripts = _copy_verifier_inputs(tmp_path)
     _replace_once(scripts / "lib" / "wake_driver.sh", _OVERWATCH_BRANCH, _OVERWATCH_REMOVED)
 

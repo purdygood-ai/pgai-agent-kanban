@@ -2,9 +2,9 @@
 """
 lint_help_presence.py
 =====================
-Lint gate: every operator-facing script under team/scripts/ — shell script
+Lint: every operator-facing script under team/scripts/ — shell script
 or Python entry point — must implement a ``--help`` or ``-h`` flag that
-prints usage text.
+prints usage text. Each script that does not is reported as a finding.
 
 Scripts that are exempt (dashboard-internal pane scripts, process-internal
 helpers invoked by other scripts rather than directly by operators) are
@@ -66,8 +66,8 @@ directory-relative names (``cm/open-doc.sh``) for scripts in scanned
 subdirectories.  The default path is ``team/scripts/help_presence_exempt.txt``
 relative to the script's inferred repo root.  Override via ``--exempt-list``.
 
-Help-quality checks (quality class — narrated, never change the exit code)
---------------------------------------------------------------------------
+Help-quality checks (quality class — recorded as findings like the rest)
+------------------------------------------------------------------------
 Two further checks run over every bash script (``*.sh``) under the scan
 root, recursively, skipping any ``lib/`` directory (sourced helpers, not
 entry points). The scan root is ``team/scripts/`` by default, or the
@@ -94,19 +94,30 @@ entry points). The scan root is ``team/scripts/`` by default, or the
       prints the header up to its first non-comment line.
 
 Each finding is one narrated line naming the script; the run ends with a
-count. Neither check ever makes the lint exit non-zero.
+count.
+
+Findings
+--------
+CONVERT (quality class, team/SOP-core.md "Gates and Refusals"): a script
+without ``--help`` is a discoverability gap, not a failure of the run that
+finds it.  Each finding is printed and recorded as one object whose
+``kind`` is ``missing-help``, ``undocumented-flag``,
+``fixed-sed-help-range`` or ``exempt-list-missing`` (the exempt list could
+not be read, so the presence check did not run); with --findings-file the
+findings are written as a JSON array (the shape
+pgai_agent_kanban.lint.findings defines), which the gated runners merge per
+instance with gated_runner_merge_findings_file.
 
 Exit codes
 ----------
-  0   No --help presence findings (help-quality findings, if any, are
-      narrated and do not change this).
-  1   One or more scripts are missing --help (see stdout for the list).
-  2   Usage error or internal failure (missing directory, missing exempt list).
+  0   The lint ran, whatever it found (every kind above is a finding).
+  2   Usage error: a --scripts-dir (or team/scripts/) that does not exist.
 
 Usage
 -----
   python3 scripts/lint_help_presence.py [--scripts-dir PATH]
                                         [--exempt-list PATH]
+                                        [--findings-file PATH]
                                         [--verbose]
 
   --scripts-dir PATH   Single directory to scan (overrides the default two-
@@ -114,6 +125,8 @@ Usage
                        also the root of the recursive help-quality scan.
   --exempt-list PATH   Exempt-list data file (default: team/scripts/
                        help_presence_exempt.txt relative to repo root).
+  --findings-file PATH Write the findings as a JSON array to PATH (parent
+                       directories created; written even when empty).
   --verbose, -v        Print each file name as it is scanned.
 
 Examples
@@ -129,6 +142,10 @@ Examples
   python3 team/scripts/lint_help_presence.py \\
       --scripts-dir /path/to/team/scripts \\
       --exempt-list /path/to/team/scripts/help_presence_exempt.txt
+
+  # Record findings for a downstream merge:
+  python3 team/scripts/lint_help_presence.py \\
+      --findings-file "${PGAI_AGENT_KANBAN_TEMP_DIR}/lint/help_presence.json"
 """
 
 from __future__ import annotations
@@ -137,7 +154,22 @@ import argparse
 import re
 import sys
 from pathlib import Path
-from typing import NamedTuple
+from typing import NamedTuple, Optional
+
+# The finding shape and the error-contract emitter live in the team package
+# beside scripts/; this script is run directly as well as imported, so the
+# package root is put on sys.path from this file's own location.
+_TEAM_DIR = Path(__file__).resolve().parent.parent  # team/
+if str(_TEAM_DIR) not in sys.path:
+    sys.path.insert(0, str(_TEAM_DIR))
+from pgai_agent_kanban.lib.error_contract import emit_error_contract  # noqa: E402
+from pgai_agent_kanban.lint.findings import (  # noqa: E402
+    display_path,
+    quality_finding,
+    write_findings_file,
+)
+
+_LINT_NAME = "help_presence"
 
 # ---------------------------------------------------------------------------
 # Help-detection patterns
@@ -222,24 +254,17 @@ def _has_help_handler(path: Path) -> bool:
 # ---------------------------------------------------------------------------
 
 
-def _load_exempt_list(exempt_list_path: Path) -> frozenset[str]:
-    """Load the exempt list and return a frozenset of entry strings.
+def _load_exempt_list(exempt_list_path: Path) -> Optional[frozenset[str]]:
+    """Load the exempt list and return a frozenset of entry strings, or
+    ``None`` when the file does not exist (the caller records that as a
+    finding; see `_report_exempt_list_missing`).
 
     File format: one entry per line, ``#`` comments, blank lines ignored.
     Entries may be bare basenames (``wake-batch.sh``) for top-level scripts
     or directory-relative names (``cm/open-doc.sh``) for subdirectory scripts.
     """
     if not exempt_list_path.is_file():
-        print(
-            f"ERROR: exempt list not found: {exempt_list_path}\n"
-            "Use --exempt-list to specify an alternative path.",
-            file=sys.stderr,
-        )
-        # CONVERT: quality-class lint precondition -- a missing exempt list
-        # means this run cannot classify scripts correctly, not that the
-        # tree's --help coverage regressed.
-        # CENSUS-ANCHOR: lint-help-presence-exempt-list-missing-01
-        sys.exit(2)
+        return None
 
     names: set[str] = set()
     for raw_line in exempt_list_path.read_text(encoding="utf-8").splitlines():
@@ -435,7 +460,7 @@ def _format_remedy_block(
     commands = _build_fix_commands(offenders, lint_script, recheck_args)
 
     lines = [
-        f"lint_help_presence: FAIL — {len(offenders)} script(s) missing --help",
+        f"lint_help_presence: {len(offenders)} script(s) missing --help",
         "",
         "Cause(s):",
     ]
@@ -522,11 +547,15 @@ _FIXED_SED_HELP_RANGE: re.Pattern[str] = re.compile(
 
 
 class _QualityFinding(NamedTuple):
-    """One narrated help-quality finding: which check, which script, what."""
+    """One help-quality finding: which check, which script, what. ``path``
+    is the script itself and ``line`` the offending line, when the check
+    has one (the fixed sed range); both feed the recorded finding."""
 
     check: str
     label: str
     detail: str
+    path: Optional[Path] = None
+    line: Optional[int] = None
 
 
 def _list_quality_scripts(root: Path) -> list[Path]:
@@ -749,6 +778,7 @@ def _scan_help_quality(
                         "block, help heredoc or OPERATOR_FLAG_HELP; an "
                         "operator-only or internal flag goes under its own "
                         "heading)",
+                        script,
                     )
                 )
         for number, line in _fixed_sed_ranges(script):
@@ -759,6 +789,8 @@ def _scan_help_quality(
                     f"prints help through a fixed range ({line}); source "
                     "lib/header_help.sh and call header_help_print "
                     "\"${BASH_SOURCE[0]}\" instead",
+                    script,
+                    number,
                 )
             )
     return findings, len(scripts)
@@ -769,8 +801,8 @@ def _narrate_help_quality(
 ) -> None:
     """Print the help-quality findings, one line each, then a count line.
 
-    Quality class: this only narrates. The caller's exit status is decided
-    by the --help presence check alone.
+    Quality class: the caller records each one as a finding too; none
+    changes the exit status.
     """
     for finding in findings:
         print(
@@ -798,8 +830,9 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "Check that every operator-facing shell script in team/scripts/ "
             "and team/scripts/cm/ implements a --help or -h flag that prints "
             "usage text.  Scripts listed in the exempt list are skipped.  "
-            "Exits 0 when all non-exempt scripts pass; exits 1 when any are "
-            "missing help.  Supply --scripts-dir to scan a single directory "
+            "Quality class: each script missing help is a finding, and the "
+            "lint exits 0 whatever it finds (2 when the scan directory does "
+            "not exist).  Supply --scripts-dir to scan a single directory "
             "instead of the default two-directory scan."
         ),
     )
@@ -824,6 +857,14 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--findings-file",
+        metavar="PATH",
+        help=(
+            "Write the findings as a JSON array to PATH (parent directories "
+            "created; written even when empty).  Findings are printed either way."
+        ),
+    )
+    parser.add_argument(
         "--verbose",
         "-v",
         action="store_true",
@@ -832,13 +873,105 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
+def _recheck_command(lint_script: Path, recheck_args: list[str]) -> str:
+    """This lint re-run with *recheck_args*, as a shell command."""
+    suffix = "".join(f' {a}' if a.startswith("--") else f' "{a}"' for a in recheck_args)
+    return f'python3 "{lint_script}"{suffix}'
+
+
+def _report_exempt_list_missing(
+    exempt_list_path: Path, *, explicit: bool, lint_script: Path, findings_file: Optional[str]
+) -> int:
+    """Record the unreadable exempt list as the run's one finding and return 0.
+
+    Without the list the presence check would flag every exempt script, so
+    it does not run. The remedy re-runs on the default list when an
+    explicit --exempt-list was given, and restores the tracked default list
+    from git otherwise.
+    """
+    repo_root = _TEAM_DIR.parent
+    if explicit:
+        remedy = _recheck_command(lint_script, [])
+    else:
+        rel = display_path(exempt_list_path, repo_root)
+        remedy = f'git -C "{repo_root}" checkout -- {rel} && {_recheck_command(lint_script, [])}'
+    finding = quality_finding(
+        _LINT_NAME,
+        f"exempt list {exempt_list_path} not found, so the --help presence check did not run",
+        remedy,
+        file=display_path(exempt_list_path, repo_root),
+        kind="exempt-list-missing",
+    )
+    write_findings_file(findings_file, [finding], lint="lint_help_presence")
+    print(
+        f"ERROR: exempt list not found: {exempt_list_path}\n"
+        "Use --exempt-list to specify an alternative path.",
+        file=sys.stderr,
+    )
+    # CENSUS-ANCHOR: lint-help-presence-exempt-list-missing-01
+    # CONVERT: quality-class lint precondition -- a missing exempt list
+    # means this run cannot classify scripts correctly, not that the
+    # tree's --help coverage regressed; recorded as a finding, returns 0.
+    emit_error_contract("lint.help-presence-exempt-list-missing", finding["cause"], remedy)
+    return 0
+
+
+def _findings(
+    offenders: list[_Offender],
+    quality: list[_QualityFinding],
+    *,
+    lint_script: Path,
+    recheck_args: list[str],
+) -> list[dict]:
+    """One quality finding per script missing ``--help`` (``kind``
+    ``missing-help``, remedied by its own fix command from the remedy block)
+    and per help-quality finding (``kind`` is the check's name)."""
+    repo_root = _TEAM_DIR.parent
+    recheck = _recheck_command(lint_script, recheck_args)
+    fixes = _build_fix_commands(offenders, lint_script, recheck_args)[:-1]
+    findings = [
+        quality_finding(
+            _LINT_NAME,
+            f"{display_path(o.path, repo_root)} does not implement a --help/-h handler "
+            f"(label: {o.label})",
+            f"{fix} && {recheck}",
+            file=display_path(o.path, repo_root),
+            kind="missing-help",
+        )
+        for o, fix in zip(offenders, fixes)
+    ]
+    for q in quality:
+        path = display_path(q.path, repo_root) if q.path else q.label
+        if q.check == "fixed-sed-help-range":
+            edit = (
+                f"replace the fixed sed range on line {q.line} with "
+                'header_help_print "${BASH_SOURCE[0]}" from lib/header_help.sh'
+            )
+        else:
+            edit = (
+                "name each flag listed in this finding in the script's help source "
+                "(header block, help heredoc or OPERATOR_FLAG_HELP)"
+            )
+        findings.append(
+            quality_finding(
+                _LINT_NAME,
+                f"{path}: {q.detail}",
+                f"in {q.path or q.label}, {edit}, then re-check: {recheck}",
+                file=path,
+                line=q.line,
+                kind=q.check,
+            )
+        )
+    return findings
+
+
 def main(argv: list[str] | None = None) -> int:
     """Run the help-presence lint and its help-quality checks.
 
-    Exit codes: 0 no script is missing ``--help`` (help-quality findings are
-    narrated and do not change this); 1 one or more scripts are missing
-    ``--help`` (listed); 2 usage error or internal failure, such as a missing
-    directory or exempt list.
+    Exit codes: 0 whatever was found (each script missing ``--help``, each
+    help-quality finding and a missing exempt list is a quality finding,
+    printed and written to --findings-file); 2 usage error, a scan directory
+    that does not exist.
     """
     args = _parse_args(argv)
 
@@ -852,7 +985,15 @@ def main(argv: list[str] | None = None) -> int:
     else:
         exempt_list_path = script_dir / "help_presence_exempt.txt"
 
+    lint_script = Path(__file__).resolve()
     exempt_names = _load_exempt_list(exempt_list_path)
+    if exempt_names is None:
+        return _report_exempt_list_missing(
+            exempt_list_path,
+            explicit=bool(args.exempt_list),
+            lint_script=lint_script,
+            findings_file=args.findings_file,
+        )
 
     # ------------------------------------------------------------------
     # Determine which directories to scan.
@@ -955,20 +1096,32 @@ def main(argv: list[str] | None = None) -> int:
     )
     _narrate_help_quality(quality_findings, quality_checked, quality_root)
 
-    if offenders:
-        # Reconstruct the exact re-lint invocation so the recheck command in
-        # the remedy block reproduces this run's scan surface precisely.
-        recheck_args: list[str] = []
-        if args.scripts_dir:
-            recheck_args += ["--scripts-dir", str(single_dir)]
-        recheck_args += ["--exempt-list", str(exempt_list_path)]
+    # Reconstruct the exact re-lint invocation so the recheck command in
+    # the remedy block reproduces this run's scan surface precisely.
+    recheck_args: list[str] = []
+    if args.scripts_dir:
+        recheck_args += ["--scripts-dir", str(single_dir)]
+    recheck_args += ["--exempt-list", str(exempt_list_path)]
+    findings = _findings(
+        offenders, quality_findings, lint_script=lint_script, recheck_args=recheck_args
+    )
+    write_findings_file(args.findings_file, findings, lint="lint_help_presence")
 
-        lint_script = Path(__file__).resolve()
+    if offenders:
         print(
             "\n" + _format_remedy_block(offenders, lint_script, recheck_args),
             flush=True,
         )
-        return 1
+        # CENSUS-ANCHOR: lint-help-presence-01
+        # CONVERT: a script without --help is a discoverability gap with
+        # zero runtime-failure risk -- recorded as findings; returns 0.
+        emit_error_contract(
+            "lint.help-presence",
+            f"{len(offenders)} operator-facing script(s) do not implement a --help/-h "
+            "handler; each is listed above with its fix.",
+            findings[0]["remedy"],
+        )
+        return 0
 
     print(
         f"lint_help_presence: OK — {checked_count} script(s) checked, "

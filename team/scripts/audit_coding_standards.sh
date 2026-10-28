@@ -22,14 +22,28 @@
 #                       unset, the framework temp root kanban.cfg [paths]
 #                       configures (tmp_root/tmp_subdir) -- never inside the
 #                       repository.
+#   --findings-file PATH
+#                       Write one finding per FINDINGS or MANUAL-REVIEW-REQUIRED
+#                       directive as a JSON array to PATH (parent directories
+#                       created; written even when empty). Each carries lint
+#                       "coding_standards_audit", severity "quality", summary,
+#                       cause, remedy, kind (directive-findings,
+#                       directive-manual-review, repo-root-missing or
+#                       scripts-dir-missing), and for a directive its
+#                       directive tag, verdict, title and the results file.
+#                       The gated runners' gated_runner_merge_findings_file
+#                       reads this shape.
 #   --verbose, -v       Print each directive's check output while running.
 #   --help, -h          Print this message and exit 0.
 #
+# Quality class: every verdict is printed and written to the results file
+# (and, with --findings-file, recorded as a finding) and the audit exits 0
+# whatever it found.
+#
 # Exit codes:
-#   0  No MANUAL-REVIEW-REQUIRED findings in the results file.
-#   1  One or more directives received MANUAL-REVIEW-REQUIRED verdict, OR one
-#      or more FINDINGS directives warrant human attention.
-#   2  Usage error or fatal setup failure (missing repo root, etc.).
+#   0  The audit ran, whatever its verdicts -- a missing repo root or
+#      team/scripts/ included (reported as a finding; nothing was audited).
+#   2  Usage error: an option missing its argument, or an unknown argument.
 #
 # Output format (results file):
 #   One section per directive, numbered D01 through D11.  Each section has:
@@ -55,12 +69,22 @@ set -euo pipefail
 # ---------------------------------------------------------------------------
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEFAULT_REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+_ACS_SELF="${SCRIPT_DIR}/audit_coding_standards.sh"
+
+# Helpers come from this script's own tree, never from the tree it audits.
+# shellcheck source=lib/error_contract.sh
+source "${SCRIPT_DIR}/lib/error_contract.sh"
+# Per-instance findings: gated_runner_record_instance_finding accumulates,
+# gated_runner_write_findings_array writes the --findings-file array.
+# shellcheck source=lib/gated_runner_lint.sh
+source "${SCRIPT_DIR}/lib/gated_runner_lint.sh"
 
 # ---------------------------------------------------------------------------
 # Argument parsing
 # ---------------------------------------------------------------------------
 REPO_ROOT=""
 OUTPUT_FILE=""
+FINDINGS_FILE=""
 VERBOSE=false
 
 while [[ $# -gt 0 ]]; do
@@ -79,6 +103,14 @@ while [[ $# -gt 0 ]]; do
         exit 2
       fi
       OUTPUT_FILE="$2"
+      shift 2
+      ;;
+    --findings-file)
+      if [[ -z "${2:-}" ]]; then
+        echo "ERROR: --findings-file requires a PATH argument" >&2
+        exit 2
+      fi
+      FINDINGS_FILE="$2"
       shift 2
       ;;
     --verbose|-v)
@@ -104,13 +136,20 @@ Options:
                       unset, the framework temp root kanban.cfg [paths]
                       configures (tmp_root/tmp_subdir) -- never inside the
                       repository.
+  --findings-file PATH
+                      Write one finding per FINDINGS or MANUAL-REVIEW-REQUIRED
+                      directive as a JSON array to PATH (written even when
+                      empty), in the shape the gated runners merge.
   --verbose, -v       Print each directive's check output while running.
   --help, -h          Print this message and exit 0.
 
+Quality class: every verdict is printed and written to the results file
+(and recorded with --findings-file); the audit exits 0 whatever it found.
+
 Exit codes:
-  0  No MANUAL-REVIEW-REQUIRED or FINDINGS verdicts in the results file.
-  1  One or more directives received FINDINGS or MANUAL-REVIEW-REQUIRED verdict.
-  2  Usage error or fatal setup failure (missing repo root, etc.).
+  0  The audit ran, whatever its verdicts (a missing repo root or
+     team/scripts/ is reported as a finding and nothing is audited).
+  2  Usage error: an option missing its argument, or an unknown argument.
 
 Output file format:
   One section per directive (D01-D11).  Each section has:
@@ -155,13 +194,28 @@ fi
 # ---------------------------------------------------------------------------
 # Validate repo root
 # ---------------------------------------------------------------------------
+# _acs_precondition_finding <kind> <cause> <remedy>
+# Record (and, with --findings-file, write) the one finding an audit that
+# could not start reports.
+_acs_precondition_finding() {
+  gated_runner_record_instance_finding coding_standards_audit "$2" "$3" \
+    "kind=$1" "repo_root=${REPO_ROOT}"
+  if [[ -n "$FINDINGS_FILE" ]]; then
+    gated_runner_write_findings_array "$FINDINGS_FILE"
+  fi
+}
+
 if [[ ! -d "$REPO_ROOT" ]]; then
-  echo "ERROR: repo root not found: $REPO_ROOT" >&2
-  echo "Pass --repo-root to specify the repository root explicitly." >&2
+  _acs_precondition_finding repo-root-missing \
+    "repo root ${REPO_ROOT} not found, so no coding-standards directive was audited" \
+    "bash ${_ACS_SELF@Q} --repo-root ${DEFAULT_REPO_ROOT@Q}"
+  # CENSUS-ANCHOR: audit-coding-standards-01
   # CONVERT: audit precondition -- a missing repo root cannot be audited,
   # but this costs a skipped quality report, not a runtime failure.
-  # CENSUS-ANCHOR: audit-coding-standards-01
-  exit 2
+  pgai_emit_error_contract "audit_coding_standards.repo_root_missing" \
+    "repo root not found: ${REPO_ROOT}; no coding-standards directive was audited." \
+    "bash ${_ACS_SELF@Q} --repo-root ${DEFAULT_REPO_ROOT@Q}"
+  exit 0
 fi
 
 TEAM_DIR="${REPO_ROOT}/team"
@@ -169,14 +223,19 @@ SCRIPTS_DIR="${TEAM_DIR}/scripts"
 DOCS_DIR="${REPO_ROOT}/docs"
 
 if [[ ! -d "$SCRIPTS_DIR" ]]; then
-  echo "ERROR: team/scripts/ not found under repo root: $REPO_ROOT" >&2
-  # CONVERT: audit precondition -- same reasoning as audit-coding-standards-01.
+  _acs_precondition_finding scripts-dir-missing \
+    "team/scripts/ not found under repo root ${REPO_ROOT}, so no coding-standards directive was audited" \
+    "bash ${_ACS_SELF@Q} --repo-root ${DEFAULT_REPO_ROOT@Q}"
   # CENSUS-ANCHOR: audit-coding-standards-02
-  exit 2
+  # CONVERT: audit precondition -- same reasoning as audit-coding-standards-01.
+  pgai_emit_error_contract "audit_coding_standards.scripts_dir_missing" \
+    "team/scripts/ not found under repo root ${REPO_ROOT}; no coding-standards directive was audited." \
+    "bash ${_ACS_SELF@Q} --repo-root ${DEFAULT_REPO_ROOT@Q}"
+  exit 0
 fi
 
 # shellcheck source=lib/temp.sh
-source "${SCRIPTS_DIR}/lib/temp.sh"
+source "${SCRIPT_DIR}/lib/temp.sh"
 # pp_run_ops from this script's own tree (the JSON reads below).
 # shellcheck source=lib/pp_run_ops.sh
 source "$(dirname "${BASH_SOURCE[0]}")/lib/pp_run_ops.sh"
@@ -228,10 +287,24 @@ write_directive() {
     fi
   } >> "$OUTPUT_FILE"
 
+  local recheck
+  recheck="bash ${_ACS_SELF@Q} --repo-root ${REPO_ROOT@Q} --output-file ${OUTPUT_FILE@Q}"
   case "$verdict" in
     PASS)                    PASS_COUNT=$(( PASS_COUNT + 1 )) ;;
-    FINDINGS)                FINDINGS_COUNT=$(( FINDINGS_COUNT + 1 )) ;;
-    MANUAL-REVIEW-REQUIRED)  MANUAL_REVIEW_COUNT=$(( MANUAL_REVIEW_COUNT + 1 )) ;;
+    FINDINGS)
+      FINDINGS_COUNT=$(( FINDINGS_COUNT + 1 ))
+      gated_runner_record_instance_finding coding_standards_audit \
+        "coding-standards directive ${tag} (${title}) has FINDINGS; the offending paths are under '## ${tag}' in ${OUTPUT_FILE}" \
+        "fix what '## ${tag}' in ${OUTPUT_FILE} lists, then re-run: ${recheck}" \
+        "kind=directive-findings" "directive=${tag}" "verdict=${verdict}" "title=${title}" "file=${OUTPUT_FILE}"
+      ;;
+    MANUAL-REVIEW-REQUIRED)
+      MANUAL_REVIEW_COUNT=$(( MANUAL_REVIEW_COUNT + 1 ))
+      gated_runner_record_instance_finding coding_standards_audit \
+        "coding-standards directive ${tag} (${title}) needs manual review; the guidance is under '## ${tag}' in ${OUTPUT_FILE}" \
+        "review the code against '## ${tag}' in ${OUTPUT_FILE} and docs/coding-standards.md, then re-run: ${recheck}" \
+        "kind=directive-manual-review" "directive=${tag}" "verdict=${verdict}" "title=${title}" "file=${OUTPUT_FILE}"
+      ;;
   esac
 
   if [[ "$VERBOSE" == "true" ]]; then
@@ -781,13 +854,12 @@ echo ""
 echo "Results written to: ${OUTPUT_FILE}"
 echo ""
 
-# Exit 0 when no MANUAL-REVIEW-REQUIRED or FINDINGS; exit 1 otherwise.
-if [[ $MANUAL_REVIEW_COUNT -gt 0 || $FINDINGS_COUNT -gt 0 ]]; then
-  # CONVERT: quality-class finding, zero runtime-failure risk -- the
-  # gated runners' quality-lint wrapper always returns 0 regardless of
-  # this exit code (see docs/blocking-site-census.md's CONVERT rollup).
-  # CENSUS-ANCHOR: audit-coding-standards-03
-  exit 1
+# Quality class: every FINDINGS and MANUAL-REVIEW-REQUIRED verdict was
+# printed and written to the results file above; record them for the gated
+# runners' merge path when asked, and exit 0 whatever the audit found.
+if [[ -n "$FINDINGS_FILE" ]]; then
+  gated_runner_write_findings_array "$FINDINGS_FILE"
+  echo "Findings written to: ${FINDINGS_FILE}"
 fi
 
 exit 0

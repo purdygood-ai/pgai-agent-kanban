@@ -15,8 +15,10 @@
 #
 # Section header:
 #   [project:NAME]
-#   where NAME matches [a-zA-Z0-9_-]+ and corresponds to a directory
-#   under $KANBAN_ROOT/projects/<NAME>/.
+#   where NAME matches ^[a-z0-9][a-z0-9-]*$ (lowercase letters, digits
+#   and '-') and corresponds to a directory under $KANBAN_ROOT/projects/<NAME>/.
+#   A section with any other name, or with text after its ']', registers
+#   no project.
 #
 # Supported fields per section:
 #
@@ -43,7 +45,7 @@
 #     wake-script iteration loop entirely, equivalent to halting without
 #     a HALT file. Useful for temporarily pausing a project.
 #     The skip covers every agent's wakes, PM discovery (pm-agent.sh --auto)
-#     and OVERWATCH sweeps (overwatch-sweep.sh and the daily OVERWATCH wake);
+#     and OVERWATCH (overwatch-sweep.sh and the overwatch wake);
 #     each narrates one "disabled in projects.cfg (enabled=false) — skipped"
 #     line per firing. `why` reports the project IDLE, and dashboards and
 #     GET /projects still list it.

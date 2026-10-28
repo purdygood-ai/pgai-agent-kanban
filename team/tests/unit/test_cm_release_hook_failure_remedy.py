@@ -9,6 +9,12 @@ caller.  Per docs/coding-standards.md "The non-deterministic exemption", the
 failure is exempt from a numbered fix-command block but must still name the
 next diagnostic step and the rule the gate enforces.
 
+With ``--inbox`` (the pre-tag phase) the same blocking failure also writes
+one operator inbox entry carrying the error key, message and remedy it
+printed; a failed inbox write is narrated and the exit stays 1. Without the
+flag (the pre-squash phase, whose trigger 4 HALT writes the entry) the inbox
+is left alone.
+
 WHY EXTRACTION, NOT REPLICATION
 --------------------------------
 `_run_release_hook` is a private helper defined at file scope in
@@ -34,6 +40,8 @@ from tests.unit.shell_harness import run_bash
 _TEAM_DIR = pathlib.Path(__file__).parent.parent.parent
 _RELEASE_FINALIZE_SH = _TEAM_DIR / "scripts" / "lib" / "cm" / "release_finalize.sh"
 _LIB_ERROR_CONTRACT = _TEAM_DIR / "scripts" / "lib" / "error_contract.sh"
+_LIB_PP_RUN_OPS = _TEAM_DIR / "scripts" / "lib" / "pp_run_ops.sh"
+_LIB_PREFLIGHT = _TEAM_DIR / "scripts" / "lib" / "cm" / "release_preflight.sh"
 
 _FUNCTION_NAME = "_run_release_hook"
 
@@ -75,13 +83,24 @@ def _run_hook_call(
     hook_path: pathlib.Path,
     *,
     no_block: bool = False,
+    inbox: bool = False,
 ) -> object:
-    """Source the real _run_release_hook() and invoke it against hook_path."""
+    """Source the real _run_release_hook() and invoke it against hook_path.
+
+    With *inbox* the call passes --inbox and the harness also sources the
+    real inbox helper (release_preflight.sh) and pp_run_ops.sh, against the
+    sandbox kanban root ``tmp_path/kanban``.
+    """
     fn_body = _extract_function(_RELEASE_FINALIZE_SH, _FUNCTION_NAME)
     repo_root = tmp_path / "repo"
     repo_root.mkdir(parents=True, exist_ok=True)
 
     no_block_arg = " '--no-block'" if no_block else ""
+    if inbox:
+        no_block_arg = " '--inbox'"
+    inbox_sources = (
+        f"source {str(_LIB_PP_RUN_OPS)!r}\nsource {str(_LIB_PREFLIGHT)!r}\n" if inbox else ""
+    )
     script = f"""\
 set -uo pipefail
 REPO_ROOT={str(repo_root)!r}
@@ -91,12 +110,24 @@ _CM_PROJECT_ROOT={str(tmp_path / "kanban_project")!r}
 RC_BRANCH='rc/v9.9.9'
 KANBAN_ROOT={str(tmp_path / "kanban")!r}
 source {str(_LIB_ERROR_CONTRACT)!r}
-
+{inbox_sources}
 {fn_body}
 
 _run_release_hook 'cm-release-pre-tag' {str(hook_path)!r}{no_block_arg}
 """
-    return run_bash(tmp_path, script)
+    kanban = tmp_path / "kanban"
+    return run_bash(
+        tmp_path,
+        script,
+        extra_env={
+            "KANBAN_ROOT": str(kanban),
+            "PGAI_AGENT_KANBAN_ROOT_PATH": str(kanban),
+            "PGAI_AGENT_KANBAN_TEMP_DIR": str(tmp_path / "tmp"),
+            "PGAI_PROJECT_ROOT": "",
+            "PGAI_TASKS_DIR": "",
+        },
+        timeout=60,
+    )
 
 
 def test_failing_hook_names_cause_with_path_and_rc(tmp_path: pathlib.Path) -> None:
@@ -176,3 +207,64 @@ def test_passing_hook_reports_success(tmp_path: pathlib.Path) -> None:
     assert result.returncode == 0
     assert "completed successfully" in result.stdout
     assert "Cause(s):" not in result.stdout + result.stderr
+
+
+def _inbox_file(tmp_path: pathlib.Path) -> pathlib.Path:
+    project = tmp_path / "kanban" / "projects" / "remedy-test-proj"
+    project.mkdir(parents=True, exist_ok=True)
+    (tmp_path / "tmp").mkdir(exist_ok=True)
+    return project / "operator-inbox.md"
+
+
+def test_inbox_failure_writes_one_entry_with_the_emitted_triple(tmp_path: pathlib.Path) -> None:
+    """--inbox (the pre-tag phase): a blocking failure still exits 1 with its
+    Cause block and error contract, and one operator inbox entry carries the
+    same error key, message and remedy the contract printed."""
+    inbox = _inbox_file(tmp_path)
+    hook = tmp_path / "hooks" / "cm-release-pre-tag.sh"
+    _write_hook(hook, "#!/usr/bin/env bash\nexit 5\n")
+
+    result = _run_hook_call(tmp_path, hook, inbox=True)
+    assert result.returncode == 1, result.stderr
+    assert "Cause(s):" in result.stderr
+    key = "cm-release.hook-failure.cm-release-pre-tag"
+    lines = result.stderr.splitlines()
+    at = lines.index(f"error:   {key}")
+    message = lines[at + 1].removeprefix("message: ")
+    remedy = lines[at + 2].removeprefix("remedy:  ")
+
+    text = inbox.read_text(encoding="utf-8")
+    assert text.count("### INBOX-") == 1, text
+    entry = text.replace("\n  ", "\n")
+    assert "- **Source:** rc:v9.9.9" in entry, entry
+    assert key in entry and message in entry and f"Remedy: {remedy}" in entry, entry
+    assert "No HALT file was written" in entry, entry
+    assert "Operator inbox: INBOX-0001 records this stop" in result.stderr
+
+
+def test_blocking_failure_without_inbox_writes_no_entry(tmp_path: pathlib.Path) -> None:
+    """Without --inbox (the pre-squash phase, whose trigger 4 HALT writes the
+    entry instead) a blocking failure leaves the inbox alone."""
+    inbox = _inbox_file(tmp_path)
+    hook = tmp_path / "hooks" / "cm-release-pre-squash.sh"
+    _write_hook(hook, "#!/usr/bin/env bash\nexit 5\n")
+
+    result = _run_hook_call(tmp_path, hook)
+    assert result.returncode == 1
+    assert not inbox.exists()
+    assert "Operator inbox" not in result.stderr
+
+
+def test_inbox_write_failure_keeps_the_exit_and_is_narrated(tmp_path: pathlib.Path) -> None:
+    """An inbox that cannot be written changes nothing about the stop: the
+    same exit 1 and Cause block, plus one WARNING naming the failed write."""
+    _inbox_file(tmp_path).mkdir()
+    hook = tmp_path / "hooks" / "cm-release-pre-tag.sh"
+    _write_hook(hook, "#!/usr/bin/env bash\nexit 5\n")
+
+    result = _run_hook_call(tmp_path, hook, inbox=True)
+    assert result.returncode == 1
+    assert "Cause(s):" in result.stderr
+    assert "error:   cm-release.hook-failure.cm-release-pre-tag" in result.stderr
+    assert "WARNING: the operator inbox entry for this stop" in result.stderr
+    assert "could not be written" in result.stderr

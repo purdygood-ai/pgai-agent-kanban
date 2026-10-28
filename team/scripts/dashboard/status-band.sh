@@ -56,6 +56,8 @@
 #
 # Environment:
 #   PGAI_AGENT_KANBAN_ROOT_PATH  — kanban root directory
+#   PGAI_CRONTAB_CMD             — command run as "<cmd> -l" to read the
+#                                  crontab; unset or empty means 'crontab'
 #   NO_COLOR                     — set to any non-empty value to disable color
 #   TERM=dumb                    — also disables color
 #
@@ -252,7 +254,7 @@ _status_band_distill() {
 # drift from what that band shows for the same crontab and clock.
 # ---------------------------------------------------------------------------
 CRONTAB_TEXT=""
-CRONTAB_TEXT=$(crontab -l 2>/dev/null) || CRONTAB_TEXT=""
+CRONTAB_TEXT=$("${PGAI_CRONTAB_CMD:-crontab}" -l 2>/dev/null) || CRONTAB_TEXT=""
 NOW_TS="$(date +%s)"
 
 roster_band_fetch_entries "$ROSTER_ENTRIES_PY" "$CRON_PARSER_LIB" "$CRONTAB_TEXT" "$NOW_TS"

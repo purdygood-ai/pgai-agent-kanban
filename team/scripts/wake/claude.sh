@@ -23,6 +23,8 @@
 #   - MAX_TASKS_PER_WAKE tasks have been completed this run
 #   - MAX_RUNTIME_SECONDS of walltime has elapsed
 #   - the current task ended in BLOCKED state and STOP_ON_BLOCKED=true
+#     (default false: a BLOCKED task parks only itself and its dependants;
+#     the batch moves on to the next independent task)
 #     (note: WAITING does NOT count as blocked — it's a soft auto-resolved state)
 #   - STOP_FILE exists (operator stop file, shared by every agent's batch;
 #     stays on disk until the operator removes it)
@@ -40,7 +42,7 @@
 #   MAX_TASKS_PER_WAKE     default 5
 #   MAX_RUNTIME_SECONDS    default 14400 (4 hours)
 #   PAUSE_BETWEEN_TASKS    default 5 (seconds)
-#   STOP_ON_BLOCKED        default true
+#   STOP_ON_BLOCKED        default false (true: a BLOCKED task ends the project's batch)
 #   STOP_FILE              default <PGAI_AGENT_KANBAN_TEMP_DIR>/wakeup/stop
 #
 # Configuration:

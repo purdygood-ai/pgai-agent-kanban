@@ -1,0 +1,28 @@
+=== Today ({TODAY}) ===
+
+  alpha
+    (no activity yet today)
+
+  beta
+    (no activity yet today)
+
+=== Current RC ===
+
+  alpha v2.49.0
+    Tasks:    6 done
+    Elapsed:  1h 35m
+    Blocked:  12
+    Tokens:   3K (so far)
+
+=== Reliability ===
+
+  alpha
+    Hands-off: 8 RCs / 248h   since 2026-10-08 03:31 (CM release HALT)
+    Clean:     0 RCs /  16h   since 2026-10-17 19:55 (BLOCKED)
+
+  beta
+    Hands-off: 2 RCs / 411h   since 2026-10-01 (no block on record)
+    Clean:     2 RCs / 411h   since 2026-10-01 (no block on record)
+
+Updated: {UPDATED}
+History CSV: projects/*/metrics/history.csv

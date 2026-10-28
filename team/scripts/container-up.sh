@@ -83,6 +83,8 @@ source "${_SCRIPT_DIR}/lib/pp_run_ops.sh"
 source "${_SCRIPT_DIR}/lib/ini_parser.sh"
 # shellcheck source=lib/temp.sh
 source "${_SCRIPT_DIR}/lib/temp.sh"
+# shellcheck source=lib/container_common.sh
+source "${_SCRIPT_DIR}/lib/container_common.sh"
 
 _MODULE="pgai_agent_kanban.container.lifecycle"
 _DEFAULT_NAME="pgai-kanban"
@@ -160,28 +162,6 @@ _refuse_engine() {
     pgai_emit_error_contract "container_up.engine_failed" "${message}" "${3}"
     # CENSUS-ANCHOR: container-up-engine-failed-01
     exit 1
-}
-
-# _first_line FILE -- the first non-blank line of FILE (empty when none).
-_first_line() {
-    [[ -r "$1" ]] || return 0
-    local line
-    while IFS= read -r line || [[ -n "${line}" ]]; do
-        [[ -n "${line//[[:space:]]/}" ]] && { printf '%s\n' "${line}"; return 0; }
-    done < "$1"
-    return 0
-}
-
-# _kv_get KEY TEXT -- the value of the first "KEY=value" line in TEXT.
-_kv_get() {
-    local key="$1" line
-    while IFS= read -r line; do
-        if [[ "${line}" == "${key}="* ]]; then
-            printf '%s\n' "${line#"${key}="}"
-            return 0
-        fi
-    done <<< "$2"
-    return 0
 }
 
 # ---------------------------------------------------------------------------
@@ -331,34 +311,20 @@ docker_use_session_begin "${_SCRIPT_NAME}" "${IMAGE}"
 # Engine queries
 # ---------------------------------------------------------------------------
 
-# _query_state: sets _STATE (running|stopped|absent) and _STATE_IMAGE.
-_query_state() {
-    local out="${_WORK}/inspect.out" err="${_WORK}/inspect.err" rc=0 prc=0 parsed
-    pgai_docker "${ENGINE}" container inspect "${NAME}" >"${out}" 2>"${err}" || rc=$?
-    parsed="$(pp_run_ops "${_MODULE}" container-state --name "${NAME}" --input "${out}" \
-        --exit-code "${rc}" --stderr-file "${err}" 2>"${_WORK}/state.err")" || prc=$?
-    if [[ "${prc}" -ne 0 && "${prc}" -ne 3 ]]; then
-        _refuse_engine "the state query for container '${NAME}'" \
-            "$(_first_line "${_WORK}/state.err")" "$(printf '%q info' "${ENGINE}")"
-    fi
-    _STATE="$(_kv_get state "${parsed}")"
-    _STATE_IMAGE="$(_kv_get image "${parsed}")"
-}
-
 # _query_scheduler: sets _SCHEDULER_PIDS (comma-separated; empty when none).
 _query_scheduler() {
     local out="${_WORK}/ps.out" rc=0 prc=0 parsed
     pgai_docker "${ENGINE}" exec "${NAME}" ps -eo pid=,args= >"${out}" 2>"${_WORK}/ps.err" || rc=$?
     if [[ "${rc}" -ne 0 ]]; then
         _refuse_engine "listing the processes in container '${NAME}' (to find its scheduler)" \
-            "$(_first_line "${_WORK}/ps.err")" "$(printf '%q exec %q ps -eo pid=,args=' "${ENGINE}" "${NAME}")"
+            "$(container_first_line "${_WORK}/ps.err")" "$(printf '%q exec %q ps -eo pid=,args=' "${ENGINE}" "${NAME}")"
     fi
     parsed="$(pp_run_ops "${_MODULE}" scheduler --input "${out}" 2>"${_WORK}/sched.err")" || prc=$?
     if [[ "${prc}" -ne 0 && "${prc}" -ne 3 ]]; then
         _refuse_engine "reading the process table of container '${NAME}'" \
-            "$(_first_line "${_WORK}/sched.err")" "$(printf '%q exec %q ps -eo pid=,args=' "${ENGINE}" "${NAME}")"
+            "$(container_first_line "${_WORK}/sched.err")" "$(printf '%q exec %q ps -eo pid=,args=' "${ENGINE}" "${NAME}")"
     fi
-    _SCHEDULER_PIDS="$(_kv_get pids "${parsed}")"
+    _SCHEDULER_PIDS="$(container_kv_get pids "${parsed}")"
 }
 
 # _require_image: refuses, naming docker/build.sh, when IMAGE does not exist.
@@ -373,7 +339,7 @@ _require_image() {
     else
         build="PGAI_CONTAINER_TIER=1 docker/build.sh debian"
     fi
-    local message="${_SCRIPT_NAME} refused: image '${IMAGE}' is not in the ${ENGINE} image store ($(_first_line "${_WORK}/image.err")). This script never builds or pulls; create the image with docker/build.sh FLAVOR from a pgai-agent-kanban repository checkout (debian, rocky9 or claude-abliterated), which tags pgai-kanban:FLAVOR and pgai-kanban:latest. Nothing was started."
+    local message="${_SCRIPT_NAME} refused: image '${IMAGE}' is not in the ${ENGINE} image store ($(container_first_line "${_WORK}/image.err")). This script never builds or pulls; create the image with docker/build.sh FLAVOR from a pgai-agent-kanban repository checkout (debian, rocky9 or claude-abliterated), which tags pgai-kanban:FLAVOR and pgai-kanban:latest. Nothing was started."
     # BLOCK-WORTHY: there is no image to run, and creating one is docker/build.sh's job alone.
     pgai_emit_error_contract "container_up.image_missing" "${message}" "${build}"
     # CENSUS-ANCHOR: container-up-image-missing-01
@@ -392,7 +358,7 @@ _start_scheduler() {
         tmux new -d -s "${_SCHEDULER_SESSION}" "${command}" 2>"${_WORK}/tmux.err" || rc=$?
     if [[ "${rc}" -ne 0 ]]; then
         _refuse_engine "starting the scheduler (tmux session '${_SCHEDULER_SESSION}') in container '${NAME}'" \
-            "$(_first_line "${_WORK}/tmux.err")" "$(printf '%q logs %q' "${ENGINE}" "${NAME}")"
+            "$(container_first_line "${_WORK}/tmux.err")" "$(printf '%q logs %q' "${ENGINE}" "${NAME}")"
     fi
     echo "${_SCRIPT_NAME}: scheduler started in tmux session '${_SCHEDULER_SESSION}' (log ${_KANBAN_ROOT}/logs/pseudocron.log)"
 }
@@ -407,7 +373,7 @@ _confirm_heartbeat() {
         rc=0
         out="$(pp_run_ops "${_MODULE}" heartbeat --kanban-root "${_KANBAN_ROOT}" --since "${_SINCE}" 2>/dev/null)" || rc=$?
         if [[ "${rc}" -eq 0 ]]; then
-            echo "${_SCRIPT_NAME}: heartbeat confirmed at $(_kv_get last_fired_at "${out}"); container '${NAME}' is up"
+            echo "${_SCRIPT_NAME}: heartbeat confirmed at $(container_kv_get last_fired_at "${out}"); container '${NAME}' is up"
             return 0
         fi
         now="$(date +%s)"
@@ -430,7 +396,7 @@ _confirm_heartbeat() {
 # ---------------------------------------------------------------------------
 echo "${_SCRIPT_NAME}: engine=${ENGINE} container=${NAME} image=${IMAGE} kanban_root=${_KANBAN_ROOT}"
 
-_query_state
+container_query_state
 case "${_STATE}" in
     running)
         _query_scheduler
@@ -454,7 +420,7 @@ case "${_STATE}" in
             pgai_docker "${ENGINE}" rm "${NAME}" >/dev/null 2>"${_WORK}/rm.err" || _rm_rc=$?
             if [[ "${_rm_rc}" -ne 0 ]]; then
                 _refuse_engine "removing stopped container '${NAME}'" \
-                    "$(_first_line "${_WORK}/rm.err")" "$(printf '%q container inspect %q' "${ENGINE}" "${NAME}")"
+                    "$(container_first_line "${_WORK}/rm.err")" "$(printf '%q container inspect %q' "${ENGINE}" "${NAME}")"
             fi
         fi
         _run_rc=0
@@ -462,9 +428,9 @@ case "${_STATE}" in
             "${CONTAINER_MOUNTS_ARGS[@]}" "${IMAGE}" >/dev/null 2>"${_WORK}/run.err" || _run_rc=$?
         if [[ "${_run_rc}" -ne 0 ]]; then
             _refuse_engine "running image '${IMAGE}' as container '${NAME}'" \
-                "$(_first_line "${_WORK}/run.err")" "$(printf '%q logs %q' "${ENGINE}" "${NAME}")"
+                "$(container_first_line "${_WORK}/run.err")" "$(printf '%q logs %q' "${ENGINE}" "${NAME}")"
         fi
-        _query_state
+        container_query_state
         if [[ "${_STATE}" != "running" ]]; then
             _refuse_engine "keeping container '${NAME}' running (it is ${_STATE:-unknown} right after the run; the entrypoint refuses a kanban root that is not an install)" \
                 "see the container log" "$(printf '%q logs %q' "${ENGINE}" "${NAME}")"

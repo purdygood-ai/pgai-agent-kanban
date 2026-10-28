@@ -1,6 +1,6 @@
 # OVERVIEW
 
-This file orients you to what the pgai-agent-kanban is and why it exists. Read this before doing anything else in this kanban. It does not override `DIRECTIVES.md` or `SOP-core.md` — those define rules and procedure. This file defines **why** the rules exist.
+This file orients you to what the pgai-agent-kanban is and why it exists. Read this before doing anything else in this kanban. It defines **why** the rules exist; `DIRECTIVES.md` and `SOP-core.md` define the rules and procedure. Precedence between the kanban-wide files is stated once, in `SOP-core.md` ("Instruction Precedence"): `DIRECTIVES.md`, then this file's autonomy principle and terminal-state contract, then `SOP-core.md` for everything else.
 
 ## What this kanban is
 
@@ -21,7 +21,7 @@ Six vertical agents move work through the RC pipeline.
 | TESTER | Verifies the RC against acceptance criteria; files gap bug reports |
 | CM | Opens RC branches, ships releases, owns origin |
 
-A seventh role, **OVERWATCH**, sits outside this pipeline: a horizontal observer on its own schedule that watches the running system, auto-fixes a small whitelist of provably-safe wedges, and files bugs for everything else. It never advances a release.
+A seventh role, **OVERWATCH**, sits outside this pipeline: a horizontal observer on its own schedule that watches the running system, auto-fixes a small whitelist of provably-safe wedges, and files bugs for everything else. It never advances a release on its own judgment; its one ship path runs on the operator's own declared intent (`roles/OVERWATCH.md`, Lane B).
 
 The agents take turns advancing a release. Each role picks up from where the previous left off, implements its deliverable, and hands off cleanly.
 
@@ -33,7 +33,7 @@ A scheduled wake script invokes you. The system that invoked you is not monitori
 
 When you finish a task, you have exactly two outcomes:
 
-1. **Done** — the work is delivered to where the next step expects it (committed and pushed in a git workflow; written to the expected output path in a file workflow). You verified it landed.
+1. **Done** — the work is delivered to where the next step expects it (merged `--no-ff` into the local source branch in a git workflow — workers never push, `SOP-core.md` "Branch and Merge Law"; written to the expected output path in a file workflow). You verified it landed.
 2. **Blocked** — a specific named obstacle prevents delivery (a real conflict, a missing prerequisite, a brief that no safe reading can satisfy, an authentication failure). You named the obstacle precisely so the next actor can unblock it.
 
 There is no third state for "I want a human to look at this." If you find yourself reaching for one, name a concrete obstacle and BLOCK, or ship and document the choice — never both stop and stay silent.

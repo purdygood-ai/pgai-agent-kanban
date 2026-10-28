@@ -52,9 +52,11 @@
 #   2 — archive not found or not readable
 #   3 — kanban root not found (PGAI_AGENT_KANBAN_ROOT_PATH or $HOME/pgai_agent_kanban)
 #   1 — also: the final project name (--name, else the archive's own) is not
-#       one plain name (letters, digits, '_' and '-', starting with a letter
-#       or digit); or the export carries an archive and it is not a valid
-#       archive project name (lower-case letters, digits and '-')
+#       a project name the registry accepts (PROJECTS_CFG_NAME_RE in
+#       lib/projects_cfg.sh: a lowercase letter or digit, then lowercase
+#       letters, digits and '-'); an export that carries an archive reports
+#       a name of letters, digits, '_' and '-' outside that rule as an
+#       invalid archive project name
 #   4 — projects/<final-name>/ (or archive/<final-name>/, when the export
 #       carries an archive) already exists and --force not given
 #   5 — staging, extraction, archive placement, or registration error
@@ -82,8 +84,13 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/lib/operator_args.sh"
 # shellcheck source=lib/project_paths.sh
 source "${SCRIPT_DIR}/lib/project_paths.sh"
+# projects_cfg_has (registry membership)
+# shellcheck source=lib/projects.sh
+source "${SCRIPT_DIR}/lib/projects.sh"
 # shellcheck source=lib/error_contract.sh
 source "${SCRIPT_DIR}/lib/error_contract.sh"
+# shellcheck source=lib/md_field.sh
+source "${SCRIPT_DIR}/lib/md_field.sh"
 
 # ---------------------------------------------------------------------------
 # Parse arguments
@@ -247,21 +254,31 @@ _suggested="${_suggested#"${_suggested%%[a-z0-9]*}"}"
 
 # Every import -- with or without an embedded archive, under --name or the
 # archive's own name -- lands at projects/<final-name>/, so the final name
-# must be one plain registrable name (the rule add-project.sh applies).
-if [[ ! "$FINAL_NAME" =~ ^[A-Za-z0-9][A-Za-z0-9_-]*$ ]]; then
+# must be a project name the registry accepts: the project-name rule
+# PROJECTS_CFG_NAME_RE (lib/projects_cfg.sh), which create-project.sh and
+# add-project.sh apply too. When the export carries an archive, a final name
+# of letters, digits, '_' and '-' that the rule refuses (My_App) is reported
+# by the archive check below, under its own error key.
+_final_name_path_shaped=true
+[[ "$FINAL_NAME" =~ ^[A-Za-z0-9][A-Za-z0-9_-]*$ ]] && _final_name_path_shaped=false
+if [[ ! "$FINAL_NAME" =~ $PROJECTS_CFG_NAME_RE ]] \
+        && [[ "$_final_name_path_shaped" == true || "$CARRIES_ARCHIVE" == false ]]; then
     # BLOCK-WORTHY (docs/blocking-site-census.md): the final name is joined
     # into projects/<final-name>/, which --force moves aside and the import
     # replaces; a separator, '..' or a leading '-' would put the project --
-    # or the backup -- outside projects/. Nothing has been extracted or
-    # moved yet; the import stops here.
+    # or the backup -- outside projects/, and any other name outside the
+    # rule is one no registry reader lists or wake starts. Nothing has been
+    # extracted or moved yet; the import stops here.
     # CENSUS-ANCHOR: import-project-name-01
     pgai_emit_error_contract "import.invalid_project_name" \
-        "import-project.sh: '${FINAL_NAME}' is not a valid project name (letters, digits, '_' and '-', starting with a letter or digit), so it cannot name projects/${FINAL_NAME}/; nothing was imported." \
+        "import-project.sh: '${FINAL_NAME}' is not a valid project name (one matching ${PROJECTS_CFG_NAME_RE}), so it cannot name projects/${FINAL_NAME}/; nothing was imported." \
         "${_rerun}$(printf -- '--name %q' "$_suggested")$([[ "$FORCE" == true ]] && printf ' --force')"
     exit 1
 fi
 
-if [[ "$CARRIES_ARCHIVE" == true && ! "$FINAL_NAME" =~ ^[a-z0-9][a-z0-9-]*$ ]]; then
+unset _final_name_path_shaped
+
+if [[ "$CARRIES_ARCHIVE" == true && ! "$FINAL_NAME" =~ $PROJECTS_CFG_NAME_RE ]]; then
     # BLOCK-WORTHY (docs/blocking-site-census.md): the archive is placed at
     # archive/<final-name>/, and a name carrying a separator, '..' or other
     # characters outside the project-name shape would put archived items
@@ -269,7 +286,7 @@ if [[ "$CARRIES_ARCHIVE" == true && ! "$FINAL_NAME" =~ ^[a-z0-9][a-z0-9-]*$ ]]; 
     # has been extracted or moved yet; the import stops here.
     # CENSUS-ANCHOR: import-project-archive-name-01
     pgai_emit_error_contract "import.invalid_archive_project_name" \
-        "import-project.sh: the export carries the project's archive, and '${FINAL_NAME}' is not a valid project name (lower-case letters, digits and '-', starting with a letter or digit), so it cannot name archive/${FINAL_NAME}/; nothing was imported." \
+        "import-project.sh: the export carries the project's archive, and '${FINAL_NAME}' is not a valid project name (one matching ${PROJECTS_CFG_NAME_RE}), so it cannot name archive/${FINAL_NAME}/; nothing was imported." \
         "${_rerun}$(printf -- '--name %q' "$_suggested")$([[ "$FORCE" == true ]] && printf ' --force')"
     exit 1
 fi
@@ -510,14 +527,11 @@ if [[ -f "$MANIFEST_FILE" ]]; then
         echo "  This is usually recoverable. Review project.cfg for schema differences before enabling releases." >&2
     fi
 
-    # Extract the registration block: lines from "## registration" until the
-    # next "##" section header or end of file.  The block includes the
-    # section header line itself (e.g. [project:NAME]) and all key=value lines.
-    MANIFEST_REGISTRATION_BLOCK="$(awk '
-        /^## registration[[:space:]]*$/ { in_reg=1; next }
-        in_reg && /^##/ { exit }
-        in_reg { print }
-    ' "$MANIFEST_FILE" 2>/dev/null || true)"
+    # Extract the registration block: the body of "## registration" (exact
+    # heading, letter case counts) up to the next "##" line or end of file,
+    # read by read_md_field.  The block includes the INI section header line
+    # itself (e.g. [project:NAME]) and all key=value lines.
+    MANIFEST_REGISTRATION_BLOCK="$(read_md_field --exact-heading "$MANIFEST_FILE" registration 2>/dev/null || true)"
 
     # Trim leading/trailing blank lines from the block
     MANIFEST_REGISTRATION_BLOCK="$(printf '%s' "$MANIFEST_REGISTRATION_BLOCK" | sed '/./,$!d' | sed -e :a -e '/^[[:space:]]*$/{$d;N;ba}')"
@@ -533,8 +547,8 @@ fi
 # When --name was supplied, rewrite the section header from [project:<orig>]
 # to [project:<final-name>] before appending.
 #
-# Guard: if the section header already exists in projects.cfg, warn and skip
-# (do NOT duplicate it).
+# Guard: if projects.cfg already registers the final name (projects_cfg_has),
+# warn and skip (do NOT duplicate it).
 # ---------------------------------------------------------------------------
 PROJECTS_CFG="${KANBAN_ROOT}/projects.cfg"
 
@@ -568,8 +582,8 @@ if [[ "$REGISTER" == true ]]; then
         exit 5
     fi
 
-    # Check for duplicate — never append a section that already exists.
-    if grep -qE "^\[project:${FINAL_NAME}\]$" "$PROJECTS_CFG" 2>/dev/null; then
+    # Check for duplicate — never append a project the registry already has.
+    if projects_cfg_has "$FINAL_NAME"; then
         echo "WARNING: project '${FINAL_NAME}' is already registered in ${PROJECTS_CFG}." >&2
         echo "  Skipping registration to avoid duplication. Edit ${PROJECTS_CFG} manually if an update is needed." >&2
     else
@@ -636,9 +650,16 @@ fi
 
 # ---------------------------------------------------------------------------
 # Operator notice: blanked env-specific fields and next-step guidance.
-# Mirrors the post-create notice from create-project.sh.
+# Mirrors the post-create notice from create-project.sh. Step 2 names the
+# remote init-project-git-repo.sh pushes to: the imported project.cfg's
+# git_remote_name (kept from the archive), or origin when none is set.
 # ---------------------------------------------------------------------------
 if [[ "${#BLANKED_FIELDS[@]}" -gt 0 ]]; then
+    # An invalid git_remote_name is narrated, not refused: the import has
+    # already succeeded, and init-project-git-repo.sh refuses that value
+    # with its own remedy when the operator runs step 2.
+    _push_remote="$(pp_git_remote_name --quiet "$FINAL_NAME")" \
+        || _push_remote="the configured remote once git_remote_name in project.cfg holds a valid remote name"
     echo ""
     echo "NOTICE: The following env-specific fields in project.cfg have been blanked:"
     for _f in "${BLANKED_FIELDS[@]}"; do
@@ -651,8 +672,8 @@ if [[ "${#BLANKED_FIELDS[@]}" -gt 0 ]]; then
     echo "  Suggested next steps:"
     echo "    1. Edit project.cfg to set dev_tree_path and git_repo_url:"
     echo "       \$EDITOR ${PROJECT_CFG}"
-    echo "    2. Push the chain's base branches to origin (run once, before first release):"
-    echo "       init-project-git-repo.sh ${FINAL_NAME}"
+    echo "    2. Push the chain's base branches to ${_push_remote} (run once, before first release):"
+    echo "       init-project-git-repo.sh --project ${FINAL_NAME}"
     echo "    3. When ready to authorize releases, raise the ceiling:"
-    echo "       set-version-ceiling.sh ${FINAL_NAME} --minor <N>"
+    echo "       set-version-ceiling.sh --project ${FINAL_NAME} --minor <N>"
 fi

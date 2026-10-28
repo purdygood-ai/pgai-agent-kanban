@@ -35,16 +35,196 @@ diff your vendored `icd.json` against the new one, and extend your client.
   new surface to extend, and what the reworded descriptions now say. This
   rule is the single statement of whether a description-only bump is
   recorded; `docs/operator-api.md` section 9 points here.
-- **A route's authority is its census row.** Every route below has a row in
-  `team/config/operator_verbs.manifest`, the operator verb census; the verb
-  named beside each route is that row. Where a census row does not exist for
-  a route, the route does not ship — the parity gate refuses it.
+- **A route's authority is its census row or its exempt entry.** Every
+  registered route is covered by a row in `team/config/operator_verbs.manifest`,
+  the operator verb census, or by a route entry with its reason in
+  `team/config/operator_verb_census_exempt.txt`;
+  `team/scripts/lint_operator_verb_manifest.py` checks that every route is one
+  or the other. A verb named beside a route below is that route's census row.
 
 Entries begin at 1.8.0. The route set of every earlier version is frozen in
 its baseline file; to recover what an earlier version added, diff the `paths`
 objects of two adjacent baselines.
 
 ---
+
+## 1.21.3
+
+Description-only patch bump over 1.21.2. The description of
+**`POST /operations/add-project`** now says `add_project.project_invalid` is
+returned for a `project` that does not satisfy the project-name rule
+(lowercase letters, digits and `-`, starting with a lowercase letter or
+digit), and no longer describes `_` or capital letters as accepted. No route
+was added or removed, no request or response field was added, removed,
+renamed or made required, and no response schema changed. A client pinned on
+1.21.2 has no new surface to extend.
+
+## 1.21.2
+
+Description-only patch bump over 1.21.1. The description of
+**`POST /operations/close`** and of its request body model `CloseBody` now
+list `duplicate` beside `done` and `wont-do` as an accepted `state`, and say
+that `duplicate` needs a `note` naming the surviving item, without which the
+call is refused `close.duplicate_pointer_missing` and nothing is written. No
+route was added or removed, no request or response field was added, removed,
+renamed or made required, and no response schema changed. A client pinned on
+1.21.1 has no new surface to extend.
+
+## 1.21.1
+
+Description-only patch bump over 1.21.0. The description of
+**`GET /board`** now lists three more item statuses: `carried` (a running
+bug or priority whose every listing bundle is closed), `needs-operator` (a
+bug or priority waiting on an operator-inbox answer) and `duplicate` (a bug
+or priority closed as a duplicate of another item), and says `working` also
+covers a running bug or priority a live bundle still lists. No route was
+added or removed, no request or response field was added, removed, renamed
+or made required, and no response schema changed. A client pinned on 1.21.0
+has no new surface to extend; one that matches on an item's `status` string
+should expect the three new values.
+
+## 1.21.0
+
+The operator inbox over HTTP: one read and one write route for the inbox
+verb. Additive minor bump over 1.20.1: two routes were added, no route was
+removed, no request or response field was added to, removed from or renamed
+on an existing route, and no response schema changed.
+
+### Routes added
+
+- **`GET /projects/{name}/inbox`** (`inbox`'s second route, its read; an
+  exempt-list route entry, response undeclared) — the project's operator
+  inbox, `{project, open, done, warnings}`, each entry `{entry_id, status,
+  date, source, question, meanwhile, how_to_answer, answer, answered_at,
+  closed_at, extra}`. Read through
+  `pgai_agent_kanban.overwatch.inbox.read_inbox`, the function
+  `inbox.sh list` reaches; `name` resolves as the CLI's `--project` does. A
+  refusal answers `{project, error, message, remedy, warnings}` with the
+  triple the CLI prints (`project_resolve.not_found`,
+  `project_resolve.ambiguous`, `inbox.unknown_project`,
+  `inbox.name_invalid`).
+- **`POST /operations/inbox-answer`** (`inbox`; request `InboxAnswerBody`,
+  response `DualChannelShellEnvelope`) — records an answer on an open
+  entry through `pgai_agent_kanban.overwatch.inbox.answer_entry`, the
+  function `inbox.sh answer` reaches. Body: `project` (required), `id`,
+  `answer`, `dry_run`. `stdout` is the answered entry; a refusal carries the
+  module's own key (`inbox.unknown_entry`, `inbox.entry_closed`,
+  `inbox.empty_answer`, `inbox.bad_entry_id`, `inbox.lock_busy`) or
+  `inbox.project_required` / `inbox.project_invalid` at `422`.
+
+### Existing routes extended (additive)
+
+None.
+
+## 1.20.1
+
+Description-only patch bump over 1.20.0. The descriptions of
+**`POST /operations/halt-after`** (`halt-after`) and
+**`POST /operations/defer`** (`defer`), and of their `HaltAfterBody` and
+`DeferBody` request schemas, now give the neutral value `v1.2.3` as the
+example release boundary for `until` instead of a past kanban release. The
+descriptions of **`POST /operations/reset`** (`reset`) and its `ResetBody`
+schema now give `v1.2.3` as the example requirement intake version, and
+those of **`POST /operations/unwind-rc`** (`unwind-rc`) and its
+`UnwindRcBody` schema now give `v1.2.3` as the example RC version for
+`key`. No route was added or removed, no request or response field was
+added, removed, renamed or made required, no response schema changed, and
+no status a route returns changed. A client pinned on 1.20.0 has no new
+surface to extend.
+
+## 1.20.0
+
+`GET /projects/{name}/reliability` returns a project's Hands-off and Clean
+reliability streaks. Additive minor bump over 1.19.1: one route was added,
+no route was removed, no request or response field was added to, removed
+from or renamed on an existing route, and no response schema changed.
+
+### Routes added
+
+- **`GET /projects/{name}/reliability`** (project reliability read, an
+  in-process read with no verb row; response undeclared) — the project's
+  `metrics/reliability.json` as stored, with `warnings` added:
+  `schema_version`, `project`, `computed_at`, `first_record_at`,
+  `hands_off` and `clean`, each streak `{class, status, rcs, hours, since,
+  last_block}`. Read through
+  `pgai_agent_kanban.metrics.reliability_view.load_reliability`, the reader
+  `metrics-report.sh --reliability --format json` uses; the route never
+  computes or writes the file. An unregistered name answers `404`
+  `{"error": "project not found", "name", "warnings"}`; a registered project
+  with no file yet answers `404` with `error` `"reliability not computed"`,
+  `name`, `message`, `remedy` (the refresh command that writes the file)
+  and `warnings`; a file that does not parse or lacks a streak field
+  answers `422` with the same keys and `error` `"reliability unreadable"`.
+
+### Existing routes extended (additive)
+
+None.
+
+## 1.19.1
+
+Description-only patch bump over 1.19.0. The description of
+**`GET /dashboard/{pane}`** and its 200 response description no longer say
+the `input` and `queue` panes start no process: they now say those panes
+run no script, that the `input` pane's `requirements` column runs `git`
+against each project's dev tree (`dev_tree_path`) to read its last release,
+that every other column starts no process, and that only the `metrics`,
+`attention`, `header` and `status-window` panes run a dashboard script. No
+route was added or removed, no request or response field was added,
+removed, renamed or made required, no response schema changed, and no
+status a route returns changed. A client pinned on 1.19.0 has no new
+surface to extend.
+
+## 1.19.0
+
+`GET /board` and `GET /projects/{name}` return each project's dashboard HALT
+text as a new `halt_text` response field, and their `halt` flag now matches
+the dashboard's, so it is also true under a kanban-wide HALT.
+`GET /dashboard/{pane}` renders the `input` and `queue` panes in process.
+Additive minor bump over 1.18.5: no route was added or removed, one response
+field was added to two existing routes, no response field was removed or
+renamed, no request field became required, and no response schema changed
+(neither route declares a response model; the field is documented in its
+description).
+
+### Routes added
+
+None.
+
+### Existing routes extended (additive)
+
+- **`GET /board`** (board aggregation read, an in-process dashboard read
+  with no verb row; response undeclared) — each `projects[]` entry gains
+  `halt_text` (string), after `halt`: the dashboard's HALT text, `""`,
+  `"HALT"` or `"HALT-AFTER <event>"`. `halt` is now the dashboard's HALT
+  flag: true for a project HALT, and also true under the kanban-wide HALT
+  when the project has no HALT or HALT-AFTER of its own. Under 1.18.5 it
+  read the project's own HALT file only, so a kanban-wide HALT left it
+  `false`. A draining project reads `halt` `false` with `halt_text`
+  `"HALT-AFTER <event>"`.
+- **`GET /projects/{name}`** (project metadata card, an in-process read with
+  no verb row; response undeclared) — new response field `halt_text`
+  (string), after `halt`, with the same values and the same `halt`
+  correction as `GET /board`. The description of `color` now states the
+  fallback: `dashboard_color` from projects.cfg, else the default-palette
+  entry at the project's ordinal in priority order, the colour `GET /board`
+  and the dashboard show.
+
+### Existing routes changed (provenance of response text)
+
+- **`GET /dashboard/{pane}`** (dashboard pane read, a view of the tmux
+  dashboard with no verb row; response the shell envelope) — the `input` and
+  `queue` panes render in process through
+  `pgai_agent_kanban.dashboard.column_render.board_pane` and start no
+  `column-render.sh` process; the `project` parameter is not read by them.
+  Only `metrics`, `attention`, `header` and `status-window` run their
+  dashboard script. When a column pane cannot gather the tree (projects.cfg
+  absent, in colon format or registering no project, or the board read
+  raising) the route answers `500` with a non-zero `exit_code`, an empty
+  `stdout` and the dual-channel `dashboard_pane.gather_unavailable` block on
+  `stderr`; nothing falls back to a script. The 200 response description now
+  says the same. `info.description` likewise now lists `GET /dashboard/{pane}`
+  among the routes that start a process for the four script-backed panes
+  only.
 
 ## 1.18.5
 

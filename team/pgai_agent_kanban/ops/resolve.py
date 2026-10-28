@@ -104,6 +104,7 @@ from pgai_agent_kanban.lib.error_contract import format_error_contract  # noqa: 
 from pgai_agent_kanban.lib.md_fields import read_field as read_md_field  # noqa: E402
 from pgai_agent_kanban.ops.context import OpsContext  # noqa: E402
 from pgai_agent_kanban.ops.errors import Ambiguous, NotFound, OpsError  # noqa: E402
+from pgai_agent_kanban.overwatch.halt_provenance import installed_script_command  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -370,7 +371,7 @@ def resolve_project_name(ctx: OpsContext, name: str) -> str:
         else:
             remedy = (
                 f"No project is registered in {cfg}. Register one first: "
-                f"team/scripts/add-project.sh --project {name}."
+                f"{installed_script_command(ctx.kanban_root, 'add-project.sh', '--project', name)}."
             )
         # BLOCK-WORTHY (docs/blocking-site-census.md): an unregistered name
         # has no directory an operation should ever write to -- refused

@@ -16,6 +16,7 @@ HTTP caller and a CLI user each see.
 from __future__ import annotations
 
 import pathlib
+import shlex
 from typing import Optional
 
 import pytest
@@ -98,6 +99,25 @@ def test_refusal_text_is_byte_identical_to_the_bash_resolver(
     with pytest.raises(error_type) as caught:
         resolve_project_name(OpsContext(kanban_root=root), typed)
     assert f"{caught.value}\n" == bash.stderr
+
+
+def test_empty_registry_refusal_is_byte_identical_on_a_root_with_a_space(tmp_path: pathlib.Path) -> None:
+    """The not_found remedy names the add-project.sh installed under the
+    root, shell-quoted; both resolvers quote a root with a space the same
+    way, and the quoted command runs as printed."""
+    root = tmp_path / "kanban board"
+    root.mkdir()
+    (root / "projects.cfg").write_text(_EMPTY_REGISTRY, encoding="utf-8")
+    bash = _bash_resolve(tmp_path, root, "ghost")
+    assert bash.returncode == 1, f"bash resolver should refuse with exit 1:\n{bash.stdout}{bash.stderr}"
+
+    with pytest.raises(NotFound) as caught:
+        resolve_project_name(OpsContext(kanban_root=root), "ghost")
+    assert f"{caught.value}\n" == bash.stderr
+
+    remedy = next(line for line in bash.stderr.splitlines() if line.startswith("remedy:"))
+    command = remedy.split("Register one first: ", 1)[1].rstrip(".")
+    assert shlex.split(command) == [f"{root}/scripts/add-project.sh", "--project", "ghost"], remedy
 
 
 def test_ambiguous_refusal_names_every_candidate(tmp_path: pathlib.Path) -> None:

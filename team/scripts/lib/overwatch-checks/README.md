@@ -16,30 +16,81 @@ Fifteen modules ship in this directory. See `team/roles/OVERWATCH.md` for the
 role-level view of what each check protects against — this README is the
 module-level view.
 
-| # | Module | Scope | Auto-fix path |
-|---|---|---|---|
-| 1 | `check-bare-tmp-litter.sh` | Bare `/tmp` top-level entries owned by the framework user, created within a known task-session window, not yet reported by the wake bracket | **REPORT-ONLY** — never deletes; snapshot-dedup so each entry is flagged once |
-| 2 | `check-empty-files.sh` | Zero-byte **report** files in `bugs/` or `priority/`. Dotfiles are never scanned at any size — a leading `.` marks protocol machinery (claim-lock sentinels, the claim ledger, similar in-flight state), not a report | Rename to `.empty.orphan`; separately prunes claim-lock-shaped `.empty.orphan` residue. Every other `.empty.orphan` stays put as evidence |
-| 3 | `check-stale-active-rc.sh` | `release-state.md` Active RC after tag shipped | Reset RC fields to `none` |
-| 4 | `check-blocked-tasks.sh` | `BLOCKED` tasks that carry no `## Block Record`, so block triage cannot see them | **REPORT-ONLY** — narrates each one with its `Needs Human` value; never writes |
-| 5 | `check-tester-orphan-files.sh` | Bug-shaped `vX.Y.Z-*.md` files in `priority/` | Copy to `bugs/BUG-NNNN`, rename original to `.orphan` |
-| 6 | `check-cache-marker-drift.sh` | `[x]` markers in backlog caches whose file is `open` | Flip marker to `[ ]` |
-| 7 | `check-orphan-rc-branches.sh` | Local `rc/vX.Y.Z` branches whose tag shipped | `git branch -d` local branch |
-| 8 | `check-push-lag.sh` | Local `main`/tags ahead of origin | **See gate below** |
-| 9 | `check-readme-bundled.sh` | PM tasks with README-shaped inputs | Mark `WONT-DO`, file bug |
-| 10 | `check-transient-api-error.sh` | `BLOCKED` tasks with transient-error log tails | Requeue to `BACKLOG` once the backoff window has passed (5, 10, then 20 min after the block, `transient_backoff_due`; inside it the task is left as found and a `transient-requeue-backoff` row is logged), below the shared `[wake] transient_retry_cap` ceiling; at the ceiling bug-file and escalate; residue companion prunes empty per-task worktrees |
-| 11 | `check-leaked-listeners.sh` | Processes with cwd under framework temp root | `SIGTERM` on cwd match, bug-file otherwise |
-| 12 | `check-version-divergence.sh` | Installed `VERSION` vs dev tree `git describe` | **REPORT-ONLY** — never auto-fix |
-| 13 | `check-stale-worktrees.sh` | `git worktree list` entries for finished (`DONE` / `WONT-DO`) tasks older than threshold; a `BLOCKED` task's worktree is never a candidate | Under `overwatch_halt_first_fix`, after re-reading the task's state: `git worktree remove` (never `--force`) and `git worktree prune` for a worktree with nothing to lose. One holding uncommitted or untracked changes is kept and reported (`worktree-kept:holds-work`, judged by `pgai_agent_kanban.overwatch.worktree_residue`); branch-carrying worktrees (commits on no `main` / `<branch_prefix>main` / `rc/*` / `<branch_prefix>rc/*`) bug-file |
-| 14 | `check-block-triage.sh` | `BLOCKED` tasks carrying a `## Block Record`, whatever their `Needs Human` value | Classify the record (`block-classifier.yaml`) and carry out the decision through the block-triage executor (`pgai_agent_kanban.overwatch.block_triage`): escalate (`Needs Human: yes` + one-paragraph `## OVERWATCH Diagnosis`; the task stays `BLOCKED`), record a first cool-down, or — for an action with a handler — `## Triage Note`, attempts +1, `cooldown_until`, then `promote_blocked_to_backlog` / `transition_task_state` (a recomputed completion gate that passes closes the task as `DONE`; stale worktree residue is cleared before a requeue; an allowlisted operator data verb runs with validated typed arguments before a requeue), or hand a `ship_policy_halt` block to the existing resolution stage, writing nothing of the task. Every write runs under `overwatch_halt_first_fix` after per-task backups and an evidence file, and logs `block-triage:<reason_code>:<action>`. An already-escalated block epoch is left alone. `[overwatch] block_triage = false` keeps it to records and diagnoses. See "check-block-triage: the safety envelope" below |
-| 15 | `check-changelog-drift.sh` | `CHANGELOG.md` on the main branch (`<branch_prefix>main`) differs from a fresh regeneration by `changelog_writer.py` against the bug ledger; skipped silently when the dev tree's HEAD is on any other branch | Under `overwatch_halt_first_fix`, holding the project's repo lock and only while Active RC still reads `none`: install the regenerated file and commit it to the main branch. A held lock, an active RC, or a HALT narrates the skip and changes nothing; the next sweep retries |
+| # | Module | Projects | Scope | Auto-fix path |
+|---|---|---|---|---|
+| 1 | `check-bare-tmp-litter.sh` | every project | Bare `/tmp` top-level entries owned by the framework user, created within a known task-session window, not yet reported by the wake bracket | **REPORT-ONLY** — never deletes; snapshot-dedup so each entry is flagged once |
+| 2 | `check-empty-files.sh` | every project | Zero-byte **report** files in `bugs/` or `priority/`. Dotfiles are never scanned at any size — a leading `.` marks protocol machinery (claim-lock sentinels, the claim ledger, similar in-flight state), not a report | Rename to `.empty.orphan`; separately prunes claim-lock-shaped `.empty.orphan` residue. Every other `.empty.orphan` stays put as evidence |
+| 3 | `check-stale-active-rc.sh` | every project | `release-state.md` Active RC after tag shipped | Reset RC fields to `none` |
+| 4 | `check-blocked-tasks.sh` | every project | `BLOCKED` tasks that carry no `## Block Record`, so block triage cannot see them | **REPORT-ONLY** — narrates each one with its `Needs Human` value; never writes |
+| 5 | `check-tester-orphan-files.sh` | every project | Bug-shaped `vX.Y.Z-*.md` files in `priority/` | Copy to `bugs/BUG-NNNN`, rename original to `.orphan` |
+| 6 | `check-cache-marker-drift.sh` | every project | `[x]` markers in backlog caches whose file is `open` | Flip marker to `[ ]` |
+| 7 | `check-orphan-rc-branches.sh` | every project | Local `rc/vX.Y.Z` branches whose tag shipped | `git branch -d` local branch |
+| 8 | `check-push-lag.sh` | every project | Local `main`/tags ahead of origin | **See gate below** |
+| 9 | `check-readme-bundled.sh` | every project | PM tasks with README-shaped inputs | Mark `WONT-DO`, file bug |
+| 10 | `check-transient-api-error.sh` | every project | `BLOCKED` tasks with transient-error log tails; a block whose `## Block Record` `reason_code` is `agent_unclassified` is classed on the provider's own error lines only (`API Error:` lines, JSON error events: the wake's `agent_block_provider_lines`), so signature words in the agent's own reply requeue nothing | Requeue to `BACKLOG` once the backoff window has passed (5, 10, then 20 min after the block, `transient_backoff_due`; inside it the task is left as found and a `transient-requeue-backoff` row is logged), below the shared `[wake] transient_retry_cap` ceiling; at the ceiling bug-file and escalate; residue companion prunes empty per-task worktrees |
+| 11 | `check-leaked-listeners.sh` | every project | Processes with cwd under framework temp root | `SIGTERM` on cwd match, bug-file otherwise |
+| 12 | `check-version-divergence.sh` | kanban-only | Installed `VERSION` vs dev tree `git describe` | **REPORT-ONLY** — never auto-fix |
+| 13 | `check-stale-worktrees.sh` | every project | `git worktree list` entries for finished (`DONE` / `WONT-DO`) tasks older than threshold; a `BLOCKED` task's worktree is never a candidate | Under `overwatch_halt_first_fix`, after re-reading the task's state: `git worktree remove` (never `--force`) and `git worktree prune` for a worktree with nothing to lose. One holding uncommitted or untracked changes is kept and reported (`worktree-kept:holds-work`, judged by `pgai_agent_kanban.overwatch.worktree_residue`); branch-carrying worktrees (commits on no `main` / `<branch_prefix>main` / `rc/*` / `<branch_prefix>rc/*`) bug-file |
+| 14 | `check-block-triage.sh` | every project | Run by the sweep (the on-BLOCK nudge included) for a project with a `release-state.md`: every stop of the project -- its `HALT`, an RC-level failure CM's release HALTed on, every `BLOCKED` task, every `BACKLOG` / `WAITING` task with `Needs Human: yes`. Run any other way: `BLOCKED` tasks carrying a `## Block Record`, whatever their `Needs Human` value | Under the sweep, the decision wake decides each stop once and carries the outcome out: an operator verb, an operator-inbox question, a runaway stop, or nothing. See "check-block-triage: the decision wake" below. Run any other way (the overwatch wake, a direct run, a project with no `release-state.md`): classify the record (`block-classifier.yaml`) and carry out the decision through the block-triage executor (`pgai_agent_kanban.overwatch.block_triage`): escalate (`Needs Human: yes` + one-paragraph `## OVERWATCH Diagnosis`; the task stays `BLOCKED`), record a first cool-down, or — for an action with a handler — `## Triage Note`, attempts +1, `cooldown_until`, then `promote_blocked_to_backlog` / `transition_task_state` (a recomputed completion gate that passes closes the task as `DONE`; stale worktree residue is cleared before a requeue; an allowlisted operator data verb runs with validated typed arguments before a requeue), or hand a `ship_policy_halt` block to the existing resolution stage, writing nothing of the task. Every write runs under `overwatch_halt_first_fix` after per-task backups and an evidence file, and logs `block-triage:<reason_code>:<action>`. An already-escalated block epoch is left alone. `[overwatch] block_triage = false` keeps it to records and diagnoses. See "check-block-triage: the safety envelope" below |
+| 15 | `check-changelog-drift.sh` | kanban-only | `CHANGELOG.md` on the main branch (`<branch_prefix>main`) differs from a fresh regeneration by `changelog_writer.py` against the bug ledger; skipped silently when the dev tree's HEAD is on any other branch | Under `overwatch_halt_first_fix`, holding the project's repo lock and only while Active RC still reads `none`: install the regenerated file and commit it to the main branch. A held lock, an active RC, or a HALT narrates the skip and changes nothing; the next sweep retries |
 
-Modules are sourced in lexical order by the OVERWATCH driver
-(`team/scripts/overwatch-sweep.sh` for the Tier-1 sweep, the OVERWATCH agent
-wake for Tier-2). Ordering matters only for logging determinism — the checks
-are independent of each other.
+Modules are sourced in lexical order by the OVERWATCH sweep
+(`team/scripts/overwatch-sweep.sh`). Ordering matters only for logging
+determinism — the checks are independent of each other.
+
+**Projects** is the scope a module declares in its header. A module with
+the line `# OVERWATCH-CHECK-SCOPE: kanban-only` checks something only the
+kanban's own source has (its `changelog_writer`, its installed `VERSION`),
+so the sweep runs it only for the kanban's own project: the one whose dev
+tree (`project.cfg` `dev_tree_path`, else `PGAI_DEV_TREE_PATH`) holds
+`install.sh` and `team/pgai_agent_kanban/__init__.py`. For every other
+project the module is neither sourced nor run; the sweep prints one
+`not applicable` line, logs a `check-not-applicable` row naming the check,
+and counts it neither ok nor error. A module with no such line, or
+`per-project`, runs for every project. Calling a check function directly
+applies no scope.
+
+## check-block-triage: the decision wake
+
+When `overwatch-sweep.sh` runs the check -- the hourly firing, and the
+on-BLOCK nudge's `--only block-triage` -- the sweep sets
+`OVERWATCH_DECISION_WAKE=1`, and for a project with a `release-state.md` the
+check runs the decision-wake module `pgai_agent_kanban.overwatch.decision_wake`
+through `pp_run_ops` instead of the block-triage loop described in the next
+section. The module finds every stop of the project, gathers what
+`pgai_agent_kanban.overwatch.decide` reads for it, decides it once, and
+hands the outcome to `pgai_agent_kanban.overwatch.decision_executor`:
+
+| Stop | Decided |
+|---|---|
+| the project's `HALT` | an operator's: `none`, never touched; a chain HALT: `clear-chain-halt` once a cause check passes, else the resolution stage |
+| an RC-level failure (a chain HALT CM's release wrote on a trigger) | as a chain HALT, keyed on the trigger: cleared when its row's cause check passes (`rc-cancelled`, `task-reset`, `notes-status-green`), else the resolution stage |
+| every `BLOCKED` task | from its `## Block Record` and classifier row: an operator verb (block triage's own handlers, `reset-to-backlog`, an allowlisted operator data verb, the resolution stage), an operator-inbox question, or `none` (a cool-down, the transient handler's own retries) |
+| every `BACKLOG` / `WAITING` task with `Needs Human: yes` | an operator-inbox question; `Needs Human` is cleared |
+| the project itself, when a runaway counter trips with nothing stopped | the runaway stop: a project HALT naming the counter, and one inbox entry |
+
+The HALT is decided first, so a chain HALT cleared now lets the task
+decisions run in the same firing. Every write runs under the Python
+HALT-first protocol and the project's repo lock
+(`pgai_agent_kanban.overwatch.halt_first`), with backups, an
+`## OVERWATCH Decision` event in `release-state.md` and an action-log row
+`overwatch-revert.sh` can undo; a present `HALT` defers every task write,
+and `HALT_OVERWATCH` or a repo lock held past `--lock-wait` stops the run
+(one `decision-wake-declined` row). A firing that finds the same stop again
+writes nothing. A block whose row waits one window before its first action
+(`provider_refusal`) has that window recorded by block triage's record step.
+`[overwatch] block_triage = false` leaves every task verb unrun. The check
+prints one stderr line per stop:
+`check-block-triage: <subject>: decision-wake <item>: <outcome> [<verb>] -> <result> (<detail>)`.
+`--dry-run` decides and narrates only, writing one `decision-wake-dry-run`
+row per stop. A project with no `release-state.md` has nowhere to record
+and count its decisions, so block triage runs there as before.
 
 ## check-block-triage: the safety envelope
+
+Run any other way -- by the overwatch wake (`run_overwatch_block_triage`),
+directly, or for a project with no `release-state.md` -- the check runs
+block triage, described here and below.
 
 `check-block-triage.sh` is the one check that acts on blocked tasks. The
 module decides nothing itself: `pgai_agent_kanban.overwatch.block_triage plan`
@@ -251,10 +302,15 @@ Modules should also honor two conventions used across the current set:
 
 ## When Modules Are Invoked
 
-The Tier-1 sweep runner `team/scripts/overwatch-sweep.sh` iterates every
+OVERWATCH fires two ways, both through the sweep: the hourly cron line and
+the on-BLOCK nudge (below). No model is ever asked to decide anything.
+
+The sweep runner `team/scripts/overwatch-sweep.sh` iterates every
 registered project (aggregation form — no `--project` argument) and, for each,
 sources every `check-*.sh` file in this directory in lexical order and invokes
-the exported function with `OVERWATCH_PROJECT` set to the current project. Per-
+the exported function with `OVERWATCH_PROJECT` set to the current project --
+except a `kanban-only` module on any project but the kanban's own, which it
+skips as not applicable (see **Projects** under the catalog). Per-
 project sweep logs land under `projects/<name>/logs/overwatch/sweep.log`.
 
 The driver manages the per-firing flock, HALT/HALT_OVERWATCH checks, and
@@ -267,8 +323,11 @@ scans, reports and bug filing run, and the sweep logs one
 `overwatch_halt_first_fix`, which defers it while any HALT is present — the
 fleet-wide one or a project HALT OVERWATCH did not create — returning
 sentinel `5` with a `fix-deferred` row ("fix deferred: HALT present") and
-nothing changed. The only fix that runs under a project HALT is block
-triage handing a `ship_policy_halt` task to the resolution stage.
+nothing changed. The only fixes that run under a project HALT are those
+whose subject is that HALT: the decision wake clearing a chain HALT whose
+cause is resolved, or handing it to the resolution stage (an operator HALT
+is decided `none` and never touched), and block triage handing a
+`ship_policy_halt` task to the resolution stage.
 
 The cron tier runs the sweep with no options. Two options serve event-driven
 callers and operators:
@@ -285,21 +344,27 @@ callers and operators:
 The on-BLOCK nudge uses both: when a wake chain has blocked a task, it runs
 `overwatch-sweep.sh --only block-triage --lock-wait 60` in the background after
 it has released the project's repo lock (`fire_block_triage_nudge`,
-`team/scripts/lib/wake_project.sh`), and the sweep's output is appended to
-`logs/overwatch-trigger.log` under the kanban root.
+`team/scripts/lib/wake_project.sh`), so the decision wake decides the new
+block -- and every other stop of the project -- inside that firing, and the
+sweep's output is appended to `logs/overwatch-trigger.log` under the kanban
+root.
 
-The Tier-2 agent wake fires on the standard `wake-batch.sh --agent=overwatch`
-path. It runs one module directly: `run_overwatch_block_triage`
+No schedule runs the overwatch wake (`wake-batch.sh --agent=overwatch`), and
+`wake-now.sh --agent overwatch` runs the sweep instead. Run by hand, the wake
+runs one module directly: `run_overwatch_block_triage`
 (`team/scripts/lib/wake_project.sh`) runs `check-block-triage.sh` for each
-project before the wake takes that project's repo lock, logging to
-`logs/overwatch-block-triage.log`. Otherwise it consumes the action log the
-Tier-1 sweep produced and files bugs for anything outside the whitelist.
+project before the wake takes that project's repo lock, as block triage
+(`OVERWATCH_DECISION_WAKE` unset), logging to
+`logs/overwatch-block-triage.log`; then the resolution stage runs and the
+wake stops. OVERWATCH keeps no queue file and dispatches no model.
 
 ## Adding a New Check
 
 1. Create `check-<slug>.sh` in this directory following the contract above.
 2. Add a corresponding entry to the module header documenting scope,
-   auto-fix path (if any), and required/optional environment variables.
+   auto-fix path (if any), and required/optional environment variables. A
+   check that only makes sense for the kanban's own repository also carries
+   `# OVERWATCH-CHECK-SCOPE: kanban-only` there.
 3. Update the catalog table above and the role-level entry in
    `team/roles/OVERWATCH.md` under the Whitelist section.
 4. Test that `bash -n check-<slug>.sh` passes.

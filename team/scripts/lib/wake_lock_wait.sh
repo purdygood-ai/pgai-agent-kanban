@@ -24,6 +24,14 @@
 #     provenance op is a wake chain's ("wake-chain:<project>"). Any other
 #     holder (an OVERWATCH repair, an operator tool, a lock with no
 #     provenance) is not waited on: the attempt defers at once, as before;
+#   - does not wait, even for a wake-chain holder, while other projects
+#     remain in the batch's first pass (the optional <others_pending>
+#     count, which wake_common.sh's wake_common_run hands run_project_chain
+#     as WAKE_BATCH_PROJECTS_PENDING): after one non-blocking attempt the
+#     project defers at once, so the lock-free projects run first and the
+#     end-of-iteration retry pass -- which passes 0 -- does the waiting.
+#     Only a first pass with no project left after this one (a
+#     single-project batch included) waits in place;
 #   - never waits past the batch's remaining runtime budget
 #     (MAX_RUNTIME_SECONDS from WAKE_START_EPOCH), and stops waiting the
 #     moment the operator stop file (STOP_FILE, wake_stop_file_present)
@@ -36,8 +44,9 @@
 # unusable lock directory) is never retried -- pgai_lock_acquire_waiting
 # returns it at once. The lock is taken with the same four provenance
 # fields the chain always recorded (holder=$AGENT, pid=$$,
-# op=wake-chain:<project>, task=none), and every attempt is a non-blocking
-# flock, so two roles never hold the lock at once.
+# op=wake-chain:<project>, task=none unless the caller names one), and
+# every attempt is a non-blocking flock, so two roles never hold the lock
+# at once.
 #
 # Starvation guard
 # ----------------
@@ -59,10 +68,14 @@
 #
 # Public entry points
 # -------------------
-#   wlw_acquire_chain_lock <project> <lock_file> <out_fd_var>
+#   wlw_acquire_chain_lock <project> <lock_file> <out_fd_var> [<others_pending>] [<task>]
 #       Take the repo lock as above. <out_fd_var> names the caller's
-#       `local` fd variable, exactly as for pgai_lock_acquire. Returns 0
-#       held, 1 still contended (or not waited on), 2 refused.
+#       `local` fd variable, exactly as for pgai_lock_acquire.
+#       <others_pending> (default 0) is how many projects the batch still
+#       has to reach after this one; above 0, a wake-chain holder is not
+#       waited on. <task> (default the literal none) is the provenance
+#       task field, for a hold scoped to one task. Returns 0 held, 1 still
+#       contended (or not waited on), 2 refused.
 #   wlw_lock_wait_budget <project>
 #       Set WLW_WAIT_BUDGET to the seconds this project may still wait in
 #       this firing: lock_wait_seconds less what it already waited, capped
@@ -105,6 +118,7 @@ declare -gA _WLW_WAITED_SECONDS 2>/dev/null || true
 _WLW_WAIT_PROJECT=""
 _WLW_WAIT_STARTED=false
 _WLW_WAIT_STOPPED=""
+_WLW_OTHERS_PENDING=0
 
 WLW_WAIT_BUDGET=0
 WLW_BATCH_LEFT=""
@@ -179,6 +193,11 @@ _wlw_keep_waiting() {
     log "project ${_WLW_WAIT_PROJECT}: not waiting for the repo lock: its holder is not a wake chain (${_desc})"
     return 1
   fi
+  if (( _WLW_OTHERS_PENDING > 0 )); then
+    _WLW_WAIT_STOPPED="others pending"
+    log "project ${_WLW_WAIT_PROJECT}: not waiting for the repo lock held by wake chain ${_desc}: ${_WLW_OTHERS_PENDING} other project(s) remain in this batch and go first; the end-of-iteration retry pass waits for it (lock_wait_seconds=$(_wlw_lock_wait_seconds))"
+    return 1
+  fi
   if [[ "$_WLW_WAIT_STARTED" != "true" ]]; then
     _WLW_WAIT_STARTED=true
     log "project ${_WLW_WAIT_PROJECT}: waiting up to ${WLW_WAIT_BUDGET}s for the repo lock held by wake chain ${_desc} (lock_wait_seconds=$(_wlw_lock_wait_seconds), batch budget left=$(_wlw_batch_left_text))"
@@ -194,11 +213,12 @@ wlw_acquire_chain_lock() {
   _WLW_WAIT_PROJECT="$_wlw_project"
   _WLW_WAIT_STARTED=false
   _WLW_WAIT_STOPPED=""
+  _WLW_OTHERS_PENDING="$(_wlw_int "${4:-}" 0)"
   _wlw_start="$(pgai_lock_wait_now)"
 
   local PGAI_LOCK_WAIT_WHILE="_wlw_keep_waiting"
   pgai_lock_acquire_waiting "$WLW_WAIT_BUDGET" "$_wlw_lock_file" "$AGENT" "$$" \
-    "wake-chain:${_wlw_project}" "none" "$_wlw_fd_var" || _wlw_rc=$?
+    "wake-chain:${_wlw_project}" "${5:-none}" "$_wlw_fd_var" || _wlw_rc=$?
 
   _wlw_waited=$(( $(pgai_lock_wait_now) - _wlw_start ))
   (( _wlw_waited >= 0 )) || _wlw_waited=0

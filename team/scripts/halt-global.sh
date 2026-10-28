@@ -98,7 +98,7 @@ else
     pgai_emit_error_contract \
         "halt_global.sentinel_create_failed" \
         "halt-global.sh: failed to create global HALT sentinel at ${_halt_path}." \
-        "Check that ${KANBAN_ROOT} is writable by the current user, then re-run team/scripts/halt-global.sh."
+        "Check that ${KANBAN_ROOT} is writable by the current user, then re-run $(printf '%q' "${KANBAN_ROOT}/scripts/halt-global.sh")."
     # CENSUS-ANCHOR: halt-global-sentinel-create-failed-01
     exit 1
 fi

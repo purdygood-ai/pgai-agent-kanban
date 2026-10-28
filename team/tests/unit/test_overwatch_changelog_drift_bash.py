@@ -22,6 +22,12 @@ Integration fixture coverage (simulates the drift-recurrence scenario):
   (K) HEAD leaves the main branch between detection and the lock → no commit.
   (L) The CHANGELOG.md backup fails → the repair aborts, CHANGELOG.md is not
       overwritten, and stderr and the action log say why.
+  (M) With PGAI_AGENT_KANBAN_TEMP_DIR set to a sandbox, the regeneration
+      buffer is created under <sandbox>/changelog_drift/ (lib/temp.sh).
+  (N) With the override unset, the buffer follows kanban.cfg [paths]
+      tmp_root/tmp_subdir instead.
+  (O) A copy of the module whose lib/ has no temp.sh refuses dual-channel
+      naming the missing path, returns 1, and changes nothing.
 
 All tests run against synthetic environments and never touch the live kanban
 root.  The dev tree used in each fixture is a minimal git repo whose
@@ -31,6 +37,7 @@ CHANGELOG.md and bug ledger can be controlled by the test.
 from __future__ import annotations
 
 import pathlib
+import shutil
 import subprocess
 import textwrap
 
@@ -844,3 +851,100 @@ def test_failed_backup_aborts_the_repair(tmp_path: pathlib.Path) -> None:
     assert "could not be backed up" in result.stderr
     assert "changelog-drift-skipped-backup-failed" in _action_log(proj_dir)
     assert not (proj_dir / "HALT").exists()
+
+
+# ---------------------------------------------------------------------------
+# Tests (M)-(O): the regeneration buffer's temp root comes from lib/temp.sh
+# ---------------------------------------------------------------------------
+
+
+def _buffer_probe_script(kanban_root: pathlib.Path, proj_dir: pathlib.Path, mktemp_log: pathlib.Path,
+                         temp_env: str, check: str = _CHECK_DRIFT) -> str:
+    """A --dry-run invocation whose ``mktemp`` records each template it is handed.
+
+    *temp_env* is the bash line that sets (or unsets) PGAI_AGENT_KANBAN_TEMP_DIR.
+    The buffer is deleted once compared, so the recorded template is the
+    evidence of where it was created.
+    """
+    return textwrap.dedent(f"""\
+        set -euo pipefail
+        overwatch_log_action() {{
+            local name="$1" target="$2" action="$3" backup="$4" reason="$5"
+            printf '%s\\t%s\\t%s\\n' "${{name}}" "${{action}}" "${{reason}}" \\
+                >> "{proj_dir}/overwatch/actions.log"
+        }}
+        mktemp() {{ printf '%s\\n' "$*" >> "{mktemp_log}"; command mktemp "$@"; }}
+
+        export KANBAN_ROOT="{kanban_root}"
+        export OVERWATCH_PROJECT="test-project"
+        export PGAI_AGENT_KANBAN_ROOT_PATH="{kanban_root}"
+        {temp_env}
+
+        source {check}
+        set +e
+        overwatch_check_changelog_drift --dry-run
+        echo "check-rc=$?"
+    """)
+
+
+def _recorded_templates(mktemp_log: pathlib.Path) -> list[str]:
+    assert mktemp_log.is_file(), "mktemp was never called: no regeneration buffer was created"
+    return [line for line in mktemp_log.read_text(encoding="utf-8").splitlines() if line]
+
+
+def test_regen_buffer_lands_under_the_temp_dir_override(tmp_path: pathlib.Path) -> None:
+    """Fixture (M): the buffer is created under <override>/changelog_drift/."""
+    kanban_root, dev_tree, proj_dir, sha_before = _stale_fixture(tmp_path)
+    sandbox = tmp_path / "sandbox_tmp"
+    mktemp_log = tmp_path / "mktemp.log"
+
+    script = _buffer_probe_script(kanban_root, proj_dir, mktemp_log,
+                                  f'export PGAI_AGENT_KANBAN_TEMP_DIR="{sandbox}"')
+    result = run_bash(tmp_path, script, timeout=60)
+
+    assert "check-rc=0" in result.stdout, f"stdout={result.stdout}\nstderr={result.stderr}"
+    assert _recorded_templates(mktemp_log) == [f"{sandbox}/changelog_drift/changelog_drift_XXXXXX.md"]
+    assert "changelog-drift-dry-run" in _action_log(proj_dir), "the buffer was compared, finding the drift"
+    assert list((sandbox / "changelog_drift").iterdir()) == [], "the buffer is removed after the compare"
+    assert _git_head_sha(dev_tree) == sha_before
+
+
+def test_regen_buffer_follows_kanban_cfg_paths_without_an_override(tmp_path: pathlib.Path) -> None:
+    """Fixture (N): with the override unset, [paths] tmp_root/tmp_subdir names the root."""
+    kanban_root, _dev_tree, proj_dir, _sha = _stale_fixture(tmp_path)
+    configured = tmp_path / "configured"
+    (kanban_root / "kanban.cfg").write_text(
+        f"[paths]\ntmp_root = {configured}\ntmp_subdir = scratch\n", encoding="utf-8")
+    mktemp_log = tmp_path / "mktemp.log"
+
+    script = _buffer_probe_script(kanban_root, proj_dir, mktemp_log, "unset PGAI_AGENT_KANBAN_TEMP_DIR")
+    result = run_bash(tmp_path, script, timeout=60)
+
+    assert "check-rc=0" in result.stdout, f"stdout={result.stdout}\nstderr={result.stderr}"
+    assert _recorded_templates(mktemp_log) == [
+        f"{configured}/scratch/changelog_drift/changelog_drift_XXXXXX.md"]
+    assert "changelog-drift-dry-run" in _action_log(proj_dir)
+
+
+def test_missing_temp_sh_refuses_and_changes_nothing(tmp_path: pathlib.Path) -> None:
+    """Fixture (O): no temp.sh beside the module's lib/ -> return 1, named path, no change."""
+    kanban_root, dev_tree, proj_dir, sha_before = _stale_fixture(tmp_path)
+    lib = tmp_path / "broken_install" / "scripts" / "lib"
+    shutil.copytree(pathlib.Path(_CHECK_DRIFT).resolve().parents[1], lib,
+                    ignore=shutil.ignore_patterns("temp.sh", "__pycache__"))
+    sandbox = tmp_path / "sandbox_tmp"
+    mktemp_log = tmp_path / "mktemp.log"
+
+    script = _buffer_probe_script(kanban_root, proj_dir, mktemp_log,
+                                  f'export PGAI_AGENT_KANBAN_TEMP_DIR="{sandbox}"',
+                                  check=str(lib / "overwatch-checks" / "check-changelog-drift.sh"))
+    result = run_bash(tmp_path, script, timeout=60)
+
+    assert "check-rc=1" in result.stdout, f"stdout={result.stdout}\nstderr={result.stderr}"
+    assert "error:   overwatch.changelog-drift.temp-sh-missing" in result.stderr, result.stderr
+    assert str(lib / "temp.sh") in result.stderr, result.stderr
+    assert "remedy:" in result.stderr
+    assert not mktemp_log.exists(), "no regeneration buffer may be created"
+    assert not sandbox.exists()
+    assert _git_head_sha(dev_tree) == sha_before
+    assert (dev_tree / "CHANGELOG.md").read_text(encoding="utf-8") == "# STALE\n"

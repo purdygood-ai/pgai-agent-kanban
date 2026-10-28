@@ -61,68 +61,77 @@ _TEAM_DIR = pathlib.Path(__file__).parent.parent.parent  # team/
 
 
 # ---------------------------------------------------------------------------
-# Census Python logic, taken from the shipped wake_lifecycle.sh at test time
+# Census logic, taken from the shipped wake_lifecycle.sh at test time
 #
-# The census is the python heredoc embedded in close_intake_on_finalize_report.
-# Its source is read out of the lib on every run and executed as-is, so a
-# change to the shipped heredoc (its ## Inputs reader included) changes what
-# these tests observe.  No copy of the census logic lives in this file.
+# The census is _intake_sibling_census, which close_intake_on_finalize_report
+# calls.  The function is cut out of the lib by name on every run and run
+# beside the shared section reader (lib/md_field.sh), so a change to the
+# shipped census (its ## Inputs reader included) changes what these tests
+# observe.  No copy of the census logic lives in this file.
 # ---------------------------------------------------------------------------
 
 _WAKE_LIFECYCLE_ABS = _TEAM_DIR / "scripts" / "lib" / "wake_lifecycle.sh"
-_CENSUS_FUNCTION = "close_intake_on_finalize_report"
-_CENSUS_MARKER = "TERMINAL = {"
+_MD_FIELD_ABS = _TEAM_DIR / "scripts" / "lib" / "md_field.sh"
+_WAKE_TASK_STATE_ABS = _TEAM_DIR / "scripts" / "lib" / "wake_task_state.sh"
+_CENSUS_FUNCTION = "_intake_sibling_census"
+# close_intake_on_finalize_report's own helpers, cut out beside it.
+_CLOSE_INTAKE_HELPERS = ("_intake_requirement_path", "_intake_sibling_census", "_intake_close_item")
 
 
-def _shipped_census_source() -> str:
-    """Return the census heredoc source from close_intake_on_finalize_report.
+def _extract_lifecycle_fn(name: str, lib: pathlib.Path = _WAKE_LIFECYCLE_ABS) -> str:
+    """Bash that defines *name* from *lib*, wake_lifecycle.sh by default (brace-depth extraction)."""
+    return textwrap.dedent(f"""\
+        eval "$(awk '
+            /^{name}\\(\\)/ {{ found=1; depth=0 }}
+            found {{
+                print
+                n = split($0, a, "")
+                for (i = 1; i <= n; i++) {{
+                    if (a[i] == "{{") depth++
+                    if (a[i] == "}}") {{ depth--; if (depth == 0) {{ found=0; exit }} }}
+                }}
+            }}
+        ' '{lib}')"
+    """)
 
-    Scopes the search to the function body (header line to the first
-    column-0 closing brace) and returns the one ``<<'PY'`` heredoc in it
-    that defines the terminal-state set.  Fails loudly, naming the lib and
-    the marker, if the function or the heredoc cannot be found exactly once.
+
+def _close_intake_helpers() -> str:
+    """Bash that loads the section reader and close_intake_on_finalize_report's helpers.
+
+    The closure write goes through wake_queue_write (wake_task_state.sh); with
+    no wake chain loaded it runs the write as-is.
     """
-    text = _WAKE_LIFECYCLE_ABS.read_text(encoding="utf-8")
-    fn = re.search(
-        rf"^{_CENSUS_FUNCTION}\(\)\s*\{{.*?^\}}[ \t]*$",
-        text,
-        flags=re.S | re.M,
+    return (
+        f"source '{_MD_FIELD_ABS}'\n"
+        + "".join(_extract_lifecycle_fn(n) for n in _CLOSE_INTAKE_HELPERS)
+        + _extract_lifecycle_fn("wake_queue_write", _WAKE_TASK_STATE_ABS)
     )
-    assert fn, f"function {_CENSUS_FUNCTION}() not found in {_WAKE_LIFECYCLE_ABS}"
-    bodies = [
-        m.group(1)
-        for m in re.finditer(
-            r"<<'PY'[ \t]*\n(.*?)\n[ \t]*PY[ \t]*$", fn.group(0), flags=re.S | re.M
-        )
-        if _CENSUS_MARKER in m.group(1)
-    ]
-    assert len(bodies) == 1, (
-        f"expected exactly one heredoc containing {_CENSUS_MARKER!r} in "
-        f"{_CENSUS_FUNCTION}() of {_WAKE_LIFECYCLE_ABS}; found {len(bodies)}"
-    )
-    return bodies[0]
 
 
 def _run_census(tasks_root: pathlib.Path, req_path: str) -> str:
-    """Run the shipped census heredoc over *tasks_root* for *req_path*.
+    """Run the shipped census over *tasks_root* for *req_path*.
 
-    The heredoc is invoked exactly as the lib invokes it:
-    ``python3 - <tasks_root> <req_path>`` with the source on stdin.
+    The function is invoked exactly as the lib invokes it:
+    ``_intake_sibling_census <tasks_root> <req_path>``.
     Returns its stdout, stripped:
         "ok:<N>"          — all N siblings are terminal
         "skip:<detail>"   — one or more siblings are non-terminal
-    A non-zero exit fails the test with the heredoc's stderr.
+    A non-zero exit fails the test with the census's stderr.
     """
+    script = (
+        "set -euo pipefail\n"
+        + _close_intake_helpers()
+        + f'{_CENSUS_FUNCTION} "$1" "$2"\n'
+    )
     proc = subprocess.run(
-        ["python3", "-", str(tasks_root), req_path],
-        input=_shipped_census_source(),
+        ["bash", "-c", script, "census", str(tasks_root), req_path],
         capture_output=True,
         text=True,
         timeout=30,
         cwd=str(_TEAM_DIR),
     )
     assert proc.returncode == 0, (
-        f"shipped census heredoc exited {proc.returncode}\n"
+        f"shipped census exited {proc.returncode}\n"
         f"stdout: {proc.stdout!r}\nstderr: {proc.stderr!r}"
     )
     return proc.stdout.strip()
@@ -485,6 +494,11 @@ def _run_close_intake(
         export PATH="{stub_bin}:$PATH"
 
         {log_stub}
+
+        # The section reader and close_intake_on_finalize_report's own
+        # helpers. The pp_run_ops stub below stays active whichever loads
+        # first; read_md_field runs its own tree's reader, not the stub.
+        {_close_intake_helpers()}
 
         # Stub pp_run_ops: delegates to stubbed python3 via "python3 -m <module> [args...]"
         # so the python3 interceptor in stub_bin continues to intercept close_item calls.
@@ -936,6 +950,9 @@ def _run_sweep_census(
         "\n",
         log_stub,
         "\n",
+        "# The section reader and close_intake_on_finalize_report's own helpers.\n",
+        _close_intake_helpers(),
+        "\n",
         "# Stub pp_run_ops: delegates to stubbed python3 so close_item interception works.\n",
         "pp_run_ops() { local _mod=\"$1\"; shift; python3 -m \"$_mod\" \"$@\"; }\n",
         "\n",
@@ -1277,6 +1294,9 @@ def _run_sweep_census_with_type_dispatch(
         f"export PATH=\"{stub_bin_s}:$PATH\"\n",
         "\n",
         log_stub,
+        "\n",
+        "# The section reader and close_intake_on_finalize_report's own helpers.\n",
+        _close_intake_helpers(),
         "\n",
         "# Stub pp_run_ops: delegates to stubbed python3 so close_item interception works.\n",
         "pp_run_ops() { local _mod=\"$1\"; shift; python3 -m \"$_mod\" \"$@\"; }\n",

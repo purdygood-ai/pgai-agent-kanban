@@ -27,8 +27,8 @@ Published-baseline immutability (rule e):
      naming the file.  The comparison is skipped, with a one-line note, when
      the baselines directory is not inside a git work tree, when the prefixed
      main branch does not exist locally, or for a baseline the main branch
-     does not carry yet (the version this release introduces).  Quality
-     class: the gated runners record the finding and continue.
+     does not carry yet (the version this release introduces).  Each
+     mutated baseline is a finding.
 
 Support-table mirror check:
   The "Support table" in docs/operator-api.md (the markdown table under the
@@ -43,23 +43,24 @@ Support-table mirror check:
   A missing document, or one without the support table, is reported too.
   SUPPORTED is read liberally here: blank lines and ``#`` comment lines are
   skipped, and a leading ``v`` on a version is ignored on either side.  The
-  compatibility rules above read SUPPORTED exactly as before.  Quality class
-  (CONVERT): documentation drift carries zero runtime-failure risk, so the
-  gated runners record the finding and continue; it never changes the
-  return value of check_compat(), only this script's own exit status.
+  compatibility rules above read SUPPORTED exactly as before.  It never
+  changes the return value of check_compat().
 
-On any violation, the script exits 1 and prints a message naming the specific
-break and stating the policy:
+Findings (CONVERT, quality class, team/SOP-core.md "Gates and Refusals"):
+every violation and every drift item is printed -- a violation names the
+specific break and states the policy
   "breaking changes require a major ICD version and an operator-approved RC"
-A support-table drift finding instead prints its causes, the fix, and the
-mirror rule.
-
-Wired into both gated runners (run-unit-tests.sh and run-integration-tests.sh)
-as a pre-flight check, following the lint_icd_freshness pattern.
+and a drift item prints with its fix and the mirror rule -- and is recorded
+as one finding.  With --findings-file the findings are written as a JSON
+array (the shape pgai_agent_kanban.lint.findings defines).  Both gated
+runners (run-unit-tests.sh and run-integration-tests.sh) pass
+--findings-file and merge the array per instance with
+gated_runner_merge_findings_file.
 
 Usage:
     python3 team/scripts/lint_icd_compat.py [--icd PATH] [--baselines-dir PATH]
                                             [--main-ref REF] [--support-doc PATH]
+                                            [--findings-file PATH]
 
 Options:
     --icd PATH           Path to the current ICD artifact.
@@ -75,17 +76,16 @@ Options:
                          mirrors SUPPORTED, for the support-table mirror check.
                          Default: docs/operator-api.md relative to the dev tree
                          root.
+    --findings-file PATH Write the findings as a JSON array to PATH (parent
+                         directories created; written even when empty).
     --help, -h           Show this help and exit.
 
 Exit codes:
-    0   All supported baselines are compatible with the current ICD, no
-        published baseline differs from the main-branch copy, and the support
-        table mirrors SUPPORTED.
-    1   Compatibility violation, empty SUPPORTED manifest, missing baseline file,
-        a published baseline that differs from the main-branch copy, or
-        support-table drift (a missing, extra, or wrongly retired version, or
-        no support table found).
-    2   Usage error or internal failure.
+    0   The checks ran, whatever they found.  A compatibility violation, an
+        empty or missing SUPPORTED manifest, a missing or unparseable baseline
+        or ICD, a published baseline that differs from the main-branch copy,
+        and support-table drift are findings, not failures.
+    2   Usage error.
 
 Environment:
     PGAI_AGENT_KANBAN_TEMP_DIR  Framework temp root (used by test helpers that
@@ -119,6 +119,44 @@ _DEFAULT_SUPPORT_DOC = _DEV_TREE_ROOT / "docs" / "operator-api.md"
 _POLICY_MSG = (
     "breaking changes require a major ICD version and an operator-approved RC"
 )
+
+# The finding shape and the error-contract emitter live in the team package
+# beside scripts/; this script is run directly as well as imported, so the
+# package root is put on sys.path from this file's own location.
+if str(_TEAM_DIR) not in sys.path:
+    sys.path.insert(0, str(_TEAM_DIR))
+from pgai_agent_kanban.lib.error_contract import emit_error_contract  # noqa: E402
+from pgai_agent_kanban.lint.findings import (  # noqa: E402
+    display_path,
+    quality_finding,
+    write_findings_file,
+)
+
+_LINT_NAME = "icd_compat"
+
+
+def _relint_command(icd_path: pathlib.Path, baselines_dir: pathlib.Path) -> str:
+    """This check re-run against *icd_path* and *baselines_dir*, as printed."""
+    return f"python3 {_THIS_FILE} --icd {icd_path} --baselines-dir {baselines_dir}"
+
+
+def _record(
+    findings: list | None,
+    cause: str,
+    remedy: str,
+    file: pathlib.Path | None = None,
+) -> None:
+    """Append one quality finding to *findings*; a no-op when it is None."""
+    if findings is None:
+        return
+    findings.append(
+        quality_finding(
+            _LINT_NAME,
+            cause.strip(),
+            remedy,
+            file=display_path(file, _DEV_TREE_ROOT) if file is not None else None,
+        )
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -612,11 +650,18 @@ def _resolve_main_ref() -> str:
 
     The prefix comes from project.cfg through the shared reader in
     ``pgai_agent_kanban.lib.branch_prefix`` — never a hardcoded ``ai_main``.
-    When that module cannot be imported the reader's own shipped default
-    prefix is used, so the check still names a real branch.
+    A project.cfg that cannot be read, or configures a prefix
+    ``pp_branch_prefix`` refuses, yields the reader's shipped default
+    (``ai_main``); the reader itself never raises.  The module is located
+    from this script's own team/ directory and has no fallback: when it
+    cannot be imported the ``ImportError`` reaches the caller.
 
     Returns:
         Branch name such as ``"ai_main"``.
+
+    Raises:
+        ImportError: when ``pgai_agent_kanban.lib.branch_prefix`` cannot be
+            imported.
     """
     team_str = str(_TEAM_DIR)
     if team_str not in sys.path:
@@ -968,6 +1013,7 @@ def check_support_table(
 def report_support_table_drift(
     doc_path: pathlib.Path = _DEFAULT_SUPPORT_DOC,
     supported_file: pathlib.Path = _DEFAULT_BASELINES_DIR / "SUPPORTED",
+    recorded: list | None = None,
 ) -> bool:
     """Run find_support_table_drift() and print its result.
 
@@ -977,11 +1023,25 @@ def report_support_table_drift(
     Args:
         doc_path:       Markdown document holding the support table.
         supported_file: The SUPPORTED manifest the table mirrors.
+        recorded:       When given, each drift item is appended to it as one
+                        quality finding (pgai_agent_kanban.lint.findings).
 
     Returns:
         True when the table mirrors the manifest; False on any drift.
     """
     findings = find_support_table_drift(doc_path=doc_path, supported_file=supported_file)
+    relint = (
+        f"python3 {_THIS_FILE} --baselines-dir {supported_file.parent} "
+        f"--support-doc {doc_path}"
+    )
+    for _kind, _version, cause in findings:
+        _record(
+            recorded,
+            cause,
+            f"Edit the 'Support table' section of {doc_path} so it mirrors "
+            f"{supported_file}, then run: {relint}",
+            file=doc_path,
+        )
     if not findings:
         if supported_file.is_file():
             print(
@@ -990,8 +1050,6 @@ def report_support_table_drift(
             )
         return True
 
-    # CONVERT: documentation drift carries zero runtime-failure risk; the
-    # gated runners record this finding and continue.
     print(
         f"lint_icd_compat: FAIL — the support table in {doc_path} does not "
         f"mirror {supported_file}",
@@ -1055,6 +1113,7 @@ def check_compat(
     icd_path: pathlib.Path = _DEFAULT_ICD_PATH,
     baselines_dir: pathlib.Path = _DEFAULT_BASELINES_DIR,
     main_ref: str | None = None,
+    findings: list | None = None,
 ) -> bool:
     """Assert the current ICD is a compatible superset of all supported baselines
     and that no published baseline has been rewritten since the last release.
@@ -1065,12 +1124,21 @@ def check_compat(
                        the frozen baseline files.
         main_ref:      Git ref for the published-baseline check (rule e).
                        ``None`` resolves ``<branch_prefix>main`` from project.cfg.
+        findings:      When given, each problem found is appended to it as one
+                       quality finding (pgai_agent_kanban.lint.findings).
 
     Returns:
         True when all checks pass; False when any violation is found, the
         manifest is empty, a baseline file is missing, or a published baseline
         differs from its main-branch copy.
     """
+    relint = _relint_command(icd_path, baselines_dir)
+    fix_contract = (
+        "Restore the removed or changed contract element in the API (a break "
+        f"needs a major ICD version in an operator-approved RC), then run: "
+        f"cd {_DEV_TREE_ROOT} && bash team/scripts/generate-icd.sh && {relint}"
+    )
+
     # --- Read SUPPORTED manifest ---
     supported_file = baselines_dir / "SUPPORTED"
     if not supported_file.exists():
@@ -1078,6 +1146,12 @@ def check_compat(
             f"lint_icd_compat: FAIL — SUPPORTED manifest not found at {supported_file}; "
             f"support status must be explicit; {_POLICY_MSG}",
             file=sys.stderr,
+        )
+        _record(
+            findings,
+            f"SUPPORTED manifest not found at {supported_file}; support status must be explicit",
+            f"git -C {_DEV_TREE_ROOT} checkout HEAD -- {display_path(supported_file, _DEV_TREE_ROOT)} && {relint}",
+            file=supported_file,
         )
         return False
 
@@ -1089,6 +1163,12 @@ def check_compat(
             f"an empty manifest is not valid — support status must be explicit; {_POLICY_MSG}",
             file=sys.stderr,
         )
+        _record(
+            findings,
+            f"SUPPORTED manifest at {supported_file} is empty; support status must be explicit",
+            f"git -C {_DEV_TREE_ROOT} checkout HEAD -- {display_path(supported_file, _DEV_TREE_ROOT)} && {relint}",
+            file=supported_file,
+        )
         return False
 
     # --- Load current ICD ---
@@ -1096,6 +1176,12 @@ def check_compat(
         print(
             f"lint_icd_compat: FAIL — current ICD not found at {icd_path}",
             file=sys.stderr,
+        )
+        _record(
+            findings,
+            f"current ICD not found at {icd_path}",
+            f"cd {_DEV_TREE_ROOT} && bash team/scripts/generate-icd.sh && {relint}",
+            file=icd_path,
         )
         return False
 
@@ -1105,6 +1191,12 @@ def check_compat(
         print(
             f"lint_icd_compat: FAIL — cannot parse current ICD at {icd_path}: {exc}",
             file=sys.stderr,
+        )
+        _record(
+            findings,
+            f"cannot parse current ICD at {icd_path}: {exc}",
+            f"cd {_DEV_TREE_ROOT} && bash team/scripts/generate-icd.sh && {relint}",
+            file=icd_path,
         )
         return False
 
@@ -1117,6 +1209,12 @@ def check_compat(
                 f"'{version}': expected {baseline_file}; {_POLICY_MSG}",
                 file=sys.stderr,
             )
+            _record(
+                findings,
+                f"baseline file missing for supported version '{version}': expected {baseline_file}",
+                f"git -C {_DEV_TREE_ROOT} checkout HEAD -- {display_path(baseline_file, _DEV_TREE_ROOT)} && {relint}",
+                file=baseline_file,
+            )
             all_ok = False
             continue
 
@@ -1126,6 +1224,12 @@ def check_compat(
             print(
                 f"lint_icd_compat: FAIL — cannot parse baseline {baseline_file}: {exc}",
                 file=sys.stderr,
+            )
+            _record(
+                findings,
+                f"cannot parse baseline {baseline_file}: {exc}",
+                f"git -C {_DEV_TREE_ROOT} checkout HEAD -- {display_path(baseline_file, _DEV_TREE_ROOT)} && {relint}",
+                file=baseline_file,
             )
             all_ok = False
             continue
@@ -1144,11 +1248,11 @@ def check_compat(
             )
             for v in violations:
                 print(v, file=sys.stderr)
+                _record(findings, f"baseline v{version}: {v.strip()}", fix_contract, file=icd_path)
             all_ok = False
 
     # Rule e: every baseline below the current version is byte-identical to
-    # the last released tree.  Quality class — the gated runners record the
-    # finding and continue; this script's own exit 1 is for direct invocation.
+    # the last released tree.  Each mutated baseline is one finding.
     current_version = str((current_doc.get("info") or {}).get("version") or "")
     published_violations = check_published_baselines(
         current_version, baselines_dir=baselines_dir, main_ref=main_ref
@@ -1161,6 +1265,13 @@ def check_compat(
         )
         for v in published_violations:
             print(v, file=sys.stderr)
+            _record(
+                findings,
+                v,
+                f"Run the git checkout command this finding names to restore the "
+                f"published copy, then run: {relint}",
+                file=baselines_dir,
+            )
         all_ok = False
 
     if all_ok:
@@ -1187,8 +1298,9 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "baseline below the current ICD version is byte-identical to its copy "
             "on the prefixed main branch, and that the support table in "
             "docs/operator-api.md mirrors SUPPORTED (reports missing, extra, and "
-            "wrongly retired versions by name).  Exits 0 when all checks pass, "
-            "1 when any violation or drift is found."
+            "wrongly retired versions by name).  Quality class: every violation "
+            "and drift item is a finding, and the lint exits 0 whatever it finds "
+            "(2 on a usage error)."
         ),
     )
     parser.add_argument(
@@ -1226,6 +1338,14 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "docs/operator-api.md relative to the dev tree root."
         ),
     )
+    parser.add_argument(
+        "--findings-file",
+        metavar="PATH",
+        help=(
+            "Write the findings as a JSON array to PATH (parent directories "
+            "created; written even when empty).  Findings are printed either way."
+        ),
+    )
     return parser.parse_args(argv)
 
 
@@ -1236,8 +1356,8 @@ def main(argv: list[str] | None = None) -> int:
         argv: Argument list (default: sys.argv[1:]).
 
     Returns:
-        Exit code (0 = compatible and mirrored, 1 = violation/missing/drift,
-        2 = usage error).
+        Exit code: 0 whatever was found (each finding is printed and written
+        to --findings-file); 2 usage error (argparse).
     """
     args = _parse_args(argv)
     icd_path = pathlib.Path(args.icd) if args.icd else _DEFAULT_ICD_PATH
@@ -1251,16 +1371,33 @@ def main(argv: list[str] | None = None) -> int:
         pathlib.Path(args.support_doc) if args.support_doc else _DEFAULT_SUPPORT_DOC
     )
 
-    ok = check_compat(
-        icd_path=icd_path, baselines_dir=baselines_dir, main_ref=args.main_ref
+    findings: list = []
+    check_compat(
+        icd_path=icd_path,
+        baselines_dir=baselines_dir,
+        main_ref=args.main_ref,
+        findings=findings,
     )
     # The mirror check runs whatever check_compat() found, so one run reports
     # every finding.  It is kept out of check_compat() so that function's
     # return value still speaks for the compatibility rules alone.
-    mirrored = report_support_table_drift(
-        doc_path=support_doc, supported_file=baselines_dir / "SUPPORTED"
+    report_support_table_drift(
+        doc_path=support_doc,
+        supported_file=baselines_dir / "SUPPORTED",
+        recorded=findings,
     )
-    return 0 if ok and mirrored else 1
+    write_findings_file(args.findings_file, findings, lint="lint_icd_compat")
+    if findings:
+        # CENSUS-ANCHOR: icd-compat-01
+        # CONVERT: an ICD compatibility or support-table finding carries zero
+        # runtime-failure risk -- narrated and recorded; main returns 0 below.
+        emit_error_contract(
+            "lint.icd-compat",
+            f"{len(findings)} ICD compatibility or support-table finding(s) "
+            f"against {baselines_dir}; each is printed above.",
+            findings[0]["remedy"],
+        )
+    return 0
 
 
 if __name__ == "__main__":

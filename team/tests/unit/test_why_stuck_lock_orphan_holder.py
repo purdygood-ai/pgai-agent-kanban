@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import os
 import pathlib
+import shlex
 import subprocess
 import sys
 from contextlib import contextmanager
@@ -140,6 +141,11 @@ def test_flock_held_reads_held_free_and_missing(tmp_path: pathlib.Path) -> None:
 # ---------------------------------------------------------------------------
 
 
+def _release_locks(root: pathlib.Path) -> str:
+    """The release-locks.sh the remedy names: the one installed under *root*, shell-quoted."""
+    return shlex.quote(f"{root}/scripts/release-locks.sh")
+
+
 def test_dead_holder_with_orphan_flock_gets_force_in_remedy(tmp_path: pathlib.Path) -> None:
     root = _sandbox(tmp_path)
     lock = _write_dead_holder_lock(root)
@@ -151,7 +157,7 @@ def test_dead_holder_with_orphan_flock_gets_force_in_remedy(tmp_path: pathlib.Pa
     line = result.stdout.strip()
     assert line.startswith("demo: STUCK-LOCK"), line
     remedy = line.split("remedy:", 1)[1]
-    assert "team/scripts/release-locks.sh --release repo-wake-demo --force" in remedy, remedy
+    assert f"{_release_locks(root)} --release repo-wake-demo --force" in remedy, remedy
     assert "still holds its flock" in line.split("remedy:", 1)[0], line
 
 
@@ -163,6 +169,6 @@ def test_dead_holder_with_free_flock_keeps_remedy_without_force(tmp_path: pathli
 
     assert result.returncode == _STUCK_LOCK_EXIT_CODE, result.stdout + result.stderr
     line = result.stdout.strip()
-    assert "team/scripts/release-locks.sh --release repo-wake-demo" in line
+    assert f"{_release_locks(root)} --release repo-wake-demo" in line
     assert "--force" not in line
     assert "still holds its flock" not in line

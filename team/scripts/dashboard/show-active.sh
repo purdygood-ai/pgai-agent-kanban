@@ -50,6 +50,10 @@ source "${SCRIPT_DIR}/../lib/project_paths.sh"
 source "${SCRIPT_DIR}/../lib/dev_tree.sh"
 # shellcheck source=lib/script_common.sh
 source "${SCRIPT_DIR}/../lib/script_common.sh"
+# read_md_field, the one bash section reader (the Goal, Summary and Blockers
+# reads below)
+# shellcheck source=../lib/md_field.sh
+source "${SCRIPT_DIR}/../lib/md_field.sh"
 
 # --- Parse args ---
 COMPACT_MODE=false
@@ -77,10 +81,13 @@ while [[ $_i -lt ${#_args[@]} ]]; do
   fi
   _i=$(( _i + 1 ))
 done
+# Operator user config, then [chain] pm_mode (config_loader.sh).
+# shellcheck source=../lib/config_loader.sh
+source "${SCRIPT_DIR}/../lib/config_loader.sh"
+config_startup_prelude "$KANBAN_ROOT"
 # Source config — INI format (kanban.cfg) replaces legacy config.cfg
 # read_ini available via project_paths.sh (sourced above).
 if [[ -f "$KANBAN_ROOT/kanban.cfg" ]]; then
-    export PGAI_KANBAN_PM_MODE="${PGAI_KANBAN_PM_MODE:-$(read_ini "$KANBAN_ROOT/kanban.cfg" chain pm_mode automatic)}"
     export PGAI_DASHBOARD_COLOR_WORKING="${PGAI_DASHBOARD_COLOR_WORKING:-$(read_ini "$KANBAN_ROOT/kanban.cfg" dashboard color_working yellow)}"
     export PGAI_DASHBOARD_COLOR_LABEL="${PGAI_DASHBOARD_COLOR_LABEL:-$(read_ini "$KANBAN_ROOT/kanban.cfg" dashboard color_label cyan)}"
     export PGAI_DASHBOARD_COLOR_DONE="${PGAI_DASHBOARD_COLOR_DONE:-$(read_ini "$KANBAN_ROOT/kanban.cfg" dashboard color_done green)}"
@@ -116,6 +123,26 @@ source "${SCRIPT_DIR}/../lib/dashboard_common.sh"
 WORKING_ID="$(get_val WORKING_TASK_ID "")"
 WORKING_MTIME="$(get_val WORKING_TASK_MTIME "")"
 WORKING_ROLE="$(get_val WORKING_TASK_ROLE "")"
+
+# --- Section head helper ---
+# _sa_section_lines <file> <heading> <max_lines>
+# Print up to <max_lines> non-blank lines of the "## <heading>" section of
+# <file>, read by read_md_field (the next "##" heading that is not "###"
+# ends the section; the body's first line is printed without its leading
+# blanks). Prints nothing when the file or the heading is missing.
+_sa_section_lines() {
+  local body line count=0
+  body="$(read_md_field "$1" "$2" 2>/dev/null)" || return 0
+  while IFS= read -r line; do
+    [[ "$line" =~ [^[:space:]] ]] || continue
+    printf '%s\n' "$line"
+    count=$(( count + 1 ))
+    if (( count >= $3 )); then
+      break
+    fi
+  done <<< "$body"
+  return 0
+}
 
 # --- Elapsed time helper ---
 compute_elapsed() {
@@ -199,11 +226,7 @@ echo ""
 
 if [[ -f "$README_FILE" ]]; then
   # Extract ## Goal section (first 3 lines of content)
-  GOAL="$(awk '
-    /^## Goal/ { found=1; next }
-    found && /^## / { exit }
-    found && NF { lines++; print; if (lines >= 3) exit }
-  ' "$README_FILE")"
+  GOAL="$(_sa_section_lines "$README_FILE" Goal 3)"
   if [[ -n "$GOAL" ]]; then
     printf '%sGoal:%s\n' "$C_LABL" "$RESET"
     while IFS= read -r line; do
@@ -215,11 +238,7 @@ fi
 
 if [[ -f "$STATUS_FILE" ]]; then
   # Extract ## Summary section (first 5 lines of content)
-  SUMMARY="$(awk '
-    /^## Summary/ { found=1; next }
-    found && /^## / { exit }
-    found && NF { lines++; print; if (lines >= 5) exit }
-  ' "$STATUS_FILE")"
+  SUMMARY="$(_sa_section_lines "$STATUS_FILE" Summary 5)"
   if [[ -n "$SUMMARY" ]] && [[ "$SUMMARY" != "TBD" ]] && [[ "$SUMMARY" != "none" ]]; then
     printf '%sSummary:%s\n' "$C_LABL" "$RESET"
     while IFS= read -r line; do
@@ -229,11 +248,7 @@ if [[ -f "$STATUS_FILE" ]]; then
   fi
 
   # Extract ## Blockers section
-  BLOCKERS="$(awk '
-    /^## Blockers/ { found=1; next }
-    found && /^## / { exit }
-    found && NF { lines++; print; if (lines >= 3) exit }
-  ' "$STATUS_FILE")"
+  BLOCKERS="$(_sa_section_lines "$STATUS_FILE" Blockers 3)"
   if [[ -n "$BLOCKERS" ]] && [[ "$BLOCKERS" != "none" ]]; then
     printf '%sBlockers:%s\n' "$C_LABL" "$RESET"
     while IFS= read -r line; do

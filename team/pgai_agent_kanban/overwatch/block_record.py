@@ -77,11 +77,33 @@ Lifecycle
   (``pgai_agent_kanban.task_status``) records an agent self-block this way
   on every BLOCKED write and drops the record on DONE / WONT-DO.
 
+Blocked ledger
+--------------
+Every ``write_block_record`` (first block and re-block alike) also opens a
+block-start for ``task:<TASK-ID>`` on the project's blocked-interval ledger
+(``pgai_agent_kanban.metrics.blocked_ledger``): class any, cause chain, the
+record's reason_code, at the record's ``last_blocked_at``, under the
+project's Active RC or the ledger's no-RC version when it is ``none``. A
+task whose block is already open (the status writer, or an earlier block
+write, opened it) gets no second one. Every wake block site, the per-task
+timeout kill included, writes through here, so each one opens the block.
+A ``remove_block_record`` that removed a record closes the task's open
+block, class any, reason_code ``terminal``. The project, task and kanban
+root are read from the status.md path
+(``<kanban_root>/projects/<project>/tasks/<TASK-ID>/status.md``); any other
+path stamps nothing. ``render_block_record`` / ``strip_block_record`` stamp
+nothing: their caller, the status writer, stamps its own write. Every stamp
+is best-effort (CENSUS CLASS CONVERT): a ledger failure prints at most one
+warning and never changes the record write or its exit code.
+
 Agent reason codes and typed action arguments
 ---------------------------------------------
 ``AGENT_REASON_CODES`` is the closed ``agent_<...>`` list an agent passes
 to the status-writer tool's ``--reason-code``; ``agent_unclassified`` is
-recorded when it passes none. ``agent_operator_data_action`` carries typed
+recorded when it passes none. ``agent_transient_provider_error`` says the
+block was caused by a transient provider error (an aborted or failed model
+call) rather than by the task; block triage retries it on the same ladder
+as ``agent_unclassified``. ``agent_operator_data_action`` carries typed
 ``key=value`` action arguments (``--action-args``) validated by
 ``parse_action_args`` against ``ACTION_VERBS``: ``verb`` names an
 allowlisted verb and the remaining keys are exactly that verb's typed
@@ -144,7 +166,7 @@ import re
 import shlex
 import sys
 from pathlib import Path
-from typing import Iterable, NoReturn, Optional, Sequence
+from typing import Callable, Iterable, NoReturn, Optional, Sequence
 
 # Run by file path (``python3 .../block_record.py``) or loaded from a file
 # outside its package, this module has no parent package and the interpreter
@@ -158,14 +180,19 @@ if not __package__:
     if _OWN_PACKAGE_ROOT not in sys.path:
         sys.path.insert(0, _OWN_PACKAGE_ROOT)
 
+from pgai_agent_kanban.lib import ini  # noqa: E402
 from pgai_agent_kanban.lib.atomic_write import atomic_write  # noqa: E402
 from pgai_agent_kanban.lib.error_contract import emit_error_contract  # noqa: E402
 from pgai_agent_kanban.lib.timeutil import format_iso, try_parse_iso  # noqa: E402
 from pgai_agent_kanban.task_status import (  # noqa: E402
     TaskStatusError,
+    ledger_context_for_status_file,
     read_section,
     remove_section,
     set_or_append_section,
+    stamp_ledger_block_end,
+    stamp_ledger_block_start,
+    task_ledger_source,
 )
 
 # ---------------------------------------------------------------------------
@@ -201,6 +228,7 @@ OWNER_ROLES: tuple[str, ...] = ("CODER", "WRITER", "TESTER", "CM", "PM")
 #: ``agent_<...>`` list; ``agent_unclassified`` is the catch-all.
 AGENT_REASON_CODES: tuple[str, ...] = (
     "agent_operator_data_action",
+    "agent_transient_provider_error",
     "agent_unclassified",
 )
 
@@ -241,6 +269,9 @@ NONE_VALUE = "none"
 INITIAL_ATTEMPTS = 0
 INITIAL_RESUME = "fresh"
 INITIAL_REQUEUES = 0
+
+#: The reason_code of the blocked-ledger block-end a record removal writes.
+TERMINAL_LEDGER_REASON_CODE = "terminal"
 
 #: How ``requeue_reasons`` joins its reason codes when written.
 REQUEUE_REASONS_SEPARATOR = ", "
@@ -511,7 +542,7 @@ def parse_evidence(value: str) -> dict[str, str]:
 # stored in the record's ``evidence`` line, ``verb`` first and then the
 # verb's arguments in their declared order, e.g. (values are an example)::
 #
-#     evidence: verb=restamp-fixed-in; project=pgai-agent-kanban; version=v2.28.0; bugs=BUG-0412,BUG-0413  (example)
+#     evidence: verb=restamp-fixed-in; project=pgai-agent-kanban; version=v1.2.3; bugs=BUG-0042,BUG-0043  (example)
 #
 # so ``parse_evidence`` (or ``read_action_args``) reads them back.
 
@@ -520,13 +551,13 @@ def parse_evidence(value: str) -> dict[str, str]:
 class ActionArgSpec:
     """One typed argument of an allowlisted verb.
 
-    ``pattern`` is matched against the canonical value (after the liberal
-    reading ``_canonical_action_value`` applies); ``shape`` describes the
-    accepted form for a refusal message.
+    ``accepts`` is called with the canonical value (after the liberal
+    reading ``_canonical_action_value`` applies) and is truthy when the value
+    is valid; ``shape`` describes the accepted form for a refusal message.
     """
 
     name: str
-    pattern: "re.Pattern[str]"
+    accepts: Callable[[str], object]
     shape: str
 
 
@@ -537,9 +568,11 @@ ACTION_VERB_KEY = "verb"
 #: The closed list ``--action-args`` is validated against; extend it here.
 ACTION_VERBS: dict[str, tuple[ActionArgSpec, ...]] = {
     "restamp-fixed-in": (
-        ActionArgSpec("project", re.compile(r"^[a-z0-9][a-z0-9-]*$"), "a project name, e.g. pgai-agent-kanban"),
-        ActionArgSpec("version", re.compile(r"^v\d+\.\d+\.\d+$"), "a release version, e.g. v2.28.0"),
-        ActionArgSpec("bugs", re.compile(r"^BUG-\d{4}(?:,BUG-\d{4})*$"), "comma-separated bug IDs, e.g. BUG-0412,BUG-0413"),
+        # The project-name rule (ini.project_name_rule), read on first use
+        # rather than at import.
+        ActionArgSpec("project", ini.is_project_name, "a project name, e.g. pgai-agent-kanban"),
+        ActionArgSpec("version", re.compile(r"^v\d+\.\d+\.\d+$").match, "a release version, vX.Y.Z"),
+        ActionArgSpec("bugs", re.compile(r"^BUG-\d{4}(?:,BUG-\d{4})*$").match, "comma-separated bug IDs, BUG-NNNN[,BUG-NNNN]"),
     ),
 }
 
@@ -625,7 +658,7 @@ def parse_action_args(values: Iterable[str]) -> dict[str, str]:
             value = pairs.get(spec.name)
             if value is None:
                 problems.append(f"{spec.name}= is missing ({spec.shape})")
-            elif value and not spec.pattern.match(value):
+            elif value and not spec.accepts(value):
                 problems.append(f"{spec.name} {value!r} is not {spec.shape}")
     if problems:
         raise ActionArgsError(problems)
@@ -657,7 +690,7 @@ def read_action_args(record: BlockRecord) -> dict[str, str]:
 
 def example_action_args() -> str:
     """A runnable ``--action-args`` value for the first allowlisted verb."""
-    return "verb=restamp-fixed-in project=pgai-agent-kanban version=v2.28.0 bugs=BUG-0412"  # example values
+    return "verb=restamp-fixed-in project=pgai-agent-kanban version=v1.2.3 bugs=BUG-0042"  # example values
 
 
 # ---------------------------------------------------------------------------
@@ -796,6 +829,11 @@ def write_block_record(
 ) -> BlockRecord:
     """Write (first block) or re-write (re-block) the Block Record.
 
+    After the record lands, opens the task's block on the project's
+    blocked ledger (class any, cause chain, this reason_code), unless one is
+    already open; best-effort -- see "Blocked ledger" in the module
+    docstring.
+
     Args:
         status_file: The task's status.md; must exist.
         reason_code: One of REASON_CODES (any case; ``-``/``.`` read as ``_``).
@@ -815,7 +853,25 @@ def write_block_record(
     code, role = _validated_code_and_role(path, reason_code, owner_role)
     stamp = _now_iso(now, path)
     text = _read_status(path)
-    return _apply(path, text, _block_write_record(text, code, role, evidence, stamp))
+    record = _apply(path, text, _block_write_record(text, code, role, evidence, stamp))
+    _stamp_ledger(path, opening=True, reason_code=record.reason_code, timestamp=record.last_blocked_at)
+    return record
+
+
+def _stamp_ledger(path: Path, *, opening: bool, reason_code: str, timestamp: Optional[str] = None) -> None:
+    """Open (or close) the task's block on the blocked ledger beside a
+    record write or removal. Best-effort and never raises -- CENSUS CLASS
+    CONVERT (docs/blocking-site-census.md): see "Blocked ledger" in the
+    module docstring."""
+    context = ledger_context_for_status_file(path)
+    if context is None:
+        return
+    kanban_root, project, key = context
+    source = task_ledger_source(key)
+    if opening:
+        stamp_ledger_block_start(kanban_root, project, source, reason_code=reason_code, timestamp=timestamp)
+    else:
+        stamp_ledger_block_end(kanban_root, project, source, reason_code=reason_code)
 
 
 def _block_write_record(
@@ -1015,6 +1071,10 @@ def update_block_record(
 def remove_block_record(status_file: "Path | str") -> bool:
     """Remove the ``## Block Record`` section from *status_file*.
 
+    A removal that removed a record (the task reached DONE or WONT-DO)
+    closes the task's open block on the blocked ledger, class any;
+    best-effort -- see "Blocked ledger" in the module docstring.
+
     Returns:
         True when a section was removed, False when there was none (nothing
         is written then).
@@ -1028,6 +1088,7 @@ def remove_block_record(status_file: "Path | str") -> bool:
     if new_text == text:
         return False
     _write_status(path, new_text)
+    _stamp_ledger(path, opening=False, reason_code=TERMINAL_LEDGER_REASON_CODE)
     return True
 
 

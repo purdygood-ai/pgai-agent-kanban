@@ -333,13 +333,13 @@
     }
    },
    "rc": 3,
-   "stderr": "error:   release_locks.not_found\nmessage: release-locks.sh: no lock matches 'nope' under <ROOT>/locks (known locks: repo-wake-alpha).\nremedy:  Run team/scripts/release-locks.sh with no flags to list every lock by name, then re-run with the full name or an unambiguous prefix.\n",
+   "stderr": "error:   release_locks.not_found\nmessage: release-locks.sh: no lock matches 'nope' under <ROOT>/locks (known locks: repo-wake-alpha).\nremedy:  Run <ROOT>/scripts/release-locks.sh with no flags to list every lock by name, then re-run with the full name or an unambiguous prefix.\n",
    "stdout": ""
   },
   "release-not-found-no-locks": {
    "locks": {},
    "rc": 3,
-   "stderr": "error:   release_locks.not_found\nmessage: release-locks.sh: no lock matches 'nope' under <ROOT>/locks (no lock files exist under <ROOT>/locks).\nremedy:  Run team/scripts/release-locks.sh with no flags to list every lock by name, then re-run with the full name or an unambiguous prefix.\n",
+   "stderr": "error:   release_locks.not_found\nmessage: release-locks.sh: no lock matches 'nope' under <ROOT>/locks (no lock files exist under <ROOT>/locks).\nremedy:  Run <ROOT>/scripts/release-locks.sh with no flags to list every lock by name, then re-run with the full name or an unambiguous prefix.\n",
    "stdout": ""
   },
   "release-prefix-boundary": {
@@ -350,7 +350,7 @@
     }
    },
    "rc": 3,
-   "stderr": "error:   release_locks.not_found\nmessage: release-locks.sh: no lock matches 'repo-wake-alpha' under <ROOT>/locks (known locks: repo-wake-alphabet).\nremedy:  Run team/scripts/release-locks.sh with no flags to list every lock by name, then re-run with the full name or an unambiguous prefix.\n",
+   "stderr": "error:   release_locks.not_found\nmessage: release-locks.sh: no lock matches 'repo-wake-alpha' under <ROOT>/locks (known locks: repo-wake-alphabet).\nremedy:  Run <ROOT>/scripts/release-locks.sh with no flags to list every lock by name, then re-run with the full name or an unambiguous prefix.\n",
    "stdout": ""
   },
   "unknown-flag": {

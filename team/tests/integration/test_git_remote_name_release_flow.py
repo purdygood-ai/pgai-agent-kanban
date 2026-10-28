@@ -68,6 +68,7 @@ if str(_TEAM_DIR) not in sys.path:
 from pgai_agent_kanban.lib import released_version  # noqa: E402
 from tests.fixtures.binary_guard import require_binary  # noqa: E402
 from tests.fixtures.scrubbed_subprocess_env import scrub_agent_scoped_env  # noqa: E402
+from tests.fixtures.section_reader_modules import copy_section_reader_modules
 
 _SCRIPTS = _TEAM_DIR / "scripts"
 _OPEN_RC = _SCRIPTS / "cm" / "open-rc.sh"
@@ -187,6 +188,7 @@ class _Fixture:
         cm_dir.mkdir(parents=True)
         for source in (_KANBAN_PY / "cm").glob("*.py"):
             (cm_dir / source.name).write_text(source.read_text(encoding="utf-8"), encoding="utf-8")
+        copy_section_reader_modules(cm_dir.parent)
 
     def _build_repos(self) -> None:
         _git("init", "-q", "--bare", str(self.bare), env=self.env)
